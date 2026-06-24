@@ -1,0 +1,10 @@
+# Default owner while the project is private.
+* @epurn
+
+# Governance and security controls require explicit ownership.
+/.github/CODEOWNERS @epurn
+/.github/ @epurn
+/AGENTS.md @epurn
+/agents/ @epurn
+/docs/security/ @epurn
+/docs/adr/ @epurn

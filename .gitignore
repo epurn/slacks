@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Node / Expo
+node_modules/
+.expo/
+.expo-shared/
+dist/
+build/
+coverage/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.mobileprovision
+
+# Local data and generated files
+*.sqlite
+*.sqlite3
+*.db
+tmp/
+logs/
+
+# macOS / editors
+.DS_Store
+.idea/
+.vscode/
+

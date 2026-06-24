@@ -1,0 +1,27 @@
+name: Security or Privacy Work
+description: Track security, privacy, abuse, or data minimization work.
+title: "[Security] "
+labels: ["security", "privacy"]
+body:
+  - type: textarea
+    id: risk
+    attributes:
+      label: Risk
+      description: What can go wrong and who is affected?
+    validations:
+      required: true
+  - type: textarea
+    id: data
+    attributes:
+      label: Data involved
+      description: Personal data, secrets, logs, model context, external providers, or attachments involved.
+    validations:
+      required: true
+  - type: textarea
+    id: mitigation
+    attributes:
+      label: Mitigation
+      description: Required controls, tests, docs, and verification.
+    validations:
+      required: true
+

@@ -1,0 +1,39 @@
+name: Story
+description: Plan a product or engineering story.
+title: "[Story] "
+labels: ["story"]
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What user or system behavior should be true when this is done?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is included and excluded?
+    validations:
+      required: true
+  - type: textarea
+    id: contracts
+    attributes:
+      label: Contracts
+      description: API, data, job, estimator, or UI contracts affected.
+  - type: textarea
+    id: security_privacy
+    attributes:
+      label: Security and privacy
+      description: Data touched, threats, retention, encryption, and permission changes.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Observable checks that prove the story is complete.
+    validations:
+      required: true
+
