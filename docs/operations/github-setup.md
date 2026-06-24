@@ -31,6 +31,22 @@ Configure `main` with:
 - block deletions,
 - include administrators when practical.
 
+## Private Repository Plan Caveat
+
+GitHub may reject branch protection on a private repository depending on the account or organization plan.
+
+Observed bootstrap response for this private repo:
+
+```text
+Upgrade to GitHub Pro or make this repository public to enable this feature.
+```
+
+If that happens, the workflows are still installed and will run, but GitHub will not block direct pushes or unreviewed merges. The enforcement options are:
+
+1. Upgrade the repository owner/organization plan.
+2. Make the repository public.
+3. Keep the repository private and treat PR review as a manual rule until branch protection is available.
+
 ## GitHub CLI Setup
 
 After the initial commit is pushed, this can be configured with the GitHub API:
@@ -44,3 +60,19 @@ gh api \
 
 GitHub may reject required status checks until each workflow has run at least once. If that happens, open a tiny PR, let both checks run, then apply the protection again.
 
+## Manual Setup Path
+
+When branch protection is available:
+
+1. Open GitHub repository settings.
+2. Go to Branches.
+3. Add a branch protection rule for `main`.
+4. Enable "Require a pull request before merging".
+5. Require at least 1 approval.
+6. Enable stale approval dismissal.
+7. Enable conversation resolution.
+8. Enable required status checks.
+9. Require `governance`.
+10. Require `separate-reviewer`.
+11. Block force pushes and deletions.
+12. Apply to administrators if the plan allows it.
