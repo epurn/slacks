@@ -13,8 +13,9 @@ tags:
   - contracts
 approved_dependencies: []
 requires_context:
-  - agents/playbooks/story-slicing.md
-  - agents/playbooks/pr-authoring.md
+  - docs/stories/README.md
+  - docs/standards/coding-standards.md
+  - docs/standards/testing-standards.md
 review_focus:
   - scope-control
   - verify-command
@@ -34,7 +35,7 @@ contracts
 
 ## Dependencies
 
-- FTY-001
+- FTY-000
 
 ## Outcome
 

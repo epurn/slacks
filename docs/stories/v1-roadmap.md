@@ -2,14 +2,11 @@
 
 This is the initial story order for Fatty v1. Keep stories small enough for one focused PR.
 
-## Milestone 0: Operating System
+## Milestone 0: Repository Governance
 
 | ID | State | Lane | Story | Acceptance |
 | --- | --- | --- | --- | --- |
 | FTY-000 | merged | governance | Governance, CI, branch protection, reviewer gate | Main is protected; governance and separate reviewer checks are required. |
-| FTY-001 | merged | governance | [Author-agent loop and PR rejection monitor](FTY-001-author-agent-loop.md) | Story slicing docs exist; recurring monitor is configured. |
-| FTY-002 | candidate | governance | External reviewer status gate | Reviewer app publishes an immutable required status/check so autonomous auto-merge does not depend on PR-controlled workflow code. |
-| FTY-003 | candidate | governance | Steward event service hardening | Local orchestrator can receive GitHub events, run deterministic routing, assign worktrees, and invoke steward/author agents only when actionable. |
 
 ## Milestone 1: Project Skeleton
 
