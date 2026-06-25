@@ -7,7 +7,7 @@ This is the initial story order for Fatty v1. Keep stories small enough for one 
 | ID | State | Lane | Story | Acceptance |
 | --- | --- | --- | --- | --- |
 | FTY-000 | merged | governance | Governance, CI, branch protection, reviewer gate | Main is protected; governance and separate reviewer checks are required. |
-| FTY-001 | ready | governance | [Author-agent loop and PR rejection monitor](FTY-001-author-agent-loop.md) | Story slicing docs exist; recurring monitor is configured. |
+| FTY-001 | merged | governance | [Author-agent loop and PR rejection monitor](FTY-001-author-agent-loop.md) | Story slicing docs exist; recurring monitor is configured. |
 
 ## Milestone 1: Project Skeleton
 

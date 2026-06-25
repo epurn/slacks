@@ -2,7 +2,7 @@
 
 ## State
 
-ready
+merged
 
 ## Lane
 
@@ -55,4 +55,3 @@ This story changes development automation only. It must preserve the non-author 
 
 - Run `make verify`.
 - Confirm PR #4 has a separate reviewer result before merge.
-

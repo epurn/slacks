@@ -144,7 +144,7 @@ def main() -> None:
             fail(f"author-agent loop must include {term!r}")
 
     reviewer_gate = read(".github/workflows/reviewer-gate.yml")
-    for term in ["review.commit_id === pr.head.sha", "review.user.login !== pr.user.login"]:
+    for term in ["review.commit_id === pr.head.sha", "review.user.login !== pr.user.login", 'eligibleReviewers.has(review.user.login)']:
         if term not in reviewer_gate:
             fail(f"reviewer gate must include {term!r}")
 

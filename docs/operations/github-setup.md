@@ -29,7 +29,7 @@ Configure `main` with:
 - block deletions,
 - include administrators when practical.
 
-Fatty enforces non-author review through the required `separate-reviewer` workflow instead of GitHub's native required-review count. This is intentional: local GitHub App reviews satisfy the workflow gate, but GitHub may not count those app approvals as native collaborator approvals. The workflow requires an approval from a non-author reviewer on the current PR head SHA, so stale approvals after branch updates do not pass.
+Fatty enforces non-author review through the required `separate-reviewer` workflow instead of GitHub's native required-review count. This is intentional: local GitHub App reviews satisfy the workflow gate, but GitHub may not count those app approvals as native collaborator approvals. The workflow requires an approval from an eligible non-author reviewer on the current PR head SHA, so stale approvals after branch updates do not pass. The initial eligible reviewer is the `fatty-reviewer` GitHub App identity.
 
 ## Private Repository Plan Caveat
 
