@@ -72,8 +72,8 @@ request memory updates for repeated or high-risk issues.
 
 Authority order:
 
-1. Latest user instruction.
-2. Security/privacy policy and branch protection.
+1. Security/privacy policy and branch protection.
+2. Latest user instruction within those non-overridable constraints.
 3. Current story acceptance criteria.
 4. `AGENTS.md` and playbooks.
 5. Durable memory.
@@ -95,4 +95,3 @@ Choose work in this order:
 3. Lanes with no open PRs.
 4. Lower-risk stories when value is similar.
 5. Roadmap order.
-

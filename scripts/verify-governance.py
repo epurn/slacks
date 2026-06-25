@@ -192,6 +192,10 @@ def main() -> None:
     for term in ["readiness sanity pass", "approved_dependencies", "memory policy", "blocker policy", "work selection"]:
         if term not in steward_playbook:
             fail(f"story steward playbook must include {term!r}")
+    security_position = steward_playbook.find("1. security/privacy policy and branch protection")
+    user_position = steward_playbook.find("2. latest user instruction within those non-overridable constraints")
+    if security_position == -1 or user_position == -1 or security_position > user_position:
+        fail("story steward authority order must keep safety and branch protection above user/task instructions")
 
     author_worker = read("agents/playbooks/author-worker.md").lower()
     for term in ["one assignment", "approved dependencies", "secret", "structured output"]:
