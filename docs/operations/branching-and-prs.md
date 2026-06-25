@@ -12,6 +12,44 @@ Use:
 Do not work directly on `main`.
 Base feature branches on current `origin/main`.
 
+## Coordination Flow
+
+Fatty uses separate planner, steward, author, and reviewer phases.
+
+1. The planner promotes stories only when they meet the story readiness rule.
+2. The steward picks up ready stories and assigns implementation work when
+   dependencies are complete and lanes are unoccupied.
+3. Authors work on branches from current `origin/main`.
+4. The author opens a PR with verification, security, privacy, and story
+   context.
+5. The steward routes the PR to a separate reviewer.
+6. New commits after review require fresh current-head review before merge.
+7. Private automation state and runner details remain outside the public repo.
+
+Run the always-on code pollers from the CLI:
+
+```sh
+make steward
+make reviewer
+make agents-run
+make agents-stop
+```
+
+Run one cheap poll cycle for debugging:
+
+```sh
+make steward-poll
+make reviewer-poll
+```
+
+These targets call the local steward and reviewer agent repositories. The
+pollers are ordinary code and should sleep or exit cheaply when nothing is
+actionable. The poll step itself is not an LLM call. It may launch separate
+bounded Codex tasks only after deterministic checks find actionable work.
+
+See `docs/operations/agent-polling.md` and
+`docs/operations/agent-model-policy.md`.
+
 ## Pull Requests
 
 Every PR must include:

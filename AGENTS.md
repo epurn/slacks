@@ -15,6 +15,33 @@ configuration, runner code, durable agent memory, machine-specific paths,
 tokens, private keys, provider secrets, and queue state must stay outside this
 repo.
 
+## Agent Role Boundary
+
+Agent work is split into durable roles. Keep the roles separate unless the user
+explicitly changes the operating model.
+
+- Planners create, refine, and promote stories. They do not implement or review
+  the work they plan.
+- Planners must not start, reload, poll, stop, or otherwise operate steward,
+  reviewer, or author services. They may prepare docs, stories, and commands;
+  the user runs the agents.
+- Stewards pick up ready stories, assign author work, watch PR state, and route
+  PRs to reviewers.
+- Authors implement scoped stories on their own branches and open PRs.
+- Reviewers inspect PRs using the review checklist and must be separate from
+  authors.
+- A single agent must not author and approve the same implementation work.
+- Public docs may describe these phases, but private routing configuration,
+  local automation state, agent memory, thread IDs, and runner details stay
+  outside this repo.
+- Steward and reviewer automation should be always-running cheap code pollers,
+  not LLM polling loops. Pollers manage queue state and wake Codex only for
+  bounded tasks when deterministic checks find actionable work.
+- Model and reasoning choices should scale with task risk and complexity instead
+  of defaulting every poll to the most expensive setting.
+- When task risk is ambiguous, estimate big and choose the higher model/reasoning
+  bucket.
+
 ## Working Rules
 
 - Work on a branch named `story/<id>-<slug>`, `fix/<id>-<slug>`,
@@ -61,5 +88,9 @@ protection on `main`.
 - `docs/security/security-baseline.md`
 - `docs/security/threat-model.md`
 - `docs/operations/branching-and-prs.md`
+- `docs/operations/agent-polling.md`
+- `docs/operations/agent-model-policy.md`
+- `docs/stories/README.md`
+- `docs/stories/v1-roadmap.md`
 - `docs/review-policy.md`
 - `docs/review-checklist.md`

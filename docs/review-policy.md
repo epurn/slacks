@@ -2,6 +2,22 @@
 
 Every PR needs a separate reviewer phase before merge.
 
+## Role Phases
+
+Planning, stewardship, authoring, and reviewing are separate roles.
+
+The planner creates, refines, and promotes stories. The steward picks up ready
+stories, identifies lane conflicts, assigns author work, watches PR state, and
+routes PRs to reviewers. Authors implement. Reviewers inspect current PR heads.
+
+Role routing must preserve the public repository boundary: private automation
+state, runner configuration, durable agent memory, thread IDs, credentials, and
+machine-specific paths do not belong in this repo.
+
+Steward and reviewer loops should be deterministic pollers, not long-running
+Codex sessions. Pollers may run continuously as ordinary code, but each Codex
+invocation should handle one bounded task and then exit.
+
 ## Author Phase
 
 The author implements the change, updates tests/docs/contracts, runs checks, and completes the PR template.

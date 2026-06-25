@@ -6,6 +6,18 @@ Prefer GitHub issues for active stories. This directory can hold longer story sp
 
 Use `v1-roadmap.md` as the ordered v1 story map.
 
+## Role Flow
+
+Planners own story creation, refinement, and promotion. Stewards own routing
+ready stories to authors and routing opened PRs to reviewers. Authors own
+implementation. Reviewers own independent review.
+
+The same agent or person must not author and approve the same implementation
+work.
+
+Stewards and reviewers should be launched by cheap polling code. The model is
+woken only when there is actionable assignment or review work.
+
 Every story should include:
 
 - YAML front matter when state is `ready` or `ready_with_notes`,
