@@ -8,6 +8,10 @@ description: Create, refine, or promote a Fatty story. Use when the user wants t
 This skill drives the **planner** role. It produces ready stories; it never
 implements, reviews, assigns, or operates services.
 
+For an interactive session, start with the **`grill-me`** skill — it interviews
+you to resolve the design, then hands off here to write the story. Use
+`plan-story` directly when you already know what the story should be.
+
 ## Steps
 
 1. **Read context first.**

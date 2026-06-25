@@ -26,8 +26,9 @@ Roles stay separate; one agent never does two of these for the same work. Full
 detail in `docs/agent-operating-system.md`.
 
 - **Planner** — creates, refines, and promotes stories. Never implements,
-  reviews, or operates the services. Driven interactively from here via the
-  `plan-story` skill / planner subagent.
+  reviews, or operates the services. Driven interactively from here: start with
+  the `grill-me` skill (it interviews you, then writes the story), or use the
+  `plan-story` skill / planner subagent directly.
 - **Steward** — deterministic poller; assigns ready stories to authors and
   routes PR fixes. Wakes a model only for bounded judgment.
 - **Author** — implements one scoped story on its own branch and opens a PR.
