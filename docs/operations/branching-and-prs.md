@@ -27,6 +27,9 @@ Every PR must include:
 Configure GitHub `main` with:
 
 - require pull request before merge,
+- require native approval until the reviewer app owns an external required status,
+- dismiss stale approvals,
+- require latest-push approval,
 - require conversation resolution,
 - require status checks:
   - `governance`,

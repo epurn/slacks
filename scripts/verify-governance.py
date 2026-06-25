@@ -125,6 +125,16 @@ def main() -> None:
     if "current PR head SHA" not in review_policy:
         fail("review policy must require review on the current PR head SHA")
 
+    github_setup = read("docs/operations/github-setup.md").lower()
+    for term in ["stale approval", "latest reviewable push", "native approving review"]:
+        if term not in github_setup:
+            fail(f"github setup must document {term!r}")
+
+    branching = read("docs/operations/branching-and-prs.md").lower()
+    for term in ["stale approvals", "latest-push approval", "native approval"]:
+        if term not in branching:
+            fail(f"branching docs must document {term!r}")
+
     roadmap = read("docs/stories/v1-roadmap.md")
     for term in ["FTY-010", "ready_with_notes", "Milestone 1", "Lane", "backend-core", "mobile-core", "estimator"]:
         if term not in roadmap:
@@ -154,6 +164,8 @@ def main() -> None:
         fail("branch protection template must keep pull requests required")
     if required_reviews.get("required_approving_review_count") != 1:
         fail("branch protection template must require native approval until an external reviewer status exists")
+    if not required_reviews.get("dismiss_stale_reviews"):
+        fail("branch protection template must dismiss stale reviews")
     if not required_reviews.get("require_last_push_approval"):
         fail("branch protection template must require latest-push approval")
 

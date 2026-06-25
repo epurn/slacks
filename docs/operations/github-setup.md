@@ -25,6 +25,8 @@ Configure `main` with:
 - require the `governance` status check,
 - require the `separate-reviewer` status check,
 - require at least one native approving review until the reviewer app owns an external required status,
+- dismiss stale approvals when new commits are pushed,
+- require approval of the latest reviewable push,
 - block force pushes,
 - block deletions,
 - include administrators when practical.
@@ -69,10 +71,12 @@ When branch protection is available:
 3. Add a branch protection rule for `main`.
 4. Enable "Require a pull request before merging".
 5. Require at least one native approving review.
-6. Enable conversation resolution.
-7. Enable required status checks.
-8. Require branches to be up to date before merging.
-9. Require `governance`.
-10. Require `separate-reviewer`.
-11. Block force pushes and deletions.
-12. Apply to administrators if the plan allows it.
+6. Enable stale approval dismissal.
+7. Require approval of the latest reviewable push.
+8. Enable conversation resolution.
+9. Enable required status checks.
+10. Require branches to be up to date before merging.
+11. Require `governance`.
+12. Require `separate-reviewer`.
+13. Block force pushes and deletions.
+14. Apply to administrators if the plan allows it.
