@@ -10,7 +10,7 @@ The author must not self-approve or merge based only on their own review.
 
 ## Reviewer Phase
 
-A reviewer inspects the diff using `agents/reviewer/review-checklist.md`.
+A reviewer inspects the diff using `docs/review-checklist.md`.
 
 The reviewer should prioritize:
 
@@ -25,9 +25,13 @@ The reviewer should prioritize:
 
 ## Automated Gate
 
-The `reviewer-gate` GitHub workflow checks that at least one approval exists on the current PR head SHA from an eligible reviewer other than the PR author. The initial eligible reviewer is the local `fatty-reviewer[bot]` GitHub App identity, pinned by GitHub user id and Bot type. GitHub branch protection should require this workflow and native approval while the reviewer signal is still implemented as repository workflow code.
+The `reviewer-gate` GitHub workflow checks that at least one approval exists on
+the current PR head SHA from an eligible reviewer other than the PR author.
+Branch protection should require this workflow and should not allow authors to
+merge based only on their own review.
 
-The long-term autonomous merge gate should move from repository workflow code to an immutable external GitHub App status or check. Until then, native approval protects workflow and governance changes from editing their own review gate.
+Long term, reviewer enforcement can move from repository workflow code to an
+external required status or check owned by trusted project infrastructure.
 
 ## Emergency Exception
 
