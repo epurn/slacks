@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"name": "fatty",
+			"path": "fatty"
+		},
+		{
+			"name": "fatty-reviewer-agent",
+			"path": "fatty-reviewer-agent"
+		},
+		{
+			"name": "fatty-author-agent",
+			"path": "fatty-author-agent"
+		},
+		{
+			"path": "fatty-steward-agent"
+		}
+	],
+	"settings": {}
+}

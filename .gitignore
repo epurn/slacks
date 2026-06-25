@@ -1,0 +1,23 @@
+# Nested repos — each is its own independent git repo, not tracked here.
+/fatty/
+/fatty-author-agent/
+/fatty-reviewer-agent/
+/fatty-steward-agent/
+/fatty-worktrees/
+
+# Secrets and local state (defense in depth; the nested repos are already ignored).
+.env
+*.env
+!*/config.example.env
+*.pem
+*.key
+**/keys/
+**/logs/
+**/.steward-run/
+
+# Noise.
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+node_modules/
