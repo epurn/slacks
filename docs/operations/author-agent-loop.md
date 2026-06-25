@@ -5,10 +5,13 @@ This document defines how Codex should autonomously build Fatty.
 ## Roles
 
 - **Author agent:** implements stories and opens PRs. In local Codex, this is the current coding agent.
+- **Story steward:** separate local `fatty-steward` GitHub App identity that manages queue health, worktree assignment, memory routing, and author launches.
 - **Reviewer agent:** separate local `fatty-reviewer` GitHub App identity that approves, comments, or requests changes.
+- **Event router:** deterministic local code that decides whether there is actionable work before waking an LLM.
 - **Merger:** GitHub native auto-merge behind branch protection.
 
 The author agent must not approve its own PR.
+The steward must not review or merge implementation work it authored.
 
 ## Default Loop
 
@@ -16,12 +19,51 @@ The author agent must not approve its own PR.
 2. If any PR has requested changes, fix the highest-priority rejected PR before starting new work.
 3. If CI is failing for an authored PR, debug and fix that PR.
 4. If PRs are waiting only for reviewer approval, do not sit idle.
-5. Choose the next `ready` or `ready_with_notes` story from `docs/stories/v1-roadmap.md` that does not conflict with open PRs.
-6. Start that story from current `origin/main`, not from another unmerged story branch.
-7. Implement one thin slice on a story branch.
-8. Open a PR and allow the reviewer agent to run.
+5. Run the deterministic steward router or equivalent lane check.
+6. Choose the next `ready` or `ready_with_notes` story from `docs/stories/v1-roadmap.md` that does not conflict with open PRs.
+7. Start that story from current `origin/main`, not from another unmerged story branch.
+8. Implement one thin slice on a story branch.
+9. Open a PR and allow the reviewer agent to run.
 
 Waiting for review is normal queue time. The author agent should keep building independent slices while the reviewer agent evaluates already-open PRs.
+If deterministic checks find no actionable work, exit quietly instead of waking an LLM to confirm emptiness.
+
+## Story Steward
+
+Use `docs/operations/story-steward-orchestrator.md` and `agents/playbooks/story-steward.md` for queue coordination.
+
+The steward may:
+
+- create, split, promote, demote, and reorder stories,
+- assign fresh worktrees,
+- update durable memory when it will save future work,
+- create story-only planning PRs.
+
+The steward may not:
+
+- change v1 product goals without recorded rationale,
+- inspect secrets by default,
+- make paid service commitments without approval,
+- review or merge its own implementation.
+
+## Story Metadata
+
+Every `ready` or `ready_with_notes` story must include YAML front matter with:
+
+- `id`,
+- `state`,
+- `primary_lane`,
+- `touched_lanes`,
+- `risk`,
+- `tags`,
+- `approved_dependencies`,
+- `requires_context`,
+- `review_focus`,
+- `autonomous`.
+
+Every promoted story must include a readiness sanity pass in the story file.
+Plain `ready` means no material caveats. Use `ready_with_notes` when assumptions
+are safe for autonomy but should remain visible.
 
 ## PR Rejection Monitor
 
@@ -50,6 +92,7 @@ New work may start only when:
 - no authored PR has failing CI that the author can fix,
 - the next story is marked `ready` or `ready_with_notes`,
 - the story has acceptance criteria,
+- the story has YAML metadata and a readiness sanity pass,
 - the story's dependencies are merged,
 - the story's lane does not overlap with open unmerged PRs.
 
@@ -62,7 +105,22 @@ git pull --ff-only origin main
 git switch -c story/<id>-<slug>
 ```
 
-If local checkout state prevents switching safely, stop and report the blocker instead of rebasing unrelated work.
+If local checkout state prevents switching safely, use a fresh worktree or report the blocker instead of rebasing unrelated work.
+
+## Worktrees
+
+Parallel implementation must use one story per worktree:
+
+```text
+/Users/epurn/workspace/fatty
+/Users/epurn/workspace/fatty-worktrees/
+  FTY-010-monorepo-scaffold/
+  FTY-012-backend-skeleton/
+```
+
+Worktrees are created from current `origin/main`. Authors should not juggle
+multiple story branches in one checkout or independently choose new work while
+already assigned.
 
 ## Parallel Work Lanes
 
@@ -114,3 +172,6 @@ If a branch was opened before this rule existed, keep the PR branch stable and i
 A recurring Codex automation should periodically check PR state and continue this loop. It should not bypass review gates, approve its own PRs, or merge directly.
 
 Automation may continue building independent `ready` or `ready_with_notes` stories while earlier PRs wait for review. It must fix rejected or failing PRs before starting additional new stories.
+Automation must use deterministic routing first. If all PRs are only waiting on
+human/native approval and no non-conflicting ready story is available, it should
+pause, exit quietly, or avoid scheduling another wakeup until a relevant event.

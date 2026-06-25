@@ -1,3 +1,27 @@
+---
+id: FTY-010
+state: ready_with_notes
+primary_lane: contracts
+touched_lanes:
+  - backend-core
+  - mobile-core
+  - infra
+risk: low
+tags:
+  - scaffold
+  - tooling
+  - contracts
+approved_dependencies: []
+requires_context:
+  - agents/playbooks/story-slicing.md
+  - agents/playbooks/pr-authoring.md
+review_focus:
+  - scope-control
+  - verify-command
+  - dependency-hygiene
+autonomous: true
+---
+
 # FTY-010: Monorepo Scaffold
 
 ## State
@@ -55,3 +79,12 @@ No user data should be stored or processed in this story. The scaffold must not 
 ## Planning Notes
 
 - Exact package manager and backend/mobile toolchain details may be finalized in the implementation PR if the choice is standard and reversible.
+- New third-party packages are not approved for this story unless the story metadata is updated in a planning PR first.
+
+## Readiness Sanity Pass
+
+- Product decision gaps: none for repository layout.
+- Cross-lane impact: creates placeholders for backend, mobile, and infra without implementing behavior.
+- Security/privacy risk: low; no user data, credentials, or runtime services.
+- Verification path: `make verify`.
+- Assumptions safe for autonomy: yes; package choices must remain minimal and reversible.

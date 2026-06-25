@@ -10,6 +10,8 @@ Use:
 - `chore/<slug>`
 
 Do not work directly on `main`.
+For parallel autonomous work, use one story branch per fresh worktree created
+from current `origin/main`.
 
 ## Pull Requests
 
@@ -48,3 +50,9 @@ Use squash merge for a clean linear history unless a release branch needs a diff
 ## Bootstrap
 
 For the initial empty repository, push the governance scaffold to `main`, then enable branch protection immediately. After protection is enabled, all further work should use PRs.
+
+## Worktree Cleanup
+
+After a PR merges, the story steward or event router may clean up the associated
+local worktree and branch only when there is no unpushed work. If cleanup is
+uncertain, leave the worktree in place and report a blocked cleanup task.

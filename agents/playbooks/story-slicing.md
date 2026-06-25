@@ -11,7 +11,9 @@ Move Fatty toward v1 through thin, reviewable vertical slices. A slice should pr
 - One story should fit in a single PR that a reviewer can inspect in one sitting.
 - Prefer end-to-end skeletons over isolated framework setup when possible.
 - Every story needs acceptance criteria and a verification plan.
+- Every ready or ready-with-notes story needs YAML metadata and a readiness sanity pass.
 - Every story needs explicit dependencies; implement only when dependencies are merged.
+- Every story that adds packages needs planning-approved dependencies listed in story metadata.
 - Stories that touch auth, personal data, LLMs, web fetches, files, or external providers need a security/privacy note.
 - Do not bundle unrelated cleanup, dependency upgrades, and feature behavior.
 - If a story grows, split it before coding instead of creating a large PR.
@@ -25,6 +27,15 @@ Move Fatty toward v1 through thin, reviewable vertical slices. A slice should pr
 - `in_review`: PR is open.
 - `changes_requested`: reviewer or CI blocked it.
 - `merged`: complete.
+
+## Ready Story Metadata
+
+`ready` and `ready_with_notes` story files must include the metadata header and
+readiness sanity pass described in `agents/playbooks/story-steward.md`.
+
+Implementation agents may install only dependencies listed in
+`approved_dependencies` or dependencies already present in the repo. If a new
+package is essential but unapproved, block that story and continue elsewhere.
 
 ## Author-Agent Loop
 
@@ -59,6 +70,14 @@ Recommended lane order for early v1 parallelism:
 5. `infra`: Docker Compose and service wiring.
 6. `estimator`: provider config and calculators.
 7. `security-privacy`: hardening and adversarial tests.
+
+When many ready stories exist, choose work by:
+
+1. rejected or failing PRs first,
+2. stories that unblock the most downstream work,
+3. lanes with no open PRs,
+4. lower risk when value is similar,
+5. roadmap order.
 
 ## Rejection Handling
 

@@ -9,6 +9,7 @@ This is the initial story order for Fatty v1. Keep stories small enough for one 
 | FTY-000 | merged | governance | Governance, CI, branch protection, reviewer gate | Main is protected; governance and separate reviewer checks are required. |
 | FTY-001 | merged | governance | [Author-agent loop and PR rejection monitor](FTY-001-author-agent-loop.md) | Story slicing docs exist; recurring monitor is configured. |
 | FTY-002 | candidate | governance | External reviewer status gate | Reviewer app publishes an immutable required status/check so autonomous auto-merge does not depend on PR-controlled workflow code. |
+| FTY-003 | candidate | governance | Steward event service hardening | Local orchestrator can receive GitHub events, run deterministic routing, assign worktrees, and invoke steward/author agents only when actionable. |
 
 ## Milestone 1: Project Skeleton
 
@@ -81,6 +82,8 @@ Only promote a story to `ready` or `ready_with_notes` when it has:
 - affected contracts or an explicit "none",
 - security/privacy note,
 - acceptance criteria,
-- verification plan.
+- verification plan,
+- YAML metadata with approved dependencies for `ready` and `ready_with_notes`,
+- readiness sanity pass.
 
 Use `ready_with_notes` when the story is safe for autonomous implementation but contains non-blocking planning notes. Keep stories as `candidate` when missing decisions would make the work unsafe, impossible to verify, or likely to conflict with unmet dependencies.

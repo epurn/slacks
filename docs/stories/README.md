@@ -8,6 +8,7 @@ Use `v1-roadmap.md` as the ordered v1 story map.
 
 Every story should include:
 
+- YAML front matter when state is `ready` or `ready_with_notes`,
 - outcome,
 - scope,
 - non-goals,
@@ -17,10 +18,24 @@ Every story should include:
 - security/privacy impact,
 - acceptance criteria,
 - verification plan.
+- readiness sanity pass before promotion from `candidate`.
 
 ## Story Template
 
 ```md
+---
+id: FTY-000
+state: ready
+primary_lane: governance
+touched_lanes: []
+risk: low
+tags: []
+approved_dependencies: []
+requires_context: []
+review_focus: []
+autonomous: true
+---
+
 # FTY-000: Title
 
 ## State
@@ -48,4 +63,12 @@ governance
 ## Acceptance Criteria
 
 ## Verification
+
+## Readiness Sanity Pass
+
+- Product decision gaps:
+- Cross-lane impact:
+- Security/privacy risk:
+- Verification path:
+- Assumptions safe for autonomy:
 ```
