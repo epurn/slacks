@@ -19,19 +19,21 @@ The operating system includes:
 - root agent guidance,
 - product and development goals,
 - focused playbooks,
+- durable memory entry points,
 - domain skills,
+- deterministic story-steward routing,
 - PR/review policy,
 - governance CI,
 - separate reviewer gate,
 - story and PR templates,
 - CODEOWNERS.
 
-Agents should operate autonomously within a task, but implementation and review remain separate phases.
+Agents should operate autonomously within a task, but implementation and review remain separate phases. Story stewardship is a coordination role invoked by deterministic events; it is not an always-on LLM requirement.
 
 ## Consequences
 
 - Future agents get a predictable entry point.
 - Detailed instructions stay available without loading every policy for every task.
 - CI can verify the governance scaffold remains present.
+- Empty automation checks can exit cheaply without waking a model.
 - Branch protection and reviewer gate must be configured in GitHub before merges are allowed.
-
