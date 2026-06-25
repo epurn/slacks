@@ -12,7 +12,7 @@ Use contracts for:
 - LLM structured outputs,
 - provider adapters,
 - source evidence records,
-- memory writes,
+- user-approved saved foods, aliases, and preference memory writes,
 - event status state machines.
 
 ## Contract Template
@@ -50,4 +50,5 @@ Use contracts for:
 - LLM output is never trusted until schema-validated.
 - User-owned data must carry user ownership at the persistence boundary.
 - Global source facts must not contain user-specific habits.
-
+- Evidence retrieval contracts must separate source facts from user-specific log
+  events, corrections, and preferences.
