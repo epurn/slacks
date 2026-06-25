@@ -55,4 +55,3 @@ No user data should be stored or processed in this story. The scaffold must not 
 ## Planning Notes
 
 - Exact package manager and backend/mobile toolchain details may be finalized in the implementation PR if the choice is standard and reversible.
-
