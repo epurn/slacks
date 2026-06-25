@@ -28,6 +28,7 @@ Every PR must include:
 Configure GitHub `main` with:
 
 - require pull request before merge,
+- require at least one native approving review,
 - dismiss stale approvals,
 - require review on the latest push,
 - require conversation resolution,
@@ -40,7 +41,9 @@ Configure GitHub `main` with:
 - apply rules to administrators where practical.
 
 The `separate-reviewer` status check is the automated non-author review gate.
-It must evaluate approval on the current PR head SHA.
+It must evaluate approval on the current PR head SHA. Native review protection
+is still required so workflow and governance changes cannot weaken their own
+merge gate.
 
 ## Merge Style
 

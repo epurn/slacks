@@ -150,12 +150,12 @@ def main() -> None:
             fail(f"review checklist must include {term!r}")
 
     github_setup = read("docs/operations/github-setup.md").lower()
-    for term in ["stale approval", "latest reviewable push", "separate-reviewer"]:
+    for term in ["stale approval", "latest reviewable push", "native approving review", "separate-reviewer"]:
         if term not in github_setup:
             fail(f"github setup must document {term!r}")
 
     branching = read("docs/operations/branching-and-prs.md").lower()
-    for term in ["stale approvals", "latest push", "separate-reviewer"]:
+    for term in ["native approving review", "stale approvals", "latest push", "separate-reviewer"]:
         if term not in branching:
             fail(f"branching docs must document {term!r}")
 
@@ -186,6 +186,15 @@ def main() -> None:
     for check in ["governance", "separate-reviewer"]:
         if check not in checks:
             fail(f"branch protection template must require {check!r}")
+    required_reviews = protection.get("required_pull_request_reviews")
+    if not isinstance(required_reviews, dict):
+        fail("branch protection template must require pull request reviews")
+    if required_reviews.get("required_approving_review_count") != 1:
+        fail("branch protection template must require one native approving review")
+    if not required_reviews.get("dismiss_stale_reviews"):
+        fail("branch protection template must dismiss stale reviews")
+    if not required_reviews.get("require_last_push_approval"):
+        fail("branch protection template must require latest-push approval")
     if not protection.get("required_conversation_resolution"):
         fail("branch protection template must require conversation resolution")
 
