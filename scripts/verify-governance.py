@@ -144,13 +144,16 @@ def main() -> None:
             fail(f"author-agent loop must include {term!r}")
 
     reviewer_gate = read(".github/workflows/reviewer-gate.yml")
-    for term in ["review.commit_id === pr.head.sha", "review.user.login !== pr.user.login", 'eligibleReviewers.has(review.user.login)']:
+    for term in ["review.commit_id === pr.head.sha", "review.user.login !== pr.user.login", 'review.user.type === "Bot"', "eligibleReviewerIds.has(review.user.id)"]:
         if term not in reviewer_gate:
             fail(f"reviewer gate must include {term!r}")
 
     protection = json.loads(read("docs/operations/main-branch-protection.json"))
-    if protection.get("required_pull_request_reviews") is not None:
-        fail("branch protection template must rely on separate-reviewer check, not native required approvals")
+    required_reviews = protection.get("required_pull_request_reviews")
+    if not isinstance(required_reviews, dict):
+        fail("branch protection template must keep pull requests required")
+    if required_reviews.get("required_approving_review_count") != 0:
+        fail("branch protection template must leave native required approvals at zero")
 
     validate_story("docs/stories/FTY-001-author-agent-loop.md")
     validate_story("docs/stories/FTY-010-monorepo-scaffold.md")

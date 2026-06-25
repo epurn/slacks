@@ -32,11 +32,12 @@ jobs:
               latestByUser.set(review.user.login, review);
             }
 
-            const eligibleReviewers = new Set(["fatty-reviewer"]);
+            const eligibleReviewerIds = new Set([296691398]);
             const approvals = [...latestByUser.values()].filter((review) => {
               return review.state === "APPROVED" &&
                 review.user.login !== pr.user.login &&
-                eligibleReviewers.has(review.user.login) &&
+                review.user.type === "Bot" &&
+                eligibleReviewerIds.has(review.user.id) &&
                 review.commit_id === pr.head.sha;
             });
 

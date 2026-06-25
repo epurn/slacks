@@ -24,12 +24,12 @@ Configure `main` with:
 - require branches to be up to date before merging,
 - require the `governance` status check,
 - require the `separate-reviewer` status check,
-- do not require GitHub's native approving review count for the autonomous queue,
+- require pull requests with zero native required approvals for the autonomous queue,
 - block force pushes,
 - block deletions,
 - include administrators when practical.
 
-Fatty enforces non-author review through the required `separate-reviewer` workflow instead of GitHub's native required-review count. This is intentional: local GitHub App reviews satisfy the workflow gate, but GitHub may not count those app approvals as native collaborator approvals. The workflow requires an approval from an eligible non-author reviewer on the current PR head SHA, so stale approvals after branch updates do not pass. The initial eligible reviewer is the `fatty-reviewer` GitHub App identity.
+Fatty enforces non-author review through the required `separate-reviewer` workflow instead of GitHub's native required-review count. This is intentional: local GitHub App reviews satisfy the workflow gate, but GitHub may not count those app approvals as native collaborator approvals. The branch rule still requires pull requests, but sets the native required approval count to zero. The workflow requires an approval from an eligible non-author reviewer on the current PR head SHA, so stale approvals after branch updates do not pass. The initial eligible reviewer is the `fatty-reviewer[bot]` GitHub App identity.
 
 ## Private Repository Plan Caveat
 
@@ -68,7 +68,7 @@ When branch protection is available:
 2. Go to Branches.
 3. Add a branch protection rule for `main`.
 4. Enable "Require a pull request before merging".
-5. Do not enable a native required approval count for the autonomous queue.
+5. Require pull requests, but set native required approvals to zero for the autonomous queue.
 6. Enable conversation resolution.
 7. Enable required status checks.
 8. Require branches to be up to date before merging.
