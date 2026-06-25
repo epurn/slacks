@@ -6,7 +6,9 @@ The product principle is simple: natural input, deterministic math, visible evid
 
 ## Current Status
 
-This repository is in Milestone 0: project operating system. The first checked-in work establishes agent guidance, development standards, security/privacy requirements, contracts, and review gates before application code is added.
+This repository is in early foundation work. It now has public governance,
+security/privacy requirements, contracts, review gates, and a minimal monorepo
+scaffold before application behavior is added.
 
 ## Product Shape
 
@@ -23,6 +25,15 @@ This repository is in Milestone 0: project operating system. The first checked-i
 
 See `docs/architecture/system-overview.md` for the working architecture.
 
+## Repository Layout
+
+- `apps/backend`: future FastAPI backend package.
+- `apps/mobile`: future iOS-first Expo / React Native app package.
+- `packages/contracts`: future machine-readable contracts shared across
+  backend, mobile, estimator, and infrastructure code.
+- `docs/contracts`: public contract principles and human-readable contract
+  templates.
+
 ## Development
 
 Run the current repository checks:
@@ -33,6 +44,10 @@ make verify
 
 More language-specific tooling will be added when the backend and mobile workspaces are scaffolded.
 
+Package-specific verification should be exposed through a package `Makefile`
+with a `verify` target. Root `make verify` delegates to those package checks
+when they exist.
+
 ## Contributing
 
 See `CONTRIBUTING.md`, `AGENTS.md`, and `docs/operations/branching-and-prs.md`.
@@ -40,4 +55,3 @@ See `CONTRIBUTING.md`, `AGENTS.md`, and `docs/operations/branching-and-prs.md`.
 ## License
 
 The project is intended to be open source. The license has not been selected yet.
-

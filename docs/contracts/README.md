@@ -1,6 +1,9 @@
 # Contracts
 
 Contracts define boundaries before implementation details leak across systems.
+Human-readable contract guidance lives here. Machine-readable schemas and
+generated contract artifacts belong in `packages/contracts` once specific
+contracts are introduced.
 
 Use contracts for:
 
@@ -50,4 +53,3 @@ Use contracts for:
 - LLM output is never trusted until schema-validated.
 - User-owned data must carry user ownership at the persistence boundary.
 - Global source facts must not contain user-specific habits.
-
