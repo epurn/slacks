@@ -26,26 +26,13 @@ Fatty uses separate planner, steward, author, and reviewer phases.
 6. New commits after review require fresh current-head review before merge.
 7. Private automation state and runner details remain outside the public repo.
 
-Run the always-on code pollers from the CLI:
-
-```sh
-make steward
-make reviewer
-make agents-run
-make agents-stop
-```
-
-Run one cheap poll cycle for debugging:
-
-```sh
-make steward-poll
-make reviewer-poll
-```
-
-These targets call the local steward and reviewer agent repositories. The
-pollers are ordinary code and should sleep or exit cheaply when nothing is
+Pollers are ordinary code and should sleep or exit cheaply when nothing is
 actionable. The poll step itself is not an LLM call. It may launch separate
 bounded Codex tasks only after deterministic checks find actionable work.
+
+Public docs may describe coordination rules and review gates. Local runner
+commands, private automation configuration, machine-specific paths, credentials,
+queue state, and runner logs stay outside this repo.
 
 See `docs/operations/agent-polling.md` and
 `docs/operations/agent-model-policy.md`.

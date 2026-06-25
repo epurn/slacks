@@ -32,41 +32,19 @@ concrete author, review, fix, or judgment task.
   before invoking Codex.
 - Exit the Codex task after the one assignment completes.
 
-## Local Commands
+## Operational Boundary
 
-From the Fatty app repo:
+The public app repo documents poller expectations, handoff rules, and review
+gates. It must not publish local runner commands, private package paths,
+machine-specific defaults, credentials, queue state, thread IDs, durable agent
+memory, or runner logs.
 
-These commands are for the user to run. The planner may document or explain
-them, but must not run, reload, poll, or stop local steward/reviewer/author
-services unless the user explicitly asks for that exact operational action.
-
-```sh
-make steward
-make reviewer
-make agents-run
-make agents-stop
-make steward-poll
-make steward-poll-dry-run
-make reviewer-poll
-make reviewer-poll-auto-merge
-```
-
-`make reviewer` and `make agents-run` run the reviewer with native GitHub
-auto-merge intent after the reviewer approves the current PR head. GitHub
-branch protection still owns the final merge gate.
-
-These delegate to sibling local agent repos through configurable paths:
-
-```sh
-FATTY_STEWARD_AGENT_ROOT=../fatty-steward-agent
-FATTY_REVIEWER_AGENT_ROOT=../fatty-reviewer-agent
-```
-
-The public app repo documents the integration point. Private launchd state,
-thread IDs, local paths, credentials, and runner logs stay outside this repo.
+Planner documentation may describe what each role is allowed to do. It must not
+instruct planners to start, reload, poll, stop, or otherwise operate steward,
+reviewer, or author services.
 
 ## Scheduling
 
-Schedule the poller code, not Codex. A launchd, cron, or GitHub webhook wrapper
-should keep the steward/reviewer code polling. The model should wake only after
-deterministic checks conclude work is needed.
+Schedule poller code, not Codex. The scheduling mechanism and service runner
+configuration belong outside this public repository. The model should wake only
+after deterministic checks conclude work is needed.
