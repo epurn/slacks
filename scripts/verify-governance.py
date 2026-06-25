@@ -27,6 +27,7 @@ REQUIRED_FILES = [
     ".github/dependabot.yml",
     "agents/goals/product-goal.md",
     "agents/goals/development-goal.md",
+    "agents/playbooks/story-slicing.md",
     "agents/playbooks/feature-development.md",
     "agents/playbooks/security-privacy-review.md",
     "agents/playbooks/contract-first-change.md",
@@ -40,9 +41,12 @@ REQUIRED_FILES = [
     "docs/security/data-retention.md",
     "docs/contracts/README.md",
     "docs/operations/branching-and-prs.md",
+    "docs/operations/author-agent-loop.md",
     "docs/operations/github-setup.md",
     "docs/operations/main-branch-protection.json",
     "docs/review-policy.md",
+    "docs/stories/README.md",
+    "docs/stories/v1-roadmap.md",
     "docs/adr/0001-agent-operating-system.md",
     "docs/adr/0002-product-architecture.md",
 ]
@@ -91,6 +95,16 @@ def main() -> None:
     review_policy = read("docs/review-policy.md")
     if "separate reviewer" not in review_policy.lower():
         fail("review policy must require a separate reviewer")
+
+    roadmap = read("docs/stories/v1-roadmap.md")
+    for term in ["FTY-010", "ready", "Milestone 1"]:
+        if term not in roadmap:
+            fail(f"v1 roadmap must include {term!r}")
+
+    author_loop = read("docs/operations/author-agent-loop.md").lower()
+    for term in ["requested changes", "reviewer agent", "next `ready` story"]:
+        if term not in author_loop:
+            fail(f"author-agent loop must include {term!r}")
 
     print("governance check passed")
 

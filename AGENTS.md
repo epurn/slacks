@@ -17,6 +17,7 @@ Fatty is an iOS-first, self-hostable calorie and macro tracker. Users log food a
 Read only the playbooks needed for the current task:
 
 - Feature work: `agents/playbooks/feature-development.md`
+- Story slicing and autonomous author loop: `agents/playbooks/story-slicing.md`
 - Security or privacy impact: `agents/playbooks/security-privacy-review.md`
 - API, database, job, or estimator boundaries: `agents/playbooks/contract-first-change.md`
 - PR preparation: `agents/playbooks/pr-authoring.md`
@@ -63,4 +64,5 @@ Merges require:
 - `docs/security/security-baseline.md`
 - `docs/security/threat-model.md`
 - `docs/operations/branching-and-prs.md`
+- `docs/operations/author-agent-loop.md`
 - `docs/review-policy.md`
