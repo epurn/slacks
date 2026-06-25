@@ -7,13 +7,13 @@ This is the initial story order for Fatty v1. Keep stories small enough for one 
 | ID | State | Lane | Story | Acceptance |
 | --- | --- | --- | --- | --- |
 | FTY-000 | merged | governance | Governance, CI, branch protection, reviewer gate | Main is protected; governance and separate reviewer checks are required. |
-| FTY-001 | ready | governance | Author-agent loop and PR rejection monitor | Story slicing docs exist; recurring monitor is configured. |
+| FTY-001 | ready | governance | [Author-agent loop and PR rejection monitor](FTY-001-author-agent-loop.md) | Story slicing docs exist; recurring monitor is configured. |
 
 ## Milestone 1: Project Skeleton
 
 | ID | State | Lane | Story | Acceptance |
 | --- | --- | --- | --- | --- |
-| FTY-010 | ready | contracts | Monorepo scaffold | Backend, mobile, shared docs, and root verification commands exist. |
+| FTY-010 | ready_with_notes | contracts | [Monorepo scaffold](FTY-010-monorepo-scaffold.md) | Backend, mobile, shared docs, and root verification commands exist. |
 | FTY-011 | candidate | infra | Docker Compose dev stack | Postgres, Redis, API, and worker containers start locally. |
 | FTY-012 | candidate | backend-core | Backend app skeleton | FastAPI health endpoint, config, logging, test harness, and typed settings exist. |
 | FTY-013 | candidate | mobile-core | Mobile app skeleton | Expo iOS-first app opens to a Today shell with local mock state. |
@@ -71,12 +71,15 @@ This is the initial story order for Fatty v1. Keep stories small enough for one 
 
 ## Story Promotion Rule
 
-Only promote a story to `ready` when it has:
+Only promote a story to `ready` or `ready_with_notes` when it has:
 
 - scope,
-- non-goals,
-- affected contracts,
 - lane,
+- dependencies,
+- non-goals,
+- affected contracts or an explicit "none",
 - security/privacy note,
 - acceptance criteria,
 - verification plan.
+
+Use `ready_with_notes` when the story is safe for autonomous implementation but contains non-blocking planning notes. Keep stories as `candidate` when missing decisions would make the work unsafe, impossible to verify, or likely to conflict with unmet dependencies.

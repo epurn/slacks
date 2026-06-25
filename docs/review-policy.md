@@ -25,9 +25,10 @@ The reviewer should prioritize:
 
 ## Automated Gate
 
-The `reviewer-gate` GitHub workflow checks that at least one approval exists from a reviewer other than the PR author. GitHub branch protection should require this workflow and normal review approval before merge.
+The `reviewer-gate` GitHub workflow checks that at least one approval exists on the current PR head SHA from a reviewer other than the PR author. GitHub branch protection should require this workflow.
+
+Do not also require GitHub's native approving review count for the autonomous queue. GitHub may not count local GitHub App approvals as native collaborator approvals, which would block safe parallel automation even when the required `separate-reviewer` check has passed.
 
 ## Emergency Exception
 
 Emergency security fixes may use an accelerated review, but still require a post-merge review and written follow-up issue.
-

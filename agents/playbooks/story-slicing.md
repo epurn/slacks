@@ -11,6 +11,7 @@ Move Fatty toward v1 through thin, reviewable vertical slices. A slice should pr
 - One story should fit in a single PR that a reviewer can inspect in one sitting.
 - Prefer end-to-end skeletons over isolated framework setup when possible.
 - Every story needs acceptance criteria and a verification plan.
+- Every story needs explicit dependencies; implement only when dependencies are merged.
 - Stories that touch auth, personal data, LLMs, web fetches, files, or external providers need a security/privacy note.
 - Do not bundle unrelated cleanup, dependency upgrades, and feature behavior.
 - If a story grows, split it before coding instead of creating a large PR.
@@ -19,6 +20,7 @@ Move Fatty toward v1 through thin, reviewable vertical slices. A slice should pr
 
 - `candidate`: useful but not ready.
 - `ready`: scoped, accepted, and implementable without user input.
+- `ready_with_notes`: implementable with documented assumptions or non-blocking planning notes.
 - `in_progress`: branch exists and work is underway.
 - `in_review`: PR is open.
 - `changes_requested`: reviewer or CI blocked it.
@@ -26,7 +28,7 @@ Move Fatty toward v1 through thin, reviewable vertical slices. A slice should pr
 
 ## Author-Agent Loop
 
-1. Pick the highest-priority `ready` story from `docs/stories/v1-roadmap.md`.
+1. Pick the highest-priority `ready` or `ready_with_notes` story from `docs/stories/v1-roadmap.md`.
 2. Create a branch named `story/<id>-<slug>`.
 3. Read only the relevant playbooks, skills, contracts, and nearby code.
 4. Implement the smallest complete slice.
@@ -37,7 +39,7 @@ Move Fatty toward v1 through thin, reviewable vertical slices. A slice should pr
 9. If review requests changes, fix them on the same branch and push.
 10. When approved and green, use GitHub native auto-merge when allowed.
 
-If another PR is only waiting for review, continue with the next non-conflicting ready story from `origin/main`. Do not stack feature branches on top of unmerged feature branches.
+If another PR is only waiting for review, continue with the next non-conflicting ready or ready-with-notes story from `origin/main`. Do not stack feature branches on top of unmerged feature branches.
 
 ## Parallel Slice Selection
 

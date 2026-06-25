@@ -11,6 +11,8 @@ Every story should include:
 - outcome,
 - scope,
 - non-goals,
+- lane,
+- dependencies,
 - contracts touched,
 - security/privacy impact,
 - acceptance criteria,
@@ -24,6 +26,14 @@ Every story should include:
 ## State
 
 ready
+
+## Lane
+
+governance
+
+## Dependencies
+
+- FTY-000
 
 ## Outcome
 

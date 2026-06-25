@@ -27,8 +27,6 @@ Every PR must include:
 Configure GitHub `main` with:
 
 - require pull request before merge,
-- require at least one approving review,
-- require approval from someone other than the latest pusher when available,
 - require conversation resolution,
 - require status checks:
   - `governance`,
@@ -38,6 +36,8 @@ Configure GitHub `main` with:
 - block deletions,
 - apply rules to administrators where practical.
 
+The `separate-reviewer` status check is the enforceable non-author review gate. Do not also require GitHub's native approval count for the autonomous queue; local GitHub App approvals can satisfy the workflow while still appearing as `REVIEW_REQUIRED` to GitHub's native review decision.
+
 ## Merge Style
 
 Use squash merge for a clean linear history unless a release branch needs a different strategy.
@@ -45,4 +45,3 @@ Use squash merge for a clean linear history unless a release branch needs a diff
 ## Bootstrap
 
 For the initial empty repository, push the governance scaffold to `main`, then enable branch protection immediately. After protection is enabled, all further work should use PRs.
-

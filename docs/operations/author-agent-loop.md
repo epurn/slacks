@@ -16,7 +16,7 @@ The author agent must not approve its own PR.
 2. If any PR has requested changes, fix the highest-priority rejected PR before starting new work.
 3. If CI is failing for an authored PR, debug and fix that PR.
 4. If PRs are waiting only for reviewer approval, do not sit idle.
-5. Choose the next `ready` story from `docs/stories/v1-roadmap.md` that does not conflict with open PRs.
+5. Choose the next `ready` or `ready_with_notes` story from `docs/stories/v1-roadmap.md` that does not conflict with open PRs.
 6. Start that story from current `origin/main`, not from another unmerged story branch.
 7. Implement one thin slice on a story branch.
 8. Open a PR and allow the reviewer agent to run.
@@ -48,8 +48,9 @@ New work may start only when:
 
 - no authored PR has requested changes,
 - no authored PR has failing CI that the author can fix,
-- the next story is marked `ready`,
+- the next story is marked `ready` or `ready_with_notes`,
 - the story has acceptance criteria,
+- the story's dependencies are merged,
 - the story's lane does not overlap with open unmerged PRs.
 
 New work must start from `origin/main`:
@@ -92,7 +93,7 @@ Before starting a new story:
 2. Identify each open PR's lane from changed paths.
 3. Identify the candidate story's lane from `docs/stories/v1-roadmap.md`.
 4. Skip candidates whose lane overlaps with open unmerged PRs.
-5. Prefer the next ready story in a different lane.
+5. Prefer the next ready or ready-with-notes story in a different lane.
 
 ## Story Source
 
@@ -100,14 +101,16 @@ Use `docs/stories/v1-roadmap.md` as the initial source of truth until GitHub Iss
 
 ## Branches
 
-Use:
+New branches must use:
 
 - `story/<id>-<slug>` for roadmap stories,
 - `fix/<id>-<slug>` for review or CI fixes,
 - `security/<id>-<slug>` for security/privacy issues.
 
+If a branch was opened before this rule existed, keep the PR branch stable and include the story ID in the PR title or body. Do not close and recreate a review-ready PR solely to rename its head branch.
+
 ## Automation
 
 A recurring Codex automation should periodically check PR state and continue this loop. It should not bypass review gates, approve its own PRs, or merge directly.
 
-Automation may continue building independent `ready` stories while earlier PRs wait for review. It must fix rejected or failing PRs before starting additional new stories.
+Automation may continue building independent `ready` or `ready_with_notes` stories while earlier PRs wait for review. It must fix rejected or failing PRs before starting additional new stories.

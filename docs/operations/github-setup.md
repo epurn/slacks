@@ -19,17 +19,17 @@ Required status checks on `main`:
 Configure `main` with:
 
 - require a pull request before merging,
-- require at least one approving review,
-- dismiss stale approvals when new commits are pushed,
-- require approval of the most recent reviewable push when available,
 - require conversation resolution,
 - require status checks before merging,
 - require branches to be up to date before merging,
 - require the `governance` status check,
 - require the `separate-reviewer` status check,
+- do not require GitHub's native approving review count for the autonomous queue,
 - block force pushes,
 - block deletions,
 - include administrators when practical.
+
+Fatty enforces non-author review through the required `separate-reviewer` workflow instead of GitHub's native required-review count. This is intentional: local GitHub App reviews satisfy the workflow gate, but GitHub may not count those app approvals as native collaborator approvals. The workflow requires an approval from a non-author reviewer on the current PR head SHA, so stale approvals after branch updates do not pass.
 
 ## Private Repository Plan Caveat
 
@@ -68,10 +68,10 @@ When branch protection is available:
 2. Go to Branches.
 3. Add a branch protection rule for `main`.
 4. Enable "Require a pull request before merging".
-5. Require at least 1 approval.
-6. Enable stale approval dismissal.
-7. Enable conversation resolution.
-8. Enable required status checks.
+5. Do not enable a native required approval count for the autonomous queue.
+6. Enable conversation resolution.
+7. Enable required status checks.
+8. Require branches to be up to date before merging.
 9. Require `governance`.
 10. Require `separate-reviewer`.
 11. Block force pushes and deletions.
