@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from sqlalchemy.engine import Engine
 
 from app.db import create_db_engine, create_session_factory
+from app.estimator.enqueue import celery_enqueuer
 from app.logging import configure_logging
 from app.routers import auth, health, log_events, profile
 from app.settings import Settings, load_settings
@@ -38,6 +39,10 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
     db_engine = engine or create_db_engine(settings.database_url)
     app.state.db_engine = db_engine
     app.state.db_session_factory = create_session_factory(db_engine)
+    # The estimation enqueuer is a swappable seam (FTY-040): production publishes
+    # to Celery/Redis; tests inject a recording fake so creating an event needs
+    # no live broker.
+    app.state.estimation_enqueuer = celery_enqueuer
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(profile.router)

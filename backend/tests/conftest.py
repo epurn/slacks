@@ -7,6 +7,7 @@ migration itself is exercised by the same tests that exercise the API.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -19,6 +20,22 @@ from alembic import command
 from app.db import create_db_engine
 from app.main import create_app
 from app.settings import Settings
+
+
+class RecordingEnqueuer:
+    """Test double for the estimation enqueuer (FTY-040).
+
+    Records each enqueue call instead of publishing to Celery/Redis, so API tests
+    that create log events never need a live broker and can assert exactly one
+    job was enqueued with the right ids.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[uuid.UUID, uuid.UUID]] = []
+
+    def __call__(self, *, log_event_id: uuid.UUID, user_id: uuid.UUID) -> None:
+        self.calls.append((log_event_id, user_id))
+
 
 #: Repository path to the backend package root (where ``alembic.ini`` lives).
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -61,10 +78,23 @@ def db_engine(tmp_path: Path) -> Iterator[Engine]:
 
 
 @pytest.fixture
-def client(db_engine: Engine) -> Iterator[TestClient]:
-    """A TestClient wired to the migrated SQLite database."""
+def enqueuer() -> RecordingEnqueuer:
+    """A recording estimation enqueuer installed on the test app."""
+
+    return RecordingEnqueuer()
+
+
+@pytest.fixture
+def client(db_engine: Engine, enqueuer: RecordingEnqueuer) -> Iterator[TestClient]:
+    """A TestClient wired to the migrated SQLite database.
+
+    The estimation enqueuer is replaced with the recording double so creating a
+    log event does not reach a live broker; tests requesting the ``enqueuer``
+    fixture see the same instance.
+    """
 
     settings = Settings(environment="test", log_level="WARNING")
     app = create_app(settings=settings, engine=db_engine)
+    app.state.estimation_enqueuer = enqueuer
     with TestClient(app) as test_client:
         yield test_client

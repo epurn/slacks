@@ -1,9 +1,13 @@
-"""Log-event routes: create, list-today, and get-by-id (FTY-030).
+"""Log-event routes: create, list-today, and get-by-id (FTY-030, FTY-040).
 
 The ``{user_id}`` path is explicit so object-level ownership is checked on every
 access. A caller may only create, list, and read their own events; the service
 fails closed on a mismatch and this router renders that as ``404`` so other
 users' events are not even confirmed to exist. Raw text is never logged.
+
+FTY-040 extends the create path: once a ``pending`` event is committed, an
+estimation job is enqueued (through the swappable enqueuer seam) so the worker
+picks it up asynchronously.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.deps import CurrentUser
+from app.estimator.enqueue import EstimationEnqueuer, get_enqueuer
 from app.schemas.log_events import LogEventCreateRequest, LogEventDTO
 from app.services import log_events as log_event_service
 from app.services.log_events import LogEventForbidden, LogEventNotFound
@@ -36,13 +41,20 @@ def create_log_event(
     payload: LogEventCreateRequest,
     current_user: CurrentUser,
     session: Annotated[Session, Depends(get_session)],
+    enqueue: Annotated[EstimationEnqueuer, Depends(get_enqueuer)],
 ) -> LogEventDTO:
-    """Create a ``pending`` log event from raw text for the caller's own account."""
+    """Create a ``pending`` log event and enqueue its estimation job.
+
+    The event is committed first; only then is the job published, so the worker
+    never races ahead of a persisted event. The payload carries ids only — never
+    the raw text.
+    """
 
     try:
         event = log_event_service.create_event(session, user_id, current_user, payload.raw_text)
     except LogEventForbidden as exc:
         raise _NOT_FOUND from exc
+    enqueue(log_event_id=event.id, user_id=event.user_id)
     return LogEventDTO.model_validate(event)
 
 

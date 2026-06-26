@@ -72,6 +72,56 @@ class LogEventStatus(StrEnum):
     NEEDS_CLARIFICATION = "needs_clarification"
 
 
+class EstimationJobStatus(StrEnum):
+    """Lifecycle status of an estimation job (FTY-040).
+
+    One :class:`~app.models.estimation.EstimationJob` exists per log event (the
+    idempotency anchor); its status tracks the worker's progress independently of
+    the user-facing :class:`LogEventStatus`:
+
+    - :attr:`QUEUED` — created on enqueue, not yet picked up.
+    - :attr:`RUNNING` — claimed by a worker; also the resting state between
+      retries while attempts remain.
+    - :attr:`SUCCEEDED` / :attr:`FAILED` / :attr:`NEEDS_CLARIFICATION` — terminal
+      outcomes. A terminal job is never reprocessed, which is what makes
+      re-delivery of the same task a no-op.
+    """
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    NEEDS_CLARIFICATION = "needs_clarification"
+
+
+#: Terminal estimation-job statuses. A job in one of these is fully resolved, so
+#: re-delivering its task must not create a new run or re-advance the event.
+TERMINAL_JOB_STATUSES: frozenset[EstimationJobStatus] = frozenset(
+    {
+        EstimationJobStatus.SUCCEEDED,
+        EstimationJobStatus.FAILED,
+        EstimationJobStatus.NEEDS_CLARIFICATION,
+    }
+)
+
+
+class EstimationRunStatus(StrEnum):
+    """Outcome of a single estimation attempt (FTY-040).
+
+    An :class:`~app.models.estimation.EstimationRun` is the auditable record of
+    one attempt at the estimation pipeline. :attr:`RUNNING` is written when the
+    run starts; the pipeline outcome rewrites it to :attr:`COMPLETED`,
+    :attr:`FAILED`, or :attr:`NEEDS_CLARIFICATION`. A failed attempt that still
+    has retries left leaves a :attr:`FAILED` run behind and a fresh run is created
+    for the next attempt, so the run history is the full audit trail.
+    """
+
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    NEEDS_CLARIFICATION = "needs_clarification"
+
+
 #: Authentication provider for an :class:`~app.models.identity.AuthIdentity`.
 #: Only the local email+password path exists in v1; hosted providers (e.g. Sign
 #: in with Apple) are deferred to a later story but modelled as separate
