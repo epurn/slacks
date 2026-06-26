@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "name": "Fatty",
+    "slug": "fatty",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "fatty",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": false
+    },
+    "plugins": ["expo-router"]
+  }
+}
