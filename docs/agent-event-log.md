@@ -64,6 +64,30 @@ calls. The service-level files are append-only across the process lifetime.
   table silently starves the ready queue). `level: warn`. `fields`: `story_id`,
   `table_state`, `file_state`.
 
+Health guard + safe auto-recovery (the steward never takes a destructive remote
+git action — push, force-push, rebase, branch delete — those only warn):
+
+- `roadmap_missing_link` — a ready story's roadmap row links no story file;
+  assignment is held. `warn`. `fields`: `story_id`.
+- `story_file_missing` — a ready story's linked file is absent on disk;
+  assignment held. `warn`. `fields`: `story_id`, `path`.
+- `story_file_untracked` — a ready story's file is not committed; authors build
+  from origin/`base` and would get no context, so assignment is held. `warn`.
+- `story_file_unpushed` — a ready story's file is committed but not on
+  origin/`base` yet; assignment is held **only** when origin was freshly
+  fetched (otherwise warn-only, to avoid false holds on a stale ref). `warn`.
+- `git_drift` — local `base` diverged from origin in a way the steward won't
+  auto-resolve (local commits present, dirty tree, or on another branch).
+  `warn`. `fields`: `ahead`, `behind`, `base`.
+- `synced_base` — the steward fast-forwarded local `base` to origin/`base`
+  (clean tree, no local commits) so the roadmap can't drift. `info`.
+  `fields`: `base`, `behind`.
+- `recovered_stale_marker` — removed a `.active` lane marker whose author
+  process is gone, freeing the lane. `warn`. `fields`: `story_id`, `age_seconds`.
+
+Held stories are routed as the non-ready sentinel state `blocked_missing_context`
+for that cycle, so an author never starts a build it cannot complete.
+
 ### reviewer
 - `watch_start` — watch loop began. `fields`: `repo`, `interval`, `auto_merge`.
 - `review_start` — reviewing a PR head. `fields`: `pr`, `model`, `files`.
@@ -96,3 +120,7 @@ calls. The service-level files are append-only across the process lifetime.
   kills the run (default 600; 0 disables).
 - `FATTY_AUTHOR_HARD_TIMEOUT` — max total seconds for one Claude run before the
   watchdog kills it (default 3600; 0 disables).
+- `FATTY_STEWARD_AUTO_SYNC` — steward fast-forwards local `base` to origin each
+  poll when safe (default `1`; set `0` to only warn on drift).
+- `FATTY_STEWARD_BASE_BRANCH` — the base branch the guard checks against
+  (default `main`).
