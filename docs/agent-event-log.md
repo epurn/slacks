@@ -149,6 +149,22 @@ for that cycle, so an author never starts a build it cannot complete.
   input is mostly `cache_read_input_tokens` is far cheaper than its raw
   input-token count implies.
 
+### usage-limit pause (all agents)
+- `usage_limit_paused` — an agent's `claude -p` call hit a subscription usage
+  limit (5-hour `session`, `weekly`, or a model-specific limit), so a shared
+  pause sentinel was recorded at `$FATTY_AGENTS_STATE_DIR/usage-pause.json`
+  (default `~/.config/fatty-agents/`). `warn`. `fields`: `kind`, `reset_at`
+  (epoch), plus `story_id`/`pr` of the run that hit it. The author/reviewer that
+  detects it records the pause; the author also emits this if it skips a run
+  because a pause is already active.
+- `usage_limit_waiting` — a poller (steward or reviewer) found an active pause
+  and is backing off instead of doing work. `info`. `fields`: `reset_at`,
+  `wait_seconds` (>= 600 — the wait cadence is floored at 10 minutes). Emitted
+  each wait tick.
+- `usage_limit_resumed` — the pause window elapsed (or a clean run cleared it)
+  and the poller resumed normal cadence. `info`. `fields`: none beyond
+  `run_id=service`.
+
 ### author
 - `run_start` — assignment picked up. `fields`: `story_id`, `mode`, `model`.
 - `claude_event` — wrapped Claude stream event. `fields.kind` is normalized to
@@ -170,6 +186,31 @@ for that cycle, so an author never starts a build it cannot complete.
   visible. Only the streaming path (`FATTY_AUTHOR_STREAM_EVENTS=1`, the default)
   carries usage; the plain path emits no result envelope. A run dominated by
   `cache_read_input_tokens` is far cheaper than its raw input count implies.
+
+## Usage-limit auto-pause
+
+All three agents share a pause sentinel so that when any `claude -p` call hits a
+subscription usage limit, the system stops spending and resumes automatically
+when the window resets — no human intervention.
+
+- The author/reviewer detect the limit from the failed call's output (the limit
+  message text — broad match, since the exact wording is version-dependent),
+  parse the reset time when present, and write the sentinel.
+- The steward and reviewer pollers check the sentinel each cycle; while paused
+  they skip all work (the steward launches no authors) and back off to the wait
+  cadence. The no-Claude author `publish` path is exempt — orphan recovery still
+  runs while paused.
+- A clean `claude` run clears the sentinel; an expired sentinel auto-clears, so a
+  wrong/unknown reset time self-corrects within one wait interval (the next real
+  run either succeeds and clears, or re-hits the limit and re-arms).
+
+Config:
+- `FATTY_AGENTS_STATE_DIR` — shared state dir for the sentinel (default
+  `~/.config/fatty-agents`, where the GitHub App keys already live).
+- `FATTY_PAUSE_POLL_SECONDS` — wait cadence while paused (default `600`; floored
+  at `600` — polls run no more often than every 10 minutes in wait mode).
+- `FATTY_PAUSE_FALLBACK_SECONDS` — retry window when the reset time can't be
+  parsed from the limit message (default `600`).
 
 ## Feature flags
 
