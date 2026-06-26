@@ -78,6 +78,36 @@ export function sortByNewest(
 }
 
 /**
+ * Prefix for optimistic placeholder ids. Server ids are UUIDs, so this prefix
+ * never collides with one and lets the timeline tell an unacknowledged local
+ * entry from a stored event during reconciliation.
+ */
+export const OPTIMISTIC_ID_PREFIX = "temp-";
+
+/** Whether an id belongs to a locally-created, not-yet-stored optimistic event. */
+export function isOptimisticId(id: string): boolean {
+  return id.startsWith(OPTIMISTIC_ID_PREFIX);
+}
+
+/**
+ * Merge a freshly polled (or refetched) list into the current timeline (FTY-032).
+ * The server list is authoritative for every event it returns. Locally-created
+ * optimistic entries the server has not acknowledged yet are preserved, so a
+ * poll landing mid-create never drops a just-added row; deduping by id falls out
+ * of keying off the fetched ids. The result is newest-first.
+ */
+export function reconcileEvents(
+  current: readonly LogEventDTO[],
+  fetched: readonly LogEventDTO[],
+): readonly LogEventDTO[] {
+  const fetchedIds = new Set(fetched.map((event) => event.id));
+  const unacknowledged = current.filter(
+    (event) => isOptimisticId(event.id) && !fetchedIds.has(event.id),
+  );
+  return sortByNewest([...fetched, ...unacknowledged]);
+}
+
+/**
  * Build an optimistic `pending` event to show immediately on submit, before the
  * create round-trip resolves. `id`/`createdAt` are supplied by the caller (kept
  * out of here so this stays pure and testable); the real event from the API

@@ -17,8 +17,19 @@ import {
   type LogEventDTO,
 } from "@/api/logEvents";
 import { EntryRow } from "@/components/EntryRow";
+import {
+  POLL_INTERVAL_MS,
+  hasPendingWork,
+  useIntervalPolling,
+} from "@/state/polling";
 import { useSession, toApiSession, type Session } from "@/state/session";
-import { optimisticLogEvent, sortByNewest } from "@/state/today";
+import {
+  OPTIMISTIC_ID_PREFIX,
+  optimisticLogEvent,
+  reconcileEvents,
+  sortByNewest,
+} from "@/state/today";
+import { useScreenActive } from "@/state/useScreenActive";
 
 /** Maximum raw-text length, mirrored from the FTY-030 contract. */
 const MAX_RAW_TEXT_LENGTH = 2000;
@@ -42,19 +53,29 @@ function messageFor(error: unknown, kind: "load" | "save"): string {
  * input that creates a new `pending` event — shown immediately (optimistically)
  * before the create round-trip resolves.
  *
- * Auto-refresh of pending entries is out of scope (FTY-032); a manual refresh is
- * provided. Until the mobile sign-in flow lands (a separate story) there is no
- * session on the device, so this renders a clear "sign in" state, mirroring the
- * profile capture flow. `load`/`create`/`session` are injectable for tests.
+ * Pending entries auto-refresh: while any visible event is non-terminal the
+ * screen polls list-today on a fixed interval and reconciles the result, so a
+ * `pending` entry reaches its terminal status without a manual refresh (FTY-032,
+ * the ADR-0002 v1 mechanism). Polling stops when nothing is pending and pauses
+ * when the screen is backgrounded or unfocused; a manual refresh is also kept.
+ *
+ * Until the mobile sign-in flow lands (a separate story) there is no session on
+ * the device, so this renders a clear "sign in" state, mirroring the profile
+ * capture flow. `load`/`create`/`session`/`useActive`/`pollIntervalMs` are
+ * injectable for tests.
  */
 export function TodayScreen({
   session: sessionOverride,
   load = listTodayLogEventsApi,
   create = createLogEventApi,
+  useActive = useScreenActive,
+  pollIntervalMs = POLL_INTERVAL_MS,
 }: {
   session?: Session;
   load?: typeof listTodayLogEventsApi;
   create?: typeof createLogEventApi;
+  useActive?: () => boolean;
+  pollIntervalMs?: number;
 } = {}) {
   const insets = useSafeAreaInsets();
   const liveSession = useSession();
@@ -112,7 +133,7 @@ export function TodayScreen({
     if (!trimmed || !apiSession || submitting) {
       return;
     }
-    const id = `temp-${tempId.current++}`;
+    const id = `${OPTIMISTIC_ID_PREFIX}${tempId.current++}`;
     const optimistic = optimisticLogEvent({
       id,
       userId: apiSession.userId,
@@ -138,6 +159,33 @@ export function TodayScreen({
       setSubmitting(false);
     }
   }, [text, apiSession, submitting, create]);
+
+  // One poll: refetch the day and reconcile into the timeline, preserving any
+  // unacknowledged optimistic entry. Transient poll failures are swallowed so a
+  // dropped request never replaces the visible timeline with an error — the
+  // next tick retries, and the manual refresh surfaces persistent failures.
+  const pollOnce = useCallback(() => {
+    if (!apiSession) {
+      return;
+    }
+    load(apiSession).then(
+      (loaded) => {
+        setEvents((prev) => reconcileEvents(prev, loaded));
+      },
+      () => {
+        // Keep the current timeline; retry on the next interval.
+      },
+    );
+  }, [apiSession, load]);
+
+  // Poll while a non-terminal event is visible and the screen is active (the
+  // app is foregrounded and this route is focused). Pausing during an in-flight
+  // create lets that round-trip own the optimistic entry, avoiding a poll/create
+  // race; polling resumes automatically once it settles if work remains.
+  const isActive = useActive();
+  const shouldPoll =
+    phase === "ready" && isActive && !submitting && hasPendingWork(events);
+  useIntervalPolling(shouldPoll, pollIntervalMs, pollOnce);
 
   if (!session) {
     return <SignInRequired insetTop={insets.top + 24} />;

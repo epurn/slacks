@@ -22,6 +22,10 @@ function event(overrides: Partial<LogEventDTO>): LogEventDTO {
   };
 }
 
+// Polling is driven by an injected screen-active signal; default it off so the
+// non-polling tests stay deterministic and never touch a navigation container.
+const INACTIVE = () => false;
+
 // SafeAreaProvider needs frame/insets metrics in a non-native test environment.
 function mount(element: React.ReactElement): ReactTestRenderer {
   let tree!: ReactTestRenderer;
@@ -75,7 +79,7 @@ function press(tree: ReactTestRenderer, label: string): void {
 
 describe("TodayScreen", () => {
   it("prompts sign-in when there is no session", () => {
-    const tree = mount(<TodayScreen session={null} />);
+    const tree = mount(<TodayScreen session={null} useActive={INACTIVE} />);
     expect(textContent(tree)).toContain("Sign in to see your day");
   });
 
@@ -86,7 +90,9 @@ describe("TodayScreen", () => {
         event({ id: "a", raw_text: "Oatmeal", status: "completed" }),
         event({ id: "b", raw_text: "Cold brew", status: "pending" }),
       ]);
-    const tree = mount(<TodayScreen session={SESSION} load={load} />);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
     await act(async () => {});
 
     expect(load).toHaveBeenCalledTimes(1);
@@ -100,7 +106,9 @@ describe("TodayScreen", () => {
 
   it("shows a nonjudgmental empty state when there are no events", async () => {
     const load = jest.fn().mockResolvedValue([]);
-    const tree = mount(<TodayScreen session={SESSION} load={load} />);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
     await act(async () => {});
 
     expect(textContent(tree)).toContain("Nothing logged yet");
@@ -111,7 +119,9 @@ describe("TodayScreen", () => {
       .fn()
       .mockRejectedValueOnce(new LogEventApiError(401, "Your session has expired."))
       .mockResolvedValueOnce([event({ id: "a", raw_text: "Oatmeal", status: "pending" })]);
-    const tree = mount(<TodayScreen session={SESSION} load={load} />);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
     await act(async () => {});
 
     expect(textContent(tree)).toContain("Your session has expired.");
@@ -132,7 +142,12 @@ describe("TodayScreen", () => {
       }),
     );
     const tree = mount(
-      <TodayScreen session={SESSION} load={load} create={create} />,
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        create={create}
+        useActive={INACTIVE}
+      />,
     );
     await act(async () => {});
 
@@ -161,7 +176,12 @@ describe("TodayScreen", () => {
       .fn()
       .mockRejectedValue(new LogEventApiError(422, "That entry couldn't be saved."));
     const tree = mount(
-      <TodayScreen session={SESSION} load={load} create={create} />,
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        create={create}
+        useActive={INACTIVE}
+      />,
     );
     await act(async () => {});
 
@@ -173,5 +193,86 @@ describe("TodayScreen", () => {
     expect(textContent(tree)).toContain("That entry couldn't be saved.");
     // Optimistic entry rolled back to the empty state.
     expect(textContent(tree)).toContain("Nothing logged yet");
+  });
+});
+
+describe("TodayScreen polling", () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  it("auto-refreshes a pending entry to its terminal status", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValueOnce([event({ id: "a", raw_text: "Oatmeal", status: "pending" })])
+      .mockResolvedValueOnce([event({ id: "a", raw_text: "Oatmeal", status: "completed" })]);
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        useActive={() => true}
+        pollIntervalMs={1000}
+      />,
+    );
+    await act(async () => {});
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+
+    // One interval later the screen polls and reconciles to the terminal status.
+    act(() => jest.advanceTimersByTime(1000));
+    await act(async () => {});
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(hasA11yLabel(tree, "Logged")).toBe(true);
+
+    // Nothing is pending now, so polling stops — no further loads.
+    act(() => jest.advanceTimersByTime(5000));
+    await act(async () => {});
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not poll while the screen is inactive (backgrounded/unfocused)", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([event({ id: "a", status: "pending" })]);
+    mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        useActive={() => false}
+        pollIntervalMs={1000}
+      />,
+    );
+    await act(async () => {});
+    expect(load).toHaveBeenCalledTimes(1);
+
+    act(() => jest.advanceTimersByTime(5000));
+    await act(async () => {});
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the timeline intact when a poll fails, then recovers", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValueOnce([event({ id: "a", raw_text: "Oatmeal", status: "pending" })])
+      .mockRejectedValueOnce(new LogEventApiError(500, "transient"))
+      .mockResolvedValueOnce([event({ id: "a", raw_text: "Oatmeal", status: "completed" })]);
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        useActive={() => true}
+        pollIntervalMs={1000}
+      />,
+    );
+    await act(async () => {});
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+
+    // A failed poll is swallowed; the pending entry is still shown.
+    act(() => jest.advanceTimersByTime(1000));
+    await act(async () => {});
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+
+    // The next tick recovers and reconciles to the terminal status.
+    act(() => jest.advanceTimersByTime(1000));
+    await act(async () => {});
+    expect(hasA11yLabel(tree, "Logged")).toBe(true);
   });
 });

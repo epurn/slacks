@@ -1,5 +1,7 @@
 import {
+  isOptimisticId,
   optimisticLogEvent,
+  reconcileEvents,
   sortByNewest,
   statusPresentation,
 } from "./today";
@@ -70,6 +72,56 @@ describe("sortByNewest", () => {
     const a = event({ id: "a", created_at: "2026-06-26T08:00:00Z" });
     const b = event({ id: "b", created_at: "2026-06-26T08:00:00Z" });
     expect(sortByNewest([a, b]).map((e) => e.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("reconcileEvents", () => {
+  it("replaces a current event with its updated server status", () => {
+    const current = [event({ id: "a", status: "pending" })];
+    const fetched = [event({ id: "a", status: "completed" })];
+    const result = reconcileEvents(current, fetched);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ id: "a", status: "completed" });
+  });
+
+  it("preserves an unacknowledged optimistic entry not yet on the server", () => {
+    const optimistic = event({ id: "temp-0", status: "pending" });
+    const stored = event({ id: "a", status: "completed" });
+    const result = reconcileEvents([optimistic, stored], [stored]);
+    expect(result.map((e) => e.id).sort()).toEqual(["a", "temp-0"]);
+  });
+
+  it("keeps an optimistic entry whose id the poll has not seen", () => {
+    // A poll cannot tell that `server-1` is the stored form of `temp-0`, so it
+    // keeps the optimistic entry; the create round-trip's id-swap (not the poll)
+    // is what retires it, and polling is paused while a create is in flight.
+    const current = [event({ id: "temp-0", status: "pending" })];
+    const fetched = [event({ id: "server-1", status: "completed" })];
+    const result = reconcileEvents(current, fetched);
+    expect(result.map((e) => e.id).sort()).toEqual(["server-1", "temp-0"]);
+  });
+
+  it("does not duplicate a server event already in the timeline", () => {
+    const current = [event({ id: "a", status: "pending" })];
+    const fetched = [event({ id: "a", status: "processing" })];
+    const result = reconcileEvents(current, fetched);
+    expect(result.map((e) => e.id)).toEqual(["a"]);
+  });
+
+  it("orders the reconciled result newest-first", () => {
+    const older = event({ id: "a", created_at: "2026-06-26T08:00:00Z" });
+    const newer = event({ id: "b", created_at: "2026-06-26T09:00:00Z" });
+    expect(reconcileEvents([], [older, newer]).map((e) => e.id)).toEqual([
+      "b",
+      "a",
+    ]);
+  });
+});
+
+describe("isOptimisticId", () => {
+  it("recognizes optimistic placeholder ids and not server ids", () => {
+    expect(isOptimisticId("temp-0")).toBe(true);
+    expect(isOptimisticId("22222222-2222-2222-2222-222222222222")).toBe(false);
   });
 });
 

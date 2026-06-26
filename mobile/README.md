@@ -3,8 +3,10 @@
 The Fatty mobile app: an Expo / React Native, iOS-first client. The **Today
 shell** renders the user's real log events from the backend (FTY-031): it lists
 today's events with accessible per-entry status and lets the user submit
-natural-language input to create a new `pending` event. Auto-refresh of pending
-entries is a later slice (FTY-032); a manual refresh is provided here.
+natural-language input to create a new `pending` event. While any entry is still
+non-terminal the timeline **auto-refreshes** it to its terminal status without a
+manual refresh (FTY-032, the ADR-0002 polling mechanism); a manual refresh is
+also provided.
 
 ## Owns
 
@@ -29,15 +31,20 @@ app/                 file-based routes (Expo Router)
 api/                 typed clients for the backend (config, profile, logEvents)
 components/          presentational UI (TodayScreen, EntryRow, StatusIcon,
                      ProfileForm, ProfileScreen)
-state/               local state + pure logic (today.ts, profile.ts, session.ts)
+state/               local state + pure logic (today.ts, polling.ts,
+                     useScreenActive.ts, profile.ts, session.ts)
 ```
 
 `api/logEvents.ts` is the typed client for the FTY-030 log-event create /
 list-today API (the timeline's backend). `state/today.ts` holds the timeline's
 pure presentation logic: the exhaustive status → glyph/label/accessibility
-mapping over the FTY-030 status state machine, newest-first ordering, and the
-optimistic-event builder. New screens are added by dropping route files into
-`app/` without restructuring the shell.
+mapping over the FTY-030 status state machine, newest-first ordering, the
+optimistic-event builder, and reconciliation of polled results. `state/polling.ts`
+holds the poll stop condition (`hasPendingWork` over the non-terminal statuses)
+and the fixed-interval timer hook; `state/useScreenActive.ts` is the foreground +
+route-focus signal that pauses polling when the screen is backgrounded or
+unfocused. New screens are added by dropping route files into `app/` without
+restructuring the shell.
 
 `state/profile.ts` owns the minimal-required-profile capture logic (FTY-021):
 the field vocabulary, unit conversion to canonical units (metres, kilograms),
