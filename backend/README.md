@@ -29,6 +29,10 @@ uv run pytest        # run the tests
 - `app/worker.py` — Celery application (`celery_app`) for background jobs; its
   broker and result backend are Redis. No task definitions yet.
 - `app/logging.py` — structured JSON logging with sensitive-field redaction.
+- `app/llm/` — config-driven LLM provider layer (OpenAI, Anthropic,
+  OpenAI-compatible, and an in-memory fake). Exposes a single
+  `structured_completion(prompt, schema) -> validated object` capability; see
+  [`docs/contracts/llm-provider.md`](../docs/contracts/llm-provider.md).
 - `app/routers/` — thin HTTP boundary; handlers delegate to `app/services/`.
 - `app/services/` — domain behavior.
 - `app/schemas/` — Pydantic request/response models.
@@ -55,6 +59,11 @@ uv run pytest        # run the tests
   Invalid or out-of-range values fail fast at startup with a `ValidationError`.
   Under Docker Compose these point at the `redis` and `postgres` service
   hostnames; see the repo-root `docker-compose.yml` and `.env.example`.
+
+- The LLM provider layer is configured from `FATTY_LLM_`-prefixed variables and
+  documented as a separate contract; see
+  [`docs/contracts/llm-provider.md`](../docs/contracts/llm-provider.md). Keys
+  live in the environment only and are never logged or exposed to clients.
 
 ## Logging and privacy
 
