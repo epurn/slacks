@@ -1,0 +1,89 @@
+# Local development stack for the Fatty backend (FTY-011).
+#
+# Brings up Postgres, Redis, the FastAPI API, and a Celery worker over plain
+# HTTP for local development:
+#
+#     cp .env.example .env
+#     docker compose up
+#
+# Out of scope (see the FTY-011 story): TLS / reverse proxy / HTTPS termination
+# (deferred to FTY-072), production hardening, resource limits, and object
+# storage. The real `.env` is gitignored; only `.env.example` is committed.
+#
+# CONTRACT: the service names (postgres, redis, api, worker), the API port
+# (8000), and the env-var names below are relied on by later infra and backend
+# stories. The API healthcheck depends on FTY-012's `GET /healthz` shape.
+
+name: fatty
+
+services:
+  postgres:
+    # Pinned image per the security baseline's pinned-dependency principle.
+    image: postgres:16.4-alpine
+    env_file:
+      - .env
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+    env_file:
+      - .env
+    # Pin the in-container bind so the host port mapping below is stable
+    # regardless of any FATTY_HOST/FATTY_PORT set in .env. Only the published
+    # host port is configurable (API_PORT), to avoid host port conflicts.
+    environment:
+      FATTY_HOST: "0.0.0.0"
+      FATTY_PORT: "8000"
+    ports:
+      - "${API_PORT:-8000}:8000"
+    # Wait for the datastores to be healthy before the API starts.
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - "CMD"
+        - ".venv/bin/python"
+        - "-c"
+        - "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz').status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  worker:
+    build:
+      context: ./backend
+    # Same image as the API; run the Celery worker instead of the web server.
+    # No task definitions exist yet (FTY-011 non-goal); the worker connects to
+    # the Redis broker and idles, ready for later estimator stories.
+    command: [".venv/bin/celery", "-A", "app.worker:celery_app", "worker", "--loglevel=info"]
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres-data:

@@ -16,16 +16,26 @@ def test_defaults() -> None:
     assert settings.log_level == "INFO"
     assert settings.host == "127.0.0.1"
     assert settings.port == 8000
+    assert settings.database_url == "postgresql://fatty:fatty@localhost:5432/fatty"
+    assert settings.redis_url == "redis://localhost:6379/0"
 
 
 def test_load_from_env_overrides_defaults() -> None:
     settings = load_settings(
-        {"FATTY_ENVIRONMENT": "production", "FATTY_LOG_LEVEL": "ERROR", "FATTY_PORT": "9001"}
+        {
+            "FATTY_ENVIRONMENT": "production",
+            "FATTY_LOG_LEVEL": "ERROR",
+            "FATTY_PORT": "9001",
+            "FATTY_REDIS_URL": "redis://redis:6379/0",
+            "FATTY_DATABASE_URL": "postgresql://fatty:fatty@postgres:5432/fatty",
+        }
     )
 
     assert settings.environment == "production"
     assert settings.log_level == "ERROR"
     assert settings.port == 9001
+    assert settings.redis_url == "redis://redis:6379/0"
+    assert settings.database_url == "postgresql://fatty:fatty@postgres:5432/fatty"
 
 
 def test_invalid_environment_fails_clearly() -> None:

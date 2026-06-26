@@ -26,11 +26,15 @@ uv run pytest        # run the tests
 - `app/main.py` — `create_app()` application factory (validates settings,
   configures logging, wires routers).
 - `app/settings.py` — typed Pydantic settings loaded from environment variables.
+- `app/worker.py` — Celery application (`celery_app`) for background jobs; its
+  broker and result backend are Redis. No task definitions yet.
 - `app/logging.py` — structured JSON logging with sensitive-field redaction.
 - `app/routers/` — thin HTTP boundary; handlers delegate to `app/services/`.
 - `app/services/` — domain behavior.
 - `app/schemas/` — Pydantic request/response models.
 - `tests/` — pytest harness.
+- `Dockerfile` — builds the API and worker image for the Docker Compose dev
+  stack (FTY-011); see the repo-root `docker-compose.yml`.
 
 ## Contracts
 
@@ -45,8 +49,12 @@ uv run pytest        # run the tests
   | `FATTY_LOG_LEVEL` | `INFO` | Standard Python log level. |
   | `FATTY_HOST` | `127.0.0.1` | Bind address; deployments override to expose. |
   | `FATTY_PORT` | `8000` | Bind port (1–65535). |
+  | `FATTY_REDIS_URL` | `redis://localhost:6379/0` | Celery broker + result backend. |
+  | `FATTY_DATABASE_URL` | `postgresql://fatty:fatty@localhost:5432/fatty` | Postgres DSN; reserved for the later database story (not consumed yet). |
 
   Invalid or out-of-range values fail fast at startup with a `ValidationError`.
+  Under Docker Compose these point at the `redis` and `postgres` service
+  hostnames; see the repo-root `docker-compose.yml` and `.env.example`.
 
 ## Logging and privacy
 
