@@ -84,6 +84,16 @@ calls. The service-level files are append-only across the process lifetime.
 - `orphan_worktree_kept` — an unregistered directory still held a `.git`, so the
   orphan sweep left it in place rather than risk destroying a working tree with
   history. `warn`. `fields`: none beyond `run_id` (the dir name).
+- `worktree_recovered` — a leftover worktree blocked (re)assignment (dirty tree,
+  wrong branch, or a non-worktree dir — typically a dead author's remains) and
+  was force-removed so it could be recreated from a clean base. `warn`. Discards
+  uncommitted work by design; committed work survives on the branch ref. Gated
+  by `FATTY_STEWARD_RECOVER_WORKTREES` (default on). `fields`: none beyond
+  `run_id` (story id).
+- `assignment_failed` — `ensure_worktree`/author launch raised for one story or
+  PR, so the steward skipped just that item (warn) and kept assigning the rest
+  instead of exiting non-zero and crash-looping under launchd KeepAlive. The
+  item is retried next poll. `warn`. `fields`: `story_id`.
 
 Health guard + safe auto-recovery (the steward never takes a destructive remote
 git action — push, force-push, rebase, branch delete — those only warn):
