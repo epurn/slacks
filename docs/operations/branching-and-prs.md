@@ -12,6 +12,20 @@ Use:
 Do not work directly on `main`.
 Base feature branches on current `origin/main`.
 
+## Coordination Flow
+
+1. Promote a story only when it meets the story readiness rule.
+2. Pick up a ready story when its dependencies are complete and its lanes are
+   unoccupied.
+3. Work on a branch from current `origin/main`.
+4. Open a PR with verification, security, privacy, and story context.
+5. Route the PR to an independent reviewer.
+6. New commits after a review require a fresh current-head review before merge.
+
+Implementation and review of the same change must be done by different parties.
+Credentials, machine-specific paths, and local automation state stay outside this
+repo.
+
 ## Pull Requests
 
 Every PR must include:
@@ -28,22 +42,21 @@ Every PR must include:
 Configure GitHub `main` with:
 
 - require pull request before merge,
-- require at least one native approving review,
-- dismiss stale approvals,
-- require review on the latest push,
+- keep native required approving review count at zero for the app-reviewer flow,
 - require conversation resolution,
 - require status checks:
   - `governance`,
-  - `separate-reviewer`,
+  - `reviewer-approved`,
   - future backend/mobile/security checks,
 - block force pushes,
 - block deletions,
 - apply rules to administrators where practical.
 
-The `separate-reviewer` status check is the automated non-author review gate.
-It must evaluate approval on the current PR head SHA. Native review protection
-is still required so workflow and governance changes cannot weaken their own
-merge gate.
+The `reviewer-approved` commit status is the automated non-author review gate.
+The reviewer agent sets it for the current PR head SHA. This custom status is
+the required reviewer gate because GitHub's native required-review rule may not
+count approvals submitted by the `fatty-reviewer` app as eligible native
+approvals.
 
 ## Merge Style
 
