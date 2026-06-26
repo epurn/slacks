@@ -15,13 +15,21 @@ func TestLoadRuns(t *testing.T) {
 	// An idle fix-pr run inferred from the id prefix.
 	os.WriteFile(filepath.Join(dir, "PR-6.json"), []byte(
 		`{"story_id":"PR-6","lanes":["governance"],"mode":"fix-pr","repo":"epurn/fatty"}`), 0o644)
+	// Steward bookkeeping (a JSON array of merged ids) must NOT show as a run.
+	os.WriteFile(filepath.Join(dir, "merged-stories.json"), []byte(
+		`["FTY-040","FTY-041"]`), 0o644)
 
 	runs, err := LoadRuns(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(runs) != 2 {
-		t.Fatalf("got %d runs, want 2", len(runs))
+		t.Fatalf("got %d runs, want 2 (merged-stories must be excluded)", len(runs))
+	}
+	for _, r := range runs {
+		if r.ID == "merged-stories" {
+			t.Fatal("merged-stories.json must not be rendered as a run")
+		}
 	}
 	// Active run sorts first.
 	if runs[0].ID != "FTY-010" || !runs[0].Active {

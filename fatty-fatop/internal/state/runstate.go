@@ -56,6 +56,12 @@ func LoadRuns(runDir string) ([]Run, error) {
 		if !strings.HasSuffix(name, ".json") {
 			continue
 		}
+		// Steward bookkeeping, not an author assignment: a JSON array of merged
+		// story ids. Skip by name (and the generic parse guard below also catches
+		// it) so it never renders as a phantom idle run.
+		if name == "merged-stories.json" {
+			continue
+		}
 		id := strings.TrimSuffix(name, ".json")
 		jsonPath := filepath.Join(runDir, name)
 		data, err := os.ReadFile(jsonPath)
@@ -63,7 +69,10 @@ func LoadRuns(runDir string) ([]Run, error) {
 			continue
 		}
 		var a assignmentFile
-		_ = json.Unmarshal(data, &a)
+		if err := json.Unmarshal(data, &a); err != nil {
+			// Not a valid assignment object (e.g. a bookkeeping array) — not a run.
+			continue
+		}
 
 		run := Run{
 			ID:         id,
