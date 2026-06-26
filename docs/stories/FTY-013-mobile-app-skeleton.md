@@ -1,25 +1,23 @@
 ---
 id: FTY-013
-state: ready_with_notes
+state: ready
 primary_lane: mobile-core
 touched_lanes:
   - contracts
 risk: low
 tags:
-  - expo
-  - ios
+  - skeleton
   - mobile
-approved_dependencies:
   - expo
-  - react
-  - react-native
+  - tooling
+approved_dependencies: []
 requires_context:
   - docs/stories/README.md
-  - docs/architecture/system-overview.md
   - docs/standards/coding-standards.md
   - docs/standards/testing-standards.md
+  - docs/architecture/system-overview.md
 review_focus:
-  - ios-first-ui
+  - scope-control
   - accessibility
   - verify-command
 autonomous: true
@@ -29,7 +27,7 @@ autonomous: true
 
 ## State
 
-ready_with_notes
+ready
 
 ## Lane
 
@@ -41,55 +39,54 @@ mobile-core
 
 ## Outcome
 
-Fatty has an Expo / React Native mobile shell that opens to a simple iOS-first Today screen using local mock state.
+An Expo / React Native iOS-first app opens to a Today shell rendered from local mock state, with file-based routing set up so further screens can be added without rework.
 
 ## Scope
 
-- Add the mobile app package under the mobile area.
-- Create a Today screen shell with natural-language entry affordance and empty/mock timeline state.
-- Use neutral, nonjudgmental UI language.
-- Add package checks and wire mobile verification into root verification where practical.
-- Document how to run the app locally.
+- Scaffold an Expo / React Native app with **Expo Router** (file-based routing) configured, but only a single Today screen present.
+- Enable TypeScript strict mode per the coding standards.
+- Render the Today screen from in-memory/local mock state — pending and completed entries may be represented in the mock per the system overview, but with no networking.
+- Use an iOS-first, accessible, compact, nonjudgmental UI; where status/evidence indicators appear, use icons with accessibility labels (minimal is acceptable at this stage).
+- Add mobile typecheck, lint, and a basic test into root verification where feasible.
 
 ## Non-Goals
 
-- API integration.
-- Auth/profile setup.
-- Camera, barcode, or nutrition label flows.
-- Full navigation architecture beyond what the skeleton needs.
-- Desktop packaging.
+- Backend integration or any networking.
+- Auth or onboarding screens.
+- Real log creation, editing flows, or polling (polling is FTY-032).
+- Android-specific work or platform parity.
+- A committed mock-state schema — the Today shell's mock shape is an internal placeholder only.
 
 ## Contracts
 
-- Mobile package location.
-- Today screen route or entrypoint.
-- Root verification integration.
+- None external. The Today shell's local mock-state shape is an internal placeholder and is explicitly not a committed contract; the real DTOs arrive with the logging-spine stories.
 
 ## Security / Privacy
 
-Do not store real food logs, body data, API keys, provider keys, or personal examples in mock data. UI should avoid shame, jokes, or edgy copy.
+No real user data. Only synthetic/mock data is used. Low risk.
 
 ## Acceptance Criteria
 
-- Expo app starts locally with a documented command.
-- First screen is a Today shell, not a marketing page.
-- UI is iOS-first, accessible, and uses local mock state only.
-- Root `make verify` includes available mobile checks or documents why they are not yet available.
+- The Expo app builds and opens to the Today screen on iOS.
+- The Today screen renders mock pending/completed entries.
+- TypeScript strict mode passes.
+- Mobile checks (typecheck, lint, basic test) run via root verification.
+- The routing structure supports adding additional screens without restructuring.
 
 ## Verification
 
-- Run `make verify`.
-- Run package-specific mobile lint/type/test commands if added.
+- Run the mobile package's typecheck, lint, and test (via `make verify` where wired).
+- Launch the Expo app on an iOS simulator and confirm the Today screen renders mock entries.
 
 ## Planning Notes
 
-- Prefer the smallest Expo setup that supports iOS-first development.
-- Web support is optional unless it comes naturally from the chosen Expo setup.
+- Exact Expo SDK version and minor project-structure choices may be finalized in the implementation PR as long as Expo Router, TS strict, and the single-screen scope hold.
+- New third-party UI/state libraries beyond the minimal Expo Router set require a planning PR updating story metadata first.
 
 ## Readiness Sanity Pass
 
-- Product decision gaps: none for initial mobile shell.
-- Cross-lane impact: establishes mobile package and Today surface for later profile/logging stories.
-- Security/privacy risk: low; avoid personal mock data and unsafe local config.
-- Verification path: `make verify` plus mobile package checks when available.
-- Assumptions safe for autonomy: yes.
+- Product decision gaps: none — Expo Router + single Today screen + mock state are resolved.
+- Cross-lane impact: establishes the mobile app foundation and routing convention for later mobile stories; no committed contract yet.
+- Security/privacy risk: low; synthetic data only, no networking.
+- Verification path: mobile checks via `make verify` plus a simulator smoke check.
+- Assumptions safe for autonomy: yes; scope is bounded to a single screen on mock state with no networking.

@@ -1,29 +1,28 @@
 ---
 id: FTY-012
-state: ready_with_notes
+state: ready
 primary_lane: backend-core
 touched_lanes:
   - contracts
-risk: low
+  - infra
+risk: medium
 tags:
-  - fastapi
+  - skeleton
   - backend
-  - scaffold
-approved_dependencies:
-  - fastapi
-  - uvicorn
-  - pydantic-settings
-  - pytest
-  - httpx
+  - logging
+  - tooling
+approved_dependencies: []
 requires_context:
   - docs/stories/README.md
-  - docs/architecture/system-overview.md
   - docs/standards/coding-standards.md
   - docs/standards/testing-standards.md
+  - docs/security/security-baseline.md
+  - docs/architecture/system-overview.md
 review_focus:
-  - test-harness
-  - config-boundaries
-  - logging-hygiene
+  - logging-redaction
+  - settings-validation
+  - scope-control
+  - verify-command
 autonomous: true
 ---
 
@@ -31,7 +30,7 @@ autonomous: true
 
 ## State
 
-ready_with_notes
+ready
 
 ## Lane
 
@@ -43,57 +42,59 @@ backend-core
 
 ## Outcome
 
-Fatty has a typed FastAPI backend skeleton with health checks, settings, logging, and tests wired into root verification.
+A minimal FastAPI application exists with a health endpoint, typed settings, structured logging, and a pytest harness, all wired into root `make verify`. This is the backend foundation every later backend, estimator, and contract story builds on.
 
 ## Scope
 
-- Add a FastAPI application package under the backend area.
-- Add typed settings loaded from environment variables.
-- Add a health endpoint suitable for local and Compose checks.
-- Add structured logging setup that avoids sensitive values.
-- Add backend unit tests and wire them into root verification.
+- Establish the backend Python toolchain as **uv** with a committed `uv.lock`. This sets the dependency-locking convention for all subsequent backend stories.
+- Create a FastAPI app exposing a single health endpoint (`GET /healthz`) that returns a typed (Pydantic) response.
+- Add Pydantic-based typed settings loaded from environment variables, with validation at startup.
+- Add structured logging configured to avoid emitting secrets, tokens, raw prompts, or personal data per the coding standards and security baseline.
+- Provide a pytest harness with at least one health-endpoint test.
+- Plug package-level lint, typecheck, and test commands into root `make verify`.
+- Route handlers delegate behavior to a service layer even at skeleton stage.
 
 ## Non-Goals
 
-- Database models or migrations.
-- Authentication.
-- Estimation jobs.
-- Provider integrations.
-- Production deployment configuration.
+- Alembic / database migrations (explicitly deferred to FTY-020, which lands the first real model).
+- Database models or persistence wiring.
+- Auth, user model, or identity handling.
+- Celery task definitions or estimator job logic.
+- External provider integrations (LLM, search, nutrition).
+- Any user-facing behavior beyond the health endpoint.
 
 ## Contracts
 
-- Backend app entrypoint.
-- Health endpoint response shape.
-- Settings module boundary.
-- Root verification command integration.
+- The health endpoint response shape and path (`GET /healthz`) become a contract that FTY-011 (Docker Compose healthcheck) and later infra stories rely on.
+- The settings environment-variable names become a contract consumed by FTY-011's compose env and later stories.
+- Root `make verify` remains the single verification entry point; backend checks must plug into it.
 
 ## Security / Privacy
 
-Settings must not read or print secrets during normal startup. Logs must not include tokens, raw prompts, personal profile data, or food history.
+No user data is stored or processed. Typed settings read provider keys and secrets from environment variables only and must never log them. Structured logging must be configured so secrets, tokens, raw prompts, and personal data are never emitted — this logging-redaction posture is a security-sensitive convention that later stories inherit, which is why this story is rated medium rather than low.
 
 ## Acceptance Criteria
 
-- Backend app starts locally through a documented command.
-- Health endpoint returns a stable JSON shape.
-- Tests cover the app factory/settings defaults/health route.
-- Root `make verify` runs backend checks.
-- Example configuration documents required values without secrets.
+- `make verify` passes from a fresh checkout, running backend lint, typecheck, and tests.
+- `GET /healthz` returns a typed HTTP 200 response.
+- Settings load from environment variables with validation; missing/invalid required settings fail clearly at startup.
+- A health-endpoint test passes in the pytest harness.
+- Logs contain no secrets, tokens, or personal data.
+- `uv.lock` is committed and dependencies are locked.
 
 ## Verification
 
 - Run `make verify`.
-- Run backend tests directly if package tooling adds a package-specific command.
 
 ## Planning Notes
 
-- Keep route handlers thin from the start.
-- Use Pydantic settings for config; do not introduce a larger framework.
+- Exact FastAPI/uv project layout and minor toolchain details may be finalized in the implementation PR as long as the uv lockfile convention and the contracts above are honored.
+- New third-party packages beyond the minimal FastAPI/uv/pytest set require a planning PR updating story metadata first.
 
 ## Readiness Sanity Pass
 
-- Product decision gaps: none for backend skeleton.
-- Cross-lane impact: creates API app boundary consumed by infra, auth, logging, and estimator stories.
-- Security/privacy risk: low; config/logging hygiene is the main concern.
-- Verification path: `make verify` plus backend tests.
-- Assumptions safe for autonomy: yes.
+- Product decision gaps: none — toolchain (uv), endpoint shape, and migrations-deferral are all resolved.
+- Cross-lane impact: sets backend toolchain, settings, and logging conventions consumed by infra (FTY-011) and all later backend stories.
+- Security/privacy risk: medium; no user data, but establishes logging-redaction and secret-handling conventions that must fail safe.
+- Verification path: `make verify`.
+- Assumptions safe for autonomy: yes; scope is bounded, no DB/auth/providers, dependencies locked.
