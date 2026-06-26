@@ -7,6 +7,7 @@ which Alembic's migration environment uses as autogenerate/target metadata.
 from __future__ import annotations
 
 from app.models.identity import AuthIdentity, User, UserProfile
+from app.models.log_events import LogEvent
 from app.models.targets import DailyTarget, Goal
 
-__all__ = ["AuthIdentity", "DailyTarget", "Goal", "User", "UserProfile"]
+__all__ = ["AuthIdentity", "DailyTarget", "Goal", "LogEvent", "User", "UserProfile"]

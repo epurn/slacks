@@ -13,7 +13,7 @@ from sqlalchemy.engine import Engine
 
 from app.db import create_db_engine, create_session_factory
 from app.logging import configure_logging
-from app.routers import auth, health, profile
+from app.routers import auth, health, log_events, profile
 from app.settings import Settings, load_settings
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(profile.router)
+    app.include_router(log_events.router)
 
     # No secrets/personal data here: only the non-sensitive environment label.
     logger.info("backend application initialized", extra={"environment": settings.environment})

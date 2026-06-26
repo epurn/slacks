@@ -49,6 +49,29 @@ class UnitsPreference(StrEnum):
     IMPERIAL = "imperial"
 
 
+class LogEventStatus(StrEnum):
+    """Lifecycle status of a raw log event (FTY-030).
+
+    This is the canonical v1 status vocabulary for the log-event state machine.
+    A new event starts at :attr:`PENDING`; the estimator pipeline (Milestone 4)
+    drives it through :attr:`PROCESSING` to a terminal :attr:`COMPLETED`,
+    :attr:`FAILED`, or :attr:`NEEDS_CLARIFICATION`. The legal transitions between
+    these statuses are the named state-machine contract in
+    :mod:`app.services.log_events`; later stories extend that map rather than
+    redefining the vocabulary here.
+
+    FTY-030 implements creation at :attr:`PENDING` and the
+    ``PENDING → COMPLETED`` transition only; the remaining transitions are
+    reserved for the estimator stories.
+    """
+
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    NEEDS_CLARIFICATION = "needs_clarification"
+
+
 #: Authentication provider for an :class:`~app.models.identity.AuthIdentity`.
 #: Only the local email+password path exists in v1; hosted providers (e.g. Sign
 #: in with Apple) are deferred to a later story but modelled as separate
