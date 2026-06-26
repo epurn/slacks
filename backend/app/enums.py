@@ -11,7 +11,7 @@ from enum import StrEnum
 
 
 class MetabolicFormula(StrEnum):
-    """Resting-metabolic-rate formula preference.
+    """Resting-metabolic-rate formula preference (FTY-022).
 
     Mifflin-St Jeor is the v1 RMR formula (see the system overview). The formula
     carries a sex-dependent additive constant, and the user's choice of that
@@ -24,12 +24,22 @@ class MetabolicFormula(StrEnum):
     :attr:`MIFFLIN_ST_JEOR` remains the *unspecified* family default for a
     freshly created, not-yet-captured profile: it names the formula but carries
     no constant, so RMR cannot be computed until the user selects a variant. The
-    capture UI only ever writes one of the two variants.
+    capture UI only ever writes one of the two variants, and those two are the
+    only valid inputs to the target calculator (see
+    :mod:`app.estimator.calculator`).
     """
 
     MIFFLIN_ST_JEOR = "mifflin_st_jeor"
     MIFFLIN_ST_JEOR_PLUS_5 = "mifflin_st_jeor_plus5"
     MIFFLIN_ST_JEOR_MINUS_161 = "mifflin_st_jeor_minus161"
+
+
+class GoalDirection(StrEnum):
+    """Direction of a weight goal, derived from start vs. target weight (FTY-022)."""
+
+    LOSS = "loss"
+    GAIN = "gain"
+    MAINTAIN = "maintain"
 
 
 class UnitsPreference(StrEnum):

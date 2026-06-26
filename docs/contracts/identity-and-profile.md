@@ -95,8 +95,10 @@ part of any response.
 - Password: 8–128 characters; carried as a secret value, never logged or echoed.
 - `height_m` ∈ (0, 3], `weight_kg` ∈ (0, 1000], `birth_year` ∈ [1900, 2100].
 - `metabolic_formula` ∈ {`mifflin_st_jeor`, `mifflin_st_jeor_plus5`,
-  `mifflin_st_jeor_minus161`}; `units_preference` ∈ {`metric`, `imperial`};
-  `timezone` must be a known IANA name.
+  `mifflin_st_jeor_minus161`} (the sex-dependent Mifflin-St Jeor constant; the
+  two variant values are the calculator inputs — see the target-calculator
+  contract); `units_preference` ∈ {`metric`, `imperial`}; `timezone` must be a
+  known IANA name.
 - Invalid input is rejected with `422` and a field-level error shape; unknown
   body keys are rejected.
 

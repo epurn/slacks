@@ -22,6 +22,7 @@ from alembic import context
 # Importing the models registers every table on Base.metadata for autogenerate.
 from app.db import Base
 from app.models import identity as _identity  # noqa: F401  (import for side effects)
+from app.models import targets as _targets  # noqa: F401  (import for side effects)
 from app.settings import load_settings
 
 config = context.config
