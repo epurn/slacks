@@ -25,7 +25,6 @@ REQUIRED_FILES = [
     ".github/CODEOWNERS",
     ".github/pull_request_template.md",
     ".github/workflows/governance.yml",
-    ".github/workflows/reviewer-gate.yml",
     ".github/dependabot.yml",
     "docs/architecture/system-overview.md",
     "docs/standards/coding-standards.md",
@@ -150,12 +149,12 @@ def main() -> None:
             fail(f"review checklist must include {term!r}")
 
     github_setup = read("docs/operations/github-setup.md").lower()
-    for term in ["stale approval", "latest reviewable push", "native approving review", "separate-reviewer"]:
+    for term in ["required native approving reviews to zero", "app-reviewer flow", "reviewer-approved"]:
         if term not in github_setup:
             fail(f"github setup must document {term!r}")
 
     branching = read("docs/operations/branching-and-prs.md").lower()
-    for term in ["native approving review", "stale approvals", "latest push", "separate-reviewer"]:
+    for term in ["native required approving review count at zero", "app-reviewer flow", "reviewer-approved"]:
         if term not in branching:
             fail(f"branching docs must document {term!r}")
 
@@ -176,25 +175,25 @@ def main() -> None:
             fail(f"ready roadmap row links to missing story file: {match.group(1)}")
         validate_ready_story_metadata(str(story_path.relative_to(ROOT)))
 
-    reviewer_gate = read(".github/workflows/reviewer-gate.yml")
-    for term in ["review.commit_id === pr.head.sha", "review.user.login !== pr.user.login"]:
-        if term not in reviewer_gate:
-            fail(f"reviewer gate must include {term!r}")
+    review_policy = read("docs/review-policy.md")
+    for term in ["reviewer-approved", "current PR head SHA", "other than the PR author"]:
+        if term not in review_policy:
+            fail(f"review policy must document reviewer status gate term {term!r}")
 
     protection = json.loads(read("docs/operations/main-branch-protection.json"))
     checks = protection.get("required_status_checks", {}).get("contexts", [])
-    for check in ["governance", "separate-reviewer"]:
+    for check in ["governance", "reviewer-approved"]:
         if check not in checks:
             fail(f"branch protection template must require {check!r}")
     required_reviews = protection.get("required_pull_request_reviews")
     if not isinstance(required_reviews, dict):
-        fail("branch protection template must require pull request reviews")
-    if required_reviews.get("required_approving_review_count") != 1:
-        fail("branch protection template must require one native approving review")
-    if not required_reviews.get("dismiss_stale_reviews"):
-        fail("branch protection template must dismiss stale reviews")
-    if not required_reviews.get("require_last_push_approval"):
-        fail("branch protection template must require latest-push approval")
+        fail("branch protection template must configure pull request reviews")
+    if required_reviews.get("required_approving_review_count") != 0:
+        fail("branch protection template must not require native approving reviews for app-reviewer flow")
+    if required_reviews.get("dismiss_stale_reviews"):
+        fail("branch protection template must not depend on native stale-review dismissal")
+    if required_reviews.get("require_last_push_approval"):
+        fail("branch protection template must not require native latest-push approval")
     if not protection.get("required_conversation_resolution"):
         fail("branch protection template must require conversation resolution")
 
