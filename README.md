@@ -40,6 +40,16 @@ each package's verification hook. Packages are scaffolded empty for now, so thei
 checks are skipped until a package adds an executable `verify.sh`. Language-specific
 tooling arrives with the backend and mobile skeleton stories.
 
+Bring up the full local backend stack (Postgres, Redis, the FastAPI API, and a
+Celery worker) over plain HTTP with Docker Compose:
+
+```sh
+cp .env.example .env
+docker compose up
+```
+
+See `docs/operations/local-dev-stack.md` for the service contract and details.
+
 ## Contributing
 
 See `CONTRIBUTING.md`, `AGENTS.md`, and `docs/operations/branching-and-prs.md`.

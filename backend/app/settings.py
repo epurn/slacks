@@ -37,6 +37,14 @@ class Settings(BaseModel):
     # FATTY_HOST to expose the service. Avoids binding all interfaces silently.
     host: str = Field(default="127.0.0.1", min_length=1)
     port: int = Field(default=8000, ge=1, le=65535)
+    # Service URLs. Defaults target a developer's localhost; Docker Compose
+    # overrides them to the compose service hostnames (see repo-root
+    # ``.env.example``). These FATTY_-prefixed names are part of the FTY-011
+    # local-infra env-var contract. ``database_url`` is reserved for the later
+    # database story and is not consumed yet; ``redis_url`` is the Celery
+    # worker's broker and result backend.
+    database_url: str = Field(default="postgresql://fatty:fatty@localhost:5432/fatty", min_length=1)
+    redis_url: str = Field(default="redis://localhost:6379/0", min_length=1)
 
 
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:

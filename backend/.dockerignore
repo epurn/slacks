@@ -1,0 +1,13 @@
+# Keep the build context (and image) lean and reproducible.
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+tests/
+README.md
+Dockerfile
+.dockerignore
