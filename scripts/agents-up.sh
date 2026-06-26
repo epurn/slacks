@@ -7,6 +7,9 @@ AUTHOR="$ROOT/fatty-author-agent"
 REVIEWER="$ROOT/fatty-reviewer-agent"
 STEWARD="$ROOT/fatty-steward-agent"
 
+echo "== clearing any orphaned git locks from a previous run =="
+bash "$ROOT/scripts/clean-git-locks.sh" || true
+
 echo "== verifying agents =="
 ( cd "$AUTHOR"   && make doctor )
 ( cd "$REVIEWER" && make doctor )
