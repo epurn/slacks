@@ -70,9 +70,16 @@ calls. The service-level files are append-only across the process lifetime.
 
 ### author
 - `run_start` — assignment picked up. `fields`: `story_id`, `mode`, `model`.
-- `claude_event` — wrapped Claude stream event. `fields`: `kind` (`assistant`,
-  `tool_use`, `tool_result`, `text`, `result`...), plus passthrough detail.
-- `verify` — a verification command ran. `fields`: `command`, `ok`.
+- `claude_event` — wrapped Claude stream event. `fields.kind` is normalized to
+  `assistant` (model text), `tool_use` (a turn that only calls tools),
+  `tool_result` (the user-role result, summarized as `↳ result`/`↳ error`),
+  `result` (final), or passthrough (`system`, `rate_limit_event`, ...).
+  Control-plane chatter (`system`, `rate_limit_event`) and empty turns are
+  emitted at `level: debug`, so fatop hides them at the default `≥info` filter
+  but they remain available when you drop the level. Everything is still
+  captured — nothing is dropped at write time.
+- `run_timeout` — the watchdog killed a hung `claude` (idle or hard timeout);
+  the run is then reported as `BLOCKED`. `fields`: `story_id`.
 - `run_result` — terminal outcome. `fields`: `event` (`DONE`/`BLOCKED`...),
   `pr`, `summary`.
 
@@ -81,3 +88,7 @@ calls. The service-level files are append-only across the process lifetime.
 - `FATTY_EVENTS_DISABLE=1` — disable all event emission for an agent.
 - `FATTY_AUTHOR_STREAM_EVENTS=0` — disable only the author Claude stream capture
   (the service-level author events still emit).
+- `FATTY_AUTHOR_IDLE_TIMEOUT` — seconds of no Claude output before the watchdog
+  kills the run (default 600; 0 disables).
+- `FATTY_AUTHOR_HARD_TIMEOUT` — max total seconds for one Claude run before the
+  watchdog kills it (default 3600; 0 disables).
