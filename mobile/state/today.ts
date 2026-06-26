@@ -1,143 +1,100 @@
 /**
- * Local mock state for the Today shell.
+ * Presentation helpers for the Today timeline (FTY-031).
  *
- * This shape is an INTERNAL PLACEHOLDER, not a committed contract. The real
- * timeline DTOs arrive with the logging-spine stories; nothing here should be
- * imported by the backend or treated as a wire format. It exists only so the
- * Today screen has realistic, fully offline data to render (see FTY-013).
+ * The wire model — the `LogEventDTO` and the status vocabulary — lives in
+ * `@/api/logEvents`. This module maps the FTY-030 event status state machine to
+ * compact, nonjudgmental UI strings and a glyph, and provides the ordering the
+ * timeline renders.
  *
- * Per the system overview, entries appear immediately as `pending` and update
- * to `complete` once estimation resolves. We model that split here without any
- * networking so the UI can be built and tested deterministically.
+ * The status mapping is exhaustive over `LogEventStatus` (a `Record` keyed by
+ * every status), so a new contract status cannot be added without a matching UI
+ * mapping — the coding standard requires status to use icons with accessibility
+ * labels, and the timeline must cover every status the contract defines.
+ *
+ * Since the estimator is not wired yet, real events stay `pending`; the mapping
+ * still covers the terminal and intermediate statuses so the UI never looks
+ * broken once estimation lands.
  */
 
-export type EntryStatus = "pending" | "complete";
+import type { LogEventDTO, LogEventStatus } from "@/api/logEvents";
 
-export type EntryKind = "food" | "exercise";
+/** How a single status is surfaced in the timeline. */
+export interface StatusPresentation {
+  /** Compact glyph shown in the status icon. */
+  readonly glyph: string;
+  /** Short status label shown beside the entry text. */
+  readonly label: string;
+  /** Screen-reader text paired with the glyph so both convey the same status. */
+  readonly accessibilityLabel: string;
+}
 
-export interface TodayEntry {
-  /** Stable identifier for list keys; opaque to the UI. */
+/**
+ * The exhaustive status → presentation map. Copy is compact and nonjudgmental:
+ * it describes the estimate's progress, never the user's choices.
+ */
+const STATUS_PRESENTATION: Record<LogEventStatus, StatusPresentation> = {
+  pending: {
+    glyph: "…",
+    label: "Waiting",
+    accessibilityLabel: "Waiting to estimate",
+  },
+  processing: {
+    glyph: "⟳",
+    label: "Estimating",
+    accessibilityLabel: "Estimating",
+  },
+  completed: {
+    glyph: "✓",
+    label: "Logged",
+    accessibilityLabel: "Logged",
+  },
+  failed: {
+    glyph: "!",
+    label: "Couldn't estimate",
+    accessibilityLabel: "Estimate didn't finish",
+  },
+  needs_clarification: {
+    glyph: "?",
+    label: "Add a detail",
+    accessibilityLabel: "Needs a quick detail",
+  },
+};
+
+/** Presentation for a status. Total over the contract's status vocabulary. */
+export function statusPresentation(status: LogEventStatus): StatusPresentation {
+  return STATUS_PRESENTATION[status];
+}
+
+/**
+ * Order events newest-first for the timeline. The API returns events
+ * oldest-first; sorting by `created_at` descending puts the most recent entry
+ * (including a just-added optimistic one) at the top. `Array.prototype.sort` is
+ * stable, so events sharing a timestamp keep their relative order.
+ */
+export function sortByNewest(
+  events: readonly LogEventDTO[],
+): readonly LogEventDTO[] {
+  return [...events].sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+/**
+ * Build an optimistic `pending` event to show immediately on submit, before the
+ * create round-trip resolves. `id`/`createdAt` are supplied by the caller (kept
+ * out of here so this stays pure and testable); the real event from the API
+ * replaces it on success.
+ */
+export function optimisticLogEvent(args: {
   readonly id: string;
-  /** Whether this entry adds (food) or subtracts (exercise) calories. */
-  readonly kind: EntryKind;
-  /** The user's natural-language input, echoed back into the timeline. */
-  readonly text: string;
-  /** `pending` until estimation resolves, then `complete`. */
-  readonly status: EntryStatus;
-  /**
-   * Estimated calories: positive for food consumed, positive magnitude for
-   * exercise burned. `null` while the entry is still `pending`.
-   */
-  readonly calories: number | null;
-  /**
-   * Whether a completed estimate is backed by a retrieved source rather than a
-   * model prior alone. Surfaced as an evidence indicator. `null` while pending.
-   */
-  readonly sourceBacked: boolean | null;
-}
-
-export interface DaySummary {
-  readonly pendingCount: number;
-  readonly completeCount: number;
-  /** Calories from completed food entries. */
-  readonly consumed: number;
-  /** Calories from completed exercise entries. */
-  readonly burned: number;
-  /** consumed - burned, over completed entries only. */
-  readonly net: number;
-}
-
-/** Synthetic Today timeline. No real user data; safe to commit. */
-export const MOCK_TODAY_ENTRIES: readonly TodayEntry[] = [
-  {
-    id: "e1",
-    kind: "food",
-    text: "Greek yogurt with blueberries and honey",
-    status: "complete",
-    calories: 220,
-    sourceBacked: true,
-  },
-  {
-    id: "e2",
-    kind: "exercise",
-    text: "30 minute brisk walk",
-    status: "complete",
-    calories: 140,
-    sourceBacked: true,
-  },
-  {
-    id: "e3",
-    kind: "food",
-    text: "Chicken burrito bowl, no rice",
-    status: "complete",
-    calories: 540,
-    sourceBacked: false,
-  },
-  {
-    id: "e4",
-    kind: "food",
-    text: "Cold brew with a splash of oat milk",
-    status: "pending",
-    calories: null,
-    sourceBacked: null,
-  },
-];
-
-/** Entries still awaiting an estimate, in input order. */
-export function selectPending(
-  entries: readonly TodayEntry[],
-): readonly TodayEntry[] {
-  return entries.filter((entry) => entry.status === "pending");
-}
-
-/** Entries with a resolved estimate, in input order. */
-export function selectComplete(
-  entries: readonly TodayEntry[],
-): readonly TodayEntry[] {
-  return entries.filter((entry) => entry.status === "complete");
-}
-
-/**
- * Roll up the day's completed entries. Pending entries contribute no calories
- * because their estimate has not resolved yet.
- */
-export function summarizeDay(entries: readonly TodayEntry[]): DaySummary {
-  let consumed = 0;
-  let burned = 0;
-  let completeCount = 0;
-  let pendingCount = 0;
-
-  for (const entry of entries) {
-    if (entry.status === "pending") {
-      pendingCount += 1;
-      continue;
-    }
-    completeCount += 1;
-    const calories = entry.calories ?? 0;
-    if (entry.kind === "food") {
-      consumed += calories;
-    } else {
-      burned += calories;
-    }
-  }
-
+  readonly userId: string;
+  readonly rawText: string;
+  readonly createdAt: string;
+}): LogEventDTO {
   return {
-    pendingCount,
-    completeCount,
-    consumed,
-    burned,
-    net: consumed - burned,
+    id: args.id,
+    user_id: args.userId,
+    raw_text: args.rawText,
+    status: "pending",
+    created_at: args.createdAt,
+    updated_at: args.createdAt,
   };
-}
-
-/**
- * Accessibility label describing an entry's estimation status and, when
- * complete, whether its estimate is source-backed. Keeps the visual status
- * glyphs paired with screen-reader text.
- */
-export function statusAccessibilityLabel(entry: TodayEntry): string {
-  if (entry.status === "pending") {
-    return "Estimating";
-  }
-  return entry.sourceBacked ? "Estimated from a source" : "Estimated";
 }

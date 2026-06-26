@@ -1,37 +1,27 @@
 import { StyleSheet, Text, View } from "react-native";
 
+import type { LogEventDTO } from "@/api/logEvents";
 import { StatusIcon } from "@/components/StatusIcon";
-import type { TodayEntry } from "@/state/today";
+import { statusPresentation } from "@/state/today";
 
 /**
- * A single timeline row: the natural-language text the user logged, a compact
- * status/evidence icon, and the calorie estimate once it resolves.
+ * A single timeline row: a compact status icon, the natural-language text the
+ * user logged, and a short status label. Event-level detail only — derived
+ * food/exercise items and calories arrive with the estimator stories (M4/M5).
  */
-export function EntryRow({ entry }: { entry: TodayEntry }) {
+export function EntryRow({ event }: { event: LogEventDTO }) {
+  const { label } = statusPresentation(event.status);
   return (
     <View style={styles.row}>
-      <StatusIcon entry={entry} />
+      <StatusIcon status={event.status} />
       <View style={styles.body}>
-        <Text style={styles.text} numberOfLines={2}>
-          {entry.text}
+        <Text style={styles.text} numberOfLines={3}>
+          {event.raw_text}
         </Text>
-        <Text style={styles.meta}>{kindLabel(entry)}</Text>
+        <Text style={styles.meta}>{label}</Text>
       </View>
-      <Text style={styles.calories}>{caloriesLabel(entry)}</Text>
     </View>
   );
-}
-
-function kindLabel(entry: TodayEntry): string {
-  return entry.kind === "food" ? "Food" : "Exercise";
-}
-
-function caloriesLabel(entry: TodayEntry): string {
-  if (entry.status === "pending" || entry.calories === null) {
-    return "—";
-  }
-  const sign = entry.kind === "exercise" ? "−" : "";
-  return `${sign}${entry.calories} kcal`;
 }
 
 const styles = StyleSheet.create({
@@ -55,10 +45,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#8E8E93",
     marginTop: 2,
-  },
-  calories: {
-    fontSize: 15,
-    fontVariant: ["tabular-nums"],
-    color: "#1C1C1E",
   },
 });

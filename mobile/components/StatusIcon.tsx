@@ -1,31 +1,25 @@
 import { StyleSheet, Text } from "react-native";
 
-import { statusAccessibilityLabel, type TodayEntry } from "@/state/today";
+import type { LogEventStatus } from "@/api/logEvents";
+import { statusPresentation } from "@/state/today";
 
 /**
- * Compact status/evidence indicator for a timeline entry. Uses a glyph paired
- * with an accessibility label so screen-reader users get the same information
- * sighted users read from the icon (coding standard: evidence/status use icons
- * with accessibility labels).
+ * Compact status indicator for a timeline entry. Pairs a glyph with an
+ * accessibility label so screen-reader users get the same status sighted users
+ * read from the icon (coding standard: status uses icons with accessibility
+ * labels).
  */
-export function StatusIcon({ entry }: { entry: TodayEntry }) {
-  const glyph = iconFor(entry);
+export function StatusIcon({ status }: { status: LogEventStatus }) {
+  const { glyph, accessibilityLabel } = statusPresentation(status);
   return (
     <Text
       style={styles.icon}
       accessibilityRole="image"
-      accessibilityLabel={statusAccessibilityLabel(entry)}
+      accessibilityLabel={accessibilityLabel}
     >
       {glyph}
     </Text>
   );
-}
-
-function iconFor(entry: TodayEntry): string {
-  if (entry.status === "pending") {
-    return "…";
-  }
-  return entry.sourceBacked ? "✓" : "≈";
 }
 
 const styles = StyleSheet.create({

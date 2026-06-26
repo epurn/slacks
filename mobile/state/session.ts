@@ -19,6 +19,13 @@ import { resolveApiBaseUrl } from "@/api/config";
 /** The signed-in user's session, or `null` when no one is signed in. */
 export type Session = Pick<ProfileSession, "token" | "userId"> | null;
 
+/** An authenticated session addressed at the resolved API base URL. */
+export interface ApiSession {
+  readonly baseUrl: string;
+  readonly token: string;
+  readonly userId: string;
+}
+
 /**
  * Resolve the current session. Returns `null` until the sign-in flow exists.
  * The API base URL is always available so the seam can be completed by simply
@@ -28,11 +35,16 @@ export function useSession(): Session {
   return null;
 }
 
-/** Combine a session with the resolved base URL into a `ProfileSession`. */
-export function toProfileSession(session: NonNullable<Session>): ProfileSession {
+/** Combine a session with the resolved base URL for an authenticated call. */
+export function toApiSession(session: NonNullable<Session>): ApiSession {
   return {
     baseUrl: resolveApiBaseUrl(),
     token: session.token,
     userId: session.userId,
   };
+}
+
+/** Combine a session with the resolved base URL into a `ProfileSession`. */
+export function toProfileSession(session: NonNullable<Session>): ProfileSession {
+  return toApiSession(session);
 }

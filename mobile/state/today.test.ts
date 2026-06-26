@@ -1,108 +1,93 @@
 import {
-  MOCK_TODAY_ENTRIES,
-  selectComplete,
-  selectPending,
-  statusAccessibilityLabel,
-  summarizeDay,
-  type TodayEntry,
+  optimisticLogEvent,
+  sortByNewest,
+  statusPresentation,
 } from "./today";
+import type { LogEventDTO, LogEventStatus } from "@/api/logEvents";
 
-const sample: readonly TodayEntry[] = [
-  {
-    id: "a",
-    kind: "food",
-    text: "Oatmeal",
-    status: "complete",
-    calories: 300,
-    sourceBacked: true,
-  },
-  {
-    id: "b",
-    kind: "exercise",
-    text: "Run",
-    status: "complete",
-    calories: 250,
-    sourceBacked: false,
-  },
-  {
-    id: "c",
-    kind: "food",
-    text: "Latte",
-    status: "pending",
-    calories: null,
-    sourceBacked: null,
-  },
+const ALL_STATUSES: readonly LogEventStatus[] = [
+  "pending",
+  "processing",
+  "completed",
+  "failed",
+  "needs_clarification",
 ];
 
-describe("selectPending / selectComplete", () => {
-  it("partitions entries by status", () => {
-    expect(selectPending(sample).map((e) => e.id)).toEqual(["c"]);
-    expect(selectComplete(sample).map((e) => e.id)).toEqual(["a", "b"]);
+function event(overrides: Partial<LogEventDTO>): LogEventDTO {
+  return {
+    id: "id",
+    user_id: "u",
+    raw_text: "two eggs",
+    status: "pending",
+    created_at: "2026-06-26T08:00:00Z",
+    updated_at: "2026-06-26T08:00:00Z",
+    ...overrides,
+  };
+}
+
+describe("statusPresentation", () => {
+  it("maps every contract status to a non-empty, accessible presentation", () => {
+    for (const status of ALL_STATUSES) {
+      const p = statusPresentation(status);
+      expect(p.glyph).not.toBe("");
+      expect(p.label).not.toBe("");
+      expect(p.accessibilityLabel).not.toBe("");
+    }
   });
 
-  it("returns empty arrays when nothing matches", () => {
-    expect(selectPending(selectComplete(sample))).toEqual([]);
+  it("distinguishes pending from completed", () => {
+    const pending = statusPresentation("pending");
+    const completed = statusPresentation("completed");
+    expect(pending.glyph).not.toBe(completed.glyph);
+    expect(pending.accessibilityLabel).not.toBe(completed.accessibilityLabel);
+  });
+
+  it("uses nonjudgmental copy for a failed estimate", () => {
+    const failed = statusPresentation("failed");
+    expect(failed.accessibilityLabel.toLowerCase()).not.toContain("error");
+    expect(failed.label).toBe("Couldn't estimate");
   });
 });
 
-describe("summarizeDay", () => {
-  it("rolls up completed food and exercise calories", () => {
-    expect(summarizeDay(sample)).toEqual({
-      pendingCount: 1,
-      completeCount: 2,
-      consumed: 300,
-      burned: 250,
-      net: 50,
-    });
+describe("sortByNewest", () => {
+  it("orders events by created_at descending", () => {
+    const a = event({ id: "a", created_at: "2026-06-26T08:00:00Z" });
+    const b = event({ id: "b", created_at: "2026-06-26T09:30:00Z" });
+    const c = event({ id: "c", created_at: "2026-06-26T07:15:00Z" });
+    expect(sortByNewest([a, b, c]).map((e) => e.id)).toEqual(["b", "a", "c"]);
   });
 
-  it("excludes pending entries from calorie totals", () => {
-    const onlyPending: TodayEntry[] = [
-      {
-        id: "p",
-        kind: "food",
-        text: "TBD",
-        status: "pending",
-        calories: null,
-        sourceBacked: null,
-      },
+  it("does not mutate its input", () => {
+    const input = [
+      event({ id: "a", created_at: "2026-06-26T08:00:00Z" }),
+      event({ id: "b", created_at: "2026-06-26T09:00:00Z" }),
     ];
-    expect(summarizeDay(onlyPending)).toEqual({
-      pendingCount: 1,
-      completeCount: 0,
-      consumed: 0,
-      burned: 0,
-      net: 0,
-    });
+    sortByNewest(input);
+    expect(input.map((e) => e.id)).toEqual(["a", "b"]);
   });
 
-  it("handles an empty day", () => {
-    expect(summarizeDay([])).toEqual({
-      pendingCount: 0,
-      completeCount: 0,
-      consumed: 0,
-      burned: 0,
-      net: 0,
-    });
+  it("keeps insertion order for entries sharing a timestamp", () => {
+    const a = event({ id: "a", created_at: "2026-06-26T08:00:00Z" });
+    const b = event({ id: "b", created_at: "2026-06-26T08:00:00Z" });
+    expect(sortByNewest([a, b]).map((e) => e.id)).toEqual(["a", "b"]);
   });
 });
 
-describe("statusAccessibilityLabel", () => {
-  it("labels pending entries as estimating", () => {
-    expect(statusAccessibilityLabel(sample[2])).toBe("Estimating");
-  });
-
-  it("distinguishes source-backed completed estimates", () => {
-    expect(statusAccessibilityLabel(sample[0])).toBe(
-      "Estimated from a source",
-    );
-    expect(statusAccessibilityLabel(sample[1])).toBe("Estimated");
-  });
-});
-
-describe("MOCK_TODAY_ENTRIES", () => {
-  it("includes both pending and completed entries", () => {
-    expect(selectPending(MOCK_TODAY_ENTRIES).length).toBeGreaterThan(0);
-    expect(selectComplete(MOCK_TODAY_ENTRIES).length).toBeGreaterThan(0);
+describe("optimisticLogEvent", () => {
+  it("builds a pending event from the supplied fields", () => {
+    const optimistic = optimisticLogEvent({
+      id: "temp-0",
+      userId: "user-1",
+      rawText: "cold brew",
+      createdAt: "2026-06-26T10:00:00Z",
+    });
+    expect(optimistic).toEqual({
+      id: "temp-0",
+      user_id: "user-1",
+      raw_text: "cold brew",
+      status: "pending",
+      created_at: "2026-06-26T10:00:00Z",
+      updated_at: "2026-06-26T10:00:00Z",
+    });
   });
 });

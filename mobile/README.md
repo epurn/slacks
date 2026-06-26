@@ -1,8 +1,10 @@
 # mobile
 
-The Fatty mobile app: an Expo / React Native, iOS-first client. The first slice
-(FTY-013) is a **Today shell** rendered entirely from local mock state — no
-networking, auth, or log-creation flows yet.
+The Fatty mobile app: an Expo / React Native, iOS-first client. The **Today
+shell** renders the user's real log events from the backend (FTY-031): it lists
+today's events with accessible per-entry status and lets the user submit
+natural-language input to create a new `pending` event. Auto-refresh of pending
+entries is a later slice (FTY-032); a manual refresh is provided here.
 
 ## Owns
 
@@ -24,16 +26,18 @@ app/                 file-based routes (Expo Router)
   _layout.tsx        root Stack + SafeAreaProvider
   index.tsx          the Today route ("/")
   profile.tsx        the profile capture route ("/profile")
-api/                 typed clients for the backend (config, profile)
+api/                 typed clients for the backend (config, profile, logEvents)
 components/          presentational UI (TodayScreen, EntryRow, StatusIcon,
                      ProfileForm, ProfileScreen)
 state/               local state + pure logic (today.ts, profile.ts, session.ts)
 ```
 
-`state/today.ts` holds the Today shell's mock data and selectors. Its shape is an
-**internal placeholder, not a committed contract** — the real timeline DTOs
-arrive with the logging-spine stories. New screens are added by dropping route
-files into `app/` without restructuring the shell.
+`api/logEvents.ts` is the typed client for the FTY-030 log-event create /
+list-today API (the timeline's backend). `state/today.ts` holds the timeline's
+pure presentation logic: the exhaustive status → glyph/label/accessibility
+mapping over the FTY-030 status state machine, newest-first ordering, and the
+optimistic-event builder. New screens are added by dropping route files into
+`app/` without restructuring the shell.
 
 `state/profile.ts` owns the minimal-required-profile capture logic (FTY-021):
 the field vocabulary, unit conversion to canonical units (metres, kilograms),
