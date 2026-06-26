@@ -94,6 +94,22 @@ calls. The service-level files are append-only across the process lifetime.
   PR, so the steward skipped just that item (warn) and kept assigning the rest
   instead of exiting non-zero and crash-looping under launchd KeepAlive. The
   item is retried next poll. `warn`. `fields`: `story_id`.
+- `orphan_branch_publishing` — a local story branch with unpushed commits, no open
+  PR, and no active author (an author killed/crashed after commit but before
+  push+PR) was handed to the author's no-Claude `publish` mode, which pushes the
+  existing commits and opens a PR (zero model cost). The normal review/merge/prune
+  lifecycle then frees the lane — fully hands-off recovery. Default on; gate with
+  `FATTY_STEWARD_PUBLISH_ORPHANS`. `warn`. `fields`: `story_id`, `branch`, `ahead`.
+- `orphan_branch_unpublished` — the same orphan condition, but emitted only when
+  `FATTY_STEWARD_PUBLISH_ORPHANS=0` disables auto-publish. The branch can never
+  merge, so it would hold its lanes forever and silently starve the queue; this
+  `warn` fires every poll until an operator or author publishes or deletes it.
+  `fields`: `story_id`, `branch`, `ahead`, `lanes`.
+- `recovered_orphan_branch` — an **empty** local story branch (no commits ahead of
+  base, no PR, no active author) was reclaimed: its worktree was recovered and the
+  branch deleted, freeing the slot. Safe because there is no committed work to
+  lose. Gated by `FATTY_STEWARD_RECOVER_WORKTREES` (default on). `warn`. `fields`:
+  `story_id`, `branch`.
 
 Health guard + safe auto-recovery (the steward never takes a destructive remote
 git action — push, force-push, rebase, branch delete — those only warn):
@@ -126,6 +142,12 @@ for that cycle, so an author never starts a build it cannot complete.
 - `status_set` — commit status set. `fields`: `pr`, `context`, `state`.
 - `auto_merge_enabled` — native auto-merge turned on. `fields`: `pr`.
 - `review_skip` — head already reviewed / draft. `fields`: `pr`, `reason`.
+- `review_usage` — token/cost telemetry for one Claude review. `fields`: `pr`,
+  `model`, `input_tokens`, `output_tokens`, `cache_creation_input_tokens`,
+  `cache_read_input_tokens`, `total_cost_usd`, `num_turns`. Emitted even when the
+  review run fails, so a costly failed review is still visible. A review whose
+  input is mostly `cache_read_input_tokens` is far cheaper than its raw
+  input-token count implies.
 
 ### author
 - `run_start` — assignment picked up. `fields`: `story_id`, `mode`, `model`.
@@ -141,6 +163,13 @@ for that cycle, so an author never starts a build it cannot complete.
   the run is then reported as `BLOCKED`. `fields`: `story_id`.
 - `run_result` — terminal outcome. `fields`: `event` (`DONE`/`BLOCKED`...),
   `pr`, `summary`.
+- `run_usage` — token/cost telemetry for one Claude author run. `fields`:
+  `story_id`, `model`, `mode`, `input_tokens`, `output_tokens`,
+  `cache_creation_input_tokens`, `cache_read_input_tokens`, `total_cost_usd`,
+  `num_turns`. Emitted even on a BLOCKED/failed run so a blown budget is still
+  visible. Only the streaming path (`FATTY_AUTHOR_STREAM_EVENTS=1`, the default)
+  carries usage; the plain path emits no result envelope. A run dominated by
+  `cache_read_input_tokens` is far cheaper than its raw input count implies.
 
 ## Feature flags
 
@@ -155,3 +184,11 @@ for that cycle, so an author never starts a build it cannot complete.
   poll when safe (default `1`; set `0` to only warn on drift).
 - `FATTY_STEWARD_BASE_BRANCH` — the base branch the guard checks against
   (default `main`).
+- `FATTY_STEWARD_ORPHAN_GRACE_SECONDS` — how long a local story branch's worktree
+  must be untouched before orphan reconciliation considers it (default `300`). The
+  grace window prevents reaping/warning on an author that just committed and is
+  about to push.
+- `FATTY_STEWARD_PUBLISH_ORPHANS` — when `1` (default), an orphaned branch with
+  unpushed commits is auto-recovered by launching the author's no-Claude `publish`
+  mode (push + open PR, zero model cost). Set `0` to fall back to warn-only
+  (`orphan_branch_unpublished`) and recover by hand.
