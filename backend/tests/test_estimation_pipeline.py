@@ -72,14 +72,14 @@ def test_stub_pipeline_completes_and_records_stub_steps() -> None:
     ]
 
 
-def test_default_pipeline_uses_real_parse_then_stub_calculate() -> None:
+def test_default_pipeline_uses_real_parse_then_exercise_calculate() -> None:
     # The v1 default wires the real FTY-042 parse step (provider-driven) ahead of
-    # the still-stubbed calculation step. Composition only — no provider call.
+    # the real FTY-043 exercise calculation step. Composition only — no provider call.
     provider = FakeProvider()
 
     pipeline = default_pipeline(provider)
 
-    assert [step.name for step in pipeline.steps] == ["parse", StubCalculateStep().name]
+    assert [step.name for step in pipeline.steps] == ["parse", "exercise_calculate"]
 
 
 def test_needs_clarification_is_terminal_outcome() -> None:

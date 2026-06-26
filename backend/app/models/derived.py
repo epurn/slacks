@@ -86,9 +86,19 @@ class DerivedFoodItem(_DerivedItem):
 
 
 class DerivedExerciseItem(_DerivedItem):
-    """An unresolved exercise candidate parsed from a log event."""
+    """An exercise candidate parsed from a log event, optionally costed (FTY-043).
+
+    Inherits the shared candidate shape and adds ``active_calories``: the net
+    (``MET − 1``) active-calorie burn the exercise calculator (FTY-043) attaches when
+    it resolves the candidate (``status = resolved``). It stays ``None`` while the
+    item is ``unresolved`` — the parse step writes the candidate, the calculator
+    later costs it. Calories are canonical kcal; the MET-table version/source behind
+    the number is recorded on the estimation run, not duplicated per row.
+    """
 
     __tablename__ = "derived_exercise_items"
+
+    active_calories: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class ClarificationQuestion(Base):

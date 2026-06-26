@@ -74,9 +74,11 @@ target was outside the safety band and clamped to the boundary), and an
    `s = −161` (`mifflin_st_jeor_minus161`) chosen by `metabolic_formula`. Height
    is converted from canonical metres to centimetres internally.
 2. **TDEE.** `TDEE = RMR × 1.2`, the baseline (sedentary) activity multiplier.
-   Logged exercise burn is added to the day's allowance **separately** by later
-   logging stories and is deliberately excluded here, to avoid double-counting
-   MET-based active calories.
+   Logged exercise burn is added to the day's allowance **separately** by the
+   exercise calculator (FTY-043, `exercise-burn.md`) and is deliberately excluded
+   here. To avoid double-counting the resting energy this multiplier already
+   includes, that calculator credits only the energy **above rest** (the `MET − 1`
+   net convention).
 3. **Daily target — single-compartment, NIDDK-style dynamic energy balance.**
    Rather than dividing the total energy deficit by the horizon (which ignores
    that expenditure falls with body mass), the model linearizes the NIDDK/Hall

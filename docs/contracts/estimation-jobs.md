@@ -87,9 +87,11 @@ persists). A step signals a non-success outcome by raising:
   immediately rather than burning retries (added in FTY-042);
 - `StepError(message)` — a *retryable* transient failure.
 
-`default_pipeline(provider)` wires the real FTY-042 parse step ahead of the
-still-stubbed `stub_calculate`. (FTY-040 shipped two stub steps; FTY-042 replaced
-`stub_parse` with the provider-driven parse step — see `parse-candidates.md`.)
+`default_pipeline(provider)` wires the real FTY-042 parse step ahead of the real
+FTY-043 `exercise_calculate` step. (FTY-040 shipped two stub steps; FTY-042 replaced
+`stub_parse` with the provider-driven parse step — see `parse-candidates.md` — and
+FTY-043 replaced `stub_calculate` with the deterministic MET exercise-burn step —
+see `exercise-burn.md`. Food resolution, FTY-044, is still to come.)
 
 ## Outputs / State machine
 

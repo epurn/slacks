@@ -105,6 +105,27 @@ class CandidateDraft:
     amount: float | None = None
 
 
+@dataclass(frozen=True)
+class ResolvedExerciseItem:
+    """A costed exercise candidate produced by the exercise calculator (FTY-043).
+
+    Carries the parsed shape (``name`` and raw portion phrase plus the best-effort
+    ``unit``/``amount``) alongside the deterministic burn: the matched MET value, the
+    duration in minutes the burn was computed over, and the net ``active_calories``
+    (the ``MET − 1`` convention). The worker persists it as a **resolved**
+    ``derived_exercise_items`` row. Like :class:`CandidateDraft` it is product data,
+    never copied into the sanitized run ``trace``.
+    """
+
+    name: str
+    quantity_text: str
+    unit: str | None
+    amount: float | None
+    met: float
+    duration_minutes: float
+    active_calories: float
+
+
 @dataclass
 class EstimationContext:
     """Mutable accumulator threaded through the pipeline steps.
@@ -120,6 +141,10 @@ class EstimationContext:
     log_event_id: uuid.UUID
     user_id: uuid.UUID
     raw_text: str
+    #: The user's canonical body weight (kg) from their profile, loaded by the
+    #: worker for the exercise calculator (FTY-043). ``None`` when the profile has
+    #: no weight yet; the calculator fails closed rather than guessing a burn.
+    weight_kg: float | None = None
     provider: str | None = None
     model: str | None = None
     schema_version: str | None = None
@@ -130,6 +155,7 @@ class EstimationContext:
     trace: list[dict[str, Any]] = field(default_factory=list)
     food_candidates: list[CandidateDraft] = field(default_factory=list)
     exercise_candidates: list[CandidateDraft] = field(default_factory=list)
+    resolved_exercise_items: list[ResolvedExerciseItem] = field(default_factory=list)
     clarification_questions: list[str] = field(default_factory=list)
 
     def record_step(self, name: str, status: str) -> None:
@@ -232,15 +258,18 @@ class Pipeline:
 
 
 def default_pipeline(provider: Provider) -> Pipeline:
-    """Build the v1 estimation pipeline: real NL parse then stub calculate.
+    """Build the v1 estimation pipeline: real NL parse then exercise calculation.
 
     The parse step (FTY-042) turns the event text into schema-validated candidates
-    using ``provider``; the calculation step is still a stub until FTY-043/044
-    replace it. The worker contract (claim → run → transition) is unchanged.
+    using ``provider``; the exercise step (FTY-043) costs the exercise candidates
+    into net active calories deterministically. Food resolution (FTY-044) is still
+    to come, so food candidates remain persisted unresolved. The worker contract
+    (claim → run → transition) is unchanged.
     """
 
-    # Imported here rather than at module top to avoid a cycle: the parse step
-    # imports the context/exception types defined above in this module.
+    # Imported here rather than at module top to avoid a cycle: the steps import the
+    # context/exception types defined above in this module.
+    from app.estimator.exercise_step import ExerciseCalculateStep
     from app.estimator.parse import ParseStep
 
-    return Pipeline([ParseStep(provider), StubCalculateStep()])
+    return Pipeline([ParseStep(provider), ExerciseCalculateStep()])

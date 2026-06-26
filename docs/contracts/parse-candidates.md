@@ -65,6 +65,8 @@ altered):
   `ON DELETE CASCADE`, indexed), `user_id` (FK → `users.id`, `ON DELETE CASCADE`,
   indexed), `name`, `quantity_text`, `unit` (nullable), `amount` (nullable float),
   `status` (`DerivedItemStatus`, written `unresolved`), `created_at`/`updated_at`.
+  FTY-043 later adds `active_calories` (nullable) to `derived_exercise_items` and
+  advances costed rows to `resolved` (see `exercise-burn.md`).
 - **`clarification_questions`** — one row per question. Columns: `id` (UUID PK),
   `log_event_id` (FK, cascade, indexed), `user_id` (FK, cascade, indexed),
   `question_text`, `position` (int, stable order), `created_at`/`updated_at`.
@@ -153,5 +155,6 @@ event.raw_text = "two eggs and a 30 min run"
   terminal `StepFailed` signal to the pipeline interface (see `estimation-jobs.md`);
   the worker's claim → run → transition contract is unchanged.
 - FTY-043/044 consume the `unresolved` candidates and advance them to `resolved`
-  with energy/macros; the later clarification story consumes the persisted
-  questions and adds the answer flow.
+  with energy/macros; FTY-043 (exercise burn) is specified in `exercise-burn.md`.
+  The later clarification story consumes the persisted questions and adds the answer
+  flow.

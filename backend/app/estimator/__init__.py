@@ -18,6 +18,17 @@ from app.estimator.calculator import (
     resting_metabolic_rate,
     total_daily_energy_expenditure,
 )
+from app.estimator.exercise import (
+    ExerciseBurn,
+    net_active_calories,
+    resolve_exercise,
+)
+from app.estimator.exercise_step import ExerciseCalculateStep
+from app.estimator.met_table import (
+    MET_TABLE_SOURCE,
+    MET_TABLE_VERSION,
+    lookup_met,
+)
 from app.estimator.pipeline import (
     EstimationContext,
     EstimationStep,
@@ -37,9 +48,13 @@ from app.estimator.processing import (
 
 __all__ = [
     "DEFAULT_MAX_ATTEMPTS",
+    "MET_TABLE_SOURCE",
+    "MET_TABLE_VERSION",
     "EstimationContext",
     "EstimationEventNotFound",
     "EstimationStep",
+    "ExerciseBurn",
+    "ExerciseCalculateStep",
     "NeedsClarification",
     "Pipeline",
     "PipelineOutcome",
@@ -47,7 +62,10 @@ __all__ = [
     "StepError",
     "compute_targets",
     "default_pipeline",
+    "lookup_met",
+    "net_active_calories",
     "process_estimation",
+    "resolve_exercise",
     "resting_metabolic_rate",
     "retry_countdown",
     "total_daily_energy_expenditure",

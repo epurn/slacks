@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session
 
 from app.enums import (
     TERMINAL_JOB_STATUSES,
+    DerivedItemStatus,
     EstimationJobStatus,
     EstimationRunStatus,
     LogEventStatus,
@@ -54,6 +55,7 @@ from app.models.derived import (
     DerivedFoodItem,
 )
 from app.models.estimation import EstimationJob, EstimationRun
+from app.models.identity import UserProfile
 from app.models.log_events import LogEvent
 from app.services.log_events import transition_event
 
@@ -153,6 +155,19 @@ def _load_owned_event(session: Session, log_event_id: uuid.UUID, user_id: uuid.U
     return event
 
 
+def _load_user_weight_kg(session: Session, user_id: uuid.UUID) -> float | None:
+    """Return the user's canonical body weight (kg), or ``None`` if not yet set.
+
+    The exercise calculator (FTY-043) needs the user's own weight; it is read from
+    the owning user's profile, never supplied by the model. A missing profile or
+    weight returns ``None`` and the calculator fails closed.
+    """
+
+    return session.scalars(
+        select(UserProfile.weight_kg).where(UserProfile.user_id == user_id)
+    ).one_or_none()
+
+
 def process_estimation(
     session: Session,
     *,
@@ -219,7 +234,12 @@ def process_estimation(
     session.commit()
     session.refresh(run)
 
-    context = EstimationContext(log_event_id=log_event_id, user_id=user_id, raw_text=event.raw_text)
+    context = EstimationContext(
+        log_event_id=log_event_id,
+        user_id=user_id,
+        raw_text=event.raw_text,
+        weight_kg=_load_user_weight_kg(session, user_id),
+    )
     result = _run_pipeline(pipeline, context)
 
     # Persist the sanitized run metadata regardless of outcome.
@@ -310,12 +330,15 @@ def _finalize(
 
 
 def _persist_candidates(session: Session, run: EstimationRun, context: EstimationContext) -> None:
-    """Persist the parsed food/exercise candidates as user-owned unresolved rows.
+    """Persist the parsed food/exercise candidates as user-owned rows.
 
-    Candidate names and portions are schema-validated *data* written through
-    parameterized ORM inserts — never executed. Ownership (``user_id``) and the
-    owning ``log_event_id`` are carried on every row for object-level
-    authorization and retention.
+    Food candidates are written ``unresolved`` (resolution is FTY-044). Exercise
+    candidates the calculator (FTY-043) costed are written ``resolved`` with their
+    ``active_calories``; if the exercise step did not run (e.g. the stub calculator),
+    they fall back to ``unresolved`` rows with no calories. Candidate names and
+    portions are schema-validated *data* written through parameterized ORM inserts —
+    never executed. Ownership (``user_id``) and the owning ``log_event_id`` are
+    carried on every row for object-level authorization and retention.
     """
 
     for draft in context.food_candidates:
@@ -329,17 +352,33 @@ def _persist_candidates(session: Session, run: EstimationRun, context: Estimatio
                 amount=draft.amount,
             )
         )
-    for draft in context.exercise_candidates:
-        session.add(
-            DerivedExerciseItem(
-                log_event_id=run.log_event_id,
-                user_id=run.user_id,
-                name=draft.name,
-                quantity_text=draft.quantity_text,
-                unit=draft.unit,
-                amount=draft.amount,
+
+    if context.resolved_exercise_items:
+        for item in context.resolved_exercise_items:
+            session.add(
+                DerivedExerciseItem(
+                    log_event_id=run.log_event_id,
+                    user_id=run.user_id,
+                    name=item.name,
+                    quantity_text=item.quantity_text,
+                    unit=item.unit,
+                    amount=item.amount,
+                    status=DerivedItemStatus.RESOLVED,
+                    active_calories=item.active_calories,
+                )
             )
-        )
+    else:
+        for draft in context.exercise_candidates:
+            session.add(
+                DerivedExerciseItem(
+                    log_event_id=run.log_event_id,
+                    user_id=run.user_id,
+                    name=draft.name,
+                    quantity_text=draft.quantity_text,
+                    unit=draft.unit,
+                    amount=draft.amount,
+                )
+            )
 
 
 def _persist_clarification_questions(
