@@ -25,13 +25,20 @@ See `docs/architecture/system-overview.md` for the working architecture.
 
 ## Development
 
+The monorepo is laid out as `backend/` (FastAPI), `mobile/` (Expo / React
+Native), and `contracts/` (shared contract code), with documentation in `docs/`.
+See `docs/architecture/repo-layout.md` for the layout and verification contract.
+
 Run the current repository checks:
 
 ```sh
 make verify
 ```
 
-More language-specific tooling will be added when the backend and mobile workspaces are scaffolded.
+`make verify` is the single entry point: it runs repository governance and then
+each package's verification hook. Packages are scaffolded empty for now, so their
+checks are skipped until a package adds an executable `verify.sh`. Language-specific
+tooling arrives with the backend and mobile skeleton stories.
 
 ## Contributing
 
