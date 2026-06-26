@@ -11,6 +11,16 @@ dependencies = [
     # "Celery workers with Redis queue"; the ``[redis]`` extra pulls the broker
     # client. No task definitions are added yet.
     "celery[redis]>=5.4",
+    # Persistence + migrations for the canonical identity/profile data model
+    # (FTY-020). SQLAlchemy provides typed ORM models and the schema metadata;
+    # Alembic owns the versioned migrations (the baseline migration creates the
+    # users/auth_identities/user_profiles tables). ``psycopg[binary]`` is the
+    # Postgres driver for the Docker Compose / self-host runtime; tests run the
+    # same models and migration against stdlib SQLite, so no live Postgres is
+    # required for ``make verify``.
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "psycopg[binary]>=3.2",
 ]
 
 [dependency-groups]
