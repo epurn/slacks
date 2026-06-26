@@ -23,14 +23,25 @@ networking, auth, or log-creation flows yet.
 app/                 file-based routes (Expo Router)
   _layout.tsx        root Stack + SafeAreaProvider
   index.tsx          the Today route ("/")
-components/          presentational UI (TodayScreen, EntryRow, StatusIcon)
-state/               local mock state + pure selectors (today.ts)
+  profile.tsx        the profile capture route ("/profile")
+api/                 typed clients for the backend (config, profile)
+components/          presentational UI (TodayScreen, EntryRow, StatusIcon,
+                     ProfileForm, ProfileScreen)
+state/               local state + pure logic (today.ts, profile.ts, session.ts)
 ```
 
 `state/today.ts` holds the Today shell's mock data and selectors. Its shape is an
 **internal placeholder, not a committed contract** — the real timeline DTOs
 arrive with the logging-spine stories. New screens are added by dropping route
 files into `app/` without restructuring the shell.
+
+`state/profile.ts` owns the minimal-required-profile capture logic (FTY-021):
+the field vocabulary, unit conversion to canonical units (metres, kilograms),
+and nonjudgmental client-side validation. `api/profile.ts` is the typed client
+for the FTY-020 profile read/write API. The capture flow persists for the
+authenticated user; `state/session.ts` is the seam for the mobile sign-in flow
+(a later story) that supplies the bearer token — until then the screen renders a
+"sign in to save" state.
 
 ## Develop
 

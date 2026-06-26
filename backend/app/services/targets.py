@@ -57,8 +57,14 @@ def build_calculator_input(
     if profile.height_m is None or profile.birth_year is None:
         raise IncompleteProfileError("profile is missing height or birth year")
 
+    formula = MetabolicFormula(profile.metabolic_formula)
+    if formula is MetabolicFormula.MIFFLIN_ST_JEOR:
+        # The unspecified family default carries no RMR constant: a profile that
+        # has not yet captured a +5/-161 variant cannot produce a target.
+        raise IncompleteProfileError("profile has not selected a metabolic formula variant")
+
     return TargetCalculatorInput(
-        metabolic_formula=MetabolicFormula(profile.metabolic_formula),
+        metabolic_formula=formula,
         height_m=profile.height_m,
         age_years=derive_age_years(profile.birth_year, for_date),
         start_weight_kg=goal.start_weight_kg,

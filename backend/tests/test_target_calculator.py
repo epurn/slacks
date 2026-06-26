@@ -22,8 +22,8 @@ from app.estimator import (
 )
 from app.schemas.targets import TargetCalculatorInput
 
-MALE = MetabolicFormula.MIFFLIN_ST_JEOR_MALE
-FEMALE = MetabolicFormula.MIFFLIN_ST_JEOR_FEMALE
+MALE = MetabolicFormula.MIFFLIN_ST_JEOR_PLUS_5
+FEMALE = MetabolicFormula.MIFFLIN_ST_JEOR_MINUS_161
 
 
 def _input(**overrides: object) -> TargetCalculatorInput:
@@ -122,7 +122,7 @@ def test_implausibly_fast_loss_is_clamped_to_floor() -> None:
     # Male 80→60 kg in 30 days demands a negative intake; refused and clamped up
     # to the male floor rather than returned as guidance.
     result = compute_targets(_input(target_weight_kg=60.0, target_date=date(2026, 1, 31)))
-    assert result.daily_calorie_target_kcal == constants.SAFETY_FLOOR_KCAL_MALE
+    assert result.daily_calorie_target_kcal == constants.SAFETY_FLOOR_KCAL_PLUS5
     assert result.clamped is True
 
 
@@ -135,8 +135,8 @@ def test_female_floor_is_lower_than_male_floor() -> None:
     )
     male = compute_targets(_input(metabolic_formula=MALE, **common))
     female = compute_targets(_input(metabolic_formula=FEMALE, **common))
-    assert male.daily_calorie_target_kcal == constants.SAFETY_FLOOR_KCAL_MALE
-    assert female.daily_calorie_target_kcal == constants.SAFETY_FLOOR_KCAL_FEMALE
+    assert male.daily_calorie_target_kcal == constants.SAFETY_FLOOR_KCAL_PLUS5
+    assert female.daily_calorie_target_kcal == constants.SAFETY_FLOOR_KCAL_MINUS161
     assert female.daily_calorie_target_kcal < male.daily_calorie_target_kcal
 
 
@@ -163,7 +163,7 @@ def test_result_carries_documented_assumptions() -> None:
     assert assumptions.baseline_activity_multiplier == 1.2
     assert assumptions.energy_density_kcal_per_kg == 7700.0
     assert assumptions.rmr_mass_coefficient_kcal_per_kg == 10.0
-    assert assumptions.safety_floor_kcal == constants.SAFETY_FLOOR_KCAL_MALE
+    assert assumptions.safety_floor_kcal == constants.SAFETY_FLOOR_KCAL_PLUS5
     assert assumptions.safety_ceiling_kcal == constants.SAFETY_CEILING_KCAL
     assert "mifflin" in assumptions.model.lower()
 

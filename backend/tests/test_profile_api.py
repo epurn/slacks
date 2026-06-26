@@ -32,7 +32,7 @@ def test_profile_defaults_after_registration(client: TestClient) -> None:
     assert body["user_id"] == user_id
     assert body["height_m"] is None
     assert body["weight_kg"] is None
-    assert body["metabolic_formula"] == "mifflin_st_jeor_male"
+    assert body["metabolic_formula"] == "mifflin_st_jeor"
     assert body["units_preference"] == "metric"
     assert body["timezone"] == "UTC"
 
@@ -64,6 +64,35 @@ def test_profile_update_persists_canonical_units(client: TestClient) -> None:
     # The update is persisted across requests.
     again = client.get(f"/api/users/{user_id}/profile", headers={"Authorization": auth})
     assert again.json()["weight_kg"] == 70.5
+
+
+def test_profile_accepts_metabolic_formula_variants(client: TestClient) -> None:
+    user_id, auth = _register(client, "formula@example.com")
+
+    for variant in ("mifflin_st_jeor_plus5", "mifflin_st_jeor_minus161"):
+        resp = client.put(
+            f"/api/users/{user_id}/profile",
+            headers={"Authorization": auth},
+            json={"metabolic_formula": variant},
+        )
+        assert resp.status_code == 200, variant
+        assert resp.json()["metabolic_formula"] == variant
+
+    # The variant persists across requests.
+    again = client.get(f"/api/users/{user_id}/profile", headers={"Authorization": auth})
+    assert again.json()["metabolic_formula"] == "mifflin_st_jeor_minus161"
+
+
+def test_profile_rejects_unknown_metabolic_formula(client: TestClient) -> None:
+    user_id, auth = _register(client, "badformula@example.com")
+
+    resp = client.put(
+        f"/api/users/{user_id}/profile",
+        headers={"Authorization": auth},
+        json={"metabolic_formula": "harris_benedict"},
+    )
+
+    assert resp.status_code == 422
 
 
 def test_profile_partial_update_preserves_other_fields(client: TestClient) -> None:

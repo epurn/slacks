@@ -13,19 +13,25 @@ from enum import StrEnum
 class MetabolicFormula(StrEnum):
     """Resting-metabolic-rate formula preference (FTY-022).
 
-    Mifflin-St Jeor is the v1 RMR equation (see the system overview). The
-    equation differs only by a sex-dependent additive constant (``+5`` vs
-    ``-161`` kcal/day), so the product models that choice here as a *metabolic
-    formula preference* rather than storing biological sex as a separate field —
-    the profile keeps the minimum body data the math needs and nothing more.
+    Mifflin-St Jeor is the v1 RMR formula (see the system overview). The formula
+    carries a sex-dependent additive constant, and the user's choice of that
+    constant *is* the profile's metabolic-formula preference (captured by FTY-021
+    with deliberately non-clinical wording, mapped by FTY-022's RMR calculator):
 
-    The two members are the only valid inputs to the target calculator; each maps
-    to one Mifflin-St Jeor constant (see :mod:`app.estimator.calculator`). FTY-021
-    profile capture must offer exactly these values.
+    - :attr:`MIFFLIN_ST_JEOR_PLUS_5` — the ``+5`` constant variant.
+    - :attr:`MIFFLIN_ST_JEOR_MINUS_161` — the ``-161`` constant variant.
+
+    :attr:`MIFFLIN_ST_JEOR` remains the *unspecified* family default for a
+    freshly created, not-yet-captured profile: it names the formula but carries
+    no constant, so RMR cannot be computed until the user selects a variant. The
+    capture UI only ever writes one of the two variants, and those two are the
+    only valid inputs to the target calculator (see
+    :mod:`app.estimator.calculator`).
     """
 
-    MIFFLIN_ST_JEOR_MALE = "mifflin_st_jeor_male"
-    MIFFLIN_ST_JEOR_FEMALE = "mifflin_st_jeor_female"
+    MIFFLIN_ST_JEOR = "mifflin_st_jeor"
+    MIFFLIN_ST_JEOR_PLUS_5 = "mifflin_st_jeor_plus5"
+    MIFFLIN_ST_JEOR_MINUS_161 = "mifflin_st_jeor_minus161"
 
 
 class GoalDirection(StrEnum):

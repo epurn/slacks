@@ -51,10 +51,12 @@ Canonical units only: weight in kilograms, energy in kcal.
 
 ### Calculator input (`TargetCalculatorInput`)
 
-`metabolic_formula` (`mifflin_st_jeor_male` | `mifflin_st_jeor_female`),
-`height_m` (m), `age_years` (int), `start_weight_kg`, `target_weight_kg` (kg),
-`start_date`, `target_date`. The profile supplies height, age (derived from
-`birth_year`), and the formula preference; the goal supplies the trajectory.
+`metabolic_formula` (`mifflin_st_jeor_plus5` | `mifflin_st_jeor_minus161` — the
+two computable variants; the unspecified `mifflin_st_jeor` family default is
+rejected as an incomplete profile), `height_m` (m), `age_years` (int),
+`start_weight_kg`, `target_weight_kg` (kg), `start_date`, `target_date`. The
+profile supplies height, age (derived from `birth_year`), and the formula
+preference; the goal supplies the trajectory.
 
 ## Outputs
 
@@ -68,9 +70,9 @@ target was outside the safety band and clamped to the boundary), and an
 ### The math
 
 1. **RMR — Mifflin-St Jeor.** `RMR = 10·weight_kg + 6.25·height_cm − 5·age + s`,
-   with the sex-dependent constant `s = +5` (male) or `s = −161` (female) chosen
-   by `metabolic_formula`. Height is converted from canonical metres to
-   centimetres internally.
+   with the sex-dependent constant `s = +5` (`mifflin_st_jeor_plus5`) or
+   `s = −161` (`mifflin_st_jeor_minus161`) chosen by `metabolic_formula`. Height
+   is converted from canonical metres to centimetres internally.
 2. **TDEE.** `TDEE = RMR × 1.2`, the baseline (sedentary) activity multiplier.
    Logged exercise burn is added to the day's allowance **separately** by later
    logging stories and is deliberately excluded here, to avoid double-counting
@@ -103,13 +105,14 @@ target was outside the safety band and clamped to the boundary), and an
 - `height_m` ∈ (0, 3]; `age_years` ∈ [13, 120]; `start_weight_kg`,
   `target_weight_kg` ∈ (0, 1000]; `target_date` strictly after `start_date`
   (positive horizon). Unknown fields are rejected.
-- The service rejects an incomplete profile (missing height or birth year) rather
+- The service rejects an incomplete profile (missing height or birth year, or a
+  metabolic formula still on the unspecified `mifflin_st_jeor` default) rather
   than computing a bogus target.
 - **Safety floor/ceiling.** The daily target is clamped to a documented band and
   `clamped` is set when the raw value falls outside it: a floor of 1500 kcal
-  (male) / 1200 kcal (female) — clinically conservative minimums for unsupervised
-  dieting, so a dangerously low target is refused, not returned — and a ceiling
-  of 4000 kcal to refuse implausibly aggressive weight-gain plans.
+  (`+5` variant) / 1200 kcal (`-161` variant) — clinically conservative minimums
+  for unsupervised dieting, so a dangerously low target is refused, not returned —
+  and a ceiling of 4000 kcal to refuse implausibly aggressive weight-gain plans.
 
 ## Authorization
 
@@ -134,7 +137,7 @@ both tables is the ownership key.
 | Condition | Result |
 | --- | --- |
 | `target_date` ≤ `start_date`, out-of-range metric, unknown field | `ValidationError` at the boundary. |
-| Profile missing height/birth year | `IncompleteProfileError`. |
+| Profile missing height/birth year, or formula on the unspecified default | `IncompleteProfileError`. |
 | Cross-user, unowned, or missing goal | `GoalForbidden` (fail closed). |
 | Raw target outside the safety band | Clamped to floor/ceiling, `clamped = true`. |
 
@@ -152,9 +155,10 @@ both tables is the ownership key.
 - `0002` applies cleanly on top of the `0001` baseline (`alembic upgrade head`)
   and is fully reversible (`alembic downgrade 0001`), verified by a migration
   apply/rollback test against a throwaway database.
-- `metabolic_formula` now has two values (`mifflin_st_jeor_male`,
-  `mifflin_st_jeor_female`); FTY-021 profile capture must offer exactly these.
-  The profile column type is unchanged (string), so no data migration is needed;
-  the model default is a pre-capture placeholder only.
+- `metabolic_formula` has two computable variants (`mifflin_st_jeor_plus5`,
+  `mifflin_st_jeor_minus161`) plus the unspecified `mifflin_st_jeor` family
+  default; FTY-021 profile capture must offer exactly the two variants. The
+  profile column type is unchanged (string), so no data migration is needed; the
+  model default (`mifflin_st_jeor`) is a pre-capture placeholder only.
 - Consumers (daily summaries, later targeting stories) depend on the
   `daily_targets` shape and the calculator output contract defined here.

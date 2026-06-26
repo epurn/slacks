@@ -73,13 +73,13 @@ MODEL_NAME = "mifflin_st_jeor + single-compartment NIDDK-style dynamic energy ba
 _ROUNDING_NOTE = "RMR/TDEE rounded to 0.1 kcal; daily target rounded to nearest kcal"
 
 _MIFFLIN_CONSTANT: dict[MetabolicFormula, float] = {
-    MetabolicFormula.MIFFLIN_ST_JEOR_MALE: constants.MIFFLIN_MALE_CONSTANT_KCAL,
-    MetabolicFormula.MIFFLIN_ST_JEOR_FEMALE: constants.MIFFLIN_FEMALE_CONSTANT_KCAL,
+    MetabolicFormula.MIFFLIN_ST_JEOR_PLUS_5: constants.MIFFLIN_PLUS5_CONSTANT_KCAL,
+    MetabolicFormula.MIFFLIN_ST_JEOR_MINUS_161: constants.MIFFLIN_MINUS161_CONSTANT_KCAL,
 }
 
 _SAFETY_FLOOR: dict[MetabolicFormula, int] = {
-    MetabolicFormula.MIFFLIN_ST_JEOR_MALE: constants.SAFETY_FLOOR_KCAL_MALE,
-    MetabolicFormula.MIFFLIN_ST_JEOR_FEMALE: constants.SAFETY_FLOOR_KCAL_FEMALE,
+    MetabolicFormula.MIFFLIN_ST_JEOR_PLUS_5: constants.SAFETY_FLOOR_KCAL_PLUS5,
+    MetabolicFormula.MIFFLIN_ST_JEOR_MINUS_161: constants.SAFETY_FLOOR_KCAL_MINUS161,
 }
 
 

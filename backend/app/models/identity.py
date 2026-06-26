@@ -108,12 +108,13 @@ class UserProfile(Base):
     height_m: Mapped[float | None] = mapped_column(Float, nullable=True)
     weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     birth_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Pre-capture placeholder only: a fresh profile must carry a non-null
-    # preference, and FTY-021 capture forces the user to pick a variant before
-    # any target is computed. The male constant is the documented default purely
-    # so the column is never null; it implies nothing until capture overwrites it.
+    # Pre-capture placeholder only: a fresh profile carries the unspecified
+    # family default so the column is never null, and FTY-021 capture forces the
+    # user to pick a +5/-161 variant before any target is computed. The default
+    # names the formula but carries no constant, so it implies nothing until
+    # capture overwrites it.
     metabolic_formula: Mapped[str] = mapped_column(
-        String(32), nullable=False, default=MetabolicFormula.MIFFLIN_ST_JEOR_MALE
+        String(32), nullable=False, default=MetabolicFormula.MIFFLIN_ST_JEOR
     )
     units_preference: Mapped[str] = mapped_column(
         String(16), nullable=False, default=UnitsPreference.METRIC

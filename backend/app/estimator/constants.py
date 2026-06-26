@@ -38,19 +38,20 @@ ENERGY_DENSITY_KCAL_PER_KG: Final[float] = 7700.0
 RMR_MASS_COEFFICIENT_KCAL_PER_KG: Final[float] = 10.0
 
 #: Sex-dependent additive constant of the Mifflin-St Jeor RMR equation, keyed by
-#: the metabolic formula preference. Male: ``+5``; female: ``-161`` kcal/day.
+#: the metabolic formula preference. The ``+5`` variant is the +5 kcal/day
+#: constant; the ``-161`` variant is the -161 kcal/day constant.
 MIFFLIN_HEIGHT_COEFFICIENT_KCAL_PER_CM: Final[float] = 6.25
 MIFFLIN_AGE_COEFFICIENT_KCAL_PER_YEAR: Final[float] = 5.0
-MIFFLIN_MALE_CONSTANT_KCAL: Final[float] = 5.0
-MIFFLIN_FEMALE_CONSTANT_KCAL: Final[float] = -161.0
+MIFFLIN_PLUS5_CONSTANT_KCAL: Final[float] = 5.0
+MIFFLIN_MINUS161_CONSTANT_KCAL: Final[float] = -161.0
 
 #: Safety floor on the daily calorie target, by formula variant. Targets below
 #: these clinically conservative minimums for unsupervised dieting are refused
-#: (clamped up to the floor and flagged), never returned as guidance. Female and
-#: male minimums of 1200 and 1500 kcal/day are common public-health guidance for
-#: medically unsupervised weight loss.
-SAFETY_FLOOR_KCAL_MALE: Final[int] = 1500
-SAFETY_FLOOR_KCAL_FEMALE: Final[int] = 1200
+#: (clamped up to the floor and flagged), never returned as guidance. The
+#: ``-161`` and ``+5`` variant minimums of 1200 and 1500 kcal/day are common
+#: public-health guidance for medically unsupervised weight loss.
+SAFETY_FLOOR_KCAL_PLUS5: Final[int] = 1500
+SAFETY_FLOOR_KCAL_MINUS161: Final[int] = 1200
 
 #: Safety ceiling on the daily calorie target. An implausibly aggressive weight
 #: *gain* over a very short horizon would demand an enormous surplus; targets

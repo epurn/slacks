@@ -42,7 +42,7 @@ def _make_user_with_profile(
     *,
     height_m: float | None = 1.80,
     birth_year: int | None = 1996,
-    formula: MetabolicFormula = MetabolicFormula.MIFFLIN_ST_JEOR_MALE,
+    formula: MetabolicFormula = MetabolicFormula.MIFFLIN_ST_JEOR_PLUS_5,
 ) -> User:
     user = User()
     session.add(user)
