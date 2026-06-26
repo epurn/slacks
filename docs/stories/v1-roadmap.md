@@ -47,9 +47,10 @@ This is the initial story order for Fatty v1. Keep stories small enough for one 
 
 | ID | State | Lane | Story | Acceptance |
 | --- | --- | --- | --- | --- |
-| FTY-050 | candidate | mobile-core | Editable food/exercise items | User can correct calories, macros, servings, and exercise burn. |
-| FTY-051 | candidate | backend-core | Corrections audit | Edits create correction records instead of silently overwriting estimates. |
-| FTY-052 | candidate | backend-core | Saved foods and aliases | Corrected recurring foods can be saved and reused. |
+| FTY-051 | ready_with_notes | backend-core | [Corrections audit and edit endpoint](FTY-051-corrections-audit.md) | A field edit preserves the original estimate, updates the current value, and appends an immutable correction; editing servings rescales calories/macros. |
+| FTY-050 | ready_with_notes | mobile-core | [Editable food/exercise items](FTY-050-editable-items.md) | User can correct calories, macros, servings, and exercise burn from the Today timeline via FTY-051's endpoint. |
+| FTY-052 | ready_with_notes | backend-core | [Saved foods and aliases (backend)](FTY-052-saved-foods-aliases.md) | A corrected food can be explicitly saved with an alias and reused via a per-user normalized prefix typeahead search endpoint. |
+| FTY-053 | ready_with_notes | mobile-core | [Saved-food save action + typeahead suggestion bar](FTY-053-saved-food-typeahead.md) | "Save this food" persists a corrected food via FTY-052; typing surfaces prefix-matching saved foods in a suggestion bar, and tapping one applies it and skips the estimator. |
 
 ## Milestone 6: Evidence Inputs
 
