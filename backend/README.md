@@ -33,6 +33,16 @@ uv run pytest        # run the tests
   OpenAI-compatible, and an in-memory fake). Exposes a single
   `structured_completion(prompt, schema) -> validated object` capability; see
   [`docs/contracts/llm-provider.md`](../docs/contracts/llm-provider.md).
+- `app/db.py` — SQLAlchemy engine, session factory, and the request-scoped
+  `get_session` dependency.
+- `app/models/` — ORM models for the canonical identity/profile data model
+  (`users`, `auth_identities`, `user_profiles`); see
+  [`docs/contracts/identity-and-profile.md`](../docs/contracts/identity-and-profile.md).
+- `app/security/` — local-auth primitives: scrypt password hashing and
+  HMAC-signed bearer tokens.
+- `app/deps.py` — `get_current_user` auth dependency for protected routes.
+- `alembic/` + `alembic.ini` — versioned database migrations (the baseline
+  migration creates the identity tables).
 - `app/routers/` — thin HTTP boundary; handlers delegate to `app/services/`.
 - `app/services/` — domain behavior.
 - `app/schemas/` — Pydantic request/response models.
@@ -54,11 +64,31 @@ uv run pytest        # run the tests
   | `FATTY_HOST` | `127.0.0.1` | Bind address; deployments override to expose. |
   | `FATTY_PORT` | `8000` | Bind port (1–65535). |
   | `FATTY_REDIS_URL` | `redis://localhost:6379/0` | Celery broker + result backend. |
-  | `FATTY_DATABASE_URL` | `postgresql://fatty:fatty@localhost:5432/fatty` | Postgres DSN; reserved for the later database story (not consumed yet). |
+  | `FATTY_DATABASE_URL` | `postgresql://fatty:fatty@localhost:5432/fatty` | Postgres DSN for the identity/profile model and migrations. A bare `postgresql://` DSN binds to psycopg (v3). |
+  | `FATTY_AUTH_SECRET` | `dev-insecure-change-me` | HMAC signing secret for local-auth bearer tokens. Production refuses to start on the default. |
+  | `FATTY_AUTH_TOKEN_TTL_SECONDS` | `604800` | Bearer-token lifetime (7 days). |
 
   Invalid or out-of-range values fail fast at startup with a `ValidationError`.
   Under Docker Compose these point at the `redis` and `postgres` service
   hostnames; see the repo-root `docker-compose.yml` and `.env.example`.
+  `FATTY_AUTH_SECRET` is read from the environment only and is never logged.
+
+## Database and migrations
+
+Schema is owned by Alembic migrations (never `create_all` in production). The
+baseline migration creates `users`, `auth_identities`, and `user_profiles`.
+
+```sh
+uv run alembic upgrade head   # apply migrations to FATTY_DATABASE_URL
+uv run alembic downgrade -1   # roll back the most recent migration
+```
+
+The identity/profile model and the auth + profile APIs are documented as a
+contract in
+[`docs/contracts/identity-and-profile.md`](../docs/contracts/identity-and-profile.md).
+Authentication identities (and password hashes) live in `auth_identities`,
+separate from `users`; profiles enforce object-level authorization so a user can
+only read or write their own profile.
 
 - The LLM provider layer is configured from `FATTY_LLM_`-prefixed variables and
   documented as a separate contract; see
