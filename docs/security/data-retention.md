@@ -13,6 +13,7 @@ Retention defaults should minimize stored personal data while preserving user va
 - Raw OCR text: avoid long-term retention unless needed for evidence; prefer extracted facts plus source metadata.
 - Fetched web pages: do not store raw pages by default; store source URL, fetched timestamp, content hash, and extracted facts.
 - Estimation runs: store model/provider, schema version, tool names, source references, assumptions, validation errors, and sanitized traces.
+- Derived parse candidates (`derived_food_items`, `derived_exercise_items`) and `clarification_questions`: user-owned derived data from a log event; retained until the owning log event, user, or account is deleted (`ON DELETE CASCADE`), same as the food/exercise logs they derive from. They hold parsed names/portions and clarifying questions only — no raw prompts and no model output beyond the schema-validated, sanitized fields.
 - Logs: short operational retention; no secrets or unnecessary personal data.
 
 ## Deletion Requirements

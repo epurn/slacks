@@ -30,6 +30,8 @@ from app.estimator.pipeline import (
     NeedsClarification,
     Pipeline,
     StepError,
+    StubCalculateStep,
+    StubParseStep,
 )
 from app.estimator.processing import (
     EstimationEventNotFound,
@@ -39,6 +41,13 @@ from app.models.estimation import EstimationJob, EstimationRun
 from app.models.log_events import LogEvent
 
 RAW_TEXT = "150g rice and dal at 7pm"
+
+
+def _stub_pipeline() -> Pipeline:
+    """The FTY-040 stub pipeline, used here to exercise the worker state machine
+    independently of the real (provider-driven) FTY-042 parse step."""
+
+    return Pipeline([StubParseStep(), StubCalculateStep()])
 
 
 class _FailStep:
@@ -96,7 +105,9 @@ def _jobs_for(session: Session, event_id: uuid.UUID) -> list[EstimationJob]:
 def test_completed_end_to_end_drives_state_machine(client: TestClient, session: Session) -> None:
     user_id, event_id = _seed_event(client, "complete@example.com")
 
-    result = process_estimation(session, log_event_id=event_id, user_id=user_id)
+    result = process_estimation(
+        session, log_event_id=event_id, user_id=user_id, pipeline=_stub_pipeline()
+    )
 
     assert result.job_status is EstimationJobStatus.SUCCEEDED
     assert result.event_status is LogEventStatus.COMPLETED
@@ -115,8 +126,12 @@ def test_completed_end_to_end_drives_state_machine(client: TestClient, session: 
 def test_redelivery_is_idempotent(client: TestClient, session: Session) -> None:
     user_id, event_id = _seed_event(client, "idempotent@example.com")
 
-    first = process_estimation(session, log_event_id=event_id, user_id=user_id)
-    second = process_estimation(session, log_event_id=event_id, user_id=user_id)
+    first = process_estimation(
+        session, log_event_id=event_id, user_id=user_id, pipeline=_stub_pipeline()
+    )
+    second = process_estimation(
+        session, log_event_id=event_id, user_id=user_id, pipeline=_stub_pipeline()
+    )
 
     # The second delivery is a no-op: same terminal job, no new run, no new run id.
     assert first.job_status is EstimationJobStatus.SUCCEEDED
@@ -199,7 +214,7 @@ def test_worker_enforces_ownership_fails_closed(client: TestClient, session: Ses
 def test_run_record_is_sanitized(client: TestClient, session: Session) -> None:
     user_id, event_id = _seed_event(client, "sanitized@example.com")
 
-    process_estimation(session, log_event_id=event_id, user_id=user_id)
+    process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=_stub_pipeline())
 
     run = session.scalars(select(EstimationRun).where(EstimationRun.log_event_id == event_id)).one()
     # Reproducibility metadata is present; raw user text never is.

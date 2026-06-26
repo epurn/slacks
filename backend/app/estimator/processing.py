@@ -44,7 +44,14 @@ from app.estimator.pipeline import (
     EstimationContext,
     Pipeline,
     PipelineOutcome,
+    PipelineResult,
     default_pipeline,
+)
+from app.llm import build_provider, load_llm_settings
+from app.models.derived import (
+    ClarificationQuestion,
+    DerivedExerciseItem,
+    DerivedFoodItem,
 )
 from app.models.estimation import EstimationJob, EstimationRun
 from app.models.log_events import LogEvent
@@ -161,7 +168,7 @@ def process_estimation(
     event is missing or not owned by ``user_id``.
     """
 
-    pipeline = pipeline or default_pipeline()
+    pipeline = pipeline or default_pipeline(build_provider(load_llm_settings()))
 
     # Enforce ownership before any write: a missing or cross-user event fails
     # closed and no job row is created on its behalf.
@@ -225,25 +232,26 @@ def process_estimation(
     run.validation_errors = list(context.validation_errors)
     run.trace = list(context.trace)
 
-    return _finalize(session, job, event, run, result)
+    return _finalize(session, job, event, run, result, context)
 
 
-def _run_pipeline(
-    pipeline: Pipeline, context: EstimationContext
-) -> tuple[PipelineOutcome, str | None]:
+def _run_pipeline(pipeline: Pipeline, context: EstimationContext) -> PipelineResult:
     """Run the pipeline, converting an unexpected exception into a failed result.
 
     Typed step signals are handled inside :meth:`Pipeline.run`; this catch-all is
-    a safety net so a bug in a step is recorded as a retryable failure (with only
+    a safety net so a bug in a step is recorded as a *retryable* failure (with only
     the exception *type* name, never its message, to avoid leaking user text)
     rather than crashing the worker.
     """
 
     try:
-        outcome = pipeline.run(context)
-        return outcome.outcome, outcome.error
+        return pipeline.run(context)
     except Exception as exc:  # noqa: BLE001 (defensive worker boundary)
-        return PipelineOutcome.FAILED, f"unexpected step error: {type(exc).__name__}"
+        return PipelineResult(
+            PipelineOutcome.FAILED,
+            f"unexpected step error: {type(exc).__name__}",
+            retryable=True,
+        )
 
 
 def _finalize(
@@ -251,13 +259,21 @@ def _finalize(
     job: EstimationJob,
     event: LogEvent,
     run: EstimationRun,
-    result: tuple[PipelineOutcome, str | None],
+    result: PipelineResult,
+    context: EstimationContext,
 ) -> ProcessResult:
-    """Apply the pipeline outcome to the run, job, and event, and commit."""
+    """Apply the pipeline outcome to the run, job, and event, and commit.
 
-    outcome, error = result
+    On a successful or needs-clarification outcome the parse step's structured
+    products (candidates / questions accumulated on ``context``) are persisted in
+    the same transaction as the terminal status. A failed outcome persists no
+    derived data — the step failed closed.
+    """
+
+    outcome = result.outcome
 
     if outcome is PipelineOutcome.COMPLETED:
+        _persist_candidates(session, run, context)
         run.status = EstimationRunStatus.COMPLETED
         job.status = EstimationJobStatus.SUCCEEDED
         session.add_all([run, job])
@@ -266,6 +282,7 @@ def _finalize(
         return _result(job, event, run, should_retry=False)
 
     if outcome is PipelineOutcome.NEEDS_CLARIFICATION:
+        _persist_clarification_questions(session, run, context)
         run.status = EstimationRunStatus.NEEDS_CLARIFICATION
         job.status = EstimationJobStatus.NEEDS_CLARIFICATION
         session.add_all([run, job])
@@ -273,10 +290,12 @@ def _finalize(
         transition_event(session, event, LogEventStatus.NEEDS_CLARIFICATION)
         return _result(job, event, run, should_retry=False)
 
-    # Failed.
+    # Failed. A deterministic (non-retryable) failure or an exhausted retry bound
+    # is terminal; otherwise the worker reports a retry is due.
     run.status = EstimationRunStatus.FAILED
-    run.error = error
-    if job.attempts >= job.max_attempts:
+    run.error = result.error
+    terminal = not result.retryable or job.attempts >= job.max_attempts
+    if terminal:
         job.status = EstimationJobStatus.FAILED
         session.add_all([run, job])
         session.commit()
@@ -288,6 +307,55 @@ def _finalize(
     session.add_all([run, job])
     session.commit()
     return _result(job, event, run, should_retry=True)
+
+
+def _persist_candidates(session: Session, run: EstimationRun, context: EstimationContext) -> None:
+    """Persist the parsed food/exercise candidates as user-owned unresolved rows.
+
+    Candidate names and portions are schema-validated *data* written through
+    parameterized ORM inserts — never executed. Ownership (``user_id``) and the
+    owning ``log_event_id`` are carried on every row for object-level
+    authorization and retention.
+    """
+
+    for draft in context.food_candidates:
+        session.add(
+            DerivedFoodItem(
+                log_event_id=run.log_event_id,
+                user_id=run.user_id,
+                name=draft.name,
+                quantity_text=draft.quantity_text,
+                unit=draft.unit,
+                amount=draft.amount,
+            )
+        )
+    for draft in context.exercise_candidates:
+        session.add(
+            DerivedExerciseItem(
+                log_event_id=run.log_event_id,
+                user_id=run.user_id,
+                name=draft.name,
+                quantity_text=draft.quantity_text,
+                unit=draft.unit,
+                amount=draft.amount,
+            )
+        )
+
+
+def _persist_clarification_questions(
+    session: Session, run: EstimationRun, context: EstimationContext
+) -> None:
+    """Persist the parse step's clarification questions, unanswered and ordered."""
+
+    for position, question in enumerate(context.clarification_questions):
+        session.add(
+            ClarificationQuestion(
+                log_event_id=run.log_event_id,
+                user_id=run.user_id,
+                question_text=question,
+                position=position,
+            )
+        )
 
 
 def _result(

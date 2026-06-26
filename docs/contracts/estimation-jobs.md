@@ -75,15 +75,21 @@ worker trust boundary (`extra="forbid"`).
 A step carries a stable `name` and a `run(context)` that mutates an
 `EstimationContext` (appending sanitized `tool_names`, `source_refs`,
 `assumptions`, `validation_errors`, and `trace` entries; setting
-`provider` / `model` / `schema_version`). A step signals a non-success outcome by
-raising:
+`provider` / `model` / `schema_version`; and, for the parse step, accumulating
+`food_candidates` / `exercise_candidates` / `clarification_questions` the worker
+persists). A step signals a non-success outcome by raising:
 
 - `NeedsClarification(reason)` — terminal, **not** retried (only the user can
   resolve ambiguous input);
-- `StepError(message)` — a retryable transient failure.
+- `StepFailed(reason)` — terminal, **not** retried: a deterministic failure
+  (empty/garbage/unparseable input, or model output that failed schema validation)
+  where retrying the same input cannot help. The worker fails the event
+  immediately rather than burning retries (added in FTY-042);
+- `StepError(message)` — a *retryable* transient failure.
 
-The v1 `default_pipeline()` is two stub steps (`stub_parse`, `stub_calculate`)
-that complete without doing real work.
+`default_pipeline(provider)` wires the real FTY-042 parse step ahead of the
+still-stubbed `stub_calculate`. (FTY-040 shipped two stub steps; FTY-042 replaced
+`stub_parse` with the provider-driven parse step — see `parse-candidates.md`.)
 
 ## Outputs / State machine
 
@@ -94,8 +100,9 @@ The worker reuses the FTY-030 `LEGAL_TRANSITIONS` map (it does not redefine it):
 | (claimed) | `running` | `running` | `pending → processing` |
 | completed | `completed` | `succeeded` | `processing → completed` |
 | needs clarification | `needs_clarification` | `needs_clarification` | `processing → needs_clarification` |
-| failed, retries remain | `failed` | `running` | _(stays `processing`)_ |
-| failed, bound reached | `failed` | `failed` | `processing → failed` |
+| failed (retryable), retries remain | `failed` | `running` | _(stays `processing`)_ |
+| failed (retryable), bound reached | `failed` | `failed` | `processing → failed` |
+| failed (deterministic, `StepFailed`) | `failed` | `failed` | `processing → failed` (immediate, no retry) |
 
 ## Retry policy
 
@@ -148,8 +155,9 @@ The worker reuses the FTY-030 `LEGAL_TRANSITIONS` map (it does not redefine it):
 | --- | --- |
 | Redelivered task for a terminal job | No-op; no new run, no re-advance. |
 | Event missing or owned by another user | `EstimationEventNotFound` (fail closed); event untouched. |
-| Transient step failure, retries remain | Run `failed`; job stays `running`; task retried with backoff. |
-| Transient step failure, bound reached | Run + job + event `failed`. |
+| Transient step failure (`StepError`), retries remain | Run `failed`; job stays `running`; task retried with backoff. |
+| Transient step failure (`StepError`), bound reached | Run + job + event `failed`. |
+| Deterministic step failure (`StepFailed`) | Run + job + event `failed` immediately (no retry). |
 | Ambiguous input (`NeedsClarification`) | Run + job + event `needs_clarification` (terminal). |
 
 ## Examples
@@ -169,5 +177,8 @@ POST /api/users/{uid}/log-events  →  201 pending event
   by an apply/rollback test against a throwaway database.
 - Additive: no prior table or column is changed. It extends the FTY-030 create
   path (enqueue) and reuses the FTY-030 state-machine map.
-- FTY-042/043/044 implement real pipeline steps against the step interface
-  without changing the worker, schema, or retry contract.
+- FTY-042/043/044 implement real pipeline steps against the step interface. The
+  worker's claim → run → transition and idempotency/ownership contracts are
+  unchanged; FTY-042 additively extended the step-signal vocabulary with the
+  terminal `StepFailed` (deterministic, non-retryable) outcome and persists its
+  candidates/questions to their own tables (see `parse-candidates.md`).

@@ -25,6 +25,7 @@ from app.estimator.processing import (
     RETRY_BACKOFF_MAX_SECONDS,
     retry_countdown,
 )
+from app.llm.providers.fake import FakeProvider
 
 
 def _context(raw_text: str = "two eggs") -> EstimationContext:
@@ -57,10 +58,10 @@ class _LeakStep:
         raise RuntimeError(f"crashed handling {self._raw}")
 
 
-def test_default_pipeline_completes_and_records_stub_steps() -> None:
+def test_stub_pipeline_completes_and_records_stub_steps() -> None:
     context = _context()
 
-    result = default_pipeline().run(context)
+    result = Pipeline([StubParseStep(), StubCalculateStep()]).run(context)
 
     assert result.outcome is PipelineOutcome.COMPLETED
     assert result.error is None
@@ -69,6 +70,16 @@ def test_default_pipeline_completes_and_records_stub_steps() -> None:
         StubParseStep().name,
         StubCalculateStep().name,
     ]
+
+
+def test_default_pipeline_uses_real_parse_then_stub_calculate() -> None:
+    # The v1 default wires the real FTY-042 parse step (provider-driven) ahead of
+    # the still-stubbed calculation step. Composition only — no provider call.
+    provider = FakeProvider()
+
+    pipeline = default_pipeline(provider)
+
+    assert [step.name for step in pipeline.steps] == ["parse", StubCalculateStep().name]
 
 
 def test_needs_clarification_is_terminal_outcome() -> None:
@@ -97,7 +108,7 @@ def test_pipeline_never_copies_raw_text_into_trace() -> None:
     private_text = "150g rice and dal at 7pm with my partner"
     context = _context(raw_text=private_text)
 
-    default_pipeline().run(context)
+    Pipeline([StubParseStep(), StubCalculateStep()]).run(context)
 
     serialized = str(context.trace)
     assert private_text not in serialized

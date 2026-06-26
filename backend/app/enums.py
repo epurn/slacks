@@ -122,6 +122,33 @@ class EstimationRunStatus(StrEnum):
     NEEDS_CLARIFICATION = "needs_clarification"
 
 
+class CandidateType(StrEnum):
+    """Kind of a parsed estimation candidate (FTY-042).
+
+    The structured parse step classifies each extracted item as :attr:`FOOD` or
+    :attr:`EXERCISE`. The two kinds persist into separate derived-item tables, so
+    this discriminator is the shared vocabulary for both the LLM output schema and
+    the routing that splits candidates into ``derived_food_items`` /
+    ``derived_exercise_items``.
+    """
+
+    FOOD = "food"
+    EXERCISE = "exercise"
+
+
+class DerivedItemStatus(StrEnum):
+    """Resolution status of a derived food/exercise item (FTY-042).
+
+    A candidate is persisted :attr:`UNRESOLVED` — parsed from the log text but not
+    yet costed. The calculation steps (FTY-043 exercise burn, FTY-044 food
+    resolution) later attach calories/macros and advance it to :attr:`RESOLVED`.
+    FTY-042 only ever writes :attr:`UNRESOLVED`.
+    """
+
+    UNRESOLVED = "unresolved"
+    RESOLVED = "resolved"
+
+
 #: Authentication provider for an :class:`~app.models.identity.AuthIdentity`.
 #: Only the local email+password path exists in v1; hosted providers (e.g. Sign
 #: in with Apple) are deferred to a later story but modelled as separate
