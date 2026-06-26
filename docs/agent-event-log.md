@@ -146,6 +146,12 @@ for that cycle, so an author never starts a build it cannot complete.
 - `review_posted` — review submitted. `fields`: `pr`, `decision`.
 - `status_set` — commit status set. `fields`: `pr`, `context`, `state`.
 - `auto_merge_enabled` — native auto-merge turned on. `fields`: `pr`.
+- `branch_updated` — an approved PR was `BEHIND` its base, so the reviewer updated
+  its branch (`gh pr update-branch`) to bring it current. Branch protection
+  requires up-to-date branches and GitHub's auto-merge does not auto-update a
+  behind branch, so without this every merge would leave the next PR stalled
+  `BEHIND` and wedge its lanes. `BEHIND` is clean-but-stale (not a conflict, which
+  is `dirty`), so the update merges the base in with no conflict. `fields`: `pr`.
 - `review_skip` — head already reviewed / draft. `fields`: `pr`, `reason`.
 - `review_usage` — token/cost telemetry for one Claude review. `fields`: `pr`,
   `model`, `input_tokens`, `output_tokens`, `cache_creation_input_tokens`,
