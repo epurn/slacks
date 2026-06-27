@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from app.estimator.food_step import BarcodeResolver, FoodResolver
     from app.estimator.label_step import LabelInput
+    from app.estimator.official_step import OfficialSourceResolveStep
     from app.llm.base import Provider
 
 
@@ -111,6 +112,12 @@ class CandidateDraft:
     #: Facts barcode source over generic USDA lookup (FTY-060). ``None`` for a
     #: plain generic-food candidate.
     barcode: str | None = None
+    #: Restaurant / manufacturer / packaged-product brand when the parse step
+    #: classified this as a *named* product (FTY-062). Present ⇒ a USDA/OFF miss
+    #: routes the candidate to the official-source resolver (search + hardened fetch,
+    #: then a model-prior fallback) instead of stopping at ``needs_clarification``.
+    #: ``None`` for a generic food.
+    brand: str | None = None
 
 
 @dataclass(frozen=True)
@@ -140,12 +147,17 @@ class ResolvedFoodItem:
 
     Carries the parsed shape (``name`` and raw portion phrase plus the best-effort
     ``unit``/``amount``) alongside the deterministic resolution: the portion ``grams``
-    and the canonical ``calories``/macros computed from a trusted source's per-100g
-    facts. It also carries the provenance the worker writes as an ``evidence_sources``
-    row — the cached ``product_id``, the source classification/reference, the content
-    hash, the fetch time, and the per-100g facts snapshot. Like :class:`CandidateDraft`
-    it is product data persisted to its own user-owned table, never copied into the
-    sanitized run ``trace``.
+    and the canonical ``calories``/macros computed from a source's per-100g facts. It
+    also carries the provenance the worker writes as an ``evidence_sources`` row — the
+    source classification/reference, the content hash, the fetch time, and the
+    per-100g facts snapshot. ``product_id`` links the global ``products`` cache row for
+    a database source (USDA FDC / Open Food Facts) and is ``None`` for a source with no
+    global cache row — an official-source page (FTY-062) or a model-prior estimate
+    (FTY-062), which are per-resolution, not shared. ``assumptions`` records the
+    documented assumptions behind the number (e.g. the model-prior fallback reason),
+    persisted on the evidence row and surfaced so the entry stays user-editable. Like
+    :class:`CandidateDraft` it is product data persisted to its own user-owned table,
+    never copied into the sanitized run ``trace``.
     """
 
     name: str
@@ -157,7 +169,7 @@ class ResolvedFoodItem:
     protein_g: float
     carbs_g: float
     fat_g: float
-    product_id: uuid.UUID
+    product_id: uuid.UUID | None
     source_type: str
     source_ref: str
     content_hash: str
@@ -166,6 +178,9 @@ class ResolvedFoodItem:
     protein_per_100g: float
     carbs_per_100g: float
     fat_per_100g: float
+    #: Documented assumptions behind this resolution (e.g. the model-prior fallback
+    #: reason). Empty for a deterministic database source.
+    assumptions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -236,6 +251,16 @@ class EstimationContext:
     trace: list[dict[str, Any]] = field(default_factory=list)
     food_candidates: list[CandidateDraft] = field(default_factory=list)
     exercise_candidates: list[CandidateDraft] = field(default_factory=list)
+    #: Branded food candidates the USDA/OFF food step could not resolve and handed
+    #: to the official-source resolver (FTY-062). The official step consumes this
+    #: list (clearing it once processed); a candidate left here when no official step
+    #: runs is persisted ``unresolved`` like any other leftover.
+    pending_official_candidates: list[CandidateDraft] = field(default_factory=list)
+    #: Food candidates the food step saw but left ``unresolved`` (no applicable
+    #: enabled source, and not official-source eligible). The worker persists these
+    #: as ``unresolved`` rows alongside any resolved items, so a mixed batch never
+    #: silently drops a candidate.
+    unresolved_food_candidates: list[CandidateDraft] = field(default_factory=list)
     resolved_exercise_items: list[ResolvedExerciseItem] = field(default_factory=list)
     resolved_food_items: list[ResolvedFoodItem] = field(default_factory=list)
     resolved_label_items: list[ResolvedLabelItem] = field(default_factory=list)
@@ -345,6 +370,7 @@ def default_pipeline(
     *,
     food_resolver: FoodResolver | None = None,
     barcode_resolver: BarcodeResolver | None = None,
+    official_step: OfficialSourceResolveStep | None = None,
 ) -> Pipeline:
     """Build the v1 estimation pipeline: NL parse, exercise calc, food resolution.
 
@@ -355,9 +381,16 @@ def default_pipeline(
     Open Food Facts barcode source over generic USDA lookup. The food step is
     appended only when a ``food_resolver`` is supplied (it needs a database session
     for the product cache and evidence writes), which the worker always provides; an
-    optional ``barcode_resolver`` adds the OFF source. A resolver-less build (e.g.
-    unit tests of composition) keeps food candidates unresolved, the pre-FTY-044
-    behavior. The worker contract (claim → run → transition) is unchanged.
+    optional ``barcode_resolver`` adds the OFF source.
+
+    ``official_step`` (FTY-062), when supplied, runs **after** the food step as the
+    last resort before model-prior: it picks up the branded candidates the food step
+    deferred (a USDA/OFF miss for a named restaurant/manufacturer/packaged product),
+    resolves them from official sources via search + hardened fetch, and otherwise
+    falls through to a model-prior estimate that carries an explicit source status.
+    A resolver-less build (e.g. unit tests of composition) keeps food candidates
+    unresolved, the pre-FTY-044 behavior. The worker contract (claim → run →
+    transition) is unchanged.
     """
 
     # Imported here rather than at module top to avoid a cycle: the steps import the
@@ -369,6 +402,10 @@ def default_pipeline(
     steps: list[EstimationStep] = [ParseStep(provider), ExerciseCalculateStep()]
     if food_resolver is not None:
         steps.append(FoodResolveStep(food_resolver, barcode_resolver=barcode_resolver))
+        # The official-source resolver only acts on candidates the food step deferred,
+        # so it is wired in only alongside the food step.
+        if official_step is not None:
+            steps.append(official_step)
     return Pipeline(steps)
 
 

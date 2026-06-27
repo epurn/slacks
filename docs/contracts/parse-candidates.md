@@ -51,7 +51,17 @@ object — smuggled keys are rejected, not ignored):
 
 `ParsedCandidate`: `type` (`food` \| `exercise`), `name` (1–200 chars),
 `quantity_text` (raw portion phrase, ≤ 120), optional `unit` (≤ 32) and `amount`
-(≥ 0). **No energy** — calories/macros are resolved downstream (FTY-043/044).
+(≥ 0), optional `barcode` (digits, ≤ 14; FTY-060) and `brand` (≤ 120; FTY-062).
+**No energy** — calories/macros are resolved downstream (FTY-043/044).
+
+`brand` (additive, FTY-062) names a **specific** restaurant / manufacturer /
+packaged-product brand when the item is a *named* product (`"Big Mac"` →
+`"McDonald's"`), and is left empty for a generic food (`"white rice"`). It is the
+signal the food step uses to route an item USDA/OFF cannot resolve to the
+official-source resolver (search + hardened fetch, then a model-prior fallback)
+instead of stopping at `needs_clarification` — see `food-resolution.md`
+(**Official-Source Resolution**). The model never invents a brand the user did not
+name; like every field it is stored as data, never interpreted.
 
 String length and list count bounds cap an adversarial or runaway reply.
 
@@ -158,3 +168,8 @@ event.raw_text = "two eggs and a 30 min run"
   with energy/macros; FTY-043 (exercise burn) is specified in `exercise-burn.md`.
   The later clarification story consumes the persisted questions and adds the answer
   flow.
+- FTY-060 (`barcode`) and FTY-062 (`brand`) add optional, length-bounded
+  `ParsedCandidate` fields. Both are additive and backward-compatible: a reply that
+  omits them validates unchanged (they default to `null`), and they are stored as data
+  only. `brand` drives official-source routing (`food-resolution.md`); it adds no
+  persistence column of its own (it is consumed at resolution time).

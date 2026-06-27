@@ -15,7 +15,16 @@ from app.db import create_db_engine, create_session_factory
 from app.estimator.enqueue import celery_enqueuer
 from app.estimator.label_upload import synchronous_label_processor
 from app.logging import configure_logging
-from app.routers import auth, corrections, daily_summary, health, log_events, profile, saved_foods
+from app.routers import (
+    auth,
+    corrections,
+    daily_summary,
+    health,
+    log_events,
+    profile,
+    saved_foods,
+    weight_entries,
+)
 from app.settings import Settings, load_settings
 
 logger = logging.getLogger(__name__)
@@ -56,6 +65,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
     app.include_router(corrections.router)
     app.include_router(saved_foods.router)
     app.include_router(daily_summary.router)
+    app.include_router(weight_entries.router)
 
     # No secrets/personal data here: only the non-sensitive environment label.
     logger.info("backend application initialized", extra={"environment": settings.environment})

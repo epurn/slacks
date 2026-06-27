@@ -75,6 +75,10 @@ food and exercise items.
 phrase in quantity_text; only fill unit/amount when you are confident.
 - Only set barcode when the user explicitly provided a numeric UPC/EAN barcode; \
 never invent or guess one.
+- Set brand only for a specific branded/named product — a restaurant item, a \
+manufacturer product, or a named packaged food (e.g. name "Big Mac" brand \
+"McDonald's"). Leave brand empty for a generic food (e.g. "white rice", "an \
+apple"). Never invent a brand the user did not name.
 - Do not invent calories, macros, or energy values — later steps resolve those.
 - If the entry clearly logs food/exercise but is too ambiguous to extract \
 confidently, set disposition "needs_clarification" and provide concise \
@@ -169,6 +173,7 @@ def _to_draft(item: ParsedCandidate) -> CandidateDraft:
         unit=item.unit,
         amount=item.amount,
         barcode=item.barcode,
+        brand=item.brand,
     )
 
 

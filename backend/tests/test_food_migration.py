@@ -88,6 +88,25 @@ def test_products_barcode_key_applies_and_rolls_back(tmp_path: Path) -> None:
         engine.dispose()
 
 
+def test_evidence_assumptions_applies_and_rolls_back(tmp_path: Path) -> None:
+    # FTY-062: the additive ``assumptions`` column on evidence_sources (the
+    # model-prior fallback reason) applies and rolls back, leaving the prior
+    # evidence_sources schema intact.
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'assumptions.db'}")
+    try:
+        upgrade(engine, "head")
+        columns = {c["name"] for c in inspect(engine).get_columns("evidence_sources")}
+        assert "assumptions" in columns
+
+        downgrade(engine, "0011")
+        rolled_back = {c["name"] for c in inspect(engine).get_columns("evidence_sources")}
+        assert "assumptions" not in rolled_back
+        # The evidence_sources table itself survives the 0012 rollback.
+        assert "evidence_sources" in set(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
+
+
 def test_evidence_sources_carries_user_ownership_and_cascades(tmp_path: Path) -> None:
     engine = create_db_engine(f"sqlite:///{tmp_path / 'evidence.db'}")
     try:

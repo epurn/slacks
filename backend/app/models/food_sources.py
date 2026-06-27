@@ -26,6 +26,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import (
+    JSON,
     DateTime,
     Float,
     ForeignKey,
@@ -89,11 +90,17 @@ class Product(Base):
 class EvidenceSource(Base):
     """User-owned provenance for one resolved derived food item.
 
-    Records which trusted source backed a user's food resolution, the content hash,
-    the fetch timestamp, and an immutable snapshot of the per-100g facts used — never
-    the raw page. ``user_id`` and ``log_event_id`` carry object-level ownership with
+    Records which source backed a user's food resolution, the content hash, the fetch
+    timestamp, and an immutable snapshot of the per-100g facts used — never the raw
+    page. ``user_id`` and ``log_event_id`` carry object-level ownership with
     ``ON DELETE CASCADE``; ``product_id`` links to the global cache row and is
     ``SET NULL`` so clearing the cache never deletes a user's evidence.
+
+    For an official-source page (FTY-062) ``source_ref`` is ``official_source:<url>``
+    (the URL only — never the raw page) and ``product_id`` is ``None`` (no global cache
+    row). For a model-prior fallback ``source_type`` is ``model_prior`` and
+    ``assumptions`` records why the fallback was used, so the entry surfaces an explicit
+    source status and stays user-editable.
     """
 
     __tablename__ = "evidence_sources"
@@ -128,6 +135,10 @@ class EvidenceSource(Base):
     protein_per_100g: Mapped[float] = mapped_column(Float, nullable=False)
     carbs_per_100g: Mapped[float] = mapped_column(Float, nullable=False)
     fat_per_100g: Mapped[float] = mapped_column(Float, nullable=False)
+    #: Documented assumptions behind this resolution (FTY-062): the model-prior
+    #: fallback reason, density/serving assumptions. ``None`` for a deterministic
+    #: database source (USDA/OFF) that needs none. Never raw user text or page content.
+    assumptions: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
