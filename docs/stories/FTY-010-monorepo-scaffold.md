@@ -1,6 +1,6 @@
 ---
 id: FTY-010
-state: ready_with_notes
+state: merged
 primary_lane: contracts
 touched_lanes:
   - backend-core

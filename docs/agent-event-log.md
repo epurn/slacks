@@ -68,14 +68,22 @@ calls. The service-level files are append-only across the process lifetime.
   file's front-matter `state:`. Only the actionable direction (a story that
   looks ready in its file but is not promoted in the table — a starvation risk)
   is `level: warn`; the benign post-merge direction (table merged, file not yet)
-  is `level: debug` since the file is reconciled separately. `fields`:
-  `story_id`, `table_state`, `file_state`.
+  is `level: debug` since `story_state_reconciled` converges the file back to
+  `merged` on the same poll. `fields`: `story_id`, `table_state`, `file_state`.
 - `story_merged` — the steward git-confirmed a story's branch merged and
   recorded it in its **own run-state** (`<run_dir>/merged-stories.json`), NOT in
   the fatty repo. `info`. `fields`: `story_id`. The fatty checkout is left
   pristine so `health.sync_base` can fast-forward it; the steward overlays these
   ids as `merged` when routing each cycle, so a merged story is never
   re-assigned even if the roadmap still lists it as ready.
+- `story_state_reconciled` — the steward wrote `merged` back into the roadmap
+  table cell and the story file's front-matter `state:` for stories it already
+  treats as merged (table-merged ∪ git-confirmed run-state), so the
+  human-readable roadmap never lags the routing overlay. `info`. `fields`:
+  `story_ids`. Idempotent — a steady poll where everything already reads
+  `merged` emits nothing. Writes only the command-centre stories repo, never the
+  public fatty checkout, and never auto-commits (the command-centre repo is
+  committed by hand). Disable with `FATTY_STEWARD_RECONCILE_STORY_STATE=0`.
 - `prune_closed_pr` — a `PR-<n>` fix-job's PR is no longer open, so its run-state
   (`<run_dir>/PR-<n>.json` + `.log`) and worktree were cleaned up. `info`.
   `fields`: `pr`. Story prune (`prune_merged_branch`) only covers roadmap

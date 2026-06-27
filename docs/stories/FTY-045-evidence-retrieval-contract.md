@@ -1,6 +1,6 @@
 ---
 id: FTY-045
-state: ready_with_notes
+state: merged
 primary_lane: contracts
 touched_lanes:
   - estimator

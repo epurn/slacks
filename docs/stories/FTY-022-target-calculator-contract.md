@@ -1,6 +1,6 @@
 ---
 id: FTY-022
-state: ready_with_notes
+state: merged
 primary_lane: estimator
 touched_lanes:
   - contracts

@@ -1,6 +1,6 @@
 ---
 id: FTY-011
-state: ready_with_notes
+state: merged
 primary_lane: infra
 touched_lanes:
   - backend-core
