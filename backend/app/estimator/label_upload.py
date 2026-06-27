@@ -52,6 +52,13 @@ def synchronous_label_processor(
     Delegates to :func:`process_estimation`, which selects the label pipeline when
     a ``label_upload`` is supplied, applies discard-by-default retention (FTY-077),
     and advances the event to its terminal status — all in the caller's session.
+
+    ``max_attempts=1`` forces a single attempt: the image lives only in this
+    request and is never enqueued, so there is no scheduler to honor a retry. A
+    transient (``retryable``) provider error must therefore resolve to terminal
+    ``failed`` here rather than leaving the event stuck in ``processing`` with a
+    ``should_retry`` nothing will ever act on. The client can retry by uploading
+    again.
     """
 
     process_estimation(
@@ -59,6 +66,7 @@ def synchronous_label_processor(
         log_event_id=log_event_id,
         user_id=user_id,
         label_upload=label_upload,
+        max_attempts=1,
     )
 
 

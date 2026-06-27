@@ -31,10 +31,11 @@ from sqlalchemy.orm import Session
 
 from app.db import create_session_factory
 from app.enums import LogEventStatus
+from app.estimator import processing
 from app.estimator.label_step import LabelInput, LabelResolveStep
 from app.estimator.pipeline import Pipeline
 from app.estimator.processing import process_estimation
-from app.llm.errors import LLMError
+from app.llm.errors import LLMError, LLMTransientError
 from app.llm.providers.fake import FakeProvider
 from app.models.attachments import LogAttachment
 from app.models.derived import DerivedFoodItem
@@ -220,6 +221,35 @@ def test_unauthenticated_upload_is_rejected(client: TestClient) -> None:
     )
 
     assert response.status_code == 401
+
+
+def test_transient_provider_error_resolves_to_a_terminal_failed_event(
+    client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A transient vision-provider error must not leave the event stuck ``processing``.
+
+    The synchronous seam has no scheduler to honor a retry — the image lives only
+    in-request and is never enqueued — so the real ``synchronous_label_processor``
+    runs a single attempt (``max_attempts=1``): an exhausted retryable failure
+    becomes terminal ``failed`` rather than a dead-end ``processing`` the mobile
+    client (FTY-032 polling) would poll forever. The client retries by re-uploading.
+
+    Drives the production processor (installed by ``create_app``) rather than the
+    test double, but makes the vision provider it builds raise a transient error.
+    """
+
+    fake = FakeProvider(responses=[LLMTransientError("boom")], supports_vision=True)
+    monkeypatch.setattr(processing, "load_llm_settings", lambda: None)
+    monkeypatch.setattr(processing, "build_provider", lambda _settings: fake)
+    user_id, auth = _register(client, "label-upload-transient@example.com")
+
+    response = _upload(client, user_id, auth)
+
+    assert response.status_code == 201
+    assert response.json()["status"] == LogEventStatus.FAILED.value
+    # A failed extraction derives no food, and the image is discarded by default.
+    assert session.scalars(select(DerivedFoodItem)).all() == []
+    assert session.scalars(select(LogAttachment)).all() == []
 
 
 def test_synchronous_upload_never_enqueues_a_job(

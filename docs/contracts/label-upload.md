@@ -53,7 +53,11 @@ this product" case.
 A `LogEventDTO` (FTY-030) at status `201 Created`. Because extraction is
 synchronous, the returned event is already at its **post-extraction** status:
 `completed` (legible panel), `needs_clarification` (unreadable / unresolvable), or
-`failed` (not a label / invalid image). The event's `raw_text` is a fixed,
+`failed` (not a label / invalid image, **or a transient provider error**). The
+in-request seam runs a single attempt with no scheduler to honor a retry, so a
+transient (retryable) vision-provider failure resolves to terminal `failed`
+rather than a dead-end `processing`; the client retries by uploading again. The
+event's `raw_text` is a fixed,
 content-free marker (`"Nutrition label photo"`) — a label carries no
 natural-language text; the food facts come from the extracted panel and are
 persisted by the FTY-061 pipeline (a `derived_food_items` row + a `user_label`
