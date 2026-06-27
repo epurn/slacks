@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import re
 import sys
 
 
@@ -38,18 +37,18 @@ REQUIRED_FILES = [
     "docs/operations/main-branch-protection.json",
     "docs/review-policy.md",
     "docs/review-checklist.md",
-    "docs/stories/README.md",
-    "docs/stories/v1-roadmap.md",
-    "docs/stories/FTY-010-monorepo-scaffold.md",
     "docs/adr/0002-product-architecture.md",
 ]
 
+# Stories live in the private command-centre repo, not here — the steward embeds
+# each spec into the author assignment. Forbid the directory so they never leak
+# back into the public app repo.
 FORBIDDEN_PATHS = [
     "agents",
     "scripts/steward-router.py",
     "docs/operations/author-agent-loop.md",
     "docs/operations/story-steward-orchestrator.md",
-    "docs/stories/FTY-001-author-agent-loop.md",
+    "docs/stories",
     "docs/adr/0001-agent-operating-system.md",
 ]
 
@@ -61,47 +60,6 @@ def fail(message: str) -> None:
 
 def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
-
-
-def require_terms(path: str, terms: list[str]) -> None:
-    content = read(path)
-    for term in terms:
-        if term not in content:
-            fail(f"{path} must include {term!r}")
-
-
-def validate_story(path: str) -> None:
-    required_headings = [
-        "## State",
-        "## Lane",
-        "## Dependencies",
-        "## Outcome",
-        "## Scope",
-        "## Non-Goals",
-        "## Contracts",
-        "## Security / Privacy",
-        "## Acceptance Criteria",
-        "## Verification",
-    ]
-    require_terms(path, required_headings)
-
-
-def validate_ready_story_metadata(path: str) -> None:
-    required_terms = [
-        "---",
-        "id:",
-        "state:",
-        "primary_lane:",
-        "touched_lanes:",
-        "risk:",
-        "tags:",
-        "approved_dependencies:",
-        "requires_context:",
-        "review_focus:",
-        "autonomous:",
-        "## Readiness Sanity Pass",
-    ]
-    require_terms(path, required_terms)
 
 
 def main() -> None:
@@ -158,23 +116,6 @@ def main() -> None:
         if term not in branching:
             fail(f"branching docs must document {term!r}")
 
-    roadmap = read("docs/stories/v1-roadmap.md")
-    for term in ["FTY-010", "ready_with_notes", "Milestone 1", "Lane", "backend-core", "mobile-core", "estimator"]:
-        if term not in roadmap:
-            fail(f"v1 roadmap must include {term!r}")
-    if "author-agent" in roadmap or "story steward" in roadmap.lower():
-        fail("public roadmap must not include private agent operations")
-
-    ready_rows = [line for line in roadmap.splitlines() if re.search(r"\|\s*FTY-\d+\s*\|\s*ready", line)]
-    for row in ready_rows:
-        match = re.search(r"\]\(([^)]+)\)", row)
-        if not match:
-            fail(f"ready roadmap row must link to a story file: {row}")
-        story_path = ROOT / "docs" / "stories" / match.group(1)
-        if not story_path.is_file():
-            fail(f"ready roadmap row links to missing story file: {match.group(1)}")
-        validate_ready_story_metadata(str(story_path.relative_to(ROOT)))
-
     review_policy = read("docs/review-policy.md")
     for term in ["reviewer-approved", "current PR head SHA", "other than the PR author"]:
         if term not in review_policy:
@@ -196,8 +137,6 @@ def main() -> None:
         fail("branch protection template must not require native latest-push approval")
     if not protection.get("required_conversation_resolution"):
         fail("branch protection template must require conversation resolution")
-
-    validate_story("docs/stories/FTY-010-monorepo-scaffold.md")
 
     print("governance checks passed")
 
