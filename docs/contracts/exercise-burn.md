@@ -181,4 +181,9 @@ profile.weight_kg = 70
 - The curated MET subset and the `(MET − 1)` net constant are documented assumptions
   (story planning notes); expanding the table or adding intensity tiers is a later
   story and must bump `MET_TABLE_VERSION`.
+- FTY-051 extends `derived_exercise_items` with a nullable `active_calories_estimated`
+  snapshot (the immutable original burn paired with the editable `active_calories`)
+  and lets a user correct the burn through the edit endpoint. This does not redefine
+  the burn calculation above; the estimator sets the snapshot at creation. See
+  `corrections.md`.
 ```

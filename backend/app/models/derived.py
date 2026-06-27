@@ -96,10 +96,21 @@ class DerivedFoodItem(_DerivedItem):
     #: Resolved portion mass (grams) the facts were scaled by; ``None`` if unresolved.
     grams: Mapped[float | None] = mapped_column(Float, nullable=True)
     #: Canonical energy (kcal) for the resolved portion; ``None`` if unresolved.
+    #: This is the **editable current** value — a user correction (FTY-051) updates
+    #: it in place while preserving the original in ``calories_estimated``.
     calories: Mapped[float | None] = mapped_column(Float, nullable=True)
     protein_g: Mapped[float | None] = mapped_column(Float, nullable=True)
     carbs_g: Mapped[float | None] = mapped_column(Float, nullable=True)
     fat_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: Immutable snapshot of the estimator's **original** calories/macros (FTY-051).
+    #: Captured once — at item creation when the food step resolves it, or from the
+    #: current value on the first edit if not already set (the safety net for items
+    #: created before this column existed) — and never mutated afterwards. ``None``
+    #: while the item is unresolved and has never been edited.
+    calories_estimated: Mapped[float | None] = mapped_column(Float, nullable=True)
+    protein_g_estimated: Mapped[float | None] = mapped_column(Float, nullable=True)
+    carbs_g_estimated: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fat_g_estimated: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class DerivedExerciseItem(_DerivedItem):
@@ -115,7 +126,13 @@ class DerivedExerciseItem(_DerivedItem):
 
     __tablename__ = "derived_exercise_items"
 
+    #: Editable current net active-calorie burn; a user correction (FTY-051) updates
+    #: it in place while preserving the original in ``active_calories_estimated``.
     active_calories: Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: Immutable snapshot of the estimator's original burn (FTY-051). Captured once —
+    #: at item creation when the exercise step costs it, or from the current value on
+    #: the first edit if not already set — and never mutated afterwards.
+    active_calories_estimated: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class ClarificationQuestion(Base):

@@ -6,6 +6,7 @@ which Alembic's migration environment uses as autogenerate/target metadata.
 
 from __future__ import annotations
 
+from app.models.corrections import Correction
 from app.models.derived import (
     ClarificationQuestion,
     DerivedExerciseItem,
@@ -20,6 +21,7 @@ from app.models.targets import DailyTarget, Goal
 __all__ = [
     "AuthIdentity",
     "ClarificationQuestion",
+    "Correction",
     "DailyTarget",
     "DerivedExerciseItem",
     "DerivedFoodItem",
