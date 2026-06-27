@@ -11,9 +11,9 @@
  *                               → (retake)  → camera
  *
  * The "save this photo" toggle defaults to off (discard-by-default per FTY-077).
- * When on, the `save` flag is forwarded to FTY-061's backend, which persists the
- * raw image as a `log_attachment`; when off, the backend discards it after
- * extraction.
+ * When on, the `save` flag is forwarded to the label-upload endpoint, which
+ * persists the raw image as a `log_attachment`; when off, the backend discards it
+ * after extraction.
  *
  * Security: the captured image is not retained on-device beyond this flow.
  * Errors carry only HTTP status — never image bytes, URIs, or extracted content.
@@ -56,13 +56,13 @@ interface CapturedPhoto {
 }
 
 export interface LabelCaptureScreenProps {
-  /** Called after a successful upload with the created pending event. */
+  /** Called after a successful upload with the resulting log event. */
   onUploaded: (event: LogEventDTO) => void;
   onClose: () => void;
   session: ApiSession;
   /**
    * Injectable upload function for tests. Defaults to `uploadLabelImage`.
-   * Receives the image URI, the save flag, and returns the pending event.
+   * Receives the image URI, the save flag, and returns the resulting event.
    */
   upload?: (imageUri: string, savePhoto: boolean) => Promise<LogEventDTO>;
   /**
@@ -85,8 +85,8 @@ function messageFor(error: unknown): string {
 
 /**
  * Full-screen label capture. Wraps the camera in the FTY-063 permission gate,
- * handles the photo review and save-photo opt-in, and drives the upload to
- * FTY-061's backend. Use inside a Modal from TodayScreen.
+ * handles the photo review and save-photo opt-in, and drives the upload to the
+ * label-upload endpoint. Use inside a Modal from TodayScreen.
  */
 export function LabelCaptureScreen({
   onUploaded,

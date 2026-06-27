@@ -1,10 +1,13 @@
 /**
  * Nutrition-label image upload client (FTY-064).
  *
- * Sends a captured label photo to FTY-061's backend label path using FTY-061's
- * defined upload contract: multipart/form-data with an `image` file field and a
- * `save` flag. A client-side guard rejects oversize or wrong-type payloads before
- * any network call — the authoritative trust boundary is FTY-061's backend.
+ * Sends a captured label photo to the label-upload endpoint defined by
+ * `docs/contracts/label-upload.md`: the raw image bytes are the request body, the
+ * `Content-Type` header declares the image type, and a `save` query flag carries
+ * the FTY-077 retention choice. The backend validates the image as data, runs the
+ * FTY-061 extraction pipeline in-request, and returns the resulting log event. A
+ * client-side guard rejects oversize or wrong-type payloads before any network
+ * call — the authoritative trust boundary is the backend.
  *
  * Privacy: errors carry only HTTP status and a fixed action description —
  * never image bytes, file paths, URIs, or extracted content. Nothing is logged.
@@ -65,15 +68,17 @@ export function validateImageGuard(sizeBytes: number, contentType: string): void
 }
 
 /**
- * Upload a captured nutrition-label photo to FTY-061's backend label path.
+ * Upload a captured nutrition-label photo to the label-upload endpoint.
  *
  * Reads the local image file, runs the client-side size/type guard, then POSTs
- * multipart/form-data to `/api/users/{userId}/log-events/label`. The `save` flag
- * is forwarded to the backend, which persists the raw image as a `log_attachment`
- * only when `true`; the default (`false`) discards it after extraction (FTY-077).
+ * the raw image bytes to `/api/users/{userId}/log-events/label?save=...`. The
+ * image type travels in the `Content-Type` header and the `save` flag in the
+ * query string; the backend persists the raw image as a `log_attachment` only
+ * when `save=true`, discarding it after extraction by default (FTY-077).
  *
- * Returns the created pending `LogEventDTO`. Errors carry only HTTP status — never
- * image bytes, URIs, or extracted content.
+ * Returns the resulting `LogEventDTO` (the backend extracts in-request, so the
+ * event is already at its post-extraction status). Errors carry only HTTP status
+ * — never image bytes, URIs, or extracted content.
  */
 export async function uploadLabelImage(
   session: ApiSession,
@@ -81,7 +86,7 @@ export async function uploadLabelImage(
   savePhoto: boolean,
   fetchImpl: typeof fetch = fetch,
 ): Promise<LogEventDTO> {
-  // Fetch the local image file to check size and content type before uploading.
+  // Fetch the local image file to read its bytes and check size/type before upload.
   const fileResponse = await fetchImpl(imageUri);
   const blob = await fileResponse.blob();
 
@@ -89,19 +94,14 @@ export async function uploadLabelImage(
   const contentType = (blob.type || "image/jpeg").split(";")[0].trim().toLowerCase();
   validateImageGuard(blob.size, contentType);
 
-  const formData = new FormData();
-  // React Native FormData file append uses the { uri, type, name } shape.
-  formData.append(
-    "image",
-    { uri: imageUri, type: contentType, name: "label.jpg" } as unknown as Blob,
-  );
-  formData.append("save", savePhoto ? "true" : "false");
-
-  const url = `${session.baseUrl}/api/users/${encodeURIComponent(session.userId)}/log-events/label`;
+  const url =
+    `${session.baseUrl}/api/users/${encodeURIComponent(session.userId)}/log-events/label` +
+    `?save=${savePhoto ? "true" : "false"}`;
   const response = await fetchImpl(url, {
     method: "POST",
-    headers: { Authorization: `Bearer ${session.token}` },
-    body: formData,
+    // Send the raw image bytes as the body; the header declares the image type.
+    headers: { Authorization: `Bearer ${session.token}`, "Content-Type": contentType },
+    body: blob,
   });
 
   if (!response.ok) {

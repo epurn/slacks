@@ -13,6 +13,7 @@ from sqlalchemy.engine import Engine
 
 from app.db import create_db_engine, create_session_factory
 from app.estimator.enqueue import celery_enqueuer
+from app.estimator.label_upload import synchronous_label_processor
 from app.logging import configure_logging
 from app.routers import auth, corrections, daily_summary, health, log_events, profile, saved_foods
 from app.settings import Settings, load_settings
@@ -43,6 +44,11 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
     # to Celery/Redis; tests inject a recording fake so creating an event needs
     # no live broker.
     app.state.estimation_enqueuer = celery_enqueuer
+    # The label processor is a swappable seam (FTY-064): production resolves an
+    # uploaded label image in-request through the real vision provider; tests
+    # inject a double backed by a scripted provider so the upload endpoint needs
+    # no live model.
+    app.state.label_processor = synchronous_label_processor
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(profile.router)

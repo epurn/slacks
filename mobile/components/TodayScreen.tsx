@@ -316,8 +316,9 @@ export function TodayScreen({
     [apiSession, submitting, create],
   );
 
-  // Label capture upload (FTY-064). The backend already created the pending event;
-  // add it to the timeline directly and let FTY-032 polling drive it to resolution.
+  // Label capture upload (FTY-064). The backend created and extracted the event
+  // in-request; add the returned event to the timeline directly and let FTY-032
+  // polling reconcile any later status change.
   const handleLabelUploaded = useCallback((event: LogEventDTO) => {
     setLabelCaptureOpen(false);
     setEvents((prev) => sortByNewest([event, ...prev]));

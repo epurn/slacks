@@ -2,9 +2,9 @@
  * Tests for the label-image upload API client (FTY-064).
  *
  * Covers:
- * - Happy path: local file read → guard → multipart POST → pending event returned.
- * - Save flag forwarded correctly (save=true / save=false).
- * - Correct endpoint, auth header, and multipart body.
+ * - Happy path: local file read → guard → raw-body POST → event returned.
+ * - Save flag forwarded correctly in the query string (save=true / save=false).
+ * - Correct endpoint, auth header, Content-Type, and raw-image body.
  * - Client-side size guard rejects oversized files before the upload call.
  * - Client-side type guard rejects non-image content types before the upload call.
  * - API error responses mapped to nonjudgmental, content-free messages.
@@ -93,7 +93,7 @@ describe("validateImageGuard", () => {
 // ─── uploadLabelImage ─────────────────────────────────────────────────────────
 
 describe("uploadLabelImage", () => {
-  it("fetches the local file, then POSTs to the FTY-061 label endpoint", async () => {
+  it("fetches the local file, then POSTs the raw image to the label endpoint", async () => {
     const fetchMock = jest
       .fn()
       .mockResolvedValueOnce(makeBlobResponse(50_000, "image/jpeg")) // local file
@@ -108,19 +108,20 @@ describe("uploadLabelImage", () => {
     const [localUri] = fetchMock.mock.calls[0] as [string];
     expect(localUri).toBe("file:///label.jpg");
 
-    // Second call: the multipart upload.
+    // Second call: the raw-body upload (save flag in the query string).
     const [uploadUrl, uploadInit] = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(uploadUrl).toBe(
-      "https://api.example.test/api/users/11111111-1111-1111-1111-111111111111/log-events/label",
+      "https://api.example.test/api/users/11111111-1111-1111-1111-111111111111/log-events/label?save=false",
     );
     expect(uploadInit.method).toBe("POST");
     const headers = uploadInit.headers as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer test-token");
-    // Content-Type must not be set manually — the browser/RN sets it with the boundary.
-    expect(headers["Content-Type"]).toBeUndefined();
+    // The header declares the image type; the body is the raw image blob.
+    expect(headers["Content-Type"]).toBe("image/jpeg");
+    expect((uploadInit.body as { size: number }).size).toBe(50_000);
   });
 
-  it("includes save=false in the form body when savePhoto is false", async () => {
+  it("sends save=false in the query string when savePhoto is false", async () => {
     const fetchMock = jest
       .fn()
       .mockResolvedValueOnce(makeBlobResponse(1000, "image/jpeg"))
@@ -128,12 +129,11 @@ describe("uploadLabelImage", () => {
 
     await uploadLabelImage(SESSION, "file:///label.jpg", false, fetchMock);
 
-    const [, uploadInit] = fetchMock.mock.calls[1] as [string, RequestInit];
-    const formData = uploadInit.body as FormData;
-    expect(formData.get("save")).toBe("false");
+    const [uploadUrl] = fetchMock.mock.calls[1] as [string];
+    expect(uploadUrl).toContain("?save=false");
   });
 
-  it("includes save=true in the form body when savePhoto is true", async () => {
+  it("sends save=true in the query string when savePhoto is true", async () => {
     const fetchMock = jest
       .fn()
       .mockResolvedValueOnce(makeBlobResponse(1000, "image/jpeg"))
@@ -141,9 +141,8 @@ describe("uploadLabelImage", () => {
 
     await uploadLabelImage(SESSION, "file:///label.jpg", true, fetchMock);
 
-    const [, uploadInit] = fetchMock.mock.calls[1] as [string, RequestInit];
-    const formData = uploadInit.body as FormData;
-    expect(formData.get("save")).toBe("true");
+    const [uploadUrl] = fetchMock.mock.calls[1] as [string];
+    expect(uploadUrl).toContain("?save=true");
   });
 
   it("rejects oversize images before the upload call (guard fires before network)", async () => {
