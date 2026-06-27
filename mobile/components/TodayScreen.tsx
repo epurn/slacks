@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   editDerivedItem as editDerivedItemApi,
   type DerivedItem,
+  type DerivedFoodItemDTO,
 } from "@/api/derivedItems";
 import {
   LogEventApiError,
@@ -21,8 +22,14 @@ import {
   listTodayLogEvents as listTodayLogEventsApi,
   type LogEventDTO,
 } from "@/api/logEvents";
+import {
+  saveFood as saveFoodApi,
+  searchSavedFoods as searchSavedFoodsApi,
+  type SavedFoodDTO,
+} from "@/api/savedFoods";
 import { BarcodeScannerScreen } from "@/components/BarcodeScannerScreen";
 import { EntryRow } from "@/components/EntryRow";
+import { TypeaheadSuggestionBar } from "@/components/TypeaheadSuggestionBar";
 import {
   POLL_INTERVAL_MS,
   hasPendingWork,
@@ -75,6 +82,37 @@ function messageFor(error: unknown, kind: "load" | "save"): string {
  * capture flow. `load`/`create`/`session`/`useActive`/`pollIntervalMs` are
  * injectable for tests.
  */
+/** Build a synthetic resolved food item from a saved food selection (FTY-053). */
+function syntheticSavedFoodItem(
+  savedFood: SavedFoodDTO,
+  logEventId: string,
+  userId: string,
+): DerivedFoodItemDTO {
+  return {
+    item_type: "food",
+    id: `saved-${savedFood.id}`,
+    user_id: userId,
+    log_event_id: logEventId,
+    name: savedFood.name,
+    quantity_text: `${savedFood.serving_size} ${savedFood.serving_unit}`,
+    unit: savedFood.serving_unit,
+    amount: savedFood.serving_size,
+    status: "resolved",
+    grams: null,
+    calories: savedFood.calories,
+    protein_g: savedFood.protein_g,
+    carbs_g: savedFood.carbs_g,
+    fat_g: savedFood.fat_g,
+    calories_estimated: savedFood.calories,
+    protein_g_estimated: savedFood.protein_g,
+    carbs_g_estimated: savedFood.carbs_g,
+    fat_g_estimated: savedFood.fat_g,
+    source: "saved_food",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+}
+
 export function TodayScreen({
   session: sessionOverride,
   load = listTodayLogEventsApi,
@@ -83,6 +121,8 @@ export function TodayScreen({
   items: itemsOverride,
   useActive = useScreenActive,
   pollIntervalMs = POLL_INTERVAL_MS,
+  searchSavedFoods = searchSavedFoodsApi,
+  saveFood = saveFoodApi,
 }: {
   session?: Session;
   load?: typeof listTodayLogEventsApi;
@@ -97,6 +137,10 @@ export function TodayScreen({
   items?: Readonly<Record<string, readonly DerivedItem[]>>;
   useActive?: () => boolean;
   pollIntervalMs?: number;
+  /** Injectable typeahead search for tests (FTY-053). */
+  searchSavedFoods?: typeof searchSavedFoodsApi;
+  /** Injectable save-food function for tests (FTY-053). */
+  saveFood?: typeof saveFoodApi;
 } = {}) {
   const insets = useSafeAreaInsets();
   const liveSession = useSession();
@@ -119,6 +163,10 @@ export function TodayScreen({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [scannerOpen, setScannerOpen] = useState(false);
+  // Saved food selected from the typeahead bar (FTY-053). When set, pressing
+  // "Add" creates the log event AND immediately adds a synthetic resolved item
+  // with the saved food's nutrition, skipping the estimator wait.
+  const [selectedSavedFood, setSelectedSavedFood] = useState<SavedFoodDTO | null>(null);
   // Monotonic counter for optimistic placeholder ids; never collides with a
   // server UUID and stays stable across renders.
   const tempId = useRef(0);
@@ -167,8 +215,24 @@ export function TodayScreen({
       rawText: trimmed,
       createdAt: new Date().toISOString(),
     });
+    // Capture and clear the selected saved food before the async path.
+    const pendingSavedFood = selectedSavedFood;
+    setSelectedSavedFood(null);
+
     // Show the new entry immediately as pending, then reconcile with the server.
     setEvents((prev) => sortByNewest([optimistic, ...prev]));
+
+    // If a saved food was selected, add a synthetic resolved item immediately
+    // with its stored nutrition — the estimator is bypassed for this item.
+    if (pendingSavedFood) {
+      const syntheticItem = syntheticSavedFoodItem(
+        pendingSavedFood,
+        id,
+        apiSession.userId,
+      );
+      setItemsByEvent((prev) => ({ ...prev, [id]: [syntheticItem] }));
+    }
+
     setText("");
     setSubmitting(true);
     setSubmitError(null);
@@ -177,15 +241,33 @@ export function TodayScreen({
       setEvents((prev) =>
         sortByNewest(prev.map((event) => (event.id === id ? created : event))),
       );
+      // Re-key the synthetic item from optimistic id to the real event id.
+      if (pendingSavedFood) {
+        setItemsByEvent((prev) => {
+          const items = prev[id] ?? [];
+          const updated = items.map((item) => ({
+            ...item,
+            log_event_id: created.id,
+          }));
+          const { [id]: _removed, ...rest } = prev;
+          return { ...rest, [created.id]: updated };
+        });
+      }
     } catch (error) {
       // Roll back the optimistic entry and restore the input so nothing is lost.
       setEvents((prev) => prev.filter((event) => event.id !== id));
+      if (pendingSavedFood) {
+        setItemsByEvent((prev) => {
+          const { [id]: _removed, ...rest } = prev;
+          return rest;
+        });
+      }
       setText(trimmed);
       setSubmitError(messageFor(error, "save"));
     } finally {
       setSubmitting(false);
     }
-  }, [text, apiSession, submitting, create]);
+  }, [text, apiSession, submitting, create, selectedSavedFood]);
 
   // Barcode scan entry point (FTY-063). Mirrors the text-composer submit flow:
   // dismiss the scanner, show the barcode as a pending optimistic entry, then
@@ -348,6 +430,15 @@ export function TodayScreen({
             </Pressable>
           </View>
         </View>
+        <TypeaheadSuggestionBar
+          query={text}
+          session={apiSession}
+          onSelect={(food) => {
+            setSelectedSavedFood(food);
+            setText(food.name);
+          }}
+          search={searchSavedFoods}
+        />
         {submitError ? (
           <Text style={styles.error} accessibilityRole="alert">
             {submitError}
@@ -363,6 +454,7 @@ export function TodayScreen({
           phase={phase}
           loadError={loadError}
           onRetry={() => void refresh()}
+          saveFood={saveFood}
         />
       </ScrollView>
     </>
@@ -378,6 +470,7 @@ function Timeline({
   phase,
   loadError,
   onRetry,
+  saveFood,
 }: {
   events: readonly LogEventDTO[];
   itemsByEvent: Readonly<Record<string, readonly DerivedItem[]>>;
@@ -387,6 +480,7 @@ function Timeline({
   phase: Phase;
   loadError: string | null;
   onRetry: () => void;
+  saveFood: typeof saveFoodApi;
 }) {
   if (events.length === 0) {
     if (phase === "loading") {
@@ -438,6 +532,7 @@ function Timeline({
             session={session}
             editItem={editItem}
             onItemChange={onItemChange}
+            saveFoodFn={saveFood}
           />
         ))}
       </View>

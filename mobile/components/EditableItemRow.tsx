@@ -11,7 +11,13 @@ import {
   DerivedItemApiError,
   editDerivedItem as editDerivedItemApi,
   type DerivedItem,
+  type DerivedFoodItemDTO,
 } from "@/api/derivedItems";
+import {
+  saveFood as saveFoodApi,
+  type SavedFoodDTO,
+  type NutritionSnapshot,
+} from "@/api/savedFoods";
 import type { ApiSession } from "@/state/session";
 import {
   editFieldsFor,
@@ -31,6 +37,8 @@ function messageFor(error: unknown): string {
   return "We couldn't save that correction. Check your connection and try again.";
 }
 
+type SaveFoodStatus = "idle" | "saving" | "saved" | "error";
+
 /**
  * The editable food/exercise item surface for the Today timeline (FTY-050).
  *
@@ -48,25 +56,40 @@ function messageFor(error: unknown): string {
  * so the user can tell at a glance — and by screen reader — which values were
  * changed.
  *
+ * For resolved food items, a "Save this food" action (FTY-053) persists the
+ * corrected nutrition snapshot via FTY-052's save endpoint, recording the
+ * original typed phrase (`logPhrase`) as an alias.
+ *
  * The row owns the item's display state after mount and lifts each confirmed
- * server value via `onItemChange`. `edit` is injectable for tests.
+ * server value via `onItemChange`. `edit` and `saveFood` are injectable for tests.
  */
 export function EditableItemRow({
   item: initialItem,
   session,
   edit = editDerivedItemApi,
   onItemChange,
+  logPhrase,
+  saveFood = saveFoodApi,
+  onSaved,
 }: {
   item: DerivedItem;
   session: ApiSession;
   edit?: typeof editDerivedItemApi;
   onItemChange?: (item: DerivedItem) => void;
+  /** The original typed phrase from the log event; enables the Save this food action. */
+  logPhrase?: string;
+  /** Injectable for tests; saves the corrected food via FTY-052. */
+  saveFood?: typeof saveFoodApi;
+  /** Called with the saved food after a successful save. */
+  onSaved?: (saved: SavedFoodDTO) => void;
 }) {
   const [item, setItem] = useState<DerivedItem>(initialItem);
   const [editingField, setEditingField] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saveFoodStatus, setSaveFoodStatus] = useState<SaveFoodStatus>("idle");
+  const [saveFoodError, setSaveFoodError] = useState<string | null>(null);
 
   // Resync when the parent supplies a new item (e.g. after lifting a confirmed
   // server value) using the render-phase "adjust state on prop change" pattern.
@@ -130,9 +153,44 @@ export function EditableItemRow({
     [draft, item, edit, session, onItemChange],
   );
 
+  const handleSaveFood = useCallback(async () => {
+    if (item.item_type !== "food") return;
+    const foodItem = item as DerivedFoodItemDTO;
+    if (foodItem.calories === null || !logPhrase) return;
+
+    const nutrition: NutritionSnapshot = {
+      calories: foodItem.calories,
+      protein_g: foodItem.protein_g,
+      carbs_g: foodItem.carbs_g,
+      fat_g: foodItem.fat_g,
+      serving_size: foodItem.amount ?? 1,
+      serving_unit: foodItem.unit ?? "serving",
+    };
+
+    setSaveFoodStatus("saving");
+    setSaveFoodError(null);
+    try {
+      const saved = await saveFood(session, {
+        name: foodItem.name,
+        phrase: logPhrase,
+        nutrition,
+      });
+      setSaveFoodStatus("saved");
+      onSaved?.(saved);
+    } catch {
+      setSaveFoodStatus("error");
+      setSaveFoodError("We couldn't save that food. Check your connection and try again.");
+    }
+  }, [item, logPhrase, saveFood, session, onSaved]);
+
   const fields = editFieldsFor(item).filter(
     (field) => fieldCurrentValue(item, field) !== null,
   );
+
+  const canSaveFood =
+    item.item_type === "food" &&
+    (item as DerivedFoodItemDTO).calories !== null &&
+    !!logPhrase;
 
   return (
     <View style={styles.item} accessibilityRole="summary">
@@ -162,6 +220,44 @@ export function EditableItemRow({
         <Text style={styles.error} accessibilityRole="alert">
           {error}
         </Text>
+      ) : null}
+
+      {canSaveFood ? (
+        <View style={styles.saveFoodRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Save this food"
+            accessibilityState={{
+              disabled:
+                saving ||
+                saveFoodStatus === "saving" ||
+                saveFoodStatus === "saved",
+            }}
+            disabled={
+              saving ||
+              saveFoodStatus === "saving" ||
+              saveFoodStatus === "saved"
+            }
+            onPress={() => void handleSaveFood()}
+            style={[
+              styles.saveFoodButton,
+              saveFoodStatus === "saved" && styles.saveFoodButtonSaved,
+            ]}
+          >
+            <Text style={styles.saveFoodLabel}>
+              {saveFoodStatus === "saving"
+                ? "Saving…"
+                : saveFoodStatus === "saved"
+                  ? "Saved ✓"
+                  : "Save this food"}
+            </Text>
+          </Pressable>
+          {saveFoodStatus === "error" && saveFoodError ? (
+            <Text style={styles.error} accessibilityRole="alert">
+              {saveFoodError}
+            </Text>
+          ) : null}
+        </View>
       ) : null}
     </View>
   );
@@ -394,5 +490,25 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#C0392B",
     marginTop: 4,
+  },
+  saveFoodRow: {
+    marginTop: 8,
+    marginBottom: 4,
+    gap: 6,
+  },
+  saveFoodButton: {
+    alignSelf: "flex-start",
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: "#E4E4EA",
+  },
+  saveFoodButtonSaved: {
+    backgroundColor: "#D1F0E0",
+  },
+  saveFoodLabel: {
+    fontSize: 13,
+    fontWeight: "500",
+    color: "#3A3A3C",
   },
 });

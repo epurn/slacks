@@ -2,6 +2,7 @@ import { StyleSheet, Text, View } from "react-native";
 
 import type { LogEventDTO } from "@/api/logEvents";
 import type { DerivedItem, editDerivedItem } from "@/api/derivedItems";
+import { saveFood } from "@/api/savedFoods";
 import { EditableItemRow } from "@/components/EditableItemRow";
 import { StatusIcon } from "@/components/StatusIcon";
 import type { ApiSession } from "@/state/session";
@@ -17,6 +18,10 @@ import { statusPresentation } from "@/state/today";
  * endpoint. `items` defaults to none, so an event without derived items (or a
  * caller that has not loaded them yet) renders exactly as before; editing
  * requires the authenticated `session`.
+ *
+ * Resolved food items show a "Save this food" action (FTY-053): the typed
+ * phrase (`event.raw_text`) is passed as the alias to record. `saveFoodFn` is
+ * injectable for tests.
  */
 export function EntryRow({
   event,
@@ -24,12 +29,14 @@ export function EntryRow({
   session = null,
   editItem,
   onItemChange,
+  saveFoodFn = saveFood,
 }: {
   event: LogEventDTO;
   items?: readonly DerivedItem[];
   session?: ApiSession | null;
   editItem?: typeof editDerivedItem;
   onItemChange?: (item: DerivedItem) => void;
+  saveFoodFn?: typeof saveFood;
 }) {
   const { label } = statusPresentation(event.status);
   return (
@@ -52,6 +59,8 @@ export function EntryRow({
               session={session}
               edit={editItem}
               onItemChange={onItemChange}
+              logPhrase={event.raw_text}
+              saveFood={saveFoodFn}
             />
           ))}
         </View>
