@@ -100,6 +100,8 @@ Green across the board, from a clean checkout:
 
 ## Status
 
-Manual. The human runs Phase 1–2 in command-centre plan mode; the steward/author/
-reviewer loop does the fixes; FTY-080 is the only automated piece. Once we've run
-a full audit by hand, fold the repeatable parts into a `release-audit` skill.
+Manual, but driven by the **`release-audit` skill** (`.claude/skills/release-audit/`)
+— it walks these phases with the human. The human still runs Phase 1–2 in
+command-centre plan mode; the steward/author/reviewer loop does the fixes; FTY-080
+is the only automated piece. Tighten the skill (fold in more of the mechanical
+checks) after the first full hand-run.
