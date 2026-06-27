@@ -397,6 +397,43 @@ echoes the query, key, headers, or response body. Rate-limit detection rides on 
 integer, never the body). Egress is allowlisted to the single configured search host
 by the hardened fetcher.
 
+## Official-Source Resolution Step (FTY-062)
+
+FTY-062 implements the consumer of the `official_source` tier: the resolution
+pipeline step that turns the FTY-079 search candidates + FTY-078 fetched text into a
+costed, evidence-backed `derived_food_items` row, and otherwise falls through to the
+`model_prior` tier. It changes **neither** this contract's source hierarchy nor its
+fallback semantics; it fixes only the **pipeline ordering** between two of the tiers.
+
+**Hierarchy rank vs. pipeline order.** The **Source Hierarchy** above is a
+*preference* ranking (which source's facts win for the same input). FTY-062 additionally
+fixes where the `official_source` *work* runs in the estimation pipeline: it is the
+**last resort before `model_prior`**, executing **only after** USDA (`usda_fdc`) and
+Open Food Facts (`open_food_facts`) miss. The expensive path (search + hardened fetch +
+LLM extraction) is therefore attempted only when the cheap deterministic databases
+cannot cost the item — a deliberate ordering distinct from the preference rank, and the
+reason a generic food never reaches official source (it is not `official_source`
+applicable) while a named/branded item USDA misses does.
+
+- **Applicability signal.** `official_source` is *applicable* only to a **named**
+  product / restaurant / manufacturer item. The first concrete implementation marks
+  this with an additive optional `brand` field on the parse candidate
+  (`parse-candidates.md`): a candidate with a brand is official-source-eligible, a
+  generic food is not. See `food-resolution.md` (**Official-Source Resolution**).
+- **Fallback Rule, concretely.** When the search lookup reports `disabled` /
+  `unavailable` / `rate_limited` / `failed` / `partial`, or no fetched page yields a
+  schema-valid fact set, the named item falls through to a `model_prior` evidence
+  record (`source_type = model_prior`) carrying the **reason** in `assumptions` — the
+  contract's "record the reason it was used, so the source status is surfaced and the
+  entry remains editable", made durable on the evidence row via the additive
+  `evidence_sources.assumptions` column.
+- **Record shape.** An `official_source` record's `source_ref` is
+  `official_source:<url>` (the URL only — no headers, body, or query secrets, and never
+  the raw page); it has no global `products` cache row. The `assumptions` field of the
+  **Evidence Source Record** is now persisted (model-prior reason, density/serving
+  assumptions); the `status` lookup outcome continues to be surfaced via the run
+  `source_refs` and the `source_type`.
+
 ## Migration / Compatibility
 
 - This contract is **additive documentation**; it introduces no schema or code
@@ -419,3 +456,10 @@ by the hardened fetcher.
   schema change, and a backward-compatible `status_code` attribute on
   `hardened_fetch`'s response/transient errors for rate-limit (HTTP 429) detection.
   The fetcher (FTY-078) and the resolution pipeline (FTY-062) remain separate.
+- FTY-062 adds the `official_source` resolution pipeline step (`official_step.py`)
+  consuming the FTY-079 search + FTY-078 fetch, and the `model_prior` fallback. It is
+  additive: an optional `brand` parse-candidate field, the `NamedFoodEstimate`
+  extraction/estimate schema, and the nullable `evidence_sources.assumptions` column
+  (`0012` migration). It does not redefine the hierarchy, the status vocabulary, or the
+  fallback rule; it fixes the pipeline ordering (official source last before
+  model-prior). See `food-resolution.md` (**Official-Source Resolution**).

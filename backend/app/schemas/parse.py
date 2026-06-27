@@ -38,6 +38,7 @@ PARSE_SCHEMA_VERSION = "parse/v1"
 MAX_CANDIDATES = 32
 MAX_QUESTIONS = 8
 MAX_NAME_LEN = 200
+MAX_BRAND_LEN = 120
 MAX_QUANTITY_LEN = 120
 MAX_UNIT_LEN = 32
 MAX_QUESTION_LEN = 300
@@ -72,6 +73,15 @@ class ParsedCandidate(BaseModel):
 
     type: CandidateType
     name: str = Field(min_length=1, max_length=MAX_NAME_LEN)
+    #: Restaurant, manufacturer, or packaged-product brand when the item names a
+    #: *specific* branded/named product ("Big Mac" → "McDonald's", "Greek yogurt" →
+    #: "Chobani"), as opposed to a generic food ("white rice"). It is the signal the
+    #: food step uses to route an unresolved item to the official-source resolver
+    #: (FTY-062): a branded item USDA/OFF cannot resolve falls through to
+    #: search + hardened fetch, then a model-prior estimate, instead of stopping at
+    #: ``needs_clarification``. ``None``/blank ⇒ a generic food (USDA only). Stored as
+    #: data, never interpreted as an instruction.
+    brand: str | None = Field(default=None, max_length=MAX_BRAND_LEN)
     quantity_text: str = Field(default="", max_length=MAX_QUANTITY_LEN)
     unit: str | None = Field(default=None, max_length=MAX_UNIT_LEN)
     amount: float | None = Field(default=None, ge=0)

@@ -45,7 +45,10 @@ from app.estimator.fdc import build_fdc_client
 from app.estimator.food_step import BarcodeResolver, FoodResolver
 from app.estimator.label_step import LabelInput
 from app.estimator.off import build_off_client
+from app.estimator.official_fetch import load_official_fetch_settings
+from app.estimator.official_step import OfficialSourceResolveStep
 from app.estimator.pipeline import (
+    CandidateDraft,
     EstimationContext,
     Pipeline,
     PipelineOutcome,
@@ -53,6 +56,7 @@ from app.estimator.pipeline import (
     default_pipeline,
     label_pipeline,
 )
+from app.estimator.search import build_search_provider
 from app.llm import build_provider, load_llm_settings
 from app.models.derived import (
     ClarificationQuestion,
@@ -208,13 +212,22 @@ def process_estimation(
             # evidence writes, so the default pipeline is built per call here where the
             # session is in scope. A barcode candidate prefers the Open Food Facts source
             # (enabled by default); a generic food uses USDA FDC (disabled without a key,
-            # leaving the candidate unresolved). Building a client makes no network call.
+            # leaving the candidate unresolved). The official-source step (FTY-062) runs
+            # last for branded candidates the food step deferred: it searches (FTY-079)
+            # and fetches (FTY-078) official pages, else falls through to a model-prior
+            # estimate. Building the clients/adapters makes no network call.
             resolver = FoodResolver(session=session, source=build_fdc_client())
             barcode_resolver = BarcodeResolver(session=session, source=build_off_client())
+            official_step = OfficialSourceResolveStep(
+                provider=provider,
+                search_provider=build_search_provider(),
+                fetch_settings=load_official_fetch_settings(),
+            )
             pipeline = default_pipeline(
                 provider,
                 food_resolver=resolver,
                 barcode_resolver=barcode_resolver,
+                official_step=official_step,
             )
 
     # Enforce ownership before any write: a missing or cross-user event fails
@@ -384,20 +397,7 @@ def _persist_candidates(session: Session, run: EstimationRun, context: Estimatio
     if context.resolved_label_items:
         _persist_resolved_labels(session, run, context)
 
-    if context.resolved_food_items:
-        _persist_resolved_food(session, run, context)
-    else:
-        for draft in context.food_candidates:
-            session.add(
-                DerivedFoodItem(
-                    log_event_id=run.log_event_id,
-                    user_id=run.user_id,
-                    name=draft.name,
-                    quantity_text=draft.quantity_text,
-                    unit=draft.unit,
-                    amount=draft.amount,
-                )
-            )
+    _persist_food(session, run, context)
 
     if context.resolved_exercise_items:
         for item in context.resolved_exercise_items:
@@ -430,6 +430,43 @@ def _persist_candidates(session: Session, run: EstimationRun, context: Estimatio
             )
 
 
+def _persist_food(session: Session, run: EstimationRun, context: EstimationContext) -> None:
+    """Persist the food side of a completed estimation: resolved + unresolved rows.
+
+    When the food step ran it sorts every candidate into exactly one bucket —
+    ``resolved_food_items`` (USDA/OFF/official/model-prior), ``unresolved_food_candidates``
+    (no applicable source), or, if no official step ran, leftover
+    ``pending_official_candidates``. Persisting the resolved items plus the two
+    unresolved buckets covers every candidate without ever dropping one in a mixed
+    batch. When no food step ran at all (a resolver-less pipeline), all three buckets
+    are empty and the parsed ``food_candidates`` are persisted ``unresolved`` instead —
+    the pre-FTY-044 behavior.
+    """
+
+    leftover = context.unresolved_food_candidates + context.pending_official_candidates
+    if context.resolved_food_items or leftover:
+        _persist_resolved_food(session, run, context)
+        for draft in leftover:
+            session.add(_unresolved_food_row(run, draft))
+        return
+
+    for draft in context.food_candidates:
+        session.add(_unresolved_food_row(run, draft))
+
+
+def _unresolved_food_row(run: EstimationRun, draft: CandidateDraft) -> DerivedFoodItem:
+    """Build an ``unresolved`` derived food row from a parsed candidate (no calories)."""
+
+    return DerivedFoodItem(
+        log_event_id=run.log_event_id,
+        user_id=run.user_id,
+        name=draft.name,
+        quantity_text=draft.quantity_text,
+        unit=draft.unit,
+        amount=draft.amount,
+    )
+
+
 def _persist_resolved_food(
     session: Session, run: EstimationRun, context: EstimationContext
 ) -> None:
@@ -437,9 +474,11 @@ def _persist_resolved_food(
 
     Each item becomes a ``resolved`` ``derived_food_items`` row (flushed so its id is
     available) plus a user-owned ``evidence_sources`` row recording the source
-    reference, content hash, fetch time, and per-100g facts snapshot — never a raw
-    page. The cached global ``products`` rows the resolver created are already in the
-    session and committed with this transaction.
+    reference, content hash, fetch time, per-100g facts snapshot, and any documented
+    ``assumptions`` (the model-prior fallback reason) — never a raw page. The cached
+    global ``products`` rows the resolver created are already in the session and
+    committed with this transaction; an official-source or model-prior item carries no
+    ``product_id``.
     """
 
     for item in context.resolved_food_items:
@@ -480,6 +519,9 @@ def _persist_resolved_food(
                 protein_per_100g=item.protein_per_100g,
                 carbs_per_100g=item.carbs_per_100g,
                 fat_per_100g=item.fat_per_100g,
+                # Documented assumptions (e.g. the model-prior fallback reason); a
+                # deterministic database source carries none, stored as NULL.
+                assumptions=list(item.assumptions) or None,
             )
         )
 

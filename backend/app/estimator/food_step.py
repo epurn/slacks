@@ -24,11 +24,14 @@ Routing follows FTY-042/043 conventions:
   results on the context; the worker persists them ``resolved`` with calories/macros,
   caches the source facts as ``products``, and writes an ``evidence_sources`` row per
   item, then completes the event.
-- **no source applies** → no-op: with no enabled source for the candidates (e.g. no
-  FDC key and no barcode/OFF), food candidates stay ``unresolved``. The event still
-  completes.
-- **no confident source match** (incl. a barcode OFF cannot resolve while OFF is
-  available) / **unresolvable quantity** → raise
+- **no source applies** → with no enabled source for a generic candidate (e.g. no
+  FDC key and no barcode/OFF), it is left ``unresolved`` and the event still completes.
+- **branded candidate USDA/OFF cannot resolve** → deferred to the official-source
+  step (FTY-062) via ``pending_official_candidates`` instead of clarifying: a named
+  restaurant/manufacturer/packaged product falls through to search + hardened fetch,
+  then a model-prior estimate.
+- **no confident source match for a generic food** (incl. a barcode OFF cannot
+  resolve while OFF is available) / **unresolvable quantity** → raise
   :class:`~app.estimator.pipeline.NeedsClarification`; the food is recognisable but
   cannot be costed confidently, so the user is asked rather than guessed (terminal).
   A barcode is **never** finalized from a guessed value while OFF is available.
@@ -76,6 +79,19 @@ from app.estimator.pipeline import (
     StepFailed,
 )
 from app.models.food_sources import Product
+
+
+def _is_official_eligible(candidate: CandidateDraft) -> bool:
+    """Whether a USDA/OFF miss for ``candidate`` should defer to official source.
+
+    A candidate carrying a non-blank ``brand`` is a *named* restaurant / manufacturer
+    / packaged product (FTY-062): if USDA/OFF cannot cost it, it falls through to the
+    official-source resolver instead of stopping at ``needs_clarification``. A generic
+    food (no brand) keeps the FTY-044 behavior (a USDA miss clarifies).
+    """
+
+    return bool(candidate.brand and candidate.brand.strip())
+
 
 #: Fixed, sanitized clarification questions used in place of any raw user text, so a
 #: ``needs_clarification`` outcome always carries a question for the later answer flow.
@@ -234,50 +250,69 @@ class FoodResolveStep:
             context.record_step(self.name, "ok")
             return
 
-        if not self._engages(context):
-            # No enabled source applies to these candidates (e.g. no FDC key and no
-            # barcode/OFF): leave food candidates unresolved rather than guess. The
-            # event still completes.
-            context.record_step(self.name, "skipped")
-            return
-
         for candidate in context.food_candidates:
-            context.resolved_food_items.append(self._resolve(context, candidate))
+            self._dispatch(context, candidate)
 
         context.record_step(self.name, "ok")
 
-    def _engages(self, context: EstimationContext) -> bool:
-        """Whether any enabled source can cost at least one of the candidates.
+    def _dispatch(self, context: EstimationContext, candidate: CandidateDraft) -> None:
+        """Resolve one candidate, defer it to official source, or leave it unresolved.
 
-        Engages when the generic source is enabled, or when the barcode source is
-        enabled and some candidate carries a barcode. Keeps the FTY-044 contract that
-        a fully-unsourced batch is left unresolved (never partially resolved).
+        A barcode candidate prefers Open Food Facts; a generic candidate uses USDA. On
+        a **miss**, a branded (official-source-eligible) candidate is deferred to the
+        official-source step (FTY-062) via ``pending_official_candidates``; a generic
+        one keeps the FTY-044/060 behavior (``needs_clarification``). When no enabled
+        source applies and the candidate is not eligible, it is left ``unresolved`` and
+        the event still completes.
         """
 
-        if self.resolver.enabled:
-            return True
-        any_barcode = any(c.barcode for c in context.food_candidates)
-        return self._off_enabled and any_barcode
-
-    @property
-    def _off_enabled(self) -> bool:
-        return self.barcode_resolver is not None and self.barcode_resolver.enabled
-
-    def _resolve(self, context: EstimationContext, candidate: CandidateDraft) -> ResolvedFoodItem:
-        """Resolve one candidate via its highest-preference applicable source."""
-
+        eligible = _is_official_eligible(candidate)
         barcode_resolver = self.barcode_resolver
-        if candidate.barcode and barcode_resolver is not None and barcode_resolver.enabled:
-            return self._resolve_barcode(context, candidate, barcode_resolver)
-        return self._resolve_generic(context, candidate)
 
-    def _resolve_barcode(
+        if candidate.barcode and barcode_resolver is not None and barcode_resolver.enabled:
+            item = self._try_barcode(context, candidate, barcode_resolver)
+            if item is not None:
+                context.resolved_food_items.append(item)
+                return
+            if eligible:
+                context.pending_official_candidates.append(candidate)
+                return
+            # No match, invalid barcode, or no usable energy value: route
+            # deterministically. Never finalized from a guess while OFF is available.
+            context.clarification_questions = [BARCODE_UNKNOWN_QUESTION]
+            raise NeedsClarification("barcode_unknown")
+
+        if self.resolver.enabled:
+            item = self._try_generic(context, candidate)
+            if item is not None:
+                context.resolved_food_items.append(item)
+                return
+            if eligible:
+                context.pending_official_candidates.append(candidate)
+                return
+            context.clarification_questions = [UNKNOWN_FOOD_QUESTION]
+            raise NeedsClarification("unknown_food")
+
+        # No enabled source applies to this candidate (e.g. no FDC key and no
+        # barcode/OFF). A branded item still gets a shot at official source +
+        # model-prior; a generic one is left unresolved and the event completes.
+        if eligible:
+            context.pending_official_candidates.append(candidate)
+            return
+        context.unresolved_food_candidates.append(candidate)
+
+    def _try_barcode(
         self,
         context: EstimationContext,
         candidate: CandidateDraft,
         barcode_resolver: BarcodeResolver,
-    ) -> ResolvedFoodItem:
-        """Resolve a barcode candidate from Open Food Facts (preferred source)."""
+    ) -> ResolvedFoodItem | None:
+        """Resolve a barcode candidate from Open Food Facts; ``None`` on a miss.
+
+        Raises :class:`StepError` / :class:`StepFailed` on a transient / non-retryable
+        OFF error, and :class:`NeedsClarification` (via :meth:`_build_item`) when the
+        product matched but its quantity cannot be resolved to grams.
+        """
 
         _record_source_ref(context, OFF_SOURCE)
         try:
@@ -289,20 +324,21 @@ class FoodResolveStep:
             raise StepFailed("off_response_error") from exc
 
         if resolved is None:
-            # No match, invalid barcode, or no usable energy value: route
-            # deterministically. Never finalized from a guess while OFF is available.
-            context.clarification_questions = [BARCODE_UNKNOWN_QUESTION]
-            raise NeedsClarification("barcode_unknown")
-
+            return None
         return self._build_item(context, candidate, resolved, OFF_SOURCE_TYPE)
 
-    def _resolve_generic(
+    def _try_generic(
         self, context: EstimationContext, candidate: CandidateDraft
-    ) -> ResolvedFoodItem:
-        """Resolve a generic-food candidate by name from USDA FDC (FTY-044)."""
+    ) -> ResolvedFoodItem | None:
+        """Resolve a generic-food candidate by name from USDA FDC; ``None`` on a miss.
 
-        if self.resolver.enabled:
-            _record_source_ref(context, FDC_SOURCE)
+        The caller guarantees the source is enabled. Raises :class:`StepError` /
+        :class:`StepFailed` on a transient / non-retryable FDC error, and
+        :class:`NeedsClarification` (via :meth:`_build_item`) on an unresolvable
+        quantity.
+        """
+
+        _record_source_ref(context, FDC_SOURCE)
         try:
             resolved = self.resolver.resolve_product(candidate.name)
         except FdcTransientError as exc:
@@ -312,9 +348,7 @@ class FoodResolveStep:
             raise StepFailed("fdc_response_error") from exc
 
         if resolved is None:
-            context.clarification_questions = [UNKNOWN_FOOD_QUESTION]
-            raise NeedsClarification("unknown_food")
-
+            return None
         return self._build_item(context, candidate, resolved, _source_type(resolved.product.source))
 
     @staticmethod
