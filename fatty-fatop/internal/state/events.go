@@ -90,6 +90,38 @@ func (e Event) Field(key string) string {
 	}
 }
 
+// FieldFloat returns a numeric fields entry as a float64. JSON numbers decode as
+// float64; numeric strings are parsed as a fallback. ok is false when the key is
+// absent or non-numeric.
+func (e Event) FieldFloat(key string) (float64, bool) {
+	v, ok := e.Fields[key]
+	if !ok || v == nil {
+		return 0, false
+	}
+	switch t := v.(type) {
+	case float64:
+		return t, true
+	case int:
+		return float64(t), true
+	case int64:
+		return float64(t), true
+	case string:
+		if f, err := strconv.ParseFloat(t, 64); err == nil {
+			return f, true
+		}
+	}
+	return 0, false
+}
+
+// FieldInt returns a numeric fields entry as an int64 (truncating any fraction).
+func (e Event) FieldInt(key string) (int64, bool) {
+	f, ok := e.FieldFloat(key)
+	if !ok {
+		return 0, false
+	}
+	return int64(f), true
+}
+
 // ReadEvents reads up to the last `max` events from a JSONL file. A max of 0
 // means no limit. Missing files yield an empty slice and no error.
 func ReadEvents(path string, max int) ([]Event, error) {

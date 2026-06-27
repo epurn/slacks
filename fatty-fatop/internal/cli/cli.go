@@ -24,6 +24,7 @@ usage:
   fatop watch                same as bare fatop
   fatop status               one-shot snapshot of services, runs, and PRs
   fatop logs [agent]         merged event stream (agent: steward|reviewer|author)
+  fatop usage                token + cost accounting (--since, -n)
   fatop inspect <id|PR-n>    full detail + timeline for one run
   fatop doctor               verify fatop can read every source
   fatop help                 show this help
@@ -36,6 +37,10 @@ logs flags:
   --level L     minimum level: debug|info|warn|error (default: debug)
   --grep S      only events whose text/event contains S
   -n N          show the last N events first (default: 40)
+
+usage flags:
+  --since W     window: today (default) | all | a duration like 24h, 90m
+  -n N          how many recent runs to list (default: 15)
 `
 
 // Execute parses os.Args and runs the requested subcommand. Returns an exit code.
@@ -56,6 +61,8 @@ func Execute() int {
 		return runStatus(rest)
 	case "logs":
 		return runLogs(rest)
+	case "usage":
+		return runUsage(rest)
 	case "inspect":
 		return runInspect(rest)
 	case "doctor":
