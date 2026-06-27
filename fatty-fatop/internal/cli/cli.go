@@ -24,6 +24,7 @@ usage:
   fatop watch                same as bare fatop
   fatop status               one-shot snapshot of services, runs, and PRs
   fatop logs [agent]         merged event stream (agent: steward|reviewer|author)
+  fatop queue                story queue in assignment order + open PRs
   fatop usage                token + cost accounting (--since, -n)
   fatop inspect <id|PR-n>    full detail + timeline for one run
   fatop doctor               verify fatop can read every source
@@ -61,6 +62,8 @@ func Execute() int {
 		return runStatus(rest)
 	case "logs":
 		return runLogs(rest)
+	case "queue":
+		return runQueue(rest)
 	case "usage":
 		return runUsage(rest)
 	case "inspect":

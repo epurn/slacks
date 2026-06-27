@@ -23,6 +23,8 @@ make install          # builds and copies fatop to ~/.local/bin
 ```sh
 fatop                      # launch the live TUI dashboard
 fatop status               # one-shot snapshot of services, runs, and PRs
+fatop queue                # story queue in assignment order + open PRs
+fatop usage                # token + cost accounting (--since today|all|<dur>)
 fatop logs                 # merged, color-coded event stream (all agents)
 fatop logs author -f       # follow only the author's events
 fatop logs --level warn    # only warnings and errors

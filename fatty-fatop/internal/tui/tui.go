@@ -40,6 +40,7 @@ type refreshMsg struct {
 	runs     []state.Run
 	prs      []state.PR
 	prErr    error
+	queue    []state.QueueStory
 }
 
 type tickMsg time.Time
@@ -54,6 +55,7 @@ type model struct {
 	runs     []state.Run
 	prs      []state.PR
 	prErr    error
+	queue    []state.QueueStory
 
 	targets  []target
 	selected int
@@ -84,7 +86,8 @@ func (m model) refreshCmd() tea.Cmd {
 		services := state.LoadServices()
 		runs, _ := state.LoadRuns(p.RunDir)
 		prs, prErr := state.LoadPRs(p.Repo)
-		return refreshMsg{services: services, runs: runs, prs: prs, prErr: prErr}
+		queue, _ := state.LoadQueue(p.Roadmap, p.StoriesDir, p.RunDir)
+		return refreshMsg{services: services, runs: runs, prs: prs, prErr: prErr, queue: queue}
 	}
 }
 
@@ -189,6 +192,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.runs = msg.runs
 		m.prs = msg.prs
 		m.prErr = msg.prErr
+		m.queue = msg.queue
 		m.updated = time.Now()
 		m.buildTargets()
 		m.refreshStream()
@@ -321,6 +325,12 @@ func (m model) railView() string {
 		}
 		b.WriteString(m.railRow(t, i == m.selected, w) + "\n")
 	}
+	if len(m.queue) > 0 {
+		b.WriteString("\n" + ui.Muted.Render("QUEUE — assignment order") + "\n")
+		for _, q := range m.queue {
+			b.WriteString(queueRow(q, w) + "\n")
+		}
+	}
 	if m.prErr == nil && len(m.prs) > 0 {
 		b.WriteString("\n" + ui.Muted.Render("OPEN PRS") + "\n")
 		for _, pr := range m.prs {
@@ -358,6 +368,26 @@ func (m model) railRow(t target, selected bool, w int) string {
 		return lipgloss.NewStyle().Background(ui.ColorAccent).Foreground(lipgloss.Color("#FFFFFF")).Render(row)
 	}
 	return row
+}
+
+func queueRow(q state.QueueStory, w int) string {
+	icon, style := "○", ui.Muted
+	meta := ui.Muted.Render(q.Lane)
+	switch {
+	case q.Active:
+		icon, style = "●", ui.Run
+		meta = ui.Run.Render("running")
+	case q.Tripped():
+		icon, style = "⚠", ui.Err
+		meta = ui.Err.Render("attention")
+	case q.Blocked():
+		icon, style = "○", ui.Warn
+		meta = ui.Warn.Render("⟂ " + strings.Join(q.UnmetDeps, ","))
+	default:
+		icon, style = "○", ui.OK
+	}
+	label := fmt.Sprintf("%s %s", style.Render(icon), q.ID)
+	return fitRow(label, meta, w-3)
 }
 
 func prRow(pr state.PR, w int) string {

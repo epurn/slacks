@@ -25,8 +25,10 @@ type Paths struct {
 
 	AuthorEvents string // service-level author events
 
-	RunDir string // fatty-worktrees/.steward-run
-	Repo   string // GitHub repo, e.g. epurn/fatty
+	RunDir     string // fatty-worktrees/.steward-run
+	Repo       string // GitHub repo, e.g. epurn/fatty
+	Roadmap    string // docs/stories/v1-roadmap.md (the steward's story queue)
+	StoriesDir string // docs/stories/
 }
 
 // Resolve picks the command-centre root using, in order: an explicit root
@@ -66,6 +68,8 @@ func Resolve(root string) Paths {
 		AuthorEvents:   filepath.Join(root, "fatty-author-agent", "logs", "author.events.jsonl"),
 		RunDir:         runDir,
 		Repo:           repo,
+		Roadmap:        filepath.Join(root, "docs", "stories", "v1-roadmap.md"),
+		StoriesDir:     filepath.Join(root, "docs", "stories"),
 	}
 }
 

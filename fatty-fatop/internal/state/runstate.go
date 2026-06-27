@@ -56,10 +56,11 @@ func LoadRuns(runDir string) ([]Run, error) {
 		if !strings.HasSuffix(name, ".json") {
 			continue
 		}
-		// Steward bookkeeping, not an author assignment: a JSON array of merged
-		// story ids. Skip by name (and the generic parse guard below also catches
-		// it) so it never renders as a phantom idle run.
-		if name == "merged-stories.json" {
+		// Steward bookkeeping, not author assignments: merged-story ids (a JSON
+		// array) and the circuit breaker's per-story attempt counts. Skip by name
+		// (the generic parse guard below also catches them) so neither renders as
+		// a phantom idle run.
+		if name == "merged-stories.json" || name == "attempts.json" {
 			continue
 		}
 		id := strings.TrimSuffix(name, ".json")
@@ -71,6 +72,11 @@ func LoadRuns(runDir string) ([]Run, error) {
 		var a assignmentFile
 		if err := json.Unmarshal(data, &a); err != nil {
 			// Not a valid assignment object (e.g. a bookkeeping array) — not a run.
+			continue
+		}
+		if a.StoryID == "" && a.Worktree == "" {
+			// A JSON object that parsed but carries no assignment fields (e.g. the
+			// attempt-count map) — not a run.
 			continue
 		}
 
