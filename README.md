@@ -23,6 +23,105 @@ This repository is in Milestone 0: project operating system. The first checked-i
 
 See `docs/architecture/system-overview.md` for the working architecture.
 
+## Self-Hosting
+
+Fatty is designed for self-hosting. The Docker Compose stack brings up Postgres,
+Redis, the FastAPI API, and a Celery worker over plain HTTP from a clean checkout.
+
+**Scope:** HTTP-only local self-host. TLS/HTTPS termination, reverse proxy,
+production hardening, resource limits, backups, and cloud/Kubernetes deployment
+are intentionally out of scope.
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) and Docker Compose v2
+- A USDA FoodData Central API key (free, from [fdc.nal.usda.gov/api-guide](https://fdc.nal.usda.gov/api-guide)) if you want generic-food USDA nutrition lookups — optional; the app runs without it
+- An LLM API key (OpenAI, Anthropic, or OpenAI-compatible) for full estimation quality — optional; the app starts and serves health with the built-in `fake` provider
+
+### Step-by-Step Bring-Up
+
+**1. Clone and enter the repo:**
+
+```sh
+git clone https://github.com/epurn/fatty.git
+cd fatty
+```
+
+**2. Copy the environment template:**
+
+```sh
+cp .env.example .env
+```
+
+**3. Generate and set the auth secret** (required before first boot):
+
+```sh
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Open `.env` and replace the `FATTY_AUTH_SECRET` placeholder with the output.
+The app will not start in production mode with the placeholder in place.
+
+**4. (Optional) Configure providers:**
+
+Open `.env` and configure any providers you want:
+- **LLM:** set `FATTY_LLM_PROVIDER`, `FATTY_LLM_API_KEY`, and `FATTY_LLM_MODEL`. Leave `FATTY_LLM_PROVIDER=fake` to skip.
+- **USDA FDC:** set `FATTY_FDC_API_KEY` with your free data.gov key. Omit to skip generic-food lookups.
+- **Open Food Facts:** enabled by default (no key needed). Set `FATTY_OFF_ENABLED=false` to disable.
+- **Brave Search:** set `FATTY_SEARCH_API_KEY` and `FATTY_SEARCH_ENABLED=true`. Disabled by default.
+
+See `.env.example` for all available options with documentation.
+
+**5. Start the stack:**
+
+```sh
+docker compose up
+```
+
+Docker Compose builds the backend image, runs first-boot Alembic migrations
+automatically (the `migrate` service completes before the API starts), then
+brings up all four services.
+
+**6. Confirm health:**
+
+```sh
+curl -fsS http://localhost:8000/healthz
+# {"status":"ok"}
+
+curl -fsS http://localhost:8000/healthz/sources
+# {"sources":[...]}  lists enabled/available evidence sources
+```
+
+A 200 response from `/healthz` confirms the API is up. `/healthz/sources` shows
+which evidence sources are enabled and available — useful to verify your provider
+configuration without making any estimation calls.
+
+### Provider Availability
+
+Every optional provider (LLM, USDA FDC, OFF, Brave Search) can be omitted.
+The app starts and serves health with all providers unconfigured; estimation
+degrades to model-prior-with-status rather than failing. Source availability is
+reflected in `GET /healthz/sources`.
+
+### First-Boot Migrations
+
+Alembic migrations run automatically on first `docker compose up` via the
+`migrate` service. The API and worker do not start until migrations complete, so
+the schema is always ready from a clean checkout.
+
+To apply migrations manually (e.g. after a code update):
+
+```sh
+docker compose run --rm migrate
+```
+
+### Stopping and Cleaning Up
+
+```sh
+docker compose down           # stop and remove containers
+docker compose down -v        # also drop the postgres data volume
+```
+
 ## Development
 
 The monorepo is laid out as `backend/` (FastAPI), `mobile/` (Expo / React
@@ -39,14 +138,6 @@ make verify
 each package's verification hook. Packages are scaffolded empty for now, so their
 checks are skipped until a package adds an executable `verify.sh`. Language-specific
 tooling arrives with the backend and mobile skeleton stories.
-
-Bring up the full local backend stack (Postgres, Redis, the FastAPI API, and a
-Celery worker) over plain HTTP with Docker Compose:
-
-```sh
-cp .env.example .env
-docker compose up
-```
 
 See `docs/operations/local-dev-stack.md` for the service contract and details.
 

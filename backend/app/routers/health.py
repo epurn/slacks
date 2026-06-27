@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.schemas.health import HealthStatus
-from app.schemas.sources import SourcesStatus
+from app.schemas.sources import EgressPolicy, SourcesStatus
 from app.services import health as health_service
 from app.services import sources as sources_service
 
@@ -29,3 +29,16 @@ def sources() -> SourcesStatus:
     """
 
     return sources_service.list_source_capabilities()
+
+
+@router.get("/healthz/egress", response_model=EgressPolicy)
+def egress() -> EgressPolicy:
+    """Config diagnostics: the official-source fetch SSRF / egress policy (FTY-078).
+
+    Surfaces the configured host allowlist and the bounded size/timeout/content-type
+    limits (plus the fixed HTTPS-only, public-IP-only, no-redirect, active-content-
+    stripping invariants), so a self-hoster can confirm the egress boundary without
+    reading code. Carries no secrets and makes no external calls.
+    """
+
+    return sources_service.describe_egress_policy()

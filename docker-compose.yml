@@ -1,18 +1,23 @@
-# Local development stack for the Fatty backend (FTY-011).
+# Docker Compose stack for the Fatty backend (FTY-011, self-host setup FTY-072).
 #
-# Brings up Postgres, Redis, the FastAPI API, and a Celery worker over plain
-# HTTP for local development:
+# Brings up Postgres, Redis, a one-shot Alembic migration runner, the FastAPI
+# API, and a Celery worker over plain HTTP:
 #
-#     cp .env.example .env
-#     docker compose up
+#     cp .env.example .env           # copy template; fill in FATTY_AUTH_SECRET
+#     docker compose up              # starts all services; migrations run first
 #
-# Out of scope (see the FTY-011 story): TLS / reverse proxy / HTTPS termination
-# (deferred to FTY-072), production hardening, resource limits, and object
-# storage. The real `.env` is gitignored; only `.env.example` is committed.
+# First-boot: the `migrate` service runs `alembic upgrade head` before the API
+# and worker start, so the schema is ready without manual intervention.
 #
-# CONTRACT: the service names (postgres, redis, api, worker), the API port
-# (8000), and the env-var names below are relied on by later infra and backend
-# stories. The API healthcheck depends on FTY-012's `GET /healthz` shape.
+# Self-host scope: HTTP-only local deployment. TLS / reverse proxy / HTTPS
+# termination, production hardening, resource limits, and cloud deployment are
+# intentionally out of scope. See the README self-host section for details.
+#
+# The real `.env` is gitignored; only `.env.example` is committed.
+#
+# CONTRACT: the service names (postgres, redis, migrate, api, worker), the API
+# port (8000), and the env-var names below are relied on by later infra and
+# backend stories. The API healthcheck depends on FTY-012's `GET /healthz` shape.
 
 name: fatty
 
@@ -42,6 +47,19 @@ services:
       timeout: 5s
       retries: 10
 
+  migrate:
+    build:
+      context: ./backend
+    # One-shot Alembic migration runner. Applies all pending migrations to HEAD
+    # before the API and worker start, so a clean checkout reaches a fully
+    # migrated schema without manual intervention (FTY-072 first-boot contract).
+    command: [".venv/bin/alembic", "upgrade", "head"]
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build:
       context: ./backend
@@ -55,12 +73,14 @@ services:
       FATTY_PORT: "8000"
     ports:
       - "${API_PORT:-8000}:8000"
-    # Wait for the datastores to be healthy before the API starts.
+    # Wait for migrations to complete and datastores to be healthy before starting.
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - "CMD"
@@ -84,6 +104,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   postgres-data:

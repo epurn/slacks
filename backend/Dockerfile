@@ -29,6 +29,10 @@ RUN uv sync --frozen --no-dev --no-install-project
 # Application source.
 COPY app ./app
 
+# Alembic migrations — needed by the migrate init service (FTY-072).
+COPY alembic ./alembic
+COPY alembic.ini ./
+
 EXPOSE 8000
 
 # Default to the API; the worker service overrides this command in compose.
