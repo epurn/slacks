@@ -1,6 +1,6 @@
 ---
 id: FTY-053
-state: needs_attention
+state: ready_with_notes
 primary_lane: mobile-core
 touched_lanes: []
 review_focus:
@@ -148,5 +148,3 @@ foods surface as tap-to-apply suggestions while logging. Two pieces:
   and FTY-052 (save + search endpoints) are not yet merged — this is a
   dependency note, not a blocker; the slice builds against their published
   surfaces.
-
-> Circuit breaker: pulled from the ready queue after 3 implement attempts produced no merged PR. A human should diagnose (scope too wide, missing context, or a real bug) and reset the attempt count before returning this to ready.

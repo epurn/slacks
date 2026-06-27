@@ -51,7 +51,7 @@ This is the initial story order for Fatty v1. Keep stories small enough for one 
 | FTY-051 | merged | backend-core | [Corrections audit and edit endpoint](FTY-051-corrections-audit.md) | A field edit preserves the original estimate, updates the current value, and appends an immutable correction; editing servings rescales calories/macros. |
 | FTY-050 | merged | mobile-core | [Editable food/exercise items](FTY-050-editable-items.md) | User can correct calories, macros, servings, and exercise burn from the Today timeline via FTY-051's endpoint. |
 | FTY-052 | merged | backend-core | [Saved foods and aliases (backend)](FTY-052-saved-foods-aliases.md) | A corrected food can be explicitly saved with an alias and reused via a per-user normalized prefix typeahead search endpoint. |
-| FTY-053 | needs_attention | mobile-core | [Saved-food save action + typeahead suggestion bar](FTY-053-saved-food-typeahead.md) | "Save this food" persists a corrected food via FTY-052; typing surfaces prefix-matching saved foods in a suggestion bar, and tapping one applies it and skips the estimator. |
+| FTY-053 | ready_with_notes | mobile-core | [Saved-food save action + typeahead suggestion bar](FTY-053-saved-food-typeahead.md) | "Save this food" persists a corrected food via FTY-052; typing surfaces prefix-matching saved foods in a suggestion bar, and tapping one applies it and skips the estimator. |
 
 ## Milestone 6: Evidence Inputs
 
@@ -65,7 +65,9 @@ Backend evidence slices (060/061/062) depend only on FTY-045 and are independent
 | FTY-076 | merged | contracts | [LLM provider v2 — image input](FTY-076-llm-provider-vision-v2.md) | structured_completion gains an optional image argument (vision model required when used); text-only path unchanged. Prerequisite for FTY-061. |
 | FTY-077 | merged | security-privacy | [log_attachments + retention](FTY-077-log-attachments-retention.md) | A log_attachments table holds an uploaded image only on explicit save; discard-by-default retention; additive reversible migration. Prerequisite for FTY-061. |
 | FTY-061 | merged | estimator | [Nutrition label extraction pipeline (backend)](FTY-061-nutrition-label-extraction.md) | A label image yields schema-validated nutrition facts via the v2 vision provider; deterministic calories/macros; image discarded unless saved. Depends on FTY-076 + FTY-077. |
-| FTY-062 | needs_attention | security-privacy | [Official source search (backend)](FTY-062-official-source-search.md) | Sanitized search + a hardened SSRF-safe fetcher retrieve official nutrition evidence for unresolved named products. |
+| FTY-078 | ready | security-privacy | [Hardened fetcher + SSRF egress policy](FTY-078-hardened-fetcher-ssrf.md) | A hardened fetcher retrieves allowlisted public official-source pages and returns inert text; the full adversarial SSRF suite fails closed. Extends FTY-044's hardened_fetch. Prerequisite for FTY-062. |
+| FTY-079 | ready | contracts | [Search-provider adapter](FTY-079-search-provider-adapter.md) | A pluggable search adapter (Brave default, disabled by default for self-host) returns candidate URLs + availability status from a sanitized query; no personal context egresses. Prerequisite for FTY-062. |
+| FTY-062 | ready | estimator | [Official-source resolution pipeline step](FTY-062-official-source-search.md) | The estimator runs FTY-079 search + FTY-078 fetch as last resort before model-prior, validates facts, and writes derived_food_items + evidence_sources (no raw pages); disabled provider falls through to model-prior-with-status. Depends on FTY-078 + FTY-079. |
 | FTY-063 | ready | mobile-core | [Mobile barcode scanner](FTY-063-mobile-barcode-scanner.md) | Scanning a barcode creates a log event resolved by FTY-060; introduces the reusable camera scaffold. |
 | FTY-064 | ready | mobile-core | [Mobile label capture](FTY-064-mobile-label-capture.md) | Capturing a label photo uploads it for FTY-061 extraction; opt-in save of the attachment. |
 
@@ -77,7 +79,7 @@ The two mobile-core items are split backend/mobile for parallel work: weight (07
 | --- | --- | --- | --- | --- |
 | FTY-070 | ready | backend-core | [Weight log backend](FTY-070-weight-log-backend.md) | A weight_entries time series with create/list endpoints and canonical-kg storage exists. |
 | FTY-074 | ready | mobile-core | [Mobile weight trend](FTY-074-mobile-weight-trend.md) | User can log weight and view a simple trend chart backed by FTY-070. |
-| FTY-071 | ready | backend-core | [Daily totals endpoint](FTY-071-daily-totals-endpoint.md) | A read-only daily-summary endpoint returns calories, macros, target, and exercise burn separately. |
+| FTY-071 | merged | backend-core | [Daily totals endpoint](FTY-071-daily-totals-endpoint.md) | A read-only daily-summary endpoint returns calories, macros, target, and exercise burn separately. |
 | FTY-075 | ready | mobile-core | [Mobile daily summary](FTY-075-mobile-daily-summary.md) | Today shows calories, macros, target, and exercise burn separately, refreshing as entries complete. |
 | FTY-072 | ready_with_notes | infra | [Self-host setup](FTY-072-self-host-setup.md) | README and Docker Compose support a fresh self-host install with documented FATTY_* env config. |
 | FTY-073 | ready_with_notes | security-privacy | [Security pass](FTY-073-security-pass.md) | Threat model/retention/secrets reviewed; an adversarial test suite proves the boundaries; findings filed as follow-up stories. |
