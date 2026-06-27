@@ -13,8 +13,8 @@ here — work inside them on their own.
 | Path | What it is |
 | --- | --- |
 | `fatty/` | The product repo (public `epurn/fatty`). Product code, contracts, standards. Its own repo. |
-| `fatty-steward-agent/` | Always-on poller. Routes ready stories, assigns authors, watches PR state. |
-| `fatty-reviewer-agent/` | Always-on poller. Reviews PR heads read-only, posts the reviewer-approved status. |
+| `fatty-steward-agent/` | The single always-on poller. Routes ready stories, and launches one-shot author AND reviewer workers in parallel based on PR + queue state. |
+| `fatty-reviewer-agent/` | One-shot worker. The steward dispatches it (`reviewer once --pr N`) to review a PR head read-only and post the reviewer-approved status. |
 | `fatty-author-agent/` | One-shot worker. Implements/fixes one assigned story in a worktree, opens a PR. |
 | `fatty-worktrees/` | Per-assignment git worktrees + steward run state. |
 | `fatty-fatop/` | Read-only Go TUI/CLI that monitors the agents. Reads the structured event logs; never operates the services. |
@@ -30,11 +30,14 @@ detail in `docs/agent-operating-system.md`.
   reviews, or operates the services. Driven interactively from here with the
   `plan-stories` skill (it interviews you, then writes the story/stories) or the
   planner subagent directly.
-- **Steward** — deterministic poller; assigns ready stories to authors and
-  routes PR fixes. Wakes a model only for bounded judgment.
+- **Steward** — the single deterministic poller. Assigns ready stories to
+  authors, routes PR fixes, and dispatches reviewers for PR heads needing a
+  verdict — launching author and reviewer workers in parallel. Wakes a model
+  only for bounded judgment.
 - **Author** — implements one scoped story on its own branch and opens a PR.
-- **Reviewer** — inspects the PR head (read-only) and approves, comments, or
-  requests changes. Always separate from the author.
+- **Reviewer** — a one-shot worker the steward dispatches; inspects the PR head
+  (read-only) and approves, comments, or requests changes. Always a separate
+  process from the author — the steward launches it but never reviews itself.
 
 ## Operating The Agents
 

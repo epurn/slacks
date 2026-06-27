@@ -19,8 +19,11 @@ mkdir -p "$REVIEWER/logs" "$STEWARD/logs"
 touch "$REVIEWER/logs/reviewer.out.log" "$REVIEWER/logs/reviewer.err.log" \
       "$STEWARD/logs/steward.out.log"   "$STEWARD/logs/steward.err.log"
 
-echo "== installing launch agents (reviewer + steward) =="
-( cd "$REVIEWER" && ./scripts/install-launch-agent.sh )   # reviewer runs with --enable-auto-merge
+echo "== installing launch agents =="
+# The steward is the only always-on poller. It launches one-shot author AND
+# reviewer workers in parallel. Installing the reviewer agent loads its on-demand
+# stub, which also boots out any previous always-on reviewer watch loop.
+( cd "$REVIEWER" && ./scripts/install-launch-agent.sh )   # on-demand worker, dispatched by the steward
 ( cd "$STEWARD"  && ./scripts/install-launch-agent.sh )
 
 echo "== active agent processes =="

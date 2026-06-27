@@ -15,13 +15,16 @@ approve the same implementation.
   operate the steward, reviewer, or author services; it prepares docs, stories,
   and commands, and you run the agents. Driven interactively from the command
   centre (`plan-story` skill / planner subagent).
-- **Steward** — picks up ready stories, assigns author work, watches PR state,
-  and routes PRs to reviewers. Deterministic poller; wakes a model only for
-  bounded judgment (story splitting, promotion, demotion, blocker triage).
+- **Steward** — the single deterministic poller. Picks up ready stories, assigns
+  author work, watches PR state, and dispatches reviewers for PR heads needing a
+  verdict — launching author and reviewer workers in parallel. Wakes a model only
+  for bounded judgment (story splitting, promotion, demotion, blocker triage).
 - **Author** — implements one scoped story on its own branch and opens a PR.
   One bounded assignment per run, then exits.
-- **Reviewer** — inspects the current PR head using the review checklist and
-  approves, comments, or requests changes. Always separate from the author.
+- **Reviewer** — a one-shot worker the steward dispatches (`reviewer once
+  --pr N`); inspects the current PR head using the review checklist and approves,
+  comments, or requests changes. One bounded review per run, then exits. Always a
+  separate process from the author.
 
 ## Public Repository Boundary
 
