@@ -379,6 +379,9 @@ def _persist_candidates(session: Session, run: EstimationRun, context: Estimatio
                     amount=item.amount,
                     status=DerivedItemStatus.RESOLVED,
                     active_calories=item.active_calories,
+                    # Snapshot the estimator's original burn at creation so a later
+                    # user correction (FTY-051) preserves it immutably.
+                    active_calories_estimated=item.active_calories,
                 )
             )
     else:
@@ -421,6 +424,12 @@ def _persist_resolved_food(
             protein_g=item.protein_g,
             carbs_g=item.carbs_g,
             fat_g=item.fat_g,
+            # Snapshot the estimator's original calories/macros at creation so a
+            # later user correction (FTY-051) preserves them immutably.
+            calories_estimated=item.calories,
+            protein_g_estimated=item.protein_g,
+            carbs_g_estimated=item.carbs_g,
+            fat_g_estimated=item.fat_g,
         )
         session.add(food)
         session.flush()  # assign food.id for the evidence foreign key

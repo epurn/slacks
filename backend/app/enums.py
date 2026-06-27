@@ -149,6 +149,18 @@ class DerivedItemStatus(StrEnum):
     RESOLVED = "resolved"
 
 
+class CorrectionSource(StrEnum):
+    """Origin of a ``corrections`` audit row (FTY-051).
+
+    A correction records who/what changed a derived item's value. v1 only writes
+    :attr:`USER_EDIT` — a deterministic user override through the edit endpoint.
+    Later learning/adaptation work (FTY-052+) may append other sources (e.g. a
+    re-estimate) without redefining the append-only audit contract.
+    """
+
+    USER_EDIT = "user_edit"
+
+
 #: Authentication provider for an :class:`~app.models.identity.AuthIdentity`.
 #: Only the local email+password path exists in v1; hosted providers (e.g. Sign
 #: in with Apple) are deferred to a later story but modelled as separate

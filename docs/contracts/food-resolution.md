@@ -212,3 +212,9 @@ rollback, and end-to-end resolution (with a stubbed FDC source) are covered by
   Foundation/SR-Legacy data-type restriction are documented assumptions (story
   planning notes); per-fdc-id cache dedup, richer portion inference, and additional
   sources are later stories.
+- FTY-051 extends `derived_food_items` with nullable `calories_estimated` /
+  `protein_g_estimated` / `carbs_g_estimated` / `fat_g_estimated` snapshots (the
+  immutable originals paired with the editable current calories/macros) and lets a
+  user correct values — including a deterministic servings rescale — through the edit
+  endpoint. This does not redefine the resolution math above; the estimator sets the
+  snapshots at creation. See `corrections.md`.
