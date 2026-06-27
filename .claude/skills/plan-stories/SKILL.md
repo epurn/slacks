@@ -38,6 +38,21 @@ Before asking anything, read so your questions and recommendations are informed:
 Note the next free story id by scanning existing `docs/stories/FTY-###` stories
 and the roadmap.
 
+**Lane vocabulary** (a story's `primary_lane` + `touched_lanes`). Lanes serialize
+concurrent *code* ownership, so pick the lane(s) where the story's **code** lives:
+
+- `backend-core` — FastAPI backend (`backend/`)
+- `mobile-core` — Expo/RN app (`mobile/`)
+- `estimator` — estimation pipeline / calculators / LLM providers (any `estimator` path)
+- `contracts` — shared contract code/schemas (`contracts/`, `packages/contracts/`)
+- `infra` — Docker/compose/deploy (`infra/`, compose files)
+- `governance` — CI, scripts, repo meta/process config
+
+Two lanes are **non-serializing** (cross-cutting; they never block other work, so
+declaring them costs nothing but they aren't the "real" lane): `security-privacy`
+(a review concern — its code is in backend-core/estimator) and `docs` (shared
+spec/standards text). A story's real serializing lane is always a code lane above.
+
 ## 2. Grill, one question at a time
 
 Walk down each branch of the design tree, resolving dependencies between
