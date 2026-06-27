@@ -80,9 +80,26 @@ class _DerivedItem(Base):
 
 
 class DerivedFoodItem(_DerivedItem):
-    """An unresolved food candidate parsed from a log event."""
+    """A food candidate parsed from a log event, optionally resolved (FTY-044).
+
+    Inherits the shared candidate shape and adds the food-resolution output: the
+    canonical ``calories`` (kcal) and macros (``protein_g`` / ``carbs_g`` / ``fat_g``,
+    grams) the calculator computes deterministically from a trusted source's per-100g
+    facts and the resolved portion ``grams``. All five stay ``None`` while the item is
+    ``unresolved`` — the parse step writes the candidate, the food step later costs it.
+    The source facts and provenance behind the numbers live in ``products`` /
+    ``evidence_sources`` and on the estimation run, not duplicated per macro here.
+    """
 
     __tablename__ = "derived_food_items"
+
+    #: Resolved portion mass (grams) the facts were scaled by; ``None`` if unresolved.
+    grams: Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: Canonical energy (kcal) for the resolved portion; ``None`` if unresolved.
+    calories: Mapped[float | None] = mapped_column(Float, nullable=True)
+    protein_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    carbs_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fat_g: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class DerivedExerciseItem(_DerivedItem):

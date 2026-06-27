@@ -12,6 +12,7 @@ from app.models.derived import (
     DerivedFoodItem,
 )
 from app.models.estimation import EstimationJob, EstimationRun
+from app.models.food_sources import EvidenceSource, Product
 from app.models.identity import AuthIdentity, User, UserProfile
 from app.models.log_events import LogEvent
 from app.models.targets import DailyTarget, Goal
@@ -24,8 +25,10 @@ __all__ = [
     "DerivedFoodItem",
     "EstimationJob",
     "EstimationRun",
+    "EvidenceSource",
     "Goal",
     "LogEvent",
+    "Product",
     "User",
     "UserProfile",
 ]

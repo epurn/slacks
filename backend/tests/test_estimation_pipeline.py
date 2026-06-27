@@ -82,6 +82,28 @@ def test_default_pipeline_uses_real_parse_then_exercise_calculate() -> None:
     assert [step.name for step in pipeline.steps] == ["parse", "exercise_calculate"]
 
 
+def test_default_pipeline_appends_food_resolution_when_resolver_supplied() -> None:
+    # The worker supplies a session-bound food resolver (FTY-044); the food step is
+    # then appended after parse + exercise. Composition only — nothing is run.
+    from typing import cast
+
+    from sqlalchemy.orm import Session
+
+    from app.estimator.food_step import FoodResolver
+
+    class _DisabledSource:
+        enabled = False
+
+        def lookup(self, query: str) -> None:  # pragma: no cover - never called here
+            return None
+
+    resolver = FoodResolver(session=cast(Session, None), source=_DisabledSource())
+
+    pipeline = default_pipeline(FakeProvider(), food_resolver=resolver)
+
+    assert [step.name for step in pipeline.steps] == ["parse", "exercise_calculate", "food_resolve"]
+
+
 def test_needs_clarification_is_terminal_outcome() -> None:
     context = _context()
 

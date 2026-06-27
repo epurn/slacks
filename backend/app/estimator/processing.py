@@ -41,6 +41,8 @@ from app.enums import (
     EstimationRunStatus,
     LogEventStatus,
 )
+from app.estimator.fdc import build_fdc_client
+from app.estimator.food_step import FoodResolver
 from app.estimator.pipeline import (
     EstimationContext,
     Pipeline,
@@ -55,6 +57,7 @@ from app.models.derived import (
     DerivedFoodItem,
 )
 from app.models.estimation import EstimationJob, EstimationRun
+from app.models.food_sources import EvidenceSource
 from app.models.identity import UserProfile
 from app.models.log_events import LogEvent
 from app.services.log_events import transition_event
@@ -183,7 +186,13 @@ def process_estimation(
     event is missing or not owned by ``user_id``.
     """
 
-    pipeline = pipeline or default_pipeline(build_provider(load_llm_settings()))
+    if pipeline is None:
+        # The food step (FTY-044) needs this session for the product cache and
+        # evidence writes, so the default pipeline is built per call here where the
+        # session is in scope. With no FDC key the source is disabled and food
+        # candidates are left unresolved.
+        resolver = FoodResolver(session=session, source=build_fdc_client())
+        pipeline = default_pipeline(build_provider(load_llm_settings()), food_resolver=resolver)
 
     # Enforce ownership before any write: a missing or cross-user event fails
     # closed and no job row is created on its behalf.
@@ -332,26 +341,31 @@ def _finalize(
 def _persist_candidates(session: Session, run: EstimationRun, context: EstimationContext) -> None:
     """Persist the parsed food/exercise candidates as user-owned rows.
 
-    Food candidates are written ``unresolved`` (resolution is FTY-044). Exercise
-    candidates the calculator (FTY-043) costed are written ``resolved`` with their
-    ``active_calories``; if the exercise step did not run (e.g. the stub calculator),
-    they fall back to ``unresolved`` rows with no calories. Candidate names and
-    portions are schema-validated *data* written through parameterized ORM inserts —
-    never executed. Ownership (``user_id``) and the owning ``log_event_id`` are
-    carried on every row for object-level authorization and retention.
+    Food candidates the resolver (FTY-044) costed are written ``resolved`` with their
+    calories/macros plus a user-owned ``evidence_sources`` provenance row; if the food
+    step did not resolve them (e.g. the source was unconfigured), they fall back to
+    ``unresolved`` rows with no calories. Exercise candidates the calculator (FTY-043)
+    costed are written ``resolved`` with their ``active_calories``; otherwise they fall
+    back to ``unresolved``. Candidate names and portions are schema-validated *data*
+    written through parameterized ORM inserts — never executed. Ownership (``user_id``)
+    and the owning ``log_event_id`` are carried on every row for object-level
+    authorization and retention.
     """
 
-    for draft in context.food_candidates:
-        session.add(
-            DerivedFoodItem(
-                log_event_id=run.log_event_id,
-                user_id=run.user_id,
-                name=draft.name,
-                quantity_text=draft.quantity_text,
-                unit=draft.unit,
-                amount=draft.amount,
+    if context.resolved_food_items:
+        _persist_resolved_food(session, run, context)
+    else:
+        for draft in context.food_candidates:
+            session.add(
+                DerivedFoodItem(
+                    log_event_id=run.log_event_id,
+                    user_id=run.user_id,
+                    name=draft.name,
+                    quantity_text=draft.quantity_text,
+                    unit=draft.unit,
+                    amount=draft.amount,
+                )
             )
-        )
 
     if context.resolved_exercise_items:
         for item in context.resolved_exercise_items:
@@ -379,6 +393,54 @@ def _persist_candidates(session: Session, run: EstimationRun, context: Estimatio
                     amount=draft.amount,
                 )
             )
+
+
+def _persist_resolved_food(
+    session: Session, run: EstimationRun, context: EstimationContext
+) -> None:
+    """Persist resolved food items with calories/macros and their evidence rows.
+
+    Each item becomes a ``resolved`` ``derived_food_items`` row (flushed so its id is
+    available) plus a user-owned ``evidence_sources`` row recording the source
+    reference, content hash, fetch time, and per-100g facts snapshot — never a raw
+    page. The cached global ``products`` rows the resolver created are already in the
+    session and committed with this transaction.
+    """
+
+    for item in context.resolved_food_items:
+        food = DerivedFoodItem(
+            log_event_id=run.log_event_id,
+            user_id=run.user_id,
+            name=item.name,
+            quantity_text=item.quantity_text,
+            unit=item.unit,
+            amount=item.amount,
+            status=DerivedItemStatus.RESOLVED,
+            grams=item.grams,
+            calories=item.calories,
+            protein_g=item.protein_g,
+            carbs_g=item.carbs_g,
+            fat_g=item.fat_g,
+        )
+        session.add(food)
+        session.flush()  # assign food.id for the evidence foreign key
+
+        session.add(
+            EvidenceSource(
+                user_id=run.user_id,
+                log_event_id=run.log_event_id,
+                derived_food_item_id=food.id,
+                product_id=item.product_id,
+                source_type=item.source_type,
+                source_ref=item.source_ref,
+                content_hash=item.content_hash,
+                fetched_at=item.fetched_at,
+                calories_per_100g=item.calories_per_100g,
+                protein_per_100g=item.protein_per_100g,
+                carbs_per_100g=item.carbs_per_100g,
+                fat_per_100g=item.fat_per_100g,
+            )
+        )
 
 
 def _persist_clarification_questions(

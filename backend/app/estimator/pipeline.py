@@ -32,10 +32,12 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from app.estimator.food_step import FoodResolver
     from app.llm.base import Provider
 
 
@@ -126,6 +128,40 @@ class ResolvedExerciseItem:
     active_calories: float
 
 
+@dataclass(frozen=True)
+class ResolvedFoodItem:
+    """A costed generic-food candidate produced by the food resolver (FTY-044).
+
+    Carries the parsed shape (``name`` and raw portion phrase plus the best-effort
+    ``unit``/``amount``) alongside the deterministic resolution: the portion ``grams``
+    and the canonical ``calories``/macros computed from a trusted source's per-100g
+    facts. It also carries the provenance the worker writes as an ``evidence_sources``
+    row — the cached ``product_id``, the source classification/reference, the content
+    hash, the fetch time, and the per-100g facts snapshot. Like :class:`CandidateDraft`
+    it is product data persisted to its own user-owned table, never copied into the
+    sanitized run ``trace``.
+    """
+
+    name: str
+    quantity_text: str
+    unit: str | None
+    amount: float | None
+    grams: float
+    calories: float
+    protein_g: float
+    carbs_g: float
+    fat_g: float
+    product_id: uuid.UUID
+    source_type: str
+    source_ref: str
+    content_hash: str
+    fetched_at: datetime
+    calories_per_100g: float
+    protein_per_100g: float
+    carbs_per_100g: float
+    fat_per_100g: float
+
+
 @dataclass
 class EstimationContext:
     """Mutable accumulator threaded through the pipeline steps.
@@ -156,6 +192,7 @@ class EstimationContext:
     food_candidates: list[CandidateDraft] = field(default_factory=list)
     exercise_candidates: list[CandidateDraft] = field(default_factory=list)
     resolved_exercise_items: list[ResolvedExerciseItem] = field(default_factory=list)
+    resolved_food_items: list[ResolvedFoodItem] = field(default_factory=list)
     clarification_questions: list[str] = field(default_factory=list)
 
     def record_step(self, name: str, status: str) -> None:
@@ -257,19 +294,27 @@ class Pipeline:
         return PipelineResult(PipelineOutcome.COMPLETED, None)
 
 
-def default_pipeline(provider: Provider) -> Pipeline:
-    """Build the v1 estimation pipeline: real NL parse then exercise calculation.
+def default_pipeline(provider: Provider, *, food_resolver: FoodResolver | None = None) -> Pipeline:
+    """Build the v1 estimation pipeline: NL parse, exercise calc, food resolution.
 
     The parse step (FTY-042) turns the event text into schema-validated candidates
     using ``provider``; the exercise step (FTY-043) costs the exercise candidates
-    into net active calories deterministically. Food resolution (FTY-044) is still
-    to come, so food candidates remain persisted unresolved. The worker contract
-    (claim → run → transition) is unchanged.
+    into net active calories deterministically; the food step (FTY-044) resolves
+    food candidates into calories/macros from a trusted source. The food step is
+    appended only when a ``food_resolver`` is supplied (it needs a database session
+    for the product cache and evidence writes), which the worker always provides; a
+    resolver-less build (e.g. unit tests of composition) keeps food candidates
+    unresolved, the pre-FTY-044 behavior. The worker contract (claim → run →
+    transition) is unchanged.
     """
 
     # Imported here rather than at module top to avoid a cycle: the steps import the
     # context/exception types defined above in this module.
     from app.estimator.exercise_step import ExerciseCalculateStep
+    from app.estimator.food_step import FoodResolveStep
     from app.estimator.parse import ParseStep
 
-    return Pipeline([ParseStep(provider), ExerciseCalculateStep()])
+    steps: list[EstimationStep] = [ParseStep(provider), ExerciseCalculateStep()]
+    if food_resolver is not None:
+        steps.append(FoodResolveStep(food_resolver))
+    return Pipeline(steps)
