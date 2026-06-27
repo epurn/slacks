@@ -2,6 +2,7 @@ import { act, create as render, type ReactTestRenderer } from "react-test-render
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { TodayScreen } from "./TodayScreen";
+import type { DailySummaryDTO } from "@/api/dailySummary";
 import type { DerivedFoodItemDTO } from "@/api/derivedItems";
 import { LogEventApiError, type LogEventDTO } from "@/api/logEvents";
 import type { SavedFoodDTO } from "@/api/savedFoods";
@@ -593,6 +594,122 @@ function savedFood(overrides: Partial<SavedFoodDTO> = {}): SavedFoodDTO {
     ...overrides,
   };
 }
+
+// ─── Daily summary header (FTY-075) ──────────────────────────────────────────
+
+function summary(overrides: Partial<DailySummaryDTO> = {}): DailySummaryDTO {
+  return {
+    date: "2026-06-27",
+    intake: { calories: 1234, protein_g: 70, carbs_g: 120, fat_g: 40 },
+    target: { calories: 2000 },
+    exercise: { active_calories: 0 },
+    ...overrides,
+  };
+}
+
+describe("TodayScreen daily summary", () => {
+  it("fetches and renders the day's summary figures", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([event({ id: "a", raw_text: "Oatmeal", status: "completed" })]);
+    const getDailySummary = jest.fn().mockResolvedValue(summary());
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        getDailySummary={getDailySummary}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    expect(getDailySummary).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+    );
+    // Figures render as numeric children; assert via the paired a11y labels.
+    expect(hasA11yLabel(tree, "Intake: 1234 calories")).toBe(true);
+    expect(hasA11yLabel(tree, "Target: 2000 calories")).toBe(true);
+  });
+
+  it("surfaces a summary error string when the fetch fails", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([event({ id: "a", raw_text: "Oatmeal", status: "completed" })]);
+    const getDailySummary = jest.fn().mockRejectedValue(new Error("network"));
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        getDailySummary={getDailySummary}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    expect(textContent(tree)).toContain("We couldn't load your summary");
+  });
+
+  it("shows the zeroed summary and target on an empty day", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const getDailySummary = jest
+      .fn()
+      .mockResolvedValue(
+        summary({ intake: { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 } }),
+      );
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        getDailySummary={getDailySummary}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    // The empty-state message and the summary header coexist: the zeroed intake
+    // and the target are visible before the first entry is logged.
+    expect(textContent(tree)).toContain("Nothing logged yet");
+    expect(hasA11yLabel(tree, "Intake: 0 calories")).toBe(true);
+    expect(hasA11yLabel(tree, "Target: 2000 calories")).toBe(true);
+  });
+
+  describe("with polling", () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    it("refreshes the summary and clears a stale error once a poll recovers", async () => {
+      // A pending entry keeps polling active. The summary fetch fails on initial
+      // load, then recovers on the next poll — the error banner must clear.
+      const load = jest
+        .fn()
+        .mockResolvedValue([event({ id: "a", raw_text: "Oatmeal", status: "pending" })]);
+      const getDailySummary = jest
+        .fn()
+        .mockRejectedValueOnce(new Error("network"))
+        .mockResolvedValue(summary({ intake: { calories: 1500, protein_g: 80, carbs_g: 150, fat_g: 50 } }));
+      const tree = mount(
+        <TodayScreen
+          session={SESSION}
+          load={load}
+          getDailySummary={getDailySummary}
+          useActive={() => true}
+          pollIntervalMs={1000}
+        />,
+      );
+      await act(async () => {});
+
+      // Initial load failed: the error banner is shown, no figures yet.
+      expect(textContent(tree)).toContain("We couldn't load your summary");
+
+      // One interval later the poll refetches and succeeds.
+      act(() => jest.advanceTimersByTime(1000));
+      await act(async () => {});
+
+      expect(textContent(tree)).not.toContain("We couldn't load your summary");
+      expect(hasA11yLabel(tree, "Intake: 1500 calories")).toBe(true); // recovered figure
+    });
+  });
+});
 
 describe("TodayScreen typeahead suggestion bar", () => {
   beforeEach(() => jest.useFakeTimers());

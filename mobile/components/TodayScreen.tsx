@@ -17,6 +17,10 @@ import {
   type DerivedFoodItemDTO,
 } from "@/api/derivedItems";
 import {
+  getDailySummary as getDailySummaryApi,
+  type DailySummaryDTO,
+} from "@/api/dailySummary";
+import {
   uploadLabelImage as uploadLabelImageApi,
 } from "@/api/labelCapture";
 import {
@@ -31,6 +35,7 @@ import {
   type SavedFoodDTO,
 } from "@/api/savedFoods";
 import { BarcodeScannerScreen } from "@/components/BarcodeScannerScreen";
+import { DailySummary } from "@/components/DailySummary";
 import { EntryRow } from "@/components/EntryRow";
 import { LabelCaptureScreen } from "@/components/LabelCaptureScreen";
 import { TypeaheadSuggestionBar } from "@/components/TypeaheadSuggestionBar";
@@ -129,6 +134,7 @@ export function TodayScreen({
   saveFood = saveFoodApi,
   uploadLabel = uploadLabelImageApi,
   labelTakePhoto,
+  getDailySummary = getDailySummaryApi,
 }: {
   session?: Session;
   load?: typeof listTodayLogEventsApi;
@@ -151,6 +157,8 @@ export function TodayScreen({
   uploadLabel?: typeof uploadLabelImageApi;
   /** Injectable photo capture for label-capture tests (FTY-064). */
   labelTakePhoto?: () => Promise<{ uri: string }>;
+  /** Injectable daily summary fetch for tests (FTY-075). */
+  getDailySummary?: typeof getDailySummaryApi;
 } = {}) {
   const insets = useSafeAreaInsets();
   const liveSession = useSession();
@@ -178,6 +186,9 @@ export function TodayScreen({
   // "Add" creates the log event AND immediately adds a synthetic resolved item
   // with the saved food's nutrition, skipping the estimator wait.
   const [selectedSavedFood, setSelectedSavedFood] = useState<SavedFoodDTO | null>(null);
+  // Daily summary: intake, macros, target, exercise burn (FTY-075).
+  const [summary, setSummary] = useState<DailySummaryDTO | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
   // Monotonic counter for optimistic placeholder ids; never collides with a
   // server UUID and stays stable across renders.
   const tempId = useRef(0);
@@ -213,6 +224,31 @@ export function TodayScreen({
       active = false;
     };
   }, [apiSession, load, reloadKey]);
+
+  // Load the daily summary (FTY-075): intake, macros, target, exercise burn.
+  // Reuses the same session and polling mechanism as the timeline (FTY-032).
+  useEffect(() => {
+    if (!apiSession) {
+      return;
+    }
+    let active = true;
+    getDailySummary(apiSession).then(
+      (loaded) => {
+        if (!active) return;
+        setSummary(loaded);
+        setSummaryError(null);
+      },
+      () => {
+        if (!active) return;
+        setSummaryError(
+          "We couldn't load your summary. Check your connection and try again.",
+        );
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [apiSession, getDailySummary, reloadKey]);
 
   const handleSubmit = useCallback(async () => {
     const trimmed = text.trim();
@@ -325,9 +361,11 @@ export function TodayScreen({
   }, []);
 
   // One poll: refetch the day and reconcile into the timeline, preserving any
-  // unacknowledged optimistic entry. Transient poll failures are swallowed so a
-  // dropped request never replaces the visible timeline with an error — the
-  // next tick retries, and the manual refresh surfaces persistent failures.
+  // unacknowledged optimistic entry. Also refetch the daily summary so it
+  // reflects any entries that have reached terminal status. Transient poll
+  // failures are swallowed so a dropped request never replaces the visible
+  // timeline with an error — the next tick retries, and the manual refresh
+  // surfaces persistent failures.
   const pollOnce = useCallback(() => {
     if (!apiSession) {
       return;
@@ -340,7 +378,19 @@ export function TodayScreen({
         // Keep the current timeline; retry on the next interval.
       },
     );
-  }, [apiSession, load]);
+    getDailySummary(apiSession).then(
+      (loaded) => {
+        setSummary(loaded);
+        // Clear any stale error so a recovered poll drops the error banner —
+        // DailySummary renders its error branch ahead of the summary, so without
+        // this an initial-load failure would stick even once good data arrives.
+        setSummaryError(null);
+      },
+      () => {
+        // Keep the current summary and any existing error; retry next interval.
+      },
+    );
+  }, [apiSession, load, getDailySummary]);
 
   // Reconcile a confirmed edit (the server's current item) back into the map,
   // replacing the prior item for its event by id so the timeline re-renders the
@@ -507,6 +557,8 @@ export function TodayScreen({
           loadError={loadError}
           onRetry={() => void refresh()}
           saveFood={saveFood}
+          summary={summary}
+          summaryError={summaryError}
         />
       </ScrollView>
     </>
@@ -523,6 +575,8 @@ function Timeline({
   loadError,
   onRetry,
   saveFood,
+  summary,
+  summaryError,
 }: {
   events: readonly LogEventDTO[];
   itemsByEvent: Readonly<Record<string, readonly DerivedItem[]>>;
@@ -533,6 +587,8 @@ function Timeline({
   loadError: string | null;
   onRetry: () => void;
   saveFood: typeof saveFoodApi;
+  summary?: DailySummaryDTO | null;
+  summaryError?: string | null;
 }) {
   if (events.length === 0) {
     if (phase === "loading") {
@@ -542,34 +598,41 @@ function Timeline({
         </View>
       );
     }
-    if (phase === "error") {
-      return (
-        <View style={styles.state}>
-          <Text style={styles.stateText} accessibilityRole="alert">
-            {loadError}
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Try again"
-            onPress={onRetry}
-            style={styles.retry}
-          >
-            <Text style={styles.retryLabel}>Try again</Text>
-          </Pressable>
-        </View>
-      );
-    }
+    // A day with nothing logged still has a summary: zeroed intake and the
+    // calorie target. Render it (and any summary error) above the empty state so
+    // the target is visible before the first entry — DailySummary returns null
+    // when there is neither summary nor error, so this stays clean.
     return (
-      <View style={styles.state}>
-        <Text style={styles.stateText}>
-          Nothing logged yet. Add your first food or exercise above.
-        </Text>
+      <View>
+        <DailySummary summary={summary} error={summaryError} />
+        {phase === "error" ? (
+          <View style={styles.state}>
+            <Text style={styles.stateText} accessibilityRole="alert">
+              {loadError}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Try again"
+              onPress={onRetry}
+              style={styles.retry}
+            >
+              <Text style={styles.retryLabel}>Try again</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={styles.state}>
+            <Text style={styles.stateText}>
+              Nothing logged yet. Add your first food or exercise above.
+            </Text>
+          </View>
+        )}
       </View>
     );
   }
 
   return (
     <View>
+      <DailySummary summary={summary} error={summaryError} />
       {phase === "error" && loadError ? (
         <Text style={styles.error} accessibilityRole="alert">
           {loadError}
