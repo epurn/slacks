@@ -98,3 +98,18 @@ state. The author and reviewer enforce this at runtime; keep it true here too.
   `~/.config/fatty-agents/keys/`.
 - Auth for Claude Code: a logged-in `claude` CLI or `ANTHROPIC_API_KEY` in the
   service environment.
+
+## Keeping agent context current
+
+The author/reviewer prompts preload facts about `fatty` (package layout, the exact
+per-package verify commands) and the planner skill documents the lane vocabulary —
+so runs skip rediscovery and save cost. The agents evolve `fatty`, so these can go
+stale. Upkeep:
+
+- **`scripts/check-preloads.py`** asserts the preloads still match `fatty` + the
+  steward's `lane_for_path`. The steward runs it at startup and hourly and emits a
+  `preload_drift` warn (visible in fatop) when they diverge. If you change `fatty`'s
+  layout or a `verify.sh`, update the author/reviewer prompts and re-run the check.
+- **`scripts/warm-deps.sh`** builds the dependency warm base the steward clones into
+  each worktree. The steward auto-refreshes it when a lockfile changes on main; run
+  it by hand to rebuild from scratch.

@@ -21,3 +21,10 @@ fi
 
 echo "== warm base ready =="
 du -sh "$FATTY/mobile/node_modules" "$FATTY/backend/.venv" 2>/dev/null || true
+
+# Record the lockfile fingerprint so the steward only re-warms when a lockfile
+# actually changes (see refresh_warm_base_if_stale in the steward runner).
+STATE="${FATTY_STEWARD_RUN_DIR:-/Users/epurn/workspace/fatty-suite/fatty-worktrees/.steward-run}"
+mkdir -p "$STATE"
+cat "$FATTY/mobile/package-lock.json" "$FATTY/backend/uv.lock" 2>/dev/null \
+  | shasum -a 256 | awk '{print $1}' > "$STATE/.warm-base-hash" || true
