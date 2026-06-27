@@ -30,3 +30,13 @@ def test_healthz_sources_reports_provider_capabilities(client: TestClient) -> No
     assert fdc["source_type"] == "trusted_nutrition_database"
     assert fdc["kinds"] == ["generic_food"]
     assert isinstance(fdc["available"], bool)
+
+    # Official-source search (FTY-079) advertises availability gated on an API key
+    # (disabled-by-default posture; proven deterministically in the adapter tests).
+    # The descriptor carries no secret.
+    official = sources["official_source"]
+    assert official["source_type"] == "official_source"
+    assert official["kinds"] == ["named_product", "restaurant_item"]
+    assert isinstance(official["available"], bool)
+    assert "api_key" not in official
+    assert "key" not in official

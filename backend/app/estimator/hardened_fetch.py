@@ -61,16 +61,27 @@ class FetchTransientError(Exception):
     """A transient transport failure (timeout, connection error, or 5xx).
 
     Retryable by the caller. The message is sanitized — it never echoes the URL,
-    headers, or bodies.
+    headers, or bodies. ``status_code`` carries the HTTP status when one is known
+    (a 5xx); it is ``None`` for a timeout or connection failure.
     """
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class FetchResponseError(Exception):
     """A non-retryable response failure (4xx, oversized, or non-JSON body).
 
     The remote answered but the answer is unusable; retrying the identical request
-    will not help. The message is sanitized.
+    will not help. The message is sanitized. ``status_code`` carries the HTTP status
+    when one is known (a 4xx, e.g. ``429`` rate-limit); it is ``None`` for an
+    oversized or non-JSON body. The code is a non-sensitive integer, never the body.
     """
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def assert_url_allowed(
@@ -231,9 +242,10 @@ def _open_json(
     except urllib.error.HTTPError as exc:
         status = exc.code
         exc.read()  # drain without surfacing the body
+        message = f"provider returned HTTP {status}"
         if status >= 500:
-            raise FetchTransientError(f"provider returned HTTP {status}") from None
-        raise FetchResponseError(f"provider returned HTTP {status}") from None
+            raise FetchTransientError(message, status_code=status) from None
+        raise FetchResponseError(message, status_code=status) from None
     except (urllib.error.URLError, TimeoutError):
         # URLError covers DNS/connection failures; TimeoutError the socket timeout.
         # The original is suppressed so its args (which can echo the URL) never leak.

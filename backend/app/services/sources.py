@@ -12,22 +12,38 @@ from collections.abc import Mapping
 
 from app.estimator.fdc import FDC_SOURCE, FDC_SOURCE_TYPE, load_fdc_settings
 from app.estimator.off import OFF_SOURCE, OFF_SOURCE_TYPE, load_off_settings
+from app.estimator.search import (
+    OFFICIAL_SOURCE,
+    OFFICIAL_SOURCE_TYPE,
+    SEARCH_KINDS,
+    load_search_settings,
+)
 from app.schemas.sources import SourceCapability, SourcesStatus
 
 
 def list_source_capabilities(environ: Mapping[str, str] | None = None) -> SourcesStatus:
     """Return the capability descriptor for each configured evidence source.
 
-    USDA FDC (generic foods) is always ``enabled`` but only ``available`` with an API
-    key; Open Food Facts (barcode) needs no credentials, so it is always ``available``
-    and ``enabled`` unless a self-hoster turns it off.
+    The official-source search provider (FTY-079) is ``enabled`` by self-host flag but
+    only ``available`` with an API key, so out of the box (no bundled key) it reports
+    available=false; USDA FDC (generic foods) is always ``enabled`` but only
+    ``available`` with an API key; Open Food Facts (barcode) needs no credentials, so
+    it is always ``available`` and ``enabled`` unless a self-hoster turns it off.
     """
 
-    fdc = load_fdc_settings(environ)
+    search = load_search_settings(environ)
     off = load_off_settings(environ)
+    fdc = load_fdc_settings(environ)
 
     return SourcesStatus(
         sources=[
+            SourceCapability(
+                id=OFFICIAL_SOURCE,
+                source_type=OFFICIAL_SOURCE_TYPE,
+                kinds=list(SEARCH_KINDS),
+                enabled=search.enabled,
+                available=search.is_available,
+            ),
             SourceCapability(
                 id=OFF_SOURCE,
                 source_type=OFF_SOURCE_TYPE,

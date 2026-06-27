@@ -48,14 +48,22 @@ Facts barcode adapter (`off.py`, `product_database` tier) is implemented in
 FTY-060 behind these same boundaries; see `food-resolution.md` (**Barcode
 Source**). The user-provided nutrition-label adapter (`label_step.py`,
 `user_label` tier — rank 1) is implemented in FTY-061; see `label-extraction.md`.
-The remaining adapter (the official-source search/fetch step) implements this
-contract the same way.
+The official-source **search** adapter (`search.py`, the `official_source` tier's
+search half) is implemented in FTY-079 behind the **Search Request / Response
+Boundary** below; its result URLs are fetched by the hardened fetcher (FTY-078) and
+consumed by the official-source resolution step (FTY-062). See **Search Provider
+Adapter (Brave) — FTY-079**.
 
 ## Version
 
 1 (FTY-045). The source-system identifiers are stable strings recorded on each
 evidence record and on the estimation run `source_refs`: `usda_fdc`,
 `open_food_facts`, `official_source`, `user_label`, `model_prior`.
+
+FTY-079 implements the `official_source` **search** boundary (the pluggable
+search-provider adapter, Brave default, disabled by default) without changing this
+contract; see **Search Provider Adapter (Brave) — FTY-079**. The six lookup-status
+values and the sanitized-query / header-only-key rules are exactly those fixed here.
 
 ## Source Hierarchy
 
@@ -311,6 +319,84 @@ generic food with no configured source and no label:
     assumptions=["usda_fdc unavailable"], surfaced to client as a model-prior estimate
 ```
 
+## Search Provider Adapter (Brave) — FTY-079
+
+The search-provider adapter is the **search half** of the `official_source` tier: it
+turns a sanitized item-identity query into candidate result URLs plus an explicit
+status, implementing the **Search Request / Response Boundary** above. It is a
+**pluggable** adapter — **Brave Search** is the default (and v1-only) backend — and is
+**disabled by default** for self-host: no key is bundled, so out of the box it reports
+`unavailable` and callers (FTY-062) fall through to the model-prior path. It ships
+**no fetcher** (the result URLs are fetched by FTY-078's hardened fetcher) and **no
+resolution pipeline** (FTY-062).
+
+### Owner (additional)
+
+`backend/app/estimator/search.py` (the `SearchProvider` interface, the
+`BraveSearchProvider` adapter, `SearchSettings`, the `sanitize_query` chokepoint, the
+`SearchStatus` values, and `build_search_provider`); the `official_source` entry in
+the source-diagnostics surface (`backend/app/services/sources.py`,
+`backend/app/routers/health.py`). The adapter reuses `hardened_fetch.py` for egress.
+
+### Config (`SearchSettings`, `FATTY_SEARCH_` env vars)
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `FATTY_SEARCH_PROVIDER` | `brave` | Which registered backend to use; only `brave` is registered in v1. An unknown value fails closed at config load. |
+| `FATTY_SEARCH_ENABLED` | `true` | Self-host enable/disable flag. `false` → `disabled` even if a key is present. |
+| `FATTY_SEARCH_API_KEY` | _(none)_ | Provider key (secret). **Absent → source `unavailable`** (disabled by default). |
+| `FATTY_SEARCH_BASE_URL` | `https://api.search.brave.com` | API base; **must be https**. The allowlisted host is derived from it. |
+| `FATTY_SEARCH_TIMEOUT_SECONDS` | `10` | Per-request wall-clock timeout. |
+| `FATTY_SEARCH_MAX_RESULTS` | `5` | Candidate result URLs requested / surfaced. |
+
+The key is a `SecretStr`, read from the environment only, never exposed to clients,
+never logged, and sent only in the `X-Subscription-Token` **header** (never the query
+string, so it cannot leak through a logged URL). With no key the source is unavailable
+and callers fall through to model-prior-with-status.
+
+### Capability / availability
+
+The adapter advertises a capability descriptor — `enabled` (the self-host flag) and
+`available` (a key is present) — surfaced in `GET /healthz/sources` under
+`id = official_source`, `source_type = official_source`,
+`kinds = [named_product, restaurant_item]`, so a self-hoster can confirm whether
+search is on without any trial call. The descriptor carries no secret.
+
+### Status values
+
+Every lookup resolves to exactly one status, aligned with the **Provider
+Capability / Status** vocabulary above:
+
+| Status | When | Result |
+| --- | --- | --- |
+| `disabled` | `FATTY_SEARCH_ENABLED=false`. | No call; caller tries next source / `model_prior`. |
+| `unavailable` | No API key configured (default posture). | No call; caller falls through. |
+| `rate_limited` | Provider returned an HTTP 429 rate-limit / quota signal. | Bounded retry, then next source / `model_prior`. |
+| `failed` | Timeout, connection error, 5xx, other 4xx, non-JSON, oversized, or policy-blocked (non-https / non-allowlisted / redirect / private-IP) response. | Nothing trusted; next source / `model_prior`. |
+| `partial` | The provider answered but offered no usable candidate URL (or the sanitized query was empty). | Not finalizable; next source. |
+| `success` | A bounded list of candidate HTTP(S) result URLs was returned. | URLs handed to the fetch step (FTY-078). |
+
+A non-`success` status always carries an empty candidate list, so an off/failed
+lookup can never be mistaken for a result.
+
+### Query sanitization / data minimization
+
+`sanitize_query` is the **single chokepoint** every query passes through before
+egress: it strips control characters (so multi-line / structured personal context
+cannot be smuggled), collapses whitespace, and length-bounds the string (≤ 256
+chars). The adapter accepts a single item-identity string and sends a **closed**
+request shape — only `q` (the sanitized name) and `count` — so profile, weight, food
+history, and event metadata have **no channel** to the provider. A test proves no
+personal context egresses.
+
+### Errors
+
+Transport/policy failures are mapped to a status, never surfaced as an exception that
+echoes the query, key, headers, or response body. Rate-limit detection rides on the
+`status_code` carried by `hardened_fetch`'s `FetchResponseError` (a non-sensitive
+integer, never the body). Egress is allowlisted to the single configured search host
+by the hardened fetcher.
+
 ## Migration / Compatibility
 
 - This contract is **additive documentation**; it introduces no schema or code
@@ -327,3 +413,9 @@ generic food with no configured source and no label:
   contract or re-deciding the source hierarchy or fallback semantics.
 - Recipe (ingredient-sum) and similar-dish reference sources remain deferred;
   this contract leaves the hierarchy slots reserved for them.
+- FTY-079 adds the `official_source` search adapter (`search.py`) and an
+  `official_source` entry in `GET /healthz/sources`. It is additive: a new
+  `FATTY_SEARCH_`-prefixed config block (disabled by default, no bundled key), no
+  schema change, and a backward-compatible `status_code` attribute on
+  `hardened_fetch`'s response/transient errors for rate-limit (HTTP 429) detection.
+  The fetcher (FTY-078) and the resolution pipeline (FTY-062) remain separate.
