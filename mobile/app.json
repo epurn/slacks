@@ -8,8 +8,11 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Fatty uses the camera to scan product barcodes so you can log packaged foods quickly."
+      }
     },
-    "plugins": ["expo-router"]
+    "plugins": ["expo-router", "expo-camera"]
   }
 }

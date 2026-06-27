@@ -6,6 +6,41 @@ import type { DerivedFoodItemDTO } from "@/api/derivedItems";
 import { LogEventApiError, type LogEventDTO } from "@/api/logEvents";
 import type { Session } from "@/state/session";
 
+// TodayScreen imports BarcodeScannerScreen which imports expo-camera native
+// modules; mock those before any tests run.
+
+// Capture the most-recent onBarcodeScanned so scanner tests can trigger a scan.
+// Must be prefixed with "mock" to be accessible inside jest.mock() factories.
+let mockTriggerScan:
+  | ((result: { data: string; type: string }) => void)
+  | undefined;
+
+jest.mock("expo-camera", () => {
+  // Use require() inside the factory — jest.mock() factories run before imports
+  // and cannot close over module-scope variables (except mock-prefixed ones).
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const ReactNative = require("react-native");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const ReactLib = require("react");
+  return {
+    useCameraPermissions: jest.fn(() => [
+      { status: "granted", granted: true, canAskAgain: false, expires: "never" },
+      jest.fn().mockResolvedValue({ status: "granted", granted: true }),
+      jest.fn().mockResolvedValue({ status: "granted", granted: true }),
+    ]),
+    CameraView: jest.fn().mockImplementation(
+      ({ onBarcodeScanned }: { onBarcodeScanned?: (r: { data: string; type: string }) => void }) => {
+        mockTriggerScan = onBarcodeScanned;
+        return ReactLib.createElement(ReactNative.View, { testID: "camera-view" });
+      },
+    ),
+  };
+});
+
+jest.mock("expo-linking", () => ({
+  openSettings: jest.fn().mockResolvedValue(undefined),
+}));
+
 const SESSION: Session = {
   token: "test-token",
   userId: "22222222-2222-2222-2222-222222222222",
@@ -359,5 +394,104 @@ describe("TodayScreen polling", () => {
     act(() => jest.advanceTimersByTime(1000));
     await act(async () => {});
     expect(hasA11yLabel(tree, "Logged")).toBe(true);
+  });
+});
+
+// ─── Barcode scan entry point ─────────────────────────────────────────────────
+
+describe("TodayScreen barcode scanning", () => {
+  beforeEach(() => {
+    mockTriggerScan = undefined;
+  });
+
+  it("exposes an accessible Scan barcode entry point", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
+    await act(async () => {});
+    expect(hasA11yLabel(tree, "Scan barcode")).toBe(true);
+  });
+
+  it("shows the scanner modal when the scan entry point is pressed", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
+    await act(async () => {});
+
+    press(tree, "Scan barcode");
+    // After pressing, the CameraView mock renders and captures onBarcodeScanned.
+    expect(hasA11yLabel(tree, "Close scanner")).toBe(true);
+  });
+
+  it("a successful barcode read submits via createLogEvent and appears as pending", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    let resolveCreate!: (dto: LogEventDTO) => void;
+    const create = jest.fn().mockReturnValue(
+      new Promise<LogEventDTO>((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        create={create}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    press(tree, "Scan barcode");
+
+    act(() => {
+      mockTriggerScan?.({ data: "5901234123457", type: "ean13" });
+    });
+
+    // create is called with the barcode string (not an image URI or object)
+    expect(create).toHaveBeenCalledTimes(1);
+    const [, rawText] = create.mock.calls[0];
+    expect(rawText).toBe("5901234123457");
+
+    // Entry appears immediately as pending before create resolves
+    expect(textContent(tree)).toContain("5901234123457");
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+
+    // Reconcile with server response
+    await act(async () => {
+      resolveCreate(
+        event({ id: "server-1", raw_text: "5901234123457", status: "pending" }),
+      );
+    });
+    expect(textContent(tree)).toContain("5901234123457");
+  });
+
+  it("rolls back and surfaces an error when the barcode submit fails", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const create = jest
+      .fn()
+      .mockRejectedValue(
+        new LogEventApiError(422, "That entry couldn't be saved."),
+      );
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        create={create}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    press(tree, "Scan barcode");
+
+    await act(async () => {
+      mockTriggerScan?.({ data: "5901234123457", type: "ean13" });
+    });
+
+    // Optimistic entry rolled back; error surfaced.
+    expect(textContent(tree)).toContain("That entry couldn't be saved.");
+    expect(textContent(tree)).toContain("Nothing logged yet");
   });
 });

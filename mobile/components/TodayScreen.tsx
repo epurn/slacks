@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -20,6 +21,7 @@ import {
   listTodayLogEvents as listTodayLogEventsApi,
   type LogEventDTO,
 } from "@/api/logEvents";
+import { BarcodeScannerScreen } from "@/components/BarcodeScannerScreen";
 import { EntryRow } from "@/components/EntryRow";
 import {
   POLL_INTERVAL_MS,
@@ -116,6 +118,7 @@ export function TodayScreen({
   const [text, setText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [scannerOpen, setScannerOpen] = useState(false);
   // Monotonic counter for optimistic placeholder ids; never collides with a
   // server UUID and stays stable across renders.
   const tempId = useRef(0);
@@ -184,6 +187,42 @@ export function TodayScreen({
     }
   }, [text, apiSession, submitting, create]);
 
+  // Barcode scan entry point (FTY-063). Mirrors the text-composer submit flow:
+  // dismiss the scanner, show the barcode as a pending optimistic entry, then
+  // reconcile with the server. Rolls back cleanly on failure.
+  const handleBarcodeScanned = useCallback(
+    async (barcode: string) => {
+      setScannerOpen(false);
+      if (!apiSession || submitting) {
+        return;
+      }
+      const id = `${OPTIMISTIC_ID_PREFIX}${tempId.current++}`;
+      const optimistic = optimisticLogEvent({
+        id,
+        userId: apiSession.userId,
+        rawText: barcode,
+        createdAt: new Date().toISOString(),
+      });
+      setEvents((prev) => sortByNewest([optimistic, ...prev]));
+      setSubmitting(true);
+      setSubmitError(null);
+      try {
+        const created = await create(apiSession, barcode);
+        setEvents((prev) =>
+          sortByNewest(
+            prev.map((event) => (event.id === id ? created : event)),
+          ),
+        );
+      } catch (error) {
+        setEvents((prev) => prev.filter((event) => event.id !== id));
+        setSubmitError(messageFor(error, "save"));
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [apiSession, submitting, create],
+  );
+
   // One poll: refetch the day and reconcile into the timeline, preserving any
   // unacknowledged optimistic entry. Transient poll failures are swallowed so a
   // dropped request never replaces the visible timeline with an error — the
@@ -234,70 +273,99 @@ export function TodayScreen({
   const canSubmit = text.trim() !== "" && !submitting;
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={[
-        styles.content,
-        { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 24 },
-      ]}
-      keyboardShouldPersistTaps="handled"
-    >
-      <View style={styles.header}>
-        <Text style={styles.title} accessibilityRole="header">
-          Today
-        </Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Refresh"
-          accessibilityState={{ disabled: phase === "loading" }}
-          disabled={phase === "loading"}
-          onPress={() => void refresh()}
-          style={styles.refresh}
-        >
-          <Text style={styles.refreshLabel}>Refresh</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.composer}>
-        <TextInput
-          accessibilityLabel="Log food or exercise"
-          placeholder="Add food or exercise…"
-          placeholderTextColor="#A0A0A8"
-          value={text}
-          onChangeText={setText}
-          multiline
-          maxLength={MAX_RAW_TEXT_LENGTH}
-          editable={!submitting}
-          style={styles.input}
+    <>
+      <Modal
+        visible={scannerOpen}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setScannerOpen(false)}
+      >
+        <BarcodeScannerScreen
+          onBarcodeScanned={(barcode) => void handleBarcodeScanned(barcode)}
+          onClose={() => setScannerOpen(false)}
         />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Add entry"
-          accessibilityState={{ disabled: !canSubmit }}
-          disabled={!canSubmit}
-          onPress={() => void handleSubmit()}
-          style={[styles.add, !canSubmit && styles.addDisabled]}
-        >
-          <Text style={styles.addLabel}>{submitting ? "Adding…" : "Add"}</Text>
-        </Pressable>
-      </View>
-      {submitError ? (
-        <Text style={styles.error} accessibilityRole="alert">
-          {submitError}
-        </Text>
-      ) : null}
+      </Modal>
 
-      <Timeline
-        events={events}
-        itemsByEvent={itemsByEvent}
-        session={apiSession}
-        editItem={editItem}
-        onItemChange={handleItemChange}
-        phase={phase}
-        loadError={loadError}
-        onRetry={() => void refresh()}
-      />
-    </ScrollView>
+      <ScrollView
+        style={styles.screen}
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 24 },
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.header}>
+          <Text style={styles.title} accessibilityRole="header">
+            Today
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Refresh"
+            accessibilityState={{ disabled: phase === "loading" }}
+            disabled={phase === "loading"}
+            onPress={() => void refresh()}
+            style={styles.refresh}
+          >
+            <Text style={styles.refreshLabel}>Refresh</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.composer}>
+          <TextInput
+            accessibilityLabel="Log food or exercise"
+            placeholder="Add food or exercise…"
+            placeholderTextColor="#A0A0A8"
+            value={text}
+            onChangeText={setText}
+            multiline
+            maxLength={MAX_RAW_TEXT_LENGTH}
+            editable={!submitting}
+            style={styles.input}
+          />
+          <View style={styles.composerActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Scan barcode"
+              accessibilityHint="Opens the camera to scan a product barcode"
+              accessibilityState={{ disabled: submitting }}
+              disabled={submitting}
+              onPress={() => setScannerOpen(true)}
+              style={styles.scanButton}
+            >
+              <Text style={styles.scanButtonLabel}>⊡</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Add entry"
+              accessibilityState={{ disabled: !canSubmit }}
+              disabled={!canSubmit}
+              onPress={() => void handleSubmit()}
+              style={[styles.add, !canSubmit && styles.addDisabled]}
+            >
+              <Text style={styles.addLabel}>
+                {submitting ? "Adding…" : "Add"}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+        {submitError ? (
+          <Text style={styles.error} accessibilityRole="alert">
+            {submitError}
+          </Text>
+        ) : null}
+
+        <Timeline
+          events={events}
+          itemsByEvent={itemsByEvent}
+          session={apiSession}
+          editItem={editItem}
+          onItemChange={handleItemChange}
+          phase={phase}
+          loadError={loadError}
+          onRetry={() => void refresh()}
+        />
+      </ScrollView>
+    </>
   );
 }
 
@@ -424,6 +492,23 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 8,
     marginBottom: 16,
+  },
+  composerActions: {
+    flexDirection: "column",
+    gap: 6,
+    alignItems: "center",
+  },
+  scanButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: "#E4E4EA",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  scanButtonLabel: {
+    fontSize: 22,
+    color: "#1C1C1E",
   },
   input: {
     flex: 1,
