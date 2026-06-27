@@ -18,6 +18,10 @@
 # fatop monitor: track source, ignore the compiled binary.
 /fatty-fatop/fatop
 
+# Stories are a local working copy of the product repo's docs/stories; the
+# canonical lives in fatty/docs/stories. Keep the real command-centre docs tracked.
+/docs/stories/
+
 # Noise.
 .DS_Store
 __pycache__/
