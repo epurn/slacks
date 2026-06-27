@@ -16,6 +16,7 @@ from app.models.estimation import EstimationJob, EstimationRun
 from app.models.food_sources import EvidenceSource, Product
 from app.models.identity import AuthIdentity, User, UserProfile
 from app.models.log_events import LogEvent
+from app.models.saved_foods import FoodAlias, SavedFood
 from app.models.targets import DailyTarget, Goal
 
 __all__ = [
@@ -28,9 +29,11 @@ __all__ = [
     "EstimationJob",
     "EstimationRun",
     "EvidenceSource",
+    "FoodAlias",
     "Goal",
     "LogEvent",
     "Product",
+    "SavedFood",
     "User",
     "UserProfile",
 ]
