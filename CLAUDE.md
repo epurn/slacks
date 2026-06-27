@@ -33,7 +33,8 @@ detail in `docs/agent-operating-system.md`.
 - **Steward** — the single deterministic poller. Assigns ready stories to
   authors, routes PR fixes, and dispatches reviewers for PR heads needing a
   verdict — launching author and reviewer workers in parallel. Wakes a model
-  only for bounded judgment.
+  only for bounded judgment, and auto-repairs a story that trips the circuit
+  breaker (split/revise/escalate, repair-once) instead of parking it.
 - **Author** — implements one scoped story on its own branch and opens a PR.
 - **Reviewer** — a one-shot worker the steward dispatches; inspects the PR head
   (read-only) and approves, comments, or requests changes. Always a separate

@@ -19,6 +19,10 @@ approve the same implementation.
   author work, watches PR state, and dispatches reviewers for PR heads needing a
   verdict — launching author and reviewer workers in parallel. Wakes a model only
   for bounded judgment (story splitting, promotion, demotion, blocker triage).
+  When a story trips the circuit breaker (repeated failed runs with no merged PR),
+  it dispatches a one-shot **auto-repair** worker that diagnoses the failure from
+  the run telemetry and splits, revises, or escalates the story so it can succeed
+  — repair-once, then a re-trip parks it for a human.
 - **Author** — implements one scoped story on its own branch and opens a PR.
   One bounded assignment per run, then exits.
 - **Reviewer** — a one-shot worker the steward dispatches (`reviewer once
