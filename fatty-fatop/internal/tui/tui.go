@@ -61,6 +61,7 @@ type refreshMsg struct {
 	prErr    error
 	queue    []state.QueueStory
 	usage    state.UsageSummary
+	reviews  []int
 }
 
 type tickMsg time.Time
@@ -77,6 +78,7 @@ type model struct {
 	prErr    error
 	queue    []state.QueueStory
 	usage    state.UsageSummary
+	reviews  []int
 
 	view       viewMode
 	returnView viewMode // where esc goes back to from the story view
@@ -109,7 +111,8 @@ func (m model) refreshCmd() tea.Cmd {
 		queue, _ := state.LoadQueue(p.Roadmap, p.StoriesDir, p.RunDir)
 		events := state.MergeEvents([]string{p.AuthorEvents, p.ReviewerEvents}, 0)
 		usage := state.SummarizeUsage(state.CollectUsage(events), startOfDay())
-		return refreshMsg{services: services, runs: runs, prs: prs, prErr: prErr, queue: queue, usage: usage}
+		reviews := state.ReviewsInFlight(p.RunDir)
+		return refreshMsg{services: services, runs: runs, prs: prs, prErr: prErr, queue: queue, usage: usage, reviews: reviews}
 	}
 }
 
@@ -229,7 +232,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case refreshMsg:
 		m.services, m.runs, m.prs, m.prErr = msg.services, msg.runs, msg.prs, msg.prErr
-		m.queue, m.usage = msg.queue, msg.usage
+		m.queue, m.usage, m.reviews = msg.queue, msg.usage, msg.reviews
 		m.updated = time.Now()
 		m.buildTargets()
 		m.clampQueue()
@@ -422,8 +425,8 @@ func (m model) View() string {
 func (m model) headerView() string {
 	parts := []string{ui.Accent.Render("fatop")}
 	for _, s := range m.services {
-		if s.Name == "author" && !s.Up {
-			continue
+		if s.OnDemand {
+			continue // one-shot workers show as activity counts below, not health dots
 		}
 		parts = append(parts, fmt.Sprintf("%s %s", ui.Dot(s.Up), s.Name))
 	}
@@ -433,7 +436,11 @@ func (m model) headerView() string {
 			active++
 		}
 	}
-	parts = append(parts, ui.Run.Render(fmt.Sprintf("⚙ %d authors", active)))
+	work := ui.Run.Render(fmt.Sprintf("⚙ %d authors", active))
+	if len(m.reviews) > 0 {
+		work += ui.Muted.Render(" · ") + ui.Run.Render(fmt.Sprintf("%d reviews", len(m.reviews)))
+	}
+	parts = append(parts, work)
 
 	// Cost stat — always visible.
 	cost := "today " + ui.Cost.Render(fmtUSD(m.usage.CostUSD))

@@ -5,12 +5,17 @@ import (
 	"strings"
 )
 
-// Service describes one always-on agent process.
+// Service describes one agent process. Only the steward is always-on; the author
+// and reviewer are one-shot workers the steward dispatches, so "not running" is
+// their normal idle state, not a fault.
 type Service struct {
-	Name   string
-	Up     bool
-	Detail string // pid list or status hint
+	Name     string
+	Up       bool
+	OnDemand bool   // dispatched per-task; down ≠ unhealthy
+	Detail   string // pid list or status hint
 }
+
+var onDemandAgents = map[string]bool{"author": true, "reviewer": true}
 
 var serviceProcPatterns = map[string]string{
 	"steward":  "steward_agent/runner.py",
@@ -27,10 +32,13 @@ func LoadServices() []Service {
 	for _, name := range order {
 		pattern := serviceProcPatterns[name]
 		pids := pgrep(pattern)
-		svc := Service{Name: name, Up: len(pids) > 0}
-		if svc.Up {
+		svc := Service{Name: name, Up: len(pids) > 0, OnDemand: onDemandAgents[name]}
+		switch {
+		case svc.Up:
 			svc.Detail = "pid " + strings.Join(pids, ",")
-		} else {
+		case svc.OnDemand:
+			svc.Detail = "on-demand (idle)"
+		default:
 			svc.Detail = "not running"
 		}
 		out = append(out, svc)

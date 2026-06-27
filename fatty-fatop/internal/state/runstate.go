@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -118,4 +119,26 @@ func LoadRuns(runDir string) ([]Run, error) {
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
+}
+
+// ReviewsInFlight returns the PR numbers currently being reviewed, read from the
+// steward's `review-<N>.reviewing` markers (one per dispatched reviewer worker).
+func ReviewsInFlight(runDir string) []int {
+	entries, err := os.ReadDir(runDir)
+	if err != nil {
+		return nil
+	}
+	var out []int
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, "review-") || !strings.HasSuffix(name, ".reviewing") {
+			continue
+		}
+		stem := strings.TrimSuffix(strings.TrimPrefix(name, "review-"), ".reviewing")
+		if n, err := strconv.Atoi(stem); err == nil {
+			out = append(out, n)
+		}
+	}
+	sort.Ints(out)
+	return out
 }

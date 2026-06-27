@@ -109,10 +109,22 @@ func runStatus(args []string) int {
 	fmt.Println(ui.Accent.Render("fatop status") + ui.Muted.Render("  "+paths.Root))
 	fmt.Println()
 
-	// Services
+	// Services. Only the steward is always-on; author + reviewer are on-demand
+	// workers, so an idle one is shown muted (not a red "down" dot).
 	fmt.Println(ui.Bold.Render("services"))
 	for _, s := range state.LoadServices() {
-		fmt.Printf("  %s %-9s %s\n", ui.Dot(s.Up), s.Name, ui.Muted.Render(s.Detail))
+		dot := ui.Dot(s.Up)
+		if s.OnDemand && !s.Up {
+			dot = ui.Muted.Render("◦")
+		}
+		fmt.Printf("  %s %-9s %s\n", dot, s.Name, ui.Muted.Render(s.Detail))
+	}
+	if reviews := state.ReviewsInFlight(paths.RunDir); len(reviews) > 0 {
+		nums := make([]string, len(reviews))
+		for i, n := range reviews {
+			nums[i] = fmt.Sprintf("#%d", n)
+		}
+		fmt.Printf("  %s %-9s %s\n", ui.Run.Render("●"), "reviews", ui.Muted.Render("in flight: "+strings.Join(nums, " ")))
 	}
 	fmt.Println()
 
