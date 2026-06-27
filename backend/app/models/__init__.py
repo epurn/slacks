@@ -19,6 +19,7 @@ from app.models.identity import AuthIdentity, User, UserProfile
 from app.models.log_events import LogEvent
 from app.models.saved_foods import FoodAlias, SavedFood
 from app.models.targets import DailyTarget, Goal
+from app.models.weight_entries import WeightEntry
 
 __all__ = [
     "AuthIdentity",
@@ -38,4 +39,5 @@ __all__ = [
     "SavedFood",
     "User",
     "UserProfile",
+    "WeightEntry",
 ]
