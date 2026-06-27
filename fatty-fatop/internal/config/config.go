@@ -29,6 +29,7 @@ type Paths struct {
 	Repo       string // GitHub repo, e.g. epurn/fatty
 	Roadmap    string // docs/stories/v1-roadmap.md (the steward's story queue)
 	StoriesDir string // docs/stories/
+	StewardEnv string // fatty-steward-agent/.env (live-editable config)
 }
 
 // Resolve picks the command-centre root using, in order: an explicit root
@@ -70,6 +71,7 @@ func Resolve(root string) Paths {
 		Repo:           repo,
 		Roadmap:        filepath.Join(root, "docs", "stories", "v1-roadmap.md"),
 		StoriesDir:     filepath.Join(root, "docs", "stories"),
+		StewardEnv:     filepath.Join(root, "fatty-steward-agent", ".env"),
 	}
 }
 

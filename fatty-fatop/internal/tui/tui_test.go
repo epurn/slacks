@@ -62,12 +62,24 @@ func TestViewsRenderWithoutPanic(t *testing.T) {
 		t.Error("reviewer should no longer be a standing agent target")
 	}
 
-	for _, v := range []viewMode{viewOverview, viewQueue, viewUsage} {
+	for _, v := range []viewMode{viewOverview, viewQueue, viewUsage, viewConfig} {
 		mv, _ := m.switchView(v)
 		out := mv.(model).View()
 		if strings.TrimSpace(out) == "" {
 			t.Errorf("view %d rendered empty", v)
 		}
+	}
+
+	// Config view: staging + adjust + apply path (apply hits SignalReload, which
+	// fails with no steward running — that's the expected status, not a panic).
+	mc, _ := m.switchView(viewConfig)
+	cm := mc.(model)
+	if len(cm.cfgStaged) == 0 {
+		t.Error("config view should stage knob values")
+	}
+	adj, _ := cm.handleConfigKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("+")})
+	if strings.TrimSpace(adj.(model).View()) == "" {
+		t.Error("config adjust rendered empty")
 	}
 
 	// Inspect a story (enter on the queue), then render the story view.

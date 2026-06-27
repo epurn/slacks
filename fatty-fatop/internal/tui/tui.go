@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/epurn/fatty-fatop/internal/config"
+	"github.com/epurn/fatty-fatop/internal/control"
 	"github.com/epurn/fatty-fatop/internal/state"
 	"github.com/epurn/fatty-fatop/internal/ui"
 )
@@ -32,6 +33,7 @@ const (
 	viewOverview viewMode = iota
 	viewQueue
 	viewUsage
+	viewConfig
 	viewStory
 )
 
@@ -43,6 +45,7 @@ var tabs = []struct {
 	{viewOverview, "1", "Overview"},
 	{viewQueue, "2", "Queue"},
 	{viewUsage, "3", "Usage"},
+	{viewConfig, "4", "Config"},
 }
 
 // target is one selectable event source in the overview rail.
@@ -82,6 +85,10 @@ type model struct {
 
 	view       viewMode
 	returnView viewMode // where esc goes back to from the story view
+
+	cfgSel    int            // selected knob in the config view
+	cfgStaged map[string]int // staged (unapplied) knob values
+	cfgStatus string         // last apply result
 
 	targets      []target // overview rail
 	agentTargets int      // count of leading "agent" targets (before RUNS)
@@ -275,9 +282,27 @@ func (m *model) clampQueue() {
 
 func (m model) switchView(v viewMode) (tea.Model, tea.Cmd) {
 	m.view = v
+	if v == viewConfig {
+		m.loadConfig()
+	}
 	m.layout()
 	m.refreshView()
 	return m, nil
+}
+
+// loadConfig stages each knob's current value from the steward .env (re-entering
+// the view discards any unapplied edits — an implicit reset).
+func (m *model) loadConfig() {
+	m.cfgStaged = map[string]int{}
+	for _, k := range control.Knobs {
+		m.cfgStaged[k.Key] = control.ReadInt(m.paths.StewardEnv, k.Key, k.Def)
+	}
+	if m.cfgSel >= len(control.Knobs) {
+		m.cfgSel = len(control.Knobs) - 1
+	}
+	if m.cfgSel < 0 {
+		m.cfgSel = 0
+	}
 }
 
 func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -295,8 +320,10 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.switchView(viewQueue)
 	case "3":
 		return m.switchView(viewUsage)
+	case "4":
+		return m.switchView(viewConfig)
 	case "tab":
-		return m.switchView((m.view + 1) % 3) // cycle the three primary tabs
+		return m.switchView((m.view + 1) % 4) // cycle the four primary tabs
 	case "esc":
 		if m.view == viewStory {
 			return m.switchView(m.returnView)
@@ -312,12 +339,54 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleOverviewKey(msg)
 	case viewQueue:
 		return m.handleQueueKey(msg)
+	case viewConfig:
+		return m.handleConfigKey(msg)
 	case viewUsage, viewStory:
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(msg)
 		return m, cmd
 	}
 	return m, nil
+}
+
+func (m model) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if len(control.Knobs) == 0 {
+		return m, nil
+	}
+	k := control.Knobs[m.cfgSel]
+	switch msg.String() {
+	case "j", "down":
+		if m.cfgSel < len(control.Knobs)-1 {
+			m.cfgSel++
+		}
+	case "k", "up":
+		if m.cfgSel > 0 {
+			m.cfgSel--
+		}
+	case "+", "=", "right", "l":
+		step := stepFor(k)
+		m.cfgStaged[k.Key] = k.Clamp(m.cfgStaged[k.Key] + step)
+		m.cfgStatus = ""
+	case "-", "_", "left", "h":
+		step := stepFor(k)
+		m.cfgStaged[k.Key] = k.Clamp(m.cfgStaged[k.Key] - step)
+		m.cfgStatus = ""
+	case "enter", "a":
+		if err := control.Apply(m.paths.StewardEnv, k.Key, m.cfgStaged[k.Key]); err != nil {
+			m.cfgStatus = ui.Err.Render("✗ " + k.Label + ": " + err.Error())
+		} else {
+			m.cfgStatus = ui.OK.Render(fmt.Sprintf("✓ %s = %d applied (steward reloads next poll)", k.Label, m.cfgStaged[k.Key]))
+		}
+	}
+	return m, nil
+}
+
+// stepFor: interval moves in larger steps than the small concurrency knobs.
+func stepFor(k control.Knob) int {
+	if k.Max-k.Min >= 100 {
+		return 30
+	}
+	return 1
 }
 
 func (m model) handleOverviewKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -430,6 +499,8 @@ func (m model) View() string {
 		body = m.queueView()
 	case viewUsage:
 		body = m.paneTitled("usage — today + recent runs")
+	case viewConfig:
+		body = m.configView()
 	case viewStory:
 		body = m.paneTitled("story — " + m.storyID + "   " + ui.Muted.Render("esc back"))
 	}
@@ -491,11 +562,13 @@ func (m model) footerView() string {
 	var keys []string
 	switch m.view {
 	case viewOverview:
-		keys = []string{"1/2/3 view", "↑/↓ select", "f follow", "l level", "g/G top/bot", "r reload", "? help", "q quit"}
+		keys = []string{"1-4 view", "↑/↓ select", "f follow", "l level", "g/G top/bot", "r reload", "? help", "q quit"}
 	case viewQueue:
-		keys = []string{"1/2/3 view", "↑/↓ move", "↵ inspect story", "r reload", "? help", "q quit"}
+		keys = []string{"1-4 view", "↑/↓ move", "↵ inspect story", "r reload", "? help", "q quit"}
 	case viewUsage:
-		keys = []string{"1/2/3 view", "pgup/pgdn scroll", "r reload", "? help", "q quit"}
+		keys = []string{"1-4 view", "pgup/pgdn scroll", "r reload", "? help", "q quit"}
+	case viewConfig:
+		keys = []string{"1-4 view", "↑/↓ knob", "+/- adjust", "↵ apply", "? help", "q quit"}
 	case viewStory:
 		keys = []string{"esc back", "↑/↓ pgup/pgdn scroll", "g/G top/bot", "q quit"}
 	}
@@ -659,6 +732,37 @@ func queueStatus(q state.QueueStory) string {
 	}
 }
 
+// --- config view (live steward tuning) ---
+
+func (m model) configView() string {
+	var b strings.Builder
+	b.WriteString(ui.PanelTitle.Render("config — live steward tuning") +
+		ui.Muted.Render("   ↑/↓ select · +/- adjust · ↵ apply") + "\n\n")
+	for i, k := range control.Knobs {
+		cur := control.ReadInt(m.paths.StewardEnv, k.Key, k.Def)
+		staged := m.cfgStaged[k.Key]
+		val := fmt.Sprintf("%4d", staged)
+		if staged != cur {
+			val = ui.Warn.Render(fmt.Sprintf("%4d", staged)) + ui.Muted.Render(fmt.Sprintf(" (was %d, unapplied)", cur))
+		} else {
+			val = ui.Bold.Render(val)
+		}
+		caret := "  "
+		label := fmt.Sprintf("%-14s", k.Label)
+		if i == m.cfgSel {
+			caret = ui.Accent.Render("▶ ")
+			label = ui.Accent.Render(label)
+		}
+		b.WriteString(fmt.Sprintf("%s%s %s   %s\n", caret, label, val, ui.Muted.Render(k.Help)))
+	}
+	b.WriteString("\n")
+	if m.cfgStatus != "" {
+		b.WriteString(m.cfgStatus + "\n")
+	}
+	b.WriteString(ui.Muted.Render("Edits write the steward .env and SIGHUP it; the new value takes effect on its next poll."))
+	return b.String()
+}
+
 // --- usage view ---
 
 func (m model) usageContent(w int) string {
@@ -763,7 +867,8 @@ func (m model) helpView() string {
 	body := strings.Join([]string{
 		ui.Accent.Render("fatop — keys"),
 		"",
-		"  1 / 2 / 3     switch view: Overview · Queue · Usage",
+		"  1 / 2 / 3 / 4 switch view: Overview · Queue · Usage · Config",
+		"  (config)      ↑/↓ select knob · +/- adjust · ↵ apply (live SIGHUP reload)",
 		"  tab           cycle views",
 		"  ↑/k ↓/j       move selection (overview rail / queue rows)",
 		"  enter         (queue) inspect the selected story's spec",
