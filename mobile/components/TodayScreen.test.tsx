@@ -4,6 +4,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { TodayScreen } from "./TodayScreen";
 import type { DerivedFoodItemDTO } from "@/api/derivedItems";
 import { LogEventApiError, type LogEventDTO } from "@/api/logEvents";
+import type { SavedFoodDTO } from "@/api/savedFoods";
 import type { Session } from "@/state/session";
 
 // TodayScreen imports BarcodeScannerScreen which imports expo-camera native
@@ -207,28 +208,35 @@ describe("TodayScreen", () => {
   });
 
   it("rolls back and restores input when create fails", async () => {
-    const load = jest.fn().mockResolvedValue([]);
-    const create = jest
-      .fn()
-      .mockRejectedValue(new LogEventApiError(422, "That entry couldn't be saved."));
-    const tree = mount(
-      <TodayScreen
-        session={SESSION}
-        load={load}
-        create={create}
-        useActive={INACTIVE}
-      />,
-    );
-    await act(async () => {});
+    // Fake timers prevent the restored text from leaking a dangling debounce
+    // timer that would fire after Jest tears down the test.
+    jest.useFakeTimers();
+    try {
+      const load = jest.fn().mockResolvedValue([]);
+      const create = jest
+        .fn()
+        .mockRejectedValue(new LogEventApiError(422, "That entry couldn't be saved."));
+      const tree = mount(
+        <TodayScreen
+          session={SESSION}
+          load={load}
+          create={create}
+          useActive={INACTIVE}
+        />,
+      );
+      await act(async () => {});
 
-    typeInto(tree, "Log food or exercise", "blernsday");
-    await act(async () => {
-      press(tree, "Add entry");
-    });
+      typeInto(tree, "Log food or exercise", "blernsday");
+      await act(async () => {
+        press(tree, "Add entry");
+      });
 
-    expect(textContent(tree)).toContain("That entry couldn't be saved.");
-    // Optimistic entry rolled back to the empty state.
-    expect(textContent(tree)).toContain("Nothing logged yet");
+      expect(textContent(tree)).toContain("That entry couldn't be saved.");
+      // Optimistic entry rolled back to the empty state.
+      expect(textContent(tree)).toContain("Nothing logged yet");
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
 
@@ -491,6 +499,208 @@ describe("TodayScreen barcode scanning", () => {
     });
 
     // Optimistic entry rolled back; error surfaced.
+    expect(textContent(tree)).toContain("That entry couldn't be saved.");
+    expect(textContent(tree)).toContain("Nothing logged yet");
+  });
+});
+
+// ─── Typeahead suggestion bar + saved food apply (FTY-053) ───────────────────
+
+function savedFood(overrides: Partial<SavedFoodDTO> = {}): SavedFoodDTO {
+  return {
+    id: "sf-1",
+    user_id: SESSION!.userId,
+    name: "Greek yogurt",
+    calories: 200,
+    protein_g: 22,
+    carbs_g: 10,
+    fat_g: 5,
+    serving_size: 1,
+    serving_unit: "cup",
+    source: "saved_from_correction",
+    created_at: "2026-06-27T10:00:00Z",
+    updated_at: "2026-06-27T10:00:00Z",
+    ...overrides,
+  };
+}
+
+describe("TodayScreen typeahead suggestion bar", () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  it("queries saved foods as the user types (after debounce)", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const searchSavedFoods = jest
+      .fn()
+      .mockResolvedValue({ items: [savedFood()], limit: 20 });
+
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        searchSavedFoods={searchSavedFoods}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    typeInto(tree, "Log food or exercise", "greek");
+
+    // No search before the debounce window.
+    expect(searchSavedFoods).not.toHaveBeenCalled();
+
+    await act(async () => {
+      jest.advanceTimersByTime(400);
+    });
+
+    expect(searchSavedFoods).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+      "greek",
+    );
+  });
+
+  it("shows suggestion chips for matching saved foods", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const searchSavedFoods = jest
+      .fn()
+      .mockResolvedValue({ items: [savedFood({ name: "Greek yogurt" })], limit: 20 });
+
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        searchSavedFoods={searchSavedFoods}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    typeInto(tree, "Log food or exercise", "greek");
+    await act(async () => {
+      jest.advanceTimersByTime(400);
+    });
+
+    expect(textContent(tree)).toContain("Greek yogurt");
+    expect(hasA11yLabel(tree, "Use saved food: Greek yogurt")).toBe(true);
+  });
+
+  it("applies the saved food's values as a synthetic item and marks source=saved_food on submit", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const yogurt = savedFood();
+    const searchSavedFoods = jest
+      .fn()
+      .mockResolvedValue({ items: [yogurt], limit: 20 });
+    let resolveCreate!: (dto: LogEventDTO) => void;
+    const create = jest.fn().mockReturnValue(
+      new Promise<LogEventDTO>((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        create={create}
+        searchSavedFoods={searchSavedFoods}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    typeInto(tree, "Log food or exercise", "greek");
+    await act(async () => {
+      jest.advanceTimersByTime(400);
+    });
+
+    // Tap the suggestion.
+    press(tree, "Use saved food: Greek yogurt");
+
+    // Press Add; the item should appear immediately with saved food values.
+    press(tree, "Add entry");
+
+    // The saved food's nutrition is shown immediately (estimator skipped).
+    const content = textContent(tree);
+    expect(content).toContain("Greek yogurt");
+    expect(content).toContain("200");  // calories from saved food
+
+    // Confirm the log event was still created (for persistence).
+    expect(create).toHaveBeenCalledTimes(1);
+
+    // Resolve the create; the item should re-key to the real event id.
+    await act(async () => {
+      resolveCreate(event({ id: "server-2", raw_text: "Greek yogurt", status: "pending" }));
+    });
+
+    // Item is still shown with saved food values after reconciliation.
+    expect(textContent(tree)).toContain("Greek yogurt");
+    expect(textContent(tree)).toContain("200");
+  });
+
+  it("leaves the normal estimator path intact when no suggestion is selected", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const searchSavedFoods = jest
+      .fn()
+      .mockResolvedValue({ items: [], limit: 20 });
+    const create = jest.fn().mockResolvedValue(
+      event({ id: "server-3", raw_text: "banana", status: "pending" }),
+    );
+
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        create={create}
+        searchSavedFoods={searchSavedFoods}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    typeInto(tree, "Log food or exercise", "banana");
+    await act(async () => {
+      press(tree, "Add entry");
+    });
+
+    // Normal entry created; no synthetic item.
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+      "banana",
+    );
+    expect(textContent(tree)).toContain("banana");
+  });
+
+  it("rolls back the synthetic item when create fails after a suggestion is tapped", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const yogurt = savedFood();
+    const searchSavedFoods = jest
+      .fn()
+      .mockResolvedValue({ items: [yogurt], limit: 20 });
+    const create = jest
+      .fn()
+      .mockRejectedValue(new LogEventApiError(422, "That entry couldn't be saved."));
+
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        create={create}
+        searchSavedFoods={searchSavedFoods}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    typeInto(tree, "Log food or exercise", "greek");
+    await act(async () => {
+      jest.advanceTimersByTime(400);
+    });
+    press(tree, "Use saved food: Greek yogurt");
+    await act(async () => {
+      press(tree, "Add entry");
+    });
+
+    // Entry and synthetic item rolled back; error surfaced.
     expect(textContent(tree)).toContain("That entry couldn't be saved.");
     expect(textContent(tree)).toContain("Nothing logged yet");
   });

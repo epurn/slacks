@@ -1,0 +1,18 @@
+{
+  "event": "COMPLETE",
+  "story": "FTY-053",
+  "summary": "Implemented the Save this food action and TypeaheadSuggestionBar for mobile (FTY-053). New files: mobile/api/savedFoods.ts (typed client for FTY-052 save + typeahead endpoints), mobile/api/savedFoods.test.ts, mobile/components/TypeaheadSuggestionBar.tsx (debounced suggestion strip), mobile/components/TypeaheadSuggestionBar.test.tsx. Modified files: mobile/api/derivedItems.ts (added readonly source?: 'saved_food' to DerivedFoodItemDTO), mobile/components/EditableItemRow.tsx (Save this food button with idle/saving/saved/error states), mobile/components/EditableItemRow.test.tsx, mobile/components/EntryRow.tsx (threads logPhrase and saveFood to EditableItemRow), mobile/components/TodayScreen.tsx (TypeaheadSuggestionBar between composer and timeline; syntheticSavedFoodItem helper; optimistic item with re-key on create success and rollback on failure), mobile/components/TodayScreen.test.tsx. All 154 mobile tests pass; TypeScript typecheck and ESLint are clean; make verify exits 0.",
+  "verify": "pass",
+  "files_changed": [
+    "mobile/api/savedFoods.ts",
+    "mobile/api/savedFoods.test.ts",
+    "mobile/api/derivedItems.ts",
+    "mobile/components/TypeaheadSuggestionBar.tsx",
+    "mobile/components/TypeaheadSuggestionBar.test.tsx",
+    "mobile/components/EditableItemRow.tsx",
+    "mobile/components/EditableItemRow.test.tsx",
+    "mobile/components/EntryRow.tsx",
+    "mobile/components/TodayScreen.tsx",
+    "mobile/components/TodayScreen.test.tsx"
+  ]
+}

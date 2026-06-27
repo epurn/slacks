@@ -6,6 +6,7 @@ import {
   type DerivedExerciseItemDTO,
   type DerivedFoodItemDTO,
 } from "@/api/derivedItems";
+import { SavedFoodApiError, type SavedFoodDTO } from "@/api/savedFoods";
 import type { ApiSession } from "@/state/session";
 
 const SESSION: ApiSession = {
@@ -302,5 +303,182 @@ describe("editing a derived item", () => {
 
     expect(edit).toHaveBeenCalledWith(SESSION, "exercise", "ex-1", "active_calories", 250);
     expect(textContent(tree)).toContain("was 300");
+  });
+});
+
+// ─── Save this food action (FTY-053) ─────────────────────────────────────────
+
+function savedFoodResult(overrides: Partial<SavedFoodDTO> = {}): SavedFoodDTO {
+  return {
+    id: "saved-1",
+    user_id: SESSION.userId,
+    name: "Greek yogurt",
+    calories: 150,
+    protein_g: 20,
+    carbs_g: 8,
+    fat_g: 4,
+    serving_size: 1,
+    serving_unit: "cup",
+    source: "saved_from_correction",
+    created_at: "2026-06-27T10:00:00Z",
+    updated_at: "2026-06-27T10:00:00Z",
+    ...overrides,
+  };
+}
+
+describe("Save this food action", () => {
+  it("shows the Save this food button when logPhrase is provided for a resolved food item", () => {
+    const tree = mount(
+      <EditableItemRow
+        item={food()}
+        session={SESSION}
+        logPhrase="a cup of greek yogurt"
+      />,
+    );
+    expect(hasA11yLabel(tree, "Save this food")).toBe(true);
+  });
+
+  it("does not show the Save this food button without logPhrase", () => {
+    const tree = mount(<EditableItemRow item={food()} session={SESSION} />);
+    expect(hasA11yLabel(tree, "Save this food")).toBe(false);
+  });
+
+  it("does not show the Save this food button for an exercise item", () => {
+    const tree = mount(
+      <EditableItemRow
+        item={exercise()}
+        session={SESSION}
+        logPhrase="30 min run"
+      />,
+    );
+    expect(hasA11yLabel(tree, "Save this food")).toBe(false);
+  });
+
+  it("does not show the Save this food button when calories are not resolved", () => {
+    const tree = mount(
+      <EditableItemRow
+        item={food({ calories: null, calories_estimated: null })}
+        session={SESSION}
+        logPhrase="greek yogurt"
+      />,
+    );
+    expect(hasA11yLabel(tree, "Save this food")).toBe(false);
+  });
+
+  it("calls saveFood with name, phrase, and the item's current nutrition snapshot", async () => {
+    const saveFood = jest.fn().mockResolvedValue(savedFoodResult());
+    const onSaved = jest.fn();
+    const tree = mount(
+      <EditableItemRow
+        item={food()}
+        session={SESSION}
+        logPhrase="a cup of greek yogurt"
+        saveFood={saveFood}
+        onSaved={onSaved}
+      />,
+    );
+
+    await pressAsync(tree, "Save this food");
+
+    expect(saveFood).toHaveBeenCalledWith(
+      SESSION,
+      {
+        name: "Greek yogurt",
+        phrase: "a cup of greek yogurt",
+        nutrition: {
+          calories: 150,
+          protein_g: 20,
+          carbs_g: 8,
+          fat_g: 4,
+          serving_size: 1,
+          serving_unit: "cup",
+        },
+      },
+    );
+    expect(onSaved).toHaveBeenCalledWith(savedFoodResult());
+  });
+
+  it("shows a success state and disables the button after a successful save", async () => {
+    const saveFood = jest.fn().mockResolvedValue(savedFoodResult());
+    const tree = mount(
+      <EditableItemRow
+        item={food()}
+        session={SESSION}
+        logPhrase="greek yogurt"
+        saveFood={saveFood}
+      />,
+    );
+
+    await pressAsync(tree, "Save this food");
+
+    const content = textContent(tree);
+    expect(content).toContain("Saved");
+    // Button is disabled after save.
+    const btn = tree.root.find(
+      (n) => n.props.accessibilityLabel === "Save this food",
+    );
+    expect(btn.props.accessibilityState?.disabled).toBe(true);
+  });
+
+  it("surfaces a nonjudgmental error when the save fails", async () => {
+    const saveFood = jest
+      .fn()
+      .mockRejectedValue(new SavedFoodApiError(422, "Validation error"));
+    const tree = mount(
+      <EditableItemRow
+        item={food()}
+        session={SESSION}
+        logPhrase="greek yogurt"
+        saveFood={saveFood}
+      />,
+    );
+
+    await pressAsync(tree, "Save this food");
+
+    const content = textContent(tree);
+    expect(content).toContain("couldn't save that food");
+    // Error does not echo validation error text or the phrase.
+    expect(content).not.toContain("Validation error");
+    // Button should be enabled to retry.
+    const btn = tree.root.find(
+      (n) => n.props.accessibilityLabel === "Save this food",
+    );
+    expect(btn.props.accessibilityState?.disabled).toBe(false);
+  });
+
+  it("uses amount and unit from the item as serving_size and serving_unit", async () => {
+    const saveFood = jest.fn().mockResolvedValue(savedFoodResult());
+    const tree = mount(
+      <EditableItemRow
+        item={food({ amount: 2, unit: "bowl" })}
+        session={SESSION}
+        logPhrase="2 bowls greek yogurt"
+        saveFood={saveFood}
+      />,
+    );
+
+    await pressAsync(tree, "Save this food");
+
+    const [, request] = saveFood.mock.calls[0] as [unknown, { nutrition: { serving_size: number; serving_unit: string } }];
+    expect(request.nutrition.serving_size).toBe(2);
+    expect(request.nutrition.serving_unit).toBe("bowl");
+  });
+
+  it("falls back to serving_size=1 and serving_unit='serving' when amount/unit are null", async () => {
+    const saveFood = jest.fn().mockResolvedValue(savedFoodResult());
+    const tree = mount(
+      <EditableItemRow
+        item={food({ amount: null, unit: null })}
+        session={SESSION}
+        logPhrase="greek yogurt"
+        saveFood={saveFood}
+      />,
+    );
+
+    await pressAsync(tree, "Save this food");
+
+    const [, request] = saveFood.mock.calls[0] as [unknown, { nutrition: { serving_size: number; serving_unit: string } }];
+    expect(request.nutrition.serving_size).toBe(1);
+    expect(request.nutrition.serving_unit).toBe("serving");
   });
 });

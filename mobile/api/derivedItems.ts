@@ -27,6 +27,10 @@ export type DerivedItemType = "food" | "exercise";
  * servings/quantity (driven by a `quantity` edit); there is no estimated
  * snapshot for it, since quantity is an input that drives the rescale, not a
  * snapshotted estimator output.
+ *
+ * `source` is a client-side annotation set to `'saved_food'` when the item's
+ * values were applied from a saved food via the typeahead (FTY-053). The
+ * backend does not return this field; it is never undefined for API-sourced items.
  */
 export interface DerivedFoodItemDTO {
   readonly item_type: "food";
@@ -49,6 +53,8 @@ export interface DerivedFoodItemDTO {
   readonly fat_g_estimated: number | null;
   readonly created_at: string;
   readonly updated_at: string;
+  /** Client-only: set to `'saved_food'` when values came from a typeahead selection (FTY-053). */
+  readonly source?: "saved_food";
 }
 
 /** Edit response for an exercise item: current burn plus the original snapshot. */
