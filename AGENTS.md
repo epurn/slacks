@@ -10,10 +10,10 @@ goal data, so privacy, security, testing, and review are product requirements.
 ## Public Repository Boundary
 
 This public repo should contain product code, public architecture docs,
-standards, stories, contracts, and review policy. Private local automation
-configuration, runner code, durable agent memory, machine-specific paths,
-tokens, private keys, provider secrets, and queue state must stay outside this
-repo.
+standards, contracts, and review policy. Story specs and the roadmap, private
+local automation configuration, runner code, durable agent memory,
+machine-specific paths, tokens, private keys, provider secrets, and queue state
+must stay outside this repo.
 
 ## Working Rules
 
