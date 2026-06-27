@@ -91,6 +91,12 @@ calls. The service-level files are append-only across the process lifetime.
   merged/closed PRs no longer linger as phantom runs-in-flight. Runs only on a
   real poll where the open-PR set is authoritative; the local branch is deleted
   only when git confirms it merged (a closed-unmerged branch keeps its commits).
+- `clear_merged_run_state` — a story already recorded merged still had a
+  lingering assignment JSON in the run dir (its branch was gone before the prune
+  paths could reach it), so its run-state was swept. `info`. `fields`:
+  `story_id`. This is the authoritative backstop that stops a finished author
+  from resurfacing as a phantom idle run in fatop; it skips any story with an
+  active author and is off in dry runs.
 - `prune_orphan_worktree` — a directory under the worktree root matched no
   registered git worktree and no active run-state, so it was removed. `info`.
   `fields`: none beyond `run_id` (the dir name).
