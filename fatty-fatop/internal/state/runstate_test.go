@@ -49,6 +49,40 @@ func TestLoadRuns(t *testing.T) {
 	}
 }
 
+func TestLoadRunsClearsMergedIdleRuns(t *testing.T) {
+	dir := t.TempDir()
+	// Idle author whose story has merged → should be cleared from in-flight runs.
+	os.WriteFile(filepath.Join(dir, "FTY-061.json"), []byte(
+		`{"story_id":"FTY-061","repo":"epurn/fatty","worktree":"/wt/fty-061"}`), 0o644)
+	// Idle author still open (not merged) → must remain visible.
+	os.WriteFile(filepath.Join(dir, "FTY-062.json"), []byte(
+		`{"story_id":"FTY-062","repo":"epurn/fatty","worktree":"/wt/fty-062"}`), 0o644)
+	// A merged story that is STILL active (live process) → must stay visible.
+	os.WriteFile(filepath.Join(dir, "FTY-063.json"), []byte(
+		`{"story_id":"FTY-063","repo":"epurn/fatty","worktree":"/wt/fty-063"}`), 0o644)
+	os.WriteFile(filepath.Join(dir, "FTY-063.active"), []byte("1"), 0o644)
+	os.WriteFile(filepath.Join(dir, "merged-stories.json"), []byte(
+		`["FTY-061","FTY-063"]`), 0o644)
+
+	runs, err := LoadRuns(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, r := range runs {
+		ids[r.ID] = true
+	}
+	if ids["FTY-061"] {
+		t.Error("merged idle run FTY-061 should be cleared")
+	}
+	if !ids["FTY-062"] {
+		t.Error("unmerged idle run FTY-062 should remain")
+	}
+	if !ids["FTY-063"] {
+		t.Error("merged but still-active run FTY-063 must stay visible")
+	}
+}
+
 func TestLoadRunsMissingDir(t *testing.T) {
 	runs, err := LoadRuns(filepath.Join(t.TempDir(), "nope"))
 	if err != nil {

@@ -1,6 +1,6 @@
 ---
 id: FTY-078
-state: ready
+state: merged
 primary_lane: security-privacy
 touched_lanes:
   - backend-core

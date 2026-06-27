@@ -1,6 +1,6 @@
 ---
 id: FTY-079
-state: ready
+state: merged
 primary_lane: contracts
 touched_lanes:
   - backend-core

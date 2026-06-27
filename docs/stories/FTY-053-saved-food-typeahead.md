@@ -1,6 +1,6 @@
 ---
 id: FTY-053
-state: ready_with_notes
+state: merged
 primary_lane: mobile-core
 touched_lanes: []
 review_focus:

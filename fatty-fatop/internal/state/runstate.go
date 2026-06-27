@@ -51,6 +51,12 @@ func LoadRuns(runDir string) ([]Run, error) {
 		return nil, err
 	}
 
+	// Stories the steward has recorded as merged. Once a story merges its author
+	// is done, but the assignment JSON lingers in the run dir until reused — so an
+	// idle (no .active marker) run for a merged story would otherwise keep showing
+	// as a phantom in-flight job. Drop those below.
+	merged := mergedRunIDs(runDir)
+
 	var runs []Run
 	for _, e := range entries {
 		name := e.Name()
@@ -103,6 +109,12 @@ func LoadRuns(runDir string) ([]Run, error) {
 			if st, err := os.Stat(marker); err == nil {
 				run.StartedAt = st.ModTime()
 			}
+		}
+		// An idle run whose story has merged is finished work, not an in-flight
+		// job — clear it. A still-active marker always wins (a live process must
+		// stay visible even if a merge was just recorded).
+		if !run.Active && (merged[run.Story] || merged[run.ID]) {
+			continue
 		}
 		runs = append(runs, run)
 	}
