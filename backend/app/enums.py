@@ -161,6 +161,19 @@ class CorrectionSource(StrEnum):
     USER_EDIT = "user_edit"
 
 
+class SavedFoodSource(StrEnum):
+    """Provenance of a ``saved_foods`` row (FTY-052).
+
+    A saved food is always created by a deliberate, user-initiated save. v1 only
+    writes :attr:`SAVED_FROM_CORRECTION` — the food was saved from a corrected
+    derived item (FTY-051). The field records *how* the food entered the user's
+    saved set so later sources (e.g. a manual entry) can be added without
+    redefining the contract.
+    """
+
+    SAVED_FROM_CORRECTION = "saved_from_correction"
+
+
 #: Authentication provider for an :class:`~app.models.identity.AuthIdentity`.
 #: Only the local email+password path exists in v1; hosted providers (e.g. Sign
 #: in with Apple) are deferred to a later story but modelled as separate
