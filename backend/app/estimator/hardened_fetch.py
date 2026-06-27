@@ -173,6 +173,55 @@ def post_json(
         headers={**headers, "Content-Type": "application/json", "Accept": "application/json"},
         method="POST",
     )
+    return _open_json(request, timeout_seconds=timeout_seconds, max_bytes=max_bytes, opener=opener)
+
+
+def get_json(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    timeout_seconds: float,
+    allowed_hosts: frozenset[str],
+    max_bytes: int = DEFAULT_MAX_BYTES,
+    resolver: Resolver = socket.getaddrinfo,
+    opener: urllib.request.OpenerDirector | None = None,
+) -> dict[str, Any]:
+    """GET ``url`` through the hardened policy and return the JSON object body.
+
+    Same security guarantees as :func:`post_json` (scheme/host/SSRF validated before
+    the socket opens, redirects refused, response size-capped and required to be a
+    JSON object); the read-only verb for providers whose lookup is a GET (e.g. Open
+    Food Facts' barcode endpoint).
+
+    Raises:
+        FetchPolicyError: the URL violated the policy, or a redirect was attempted.
+        FetchTransientError: timeout, connection failure, or a ``5xx`` response.
+        FetchResponseError: a ``4xx`` response, an oversized body, or a non-JSON body.
+    """
+
+    assert_url_allowed(url, allowed_hosts=allowed_hosts, resolver=resolver)
+
+    request = urllib.request.Request(  # noqa: S310 — scheme/host validated above
+        url,
+        headers={**(headers or {}), "Accept": "application/json"},
+        method="GET",
+    )
+    return _open_json(request, timeout_seconds=timeout_seconds, max_bytes=max_bytes, opener=opener)
+
+
+def _open_json(
+    request: urllib.request.Request,
+    *,
+    timeout_seconds: float,
+    max_bytes: int,
+    opener: urllib.request.OpenerDirector | None,
+) -> dict[str, Any]:
+    """Open a pre-validated request, enforce the size/content-type/JSON limits.
+
+    Shared by :func:`post_json` and :func:`get_json`; callers must have already run
+    :func:`assert_url_allowed` against the request URL. Error messages never echo the
+    URL, headers, request body, or response body.
+    """
 
     director = opener or _build_opener()
     try:

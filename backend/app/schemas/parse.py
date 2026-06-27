@@ -42,6 +42,7 @@ MAX_QUANTITY_LEN = 120
 MAX_UNIT_LEN = 32
 MAX_QUESTION_LEN = 300
 MAX_REASON_LEN = 120
+MAX_BARCODE_LEN = 14
 
 
 class ParseDisposition(StrEnum):
@@ -74,6 +75,11 @@ class ParsedCandidate(BaseModel):
     quantity_text: str = Field(default="", max_length=MAX_QUANTITY_LEN)
     unit: str | None = Field(default=None, max_length=MAX_UNIT_LEN)
     amount: float | None = Field(default=None, ge=0)
+    #: A UPC/EAN barcode only when the user explicitly provided one (e.g. a scanned
+    #: packaged product, FTY-063). Never invented by the model; an unparseable or
+    #: out-of-range value is normalized away by the food step (FTY-060), which then
+    #: routes deterministically rather than guessing. Digits only, length-bounded.
+    barcode: str | None = Field(default=None, max_length=MAX_BARCODE_LEN, pattern=r"^\d+$")
 
 
 class ParseResult(BaseModel):

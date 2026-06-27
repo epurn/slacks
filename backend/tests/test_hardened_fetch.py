@@ -18,10 +18,12 @@ import pytest
 from app.estimator.hardened_fetch import (
     FetchPolicyError,
     assert_url_allowed,
+    get_json,
     post_json,
 )
 
 ALLOWED = frozenset({"api.nal.usda.gov"})
+OFF_ALLOWED = frozenset({"world.openfoodfacts.org"})
 
 
 def _resolver_returning(ip: str) -> Any:
@@ -100,3 +102,44 @@ def test_post_json_refuses_before_opening_a_socket() -> None:
             resolver=_resolver_returning("23.1.2.3"),
             opener=_ExplodingOpener(),  # type: ignore[arg-type]
         )
+
+
+def test_get_json_refuses_non_https_off_target_before_opening_a_socket() -> None:
+    # The OFF (GET) transport gates on the same policy: a non-https barcode URL is
+    # refused before the socket opens. Proves the source fails closed.
+    class _ExplodingOpener:
+        def open(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover - must not run
+            raise AssertionError("transport must not be reached for a blocked URL")
+
+    with pytest.raises(FetchPolicyError):
+        get_json(
+            "http://world.openfoodfacts.org/api/v2/product/0123456789012.json",
+            timeout_seconds=1.0,
+            allowed_hosts=OFF_ALLOWED,
+            resolver=_resolver_returning("23.1.2.3"),
+            opener=_ExplodingOpener(),  # type: ignore[arg-type]
+        )
+
+
+def test_get_json_blocks_non_allowlisted_off_host() -> None:
+    with pytest.raises(FetchPolicyError) as exc:
+        get_json(
+            "https://evil.example.com/api/v2/product/0123456789012.json",
+            timeout_seconds=1.0,
+            allowed_hosts=OFF_ALLOWED,
+            resolver=_resolver_returning("23.1.2.3"),
+        )
+    assert exc.value.reason == "host_not_allowed"
+
+
+def test_get_json_blocks_off_host_resolving_to_metadata_service() -> None:
+    # SSRF / DNS-rebinding defence on the OFF transport: even an allowlisted host is
+    # refused when it resolves to the cloud metadata address.
+    with pytest.raises(FetchPolicyError) as exc:
+        get_json(
+            "https://world.openfoodfacts.org/api/v2/product/0123456789012.json",
+            timeout_seconds=1.0,
+            allowed_hosts=OFF_ALLOWED,
+            resolver=_resolver_returning("169.254.169.254"),
+        )
+    assert exc.value.reason == "private_address_blocked"

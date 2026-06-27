@@ -41,6 +41,13 @@ estimator / contracts / backend-core / security-privacy lane:
 1 (FTY-044). The source system id `usda_fdc` is recorded on run evidence and on each
 cached product / evidence row.
 
+2 (FTY-060) adds the **Open Food Facts barcode source** *above* USDA generic in the
+source hierarchy (a confident packaged-product match is preferred over a generic
+estimate for the same input), without changing the FTY-044 USDA path or its math. The
+source system id `open_food_facts` (source type `product_database`) is recorded on run
+evidence and on each cached product / evidence row it produces. See **Barcode Source
+(Open Food Facts)** below.
+
 ## Inputs
 
 ### Config (`FdcSettings`, `FATTY_FDC_` env vars)
@@ -196,6 +203,95 @@ rollback, and end-to-end resolution (with a stubbed FDC source) are covered by
 `tests/test_food_serving.py`, `tests/test_fdc_client.py`, `tests/test_hardened_fetch.py`,
 `tests/test_food_migration.py`, and `tests/test_food_resolution.py`.
 
+## Barcode Source (Open Food Facts) — FTY-060
+
+The barcode source resolves a food candidate carrying a UPC/EAN **barcode** into the
+same `derived_food_items` resolution shape (canonical kcal + grams, stored evidence,
+cached product) as the USDA path, but from **Open Food Facts** (OFF). It is the
+`product_database` tier of the evidence-retrieval hierarchy (`evidence-retrieval.md`)
+and sits **above** USDA generic: when a candidate has a barcode and OFF is enabled,
+OFF is queried first; a confident match is preferred over a generic USDA estimate.
+
+### Owner (additional)
+
+`backend/app/estimator/off.py` (OFF client, settings, mapping, barcode normalization),
+`BarcodeResolver` + the source-hierarchy routing in
+`backend/app/estimator/food_step.py`, the `products.barcode` key
+(`backend/app/models/food_sources.py` + `0010` migration), and the source-diagnostics
+endpoint (`backend/app/routers/health.py`, `backend/app/services/sources.py`).
+
+### Config (`OffSettings`, `FATTY_OFF_` env vars)
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `FATTY_OFF_ENABLED` | `true` | Self-host enable/disable flag. OFF is an open API (no key), so it is **on by default**; set `false` to disable the source. |
+| `FATTY_OFF_BASE_URL` | `https://world.openfoodfacts.org` | API base; **must be https**. The allowlisted host is derived from it. |
+| `FATTY_OFF_TIMEOUT_SECONDS` | `10` | Per-request wall-clock timeout. |
+| `FATTY_OFF_USER_AGENT` | `Fatty/1.0 (+…)` | Non-secret identifying user-agent (OFF API etiquette / rate limits). |
+
+OFF needs no credentials, so a provider is **available** whenever it is enabled. A
+candidate carries a barcode only when one was explicitly supplied (a future scan,
+FTY-063); barcodes are never invented by the model. The barcode is normalized to
+digits and must be a plausible GTIN length (8/12/13/14) or it is treated as a
+non-match.
+
+### Source lookup, mapping, and caching
+
+OFF is queried **by barcode only** — never the user's profile, weight, history, or any
+other personal context — through the hardened fetch (`hardened_fetch.get_json`: HTTPS
+only, OFF host allowlisted, SSRF/private-IP blocking, no redirects, bounded
+time/size, JSON content-type). Resolution checks the global `products` cache by
+`(source = open_food_facts, barcode)` first; a **cache hit makes no external call**
+(a repeat scan is free). On a miss it calls the OFF v2 product endpoint with a pinned
+`fields` list (`code,product_name,nutriments,serving_quantity,serving_size`), maps the
+product to canonical per-100g facts, and caches it as a global `products` row.
+
+Mapping (untrusted until it validates against the response schema): energy **kcal**
+(`energy-kcal_100g`, **required**), protein, carbohydrate, total fat. Macros default
+to 0 when absent (mirroring FTY-044). Per-100g facts are preferred; when OFF supplies
+only **per-serving** facts plus a **gram** serving size (`serving_quantity`), they are
+converted to per-100g (`× 100 / serving_g`) for canonical storage. A product with no
+energy on a usable basis, or with neither a per-100g basis nor a gram serving size, is
+a **non-match**. Default serving grams come from `serving_quantity` when positive.
+Serving math (quantity → grams → calories/macros) reuses FTY-044's `resolve_grams` /
+`scale_facts` unchanged.
+
+`products` rows are keyed by barcode via the additive `barcode` column (`0010`
+migration, indexed `ix_products_barcode`); the OFF row also stores the normalized
+barcode in `query_key`, so the existing `(source, query_key)` uniqueness still dedupes
+one cache row per product. The OFF row carries `source = open_food_facts`,
+`source_ref = open_food_facts:<barcode>`, and is **global** (no user data). The
+user-owned `evidence_sources` row records `source_type = product_database`,
+`source_ref`, content hash, fetched timestamp, and the per-100g facts snapshot —
+**never** the raw OFF response or page.
+
+### Routing
+
+| Condition | Pipeline signal | Persisted | Event transition |
+| --- | --- | --- | --- |
+| Barcode + OFF match + resolvable quantity | _(completes)_ | food `resolved` (`product_database`) + `products` (by barcode) + `evidence_sources` | `processing → completed` |
+| OFF preferred over USDA for a barcode candidate | _(as above)_ | OFF facts win; USDA not consulted | `processing → completed` |
+| Barcode OFF no match / invalid barcode / no usable energy | `NeedsClarification` (`barcode_unknown`) | clarification question | `processing → needs_clarification` |
+| Unresolvable quantity | `NeedsClarification` (`unresolvable_quantity`) | clarification question | `processing → needs_clarification` |
+| OFF transient failure (timeout/5xx) | `StepError` (`off_transient_error`, retryable) | nothing | retries within bound, then `failed` |
+| OFF non-retryable error (4xx/non-JSON/policy) | `StepFailed` (`off_response_error`) | nothing | `processing → failed` |
+| OFF disabled/unavailable for a barcode candidate | _(falls back)_ | next source (USDA by name) if applicable, else `needs_clarification` | per the source it falls to |
+
+A barcode is **never** finalized from a guessed model-prior value while OFF is
+available; `model_prior` would be permitted only when OFF is unavailable/disabled and
+no other source applies (the model-prior persistence path itself remains deferred).
+When OFF is disabled, a barcode candidate falls back to the next applicable source
+(USDA generic by name). The run records the consulted source system(s)
+(`open_food_facts`, and/or `usda_fdc`) in `source_refs` so estimation source status is
+surfaced.
+
+### Diagnostics
+
+`GET /healthz/sources` returns each evidence source's capability descriptor
+(`id`, `source_type`, `kinds`, `enabled`, `available`) — Open Food Facts (`barcode`)
+and USDA FDC (`generic_food`) — so a self-hoster can confirm which sources are on
+without any trial call. It carries no secrets and makes no external calls.
+
 ## Migration / Compatibility
 
 - The `0007` migration applies (`alembic upgrade head`) on top of the `0006`
@@ -212,6 +308,13 @@ rollback, and end-to-end resolution (with a stubbed FDC source) are covered by
   Foundation/SR-Legacy data-type restriction are documented assumptions (story
   planning notes); per-fdc-id cache dedup, richer portion inference, and additional
   sources are later stories.
+- FTY-060 adds the `0010` migration: a nullable, indexed `barcode` column on the
+  global `products` cache (the Open Food Facts barcode key). It applies on top of
+  `0009` and is fully reversible (`alembic downgrade 0009`), verified by an
+  apply/rollback test. Additive: existing FDC rows keep `barcode = NULL`; no prior
+  column is altered and no backfill is needed. `products` stays global (no `user_id`).
+  The barcode source reuses the FTY-044 serving math, evidence/`products` ownership
+  split, and hardened-fetch policy unchanged; it only adds a higher-priority source.
 - FTY-051 extends `derived_food_items` with nullable `calories_estimated` /
   `protein_g_estimated` / `carbs_g_estimated` / `fat_g_estimated` snapshots (the
   immutable originals paired with the editable current calories/macros) and lets a

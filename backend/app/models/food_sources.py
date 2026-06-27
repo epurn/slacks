@@ -5,10 +5,13 @@ deliberately separate per ``docs/security/data-retention.md`` and the contract
 principle that *global source facts must not contain user-specific habits*:
 
 - ``products`` — a **global** cache of nutrition facts retrieved from a trusted
-  source (USDA FDC). It carries **no** ``user_id``: the per-100g facts for "white
-  rice" are the same for everyone, so caching them avoids repeat external lookups.
-  Keyed by ``(source, query_key)``; retained as global source facts (no user data to
-  delete).
+  source (USDA FDC generic foods, or Open Food Facts packaged products by barcode,
+  FTY-060). It carries **no** ``user_id``: the per-100g facts for "white rice" or a
+  given barcode are the same for everyone, so caching them avoids repeat external
+  lookups. Keyed by ``(source, query_key)`` — ``query_key`` holds the normalized
+  food name (FDC) or the normalized barcode (OFF), with a dedicated indexed
+  ``barcode`` column the barcode resolver looks up by. Retained as global source
+  facts (no user data to delete).
 - ``evidence_sources`` — the **user-owned** provenance record for one resolved
   ``derived_food_items`` row: which source backed it, the content hash, when it was
   fetched, and an immutable snapshot of the per-100g facts used. It carries
@@ -58,8 +61,14 @@ class Product(Base):
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     #: Stable per-record source reference, e.g. ``usda_fdc:171688``.
     source_ref: Mapped[str] = mapped_column(String(128), nullable=False)
-    #: Normalized food name that produced this cache entry (the lookup key).
+    #: Normalized food name that produced this cache entry (the lookup key). For a
+    #: barcode source (Open Food Facts), this holds the normalized barcode so the
+    #: ``(source, query_key)`` uniqueness still dedupes one cache row per product.
     query_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    #: Normalized UPC/EAN for a barcode-sourced row (Open Food Facts, FTY-060); the
+    #: explicit, indexed barcode key the resolver looks up by. ``None`` for a
+    #: name-keyed generic source (USDA FDC).
+    barcode: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     description: Mapped[str] = mapped_column(String(300), nullable=False, default="")
     #: Canonical per-100g facts: kcal energy and macros in grams.
     calories_per_100g: Mapped[float] = mapped_column(Float, nullable=False)

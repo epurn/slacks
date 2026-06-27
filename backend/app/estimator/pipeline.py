@@ -37,7 +37,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from app.estimator.food_step import FoodResolver
+    from app.estimator.food_step import BarcodeResolver, FoodResolver
     from app.llm.base import Provider
 
 
@@ -105,6 +105,11 @@ class CandidateDraft:
     quantity_text: str = ""
     unit: str | None = None
     amount: float | None = None
+    #: Normalized UPC/EAN barcode for a packaged product, when one was supplied
+    #: (e.g. a future scan, FTY-063). Present ⇒ the food step prefers the Open Food
+    #: Facts barcode source over generic USDA lookup (FTY-060). ``None`` for a
+    #: plain generic-food candidate.
+    barcode: str | None = None
 
 
 @dataclass(frozen=True)
@@ -294,18 +299,24 @@ class Pipeline:
         return PipelineResult(PipelineOutcome.COMPLETED, None)
 
 
-def default_pipeline(provider: Provider, *, food_resolver: FoodResolver | None = None) -> Pipeline:
+def default_pipeline(
+    provider: Provider,
+    *,
+    food_resolver: FoodResolver | None = None,
+    barcode_resolver: BarcodeResolver | None = None,
+) -> Pipeline:
     """Build the v1 estimation pipeline: NL parse, exercise calc, food resolution.
 
     The parse step (FTY-042) turns the event text into schema-validated candidates
     using ``provider``; the exercise step (FTY-043) costs the exercise candidates
-    into net active calories deterministically; the food step (FTY-044) resolves
-    food candidates into calories/macros from a trusted source. The food step is
+    into net active calories deterministically; the food step (FTY-044 generic +
+    FTY-060 barcode) resolves food candidates into calories/macros, preferring the
+    Open Food Facts barcode source over generic USDA lookup. The food step is
     appended only when a ``food_resolver`` is supplied (it needs a database session
-    for the product cache and evidence writes), which the worker always provides; a
-    resolver-less build (e.g. unit tests of composition) keeps food candidates
-    unresolved, the pre-FTY-044 behavior. The worker contract (claim → run →
-    transition) is unchanged.
+    for the product cache and evidence writes), which the worker always provides; an
+    optional ``barcode_resolver`` adds the OFF source. A resolver-less build (e.g.
+    unit tests of composition) keeps food candidates unresolved, the pre-FTY-044
+    behavior. The worker contract (claim → run → transition) is unchanged.
     """
 
     # Imported here rather than at module top to avoid a cycle: the steps import the
@@ -316,5 +327,5 @@ def default_pipeline(provider: Provider, *, food_resolver: FoodResolver | None =
 
     steps: list[EstimationStep] = [ParseStep(provider), ExerciseCalculateStep()]
     if food_resolver is not None:
-        steps.append(FoodResolveStep(food_resolver))
+        steps.append(FoodResolveStep(food_resolver, barcode_resolver=barcode_resolver))
     return Pipeline(steps)

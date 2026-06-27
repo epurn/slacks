@@ -42,7 +42,8 @@ from app.enums import (
     LogEventStatus,
 )
 from app.estimator.fdc import build_fdc_client
-from app.estimator.food_step import FoodResolver
+from app.estimator.food_step import BarcodeResolver, FoodResolver
+from app.estimator.off import build_off_client
 from app.estimator.pipeline import (
     EstimationContext,
     Pipeline,
@@ -187,12 +188,18 @@ def process_estimation(
     """
 
     if pipeline is None:
-        # The food step (FTY-044) needs this session for the product cache and
+        # The food step (FTY-044/060) needs this session for the product cache and
         # evidence writes, so the default pipeline is built per call here where the
-        # session is in scope. With no FDC key the source is disabled and food
-        # candidates are left unresolved.
+        # session is in scope. A barcode candidate prefers the Open Food Facts source
+        # (enabled by default); a generic food uses USDA FDC (disabled without a key,
+        # leaving the candidate unresolved). Building a client makes no network call.
         resolver = FoodResolver(session=session, source=build_fdc_client())
-        pipeline = default_pipeline(build_provider(load_llm_settings()), food_resolver=resolver)
+        barcode_resolver = BarcodeResolver(session=session, source=build_off_client())
+        pipeline = default_pipeline(
+            build_provider(load_llm_settings()),
+            food_resolver=resolver,
+            barcode_resolver=barcode_resolver,
+        )
 
     # Enforce ownership before any write: a missing or cross-user event fails
     # closed and no job row is created on its behalf.

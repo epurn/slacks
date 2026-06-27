@@ -43,9 +43,11 @@ see `docs/architecture/evidence-retrieval.md`).
 contracts lane, with estimator / backend-core / security-privacy touch:
 `docs/contracts/evidence-retrieval.md` (this contract). The first concrete
 implementation lives in `backend/app/estimator/` (`fdc.py`,
-`hardened_fetch.py`, `food_sources.py`); see `food-resolution.md`. Later
-adapters (`off.py`, the official-source search/fetch step, label extraction)
-implement this contract behind the same boundaries.
+`hardened_fetch.py`, `food_sources.py`); see `food-resolution.md`. The Open Food
+Facts barcode adapter (`off.py`, `product_database` tier) is implemented in
+FTY-060 behind these same boundaries; see `food-resolution.md` (**Barcode
+Source**). Remaining adapters (the official-source search/fetch step, label
+extraction) implement this contract the same way.
 
 ## Version
 

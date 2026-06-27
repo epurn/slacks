@@ -97,6 +97,9 @@ class ProductFacts:
     facts: NutritionFacts
     default_serving_g: float | None
     content_hash: str
+    #: The normalized barcode for a product-database (Open Food Facts) row, used as
+    #: the explicit ``products.barcode`` key. ``None`` for name-keyed sources (FDC).
+    barcode: str | None = None
 
 
 @runtime_checkable

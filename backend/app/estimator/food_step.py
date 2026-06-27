@@ -1,14 +1,21 @@
-"""The generic-food resolution step (FTY-044).
+"""The food-resolution step (FTY-044 generic foods + FTY-060 barcode lookup).
 
 The third real estimation pipeline step. It takes the food candidates the parse
-step (FTY-042) extracted and resolves each into canonical calories and macros,
-sourced from a trusted nutrition database (USDA FDC) with deterministic serving
-math. Exercise candidates are left untouched (resolution is FTY-043).
+step (FTY-042) extracted and resolves each into canonical calories and macros, with
+deterministic serving math, from the highest-preference applicable source:
 
-A :class:`FoodResolver` owns the side of resolution that needs the database — the
-global ``products`` cache — and the external :class:`~app.estimator.fdc.FoodSource`.
-It is constructed by the worker (which holds the session) and injected into the
-step; the step itself stays a thin orchestration over the resolver plus the pure
+1. **Open Food Facts** (``product_database``, FTY-060) for a candidate carrying a
+   barcode — a packaged-product fact, preferred over a generic estimate.
+2. **USDA FoodData Central** (``trusted_nutrition_database``, FTY-044) for a generic
+   food, looked up by name.
+
+Exercise candidates are left untouched (resolution is FTY-043).
+
+A :class:`FoodResolver` / :class:`BarcodeResolver` each own the side of resolution
+that needs the database — the global ``products`` cache — and an external source
+(:class:`~app.estimator.fdc.FoodSource` / :class:`~app.estimator.off.BarcodeSource`).
+They are constructed by the worker (which holds the session) and injected into the
+step; the step itself stays a thin orchestration over the resolvers plus the pure
 serving math (:mod:`app.estimator.food_serving`).
 
 Routing follows FTY-042/043 conventions:
@@ -17,18 +24,20 @@ Routing follows FTY-042/043 conventions:
   results on the context; the worker persists them ``resolved`` with calories/macros,
   caches the source facts as ``products``, and writes an ``evidence_sources`` row per
   item, then completes the event.
-- **source unconfigured** → no-op: with no FDC key the source is disabled, so food
-  candidates stay ``unresolved`` (the offline bundled-dataset fallback is a documented
-  deferral). The event still completes.
-- **no confident source match** / **unresolvable quantity** → raise
+- **no source applies** → no-op: with no enabled source for the candidates (e.g. no
+  FDC key and no barcode/OFF), food candidates stay ``unresolved``. The event still
+  completes.
+- **no confident source match** (incl. a barcode OFF cannot resolve while OFF is
+  available) / **unresolvable quantity** → raise
   :class:`~app.estimator.pipeline.NeedsClarification`; the food is recognisable but
   cannot be costed confidently, so the user is asked rather than guessed (terminal).
+  A barcode is **never** finalized from a guessed value while OFF is available.
 - **transient source failure** → raise :class:`~app.estimator.pipeline.StepError`
   (retryable); a **non-retryable source error** → :class:`StepFailed` (fail closed).
 
 The nutrition facts are never taken from the model — only from the trusted source —
-and the run records the source reference as evidence, never any raw page, the API
-key, or raw user text (security baseline + ``docs/security/data-retention.md``).
+and the run records the source reference as evidence, never any raw page/response,
+the API key, or raw user text (security baseline + ``docs/security/data-retention.md``).
 """
 
 from __future__ import annotations
@@ -50,6 +59,14 @@ from app.estimator.fdc import (
     normalize_query,
 )
 from app.estimator.food_serving import NutritionFacts, resolve_grams, scale_facts
+from app.estimator.off import (
+    OFF_SOURCE,
+    OFF_SOURCE_TYPE,
+    BarcodeSource,
+    OffResponseError,
+    OffTransientError,
+    normalize_barcode,
+)
 from app.estimator.pipeline import (
     CandidateDraft,
     EstimationContext,
@@ -63,6 +80,9 @@ from app.models.food_sources import Product
 #: Fixed, sanitized clarification questions used in place of any raw user text, so a
 #: ``needs_clarification`` outcome always carries a question for the later answer flow.
 UNKNOWN_FOOD_QUESTION = "Which food was that? We couldn't find a nutrition match."
+BARCODE_UNKNOWN_QUESTION = (
+    "We couldn't find that barcode's product. Which food was it, and how much?"
+)
 QUANTITY_QUESTION = "How much did you have (for example, in grams, millilitres, or servings)?"
 
 
@@ -74,14 +94,40 @@ class _ResolvedProduct:
     fetched_at: datetime
 
 
+def _cache_product(session: Session, facts: ProductFacts) -> Product:
+    """Insert ``facts`` as a global ``products`` row and flush to assign its id.
+
+    Shared by both resolvers: the cached row holds global source facts only (no user
+    data). ``barcode`` is set for a barcode source (OFF) and ``None`` for a name-keyed
+    generic source (FDC).
+    """
+
+    product = Product(
+        source=facts.source,
+        source_ref=facts.source_ref,
+        query_key=facts.query_key,
+        barcode=facts.barcode,
+        description=facts.description,
+        calories_per_100g=facts.facts.calories,
+        protein_per_100g=facts.facts.protein_g,
+        carbs_per_100g=facts.facts.carbs_g,
+        fat_per_100g=facts.facts.fat_g,
+        default_serving_g=facts.default_serving_g,
+        content_hash=facts.content_hash,
+    )
+    session.add(product)
+    session.flush()
+    return product
+
+
 class FoodResolver:
-    """Resolves a food name to a cached :class:`Product`, fetching on a cache miss.
+    """Resolves a generic food name to a cached :class:`Product`, fetching on a miss.
 
     Owns the global ``products`` cache (read + get-or-create) and the external
-    :class:`FoodSource`. A cache hit avoids any external call; a miss fetches from the
-    source and caches the global facts (no user data) in the session for the worker's
-    commit. New cache rows are flushed so the worker can reference them from the
-    user-owned ``evidence_sources`` it writes on success.
+    :class:`FoodSource` (USDA FDC). A cache hit avoids any external call; a miss
+    fetches from the source and caches the global facts (no user data) in the session
+    for the worker's commit. New cache rows are flushed so the worker can reference
+    them from the user-owned ``evidence_sources`` it writes on success.
     """
 
     def __init__(self, *, session: Session, source: FoodSource) -> None:
@@ -115,33 +161,69 @@ class FoodResolver:
         facts = self._source.lookup(name)
         if facts is None:
             return None
-        return _ResolvedProduct(product=self._cache(facts), fetched_at=datetime.now(UTC))
-
-    def _cache(self, facts: ProductFacts) -> Product:
-        """Insert ``facts`` as a global ``products`` row and flush to assign its id."""
-
-        product = Product(
-            source=facts.source,
-            source_ref=facts.source_ref,
-            query_key=facts.query_key,
-            description=facts.description,
-            calories_per_100g=facts.facts.calories,
-            protein_per_100g=facts.facts.protein_g,
-            carbs_per_100g=facts.facts.carbs_g,
-            fat_per_100g=facts.facts.fat_g,
-            default_serving_g=facts.default_serving_g,
-            content_hash=facts.content_hash,
+        return _ResolvedProduct(
+            product=_cache_product(self._session, facts), fetched_at=datetime.now(UTC)
         )
-        self._session.add(product)
-        self._session.flush()
-        return product
+
+
+class BarcodeResolver:
+    """Resolves a barcode to a cached :class:`Product`, fetching from OFF on a miss.
+
+    The Open Food Facts counterpart to :class:`FoodResolver`. Owns the global
+    ``products`` cache keyed by the normalized ``barcode`` under ``source =
+    open_food_facts`` and the external :class:`BarcodeSource`. A cache hit makes **no**
+    external call, so a repeat scan is free; a miss fetches by barcode only (no
+    personal context) and caches the global facts.
+    """
+
+    def __init__(self, *, session: Session, source: BarcodeSource) -> None:
+        self._session = session
+        self._source = source
+
+    @property
+    def enabled(self) -> bool:
+        """Whether the underlying OFF source is enabled and may be queried."""
+
+        return self._source.enabled
+
+    def resolve_product(self, barcode: str) -> _ResolvedProduct | None:
+        """Return the cached/fetched product for ``barcode``, or ``None`` if no match.
+
+        Checks the ``products`` cache by normalized barcode first; on a miss, queries
+        OFF and caches the result. Propagates :class:`OffTransientError` /
+        :class:`OffResponseError` from the source for the step to route.
+        """
+
+        normalized = normalize_barcode(barcode)
+        if normalized is None:
+            return None
+
+        cached = self._session.scalars(
+            select(Product).where(Product.source == OFF_SOURCE, Product.barcode == normalized)
+        ).one_or_none()
+        if cached is not None:
+            return _ResolvedProduct(product=cached, fetched_at=cached.updated_at)
+
+        facts = self._source.lookup(normalized)
+        if facts is None:
+            return None
+        return _ResolvedProduct(
+            product=_cache_product(self._session, facts), fetched_at=datetime.now(UTC)
+        )
 
 
 @dataclass(frozen=True)
 class FoodResolveStep:
-    """Resolve the parsed food candidates into calories/macros from a trusted source."""
+    """Resolve parsed food candidates into calories/macros from the best source.
+
+    A barcode-bearing candidate prefers the Open Food Facts barcode source (FTY-060,
+    ``barcode_resolver``) over generic USDA lookup (FTY-044, ``resolver``); a plain
+    generic-food candidate uses USDA. ``barcode_resolver`` is optional so a build
+    without OFF (e.g. pre-FTY-060 composition tests) keeps the generic-only behavior.
+    """
 
     resolver: FoodResolver
+    barcode_resolver: BarcodeResolver | None = None
     name: str = "food_resolve"
 
     def run(self, context: EstimationContext) -> None:
@@ -152,22 +234,75 @@ class FoodResolveStep:
             context.record_step(self.name, "ok")
             return
 
-        if not self.resolver.enabled:
-            # No FDC key configured: leave food candidates unresolved rather than
-            # guess. A documented deferral (offline bundled dataset).
+        if not self._engages(context):
+            # No enabled source applies to these candidates (e.g. no FDC key and no
+            # barcode/OFF): leave food candidates unresolved rather than guess. The
+            # event still completes.
             context.record_step(self.name, "skipped")
             return
-
-        self._record_evidence_meta(context)
 
         for candidate in context.food_candidates:
             context.resolved_food_items.append(self._resolve(context, candidate))
 
         context.record_step(self.name, "ok")
 
-    def _resolve(self, context: EstimationContext, candidate: CandidateDraft) -> ResolvedFoodItem:
-        """Resolve one candidate, mapping source/quantity failures to pipeline signals."""
+    def _engages(self, context: EstimationContext) -> bool:
+        """Whether any enabled source can cost at least one of the candidates.
 
+        Engages when the generic source is enabled, or when the barcode source is
+        enabled and some candidate carries a barcode. Keeps the FTY-044 contract that
+        a fully-unsourced batch is left unresolved (never partially resolved).
+        """
+
+        if self.resolver.enabled:
+            return True
+        any_barcode = any(c.barcode for c in context.food_candidates)
+        return self._off_enabled and any_barcode
+
+    @property
+    def _off_enabled(self) -> bool:
+        return self.barcode_resolver is not None and self.barcode_resolver.enabled
+
+    def _resolve(self, context: EstimationContext, candidate: CandidateDraft) -> ResolvedFoodItem:
+        """Resolve one candidate via its highest-preference applicable source."""
+
+        barcode_resolver = self.barcode_resolver
+        if candidate.barcode and barcode_resolver is not None and barcode_resolver.enabled:
+            return self._resolve_barcode(context, candidate, barcode_resolver)
+        return self._resolve_generic(context, candidate)
+
+    def _resolve_barcode(
+        self,
+        context: EstimationContext,
+        candidate: CandidateDraft,
+        barcode_resolver: BarcodeResolver,
+    ) -> ResolvedFoodItem:
+        """Resolve a barcode candidate from Open Food Facts (preferred source)."""
+
+        _record_source_ref(context, OFF_SOURCE)
+        try:
+            resolved = barcode_resolver.resolve_product(candidate.barcode or "")
+        except OffTransientError as exc:
+            raise StepError("off_transient_error") from exc
+        except OffResponseError as exc:
+            # OFF answered unusably; fail closed rather than guess a number.
+            raise StepFailed("off_response_error") from exc
+
+        if resolved is None:
+            # No match, invalid barcode, or no usable energy value: route
+            # deterministically. Never finalized from a guess while OFF is available.
+            context.clarification_questions = [BARCODE_UNKNOWN_QUESTION]
+            raise NeedsClarification("barcode_unknown")
+
+        return self._build_item(context, candidate, resolved, OFF_SOURCE_TYPE)
+
+    def _resolve_generic(
+        self, context: EstimationContext, candidate: CandidateDraft
+    ) -> ResolvedFoodItem:
+        """Resolve a generic-food candidate by name from USDA FDC (FTY-044)."""
+
+        if self.resolver.enabled:
+            _record_source_ref(context, FDC_SOURCE)
         try:
             resolved = self.resolver.resolve_product(candidate.name)
         except FdcTransientError as exc:
@@ -179,6 +314,17 @@ class FoodResolveStep:
         if resolved is None:
             context.clarification_questions = [UNKNOWN_FOOD_QUESTION]
             raise NeedsClarification("unknown_food")
+
+        return self._build_item(context, candidate, resolved, _source_type(resolved.product.source))
+
+    @staticmethod
+    def _build_item(
+        context: EstimationContext,
+        candidate: CandidateDraft,
+        resolved: _ResolvedProduct,
+        source_type: str,
+    ) -> ResolvedFoodItem:
+        """Apply deterministic serving math and build the resolved item + provenance."""
 
         product = resolved.product
         grams = resolve_grams(
@@ -198,6 +344,8 @@ class FoodResolveStep:
             fat_g=product.fat_per_100g,
         )
         scaled = scale_facts(facts, grams)
+        # Record the source that actually backed this resolution (covers a cache hit).
+        _record_source_ref(context, product.source)
         product_id: uuid.UUID = product.id
 
         return ResolvedFoodItem(
@@ -211,7 +359,7 @@ class FoodResolveStep:
             carbs_g=scaled.carbs_g,
             fat_g=scaled.fat_g,
             product_id=product_id,
-            source_type=_source_type(product.source),
+            source_type=source_type,
             source_ref=product.source_ref,
             content_hash=product.content_hash,
             fetched_at=resolved.fetched_at,
@@ -221,12 +369,12 @@ class FoodResolveStep:
             fat_per_100g=product.fat_per_100g,
         )
 
-    @staticmethod
-    def _record_evidence_meta(context: EstimationContext) -> None:
-        """Record the source system as run evidence (content-free metadata only)."""
 
-        if FDC_SOURCE not in context.source_refs:
-            context.source_refs.append(FDC_SOURCE)
+def _record_source_ref(context: EstimationContext, source: str) -> None:
+    """Record a source system as run evidence (content-free metadata only)."""
+
+    if source not in context.source_refs:
+        context.source_refs.append(source)
 
 
 def _source_type(source: str) -> str:
@@ -234,4 +382,6 @@ def _source_type(source: str) -> str:
 
     if source == FDC_SOURCE:
         return FDC_SOURCE_TYPE
+    if source == OFF_SOURCE:
+        return OFF_SOURCE_TYPE
     return source

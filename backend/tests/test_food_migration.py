@@ -66,6 +66,28 @@ def test_products_is_global_with_no_user_ownership(tmp_path: Path) -> None:
         engine.dispose()
 
 
+def test_products_barcode_key_applies_and_rolls_back(tmp_path: Path) -> None:
+    # FTY-060: the additive barcode key on the global products cache applies and
+    # rolls back, leaving the FTY-044 products schema intact.
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'barcode.db'}")
+    try:
+        upgrade(engine, "head")
+        columns = {c["name"] for c in inspect(engine).get_columns("products")}
+        assert "barcode" in columns
+        indexes = {ix["name"] for ix in inspect(engine).get_indexes("products")}
+        assert "ix_products_barcode" in indexes
+        # The barcode key is global source data: products still has no user_id.
+        assert "user_id" not in columns
+
+        downgrade(engine, "0009")
+        rolled_back = {c["name"] for c in inspect(engine).get_columns("products")}
+        assert "barcode" not in rolled_back
+        # The FTY-044 products table itself survives the 0010 rollback.
+        assert "products" in set(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
+
+
 def test_evidence_sources_carries_user_ownership_and_cascades(tmp_path: Path) -> None:
     engine = create_db_engine(f"sqlite:///{tmp_path / 'evidence.db'}")
     try:
