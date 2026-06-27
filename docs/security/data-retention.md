@@ -9,7 +9,7 @@ Retention defaults should minimize stored personal data while preserving user va
 - Food and exercise logs: retained until user deletion or account deletion.
 - Body weight entries: retained until user deletion or account deletion.
 - Saved foods, recipes, aliases, and memories: retained until user deletion or account deletion.
-- Nutrition label images: retain only while needed for extraction unless the user explicitly saves the attachment.
+- Nutrition label images (`log_attachments`, FTY-077): discard by default — an uploaded image is retained only while needed for extraction and discarded afterward unless the user explicitly saves it. An explicit save writes exactly one user-owned `log_attachments` row (the image bytes plus the content-type, byte size, and content hash needed to retrieve and delete it); the default flow persists no raw image. Uploads are size- and content-type limited and rejected fail-closed before storage. The row is `ON DELETE CASCADE` from both the user and the owning log event, so a saved image is removed on log-event, user, or account deletion. It never stores model output (that is `evidence_sources`).
 - Raw OCR text: avoid long-term retention unless needed for evidence; prefer extracted facts plus source metadata.
 - Fetched web pages: do not store raw pages by default; store source URL, fetched timestamp, content hash, and extracted facts.
 - Estimation runs: store model/provider, schema version, tool names, source references, assumptions, validation errors, and sanitized traces.

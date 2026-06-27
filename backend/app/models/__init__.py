@@ -6,6 +6,7 @@ which Alembic's migration environment uses as autogenerate/target metadata.
 
 from __future__ import annotations
 
+from app.models.attachments import LogAttachment
 from app.models.corrections import Correction
 from app.models.derived import (
     ClarificationQuestion,
@@ -31,6 +32,7 @@ __all__ = [
     "EvidenceSource",
     "FoodAlias",
     "Goal",
+    "LogAttachment",
     "LogEvent",
     "Product",
     "SavedFood",

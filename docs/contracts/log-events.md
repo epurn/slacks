@@ -18,8 +18,10 @@ This contract covers three things:
    object-level authorization rule.
 
 It deliberately excludes estimation, job enqueue, and worker processing
-(FTY-040+); derived food/exercise items; `log_attachments` (FTY-060/061); and
-editing or deleting events (later stories).
+(FTY-040+); derived food/exercise items; and editing or deleting events (later
+stories). Saved image attachments are owned by their own contract
+(`log-attachments.md`, FTY-077): a `log_attachments` row references a log event but
+is written only when the user explicitly saves an uploaded image.
 
 ## Owner
 
