@@ -17,6 +17,9 @@ import {
   type DerivedFoodItemDTO,
 } from "@/api/derivedItems";
 import {
+  uploadLabelImage as uploadLabelImageApi,
+} from "@/api/labelCapture";
+import {
   LogEventApiError,
   createLogEvent as createLogEventApi,
   listTodayLogEvents as listTodayLogEventsApi,
@@ -29,6 +32,7 @@ import {
 } from "@/api/savedFoods";
 import { BarcodeScannerScreen } from "@/components/BarcodeScannerScreen";
 import { EntryRow } from "@/components/EntryRow";
+import { LabelCaptureScreen } from "@/components/LabelCaptureScreen";
 import { TypeaheadSuggestionBar } from "@/components/TypeaheadSuggestionBar";
 import {
   POLL_INTERVAL_MS,
@@ -123,6 +127,8 @@ export function TodayScreen({
   pollIntervalMs = POLL_INTERVAL_MS,
   searchSavedFoods = searchSavedFoodsApi,
   saveFood = saveFoodApi,
+  uploadLabel = uploadLabelImageApi,
+  labelTakePhoto,
 }: {
   session?: Session;
   load?: typeof listTodayLogEventsApi;
@@ -141,6 +147,10 @@ export function TodayScreen({
   searchSavedFoods?: typeof searchSavedFoodsApi;
   /** Injectable save-food function for tests (FTY-053). */
   saveFood?: typeof saveFoodApi;
+  /** Injectable label upload for tests (FTY-064). */
+  uploadLabel?: typeof uploadLabelImageApi;
+  /** Injectable photo capture for label-capture tests (FTY-064). */
+  labelTakePhoto?: () => Promise<{ uri: string }>;
 } = {}) {
   const insets = useSafeAreaInsets();
   const liveSession = useSession();
@@ -163,6 +173,7 @@ export function TodayScreen({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [labelCaptureOpen, setLabelCaptureOpen] = useState(false);
   // Saved food selected from the typeahead bar (FTY-053). When set, pressing
   // "Add" creates the log event AND immediately adds a synthetic resolved item
   // with the saved food's nutrition, skipping the estimator wait.
@@ -305,6 +316,13 @@ export function TodayScreen({
     [apiSession, submitting, create],
   );
 
+  // Label capture upload (FTY-064). The backend already created the pending event;
+  // add it to the timeline directly and let FTY-032 polling drive it to resolution.
+  const handleLabelUploaded = useCallback((event: LogEventDTO) => {
+    setLabelCaptureOpen(false);
+    setEvents((prev) => sortByNewest([event, ...prev]));
+  }, []);
+
   // One poll: refetch the day and reconcile into the timeline, preserving any
   // unacknowledged optimistic entry. Transient poll failures are swallowed so a
   // dropped request never replaces the visible timeline with an error — the
@@ -368,6 +386,28 @@ export function TodayScreen({
         />
       </Modal>
 
+      <Modal
+        visible={labelCaptureOpen}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setLabelCaptureOpen(false)}
+      >
+        {apiSession && (
+          <LabelCaptureScreen
+            session={apiSession}
+            onUploaded={handleLabelUploaded}
+            onClose={() => setLabelCaptureOpen(false)}
+            upload={
+              apiSession
+                ? (imageUri, savePhoto) =>
+                    uploadLabel(apiSession, imageUri, savePhoto)
+                : undefined
+            }
+            takePhoto={labelTakePhoto}
+          />
+        )}
+      </Modal>
+
       <ScrollView
         style={styles.screen}
         contentContainerStyle={[
@@ -415,6 +455,17 @@ export function TodayScreen({
               style={styles.scanButton}
             >
               <Text style={styles.scanButtonLabel}>⊡</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Capture label"
+              accessibilityHint="Opens the camera to photograph a nutrition label"
+              accessibilityState={{ disabled: submitting || !apiSession }}
+              disabled={submitting || !apiSession}
+              onPress={() => setLabelCaptureOpen(true)}
+              style={styles.scanButton}
+            >
+              <Text style={styles.scanButtonLabel}>◉</Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"

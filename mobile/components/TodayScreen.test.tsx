@@ -504,6 +504,76 @@ describe("TodayScreen barcode scanning", () => {
   });
 });
 
+// ─── Label capture entry point (FTY-064) ─────────────────────────────────────
+
+describe("TodayScreen label capture", () => {
+  it("exposes an accessible Capture label entry point", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
+    await act(async () => {});
+    expect(hasA11yLabel(tree, "Capture label")).toBe(true);
+  });
+
+  it("shows the label capture modal when the label entry point is pressed", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
+    await act(async () => {});
+
+    press(tree, "Capture label");
+
+    // After pressing, the CameraCapture scaffold renders (permission granted by the mock).
+    expect(hasA11yLabel(tree, "Close scanner")).toBe(true);
+  });
+
+  it("adds the uploaded label event to the timeline via FTY-032 polling", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const createdEvent: LogEventDTO = {
+      id: "label-server-1",
+      user_id: SESSION!.userId,
+      raw_text: "nutrition label photo",
+      status: "pending",
+      created_at: "2026-06-27T10:00:00Z",
+      updated_at: "2026-06-27T10:00:00Z",
+    };
+    // The upload function returns the created pending event.
+    const uploadLabel = jest.fn().mockResolvedValue(createdEvent);
+    // The takePhoto mock skips the real camera ref.
+    const labelTakePhoto = jest.fn().mockResolvedValue({ uri: "file:///label.jpg" });
+
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        useActive={INACTIVE}
+        uploadLabel={uploadLabel}
+        labelTakePhoto={labelTakePhoto}
+      />,
+    );
+    await act(async () => {});
+
+    // Open label capture modal.
+    press(tree, "Capture label");
+
+    // Take photo.
+    await act(async () => {
+      press(tree, "Take photo");
+    });
+
+    // Upload.
+    await act(async () => {
+      press(tree, "Upload label");
+    });
+
+    // The uploaded event appears on the timeline as pending.
+    expect(textContent(tree)).toContain("nutrition label photo");
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+  });
+});
+
 // ─── Typeahead suggestion bar + saved food apply (FTY-053) ───────────────────
 
 function savedFood(overrides: Partial<SavedFoodDTO> = {}): SavedFoodDTO {
