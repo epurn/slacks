@@ -14,7 +14,7 @@ is predictable, empty package homes — not product behavior.
 
 Supporting top-level paths already in the repo:
 
-- `docs/` — architecture, standards, security, operations, stories, and the
+- `docs/` — architecture, standards, security, operations, and the
   human-readable contract specs (`docs/contracts/`).
 - `scripts/` — repository-level tooling (`verify-governance.py`,
   `package-verify.sh`).
