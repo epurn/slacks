@@ -18,7 +18,6 @@ tags:
   - calculator
 approved_dependencies: []
 requires_context:
-  - docs/stories/README.md
   - docs/contracts/README.md
   - docs/architecture/system-overview.md
   - docs/standards/testing-standards.md

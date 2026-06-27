@@ -14,7 +14,6 @@ tags:
   - nutrition-data
 approved_dependencies: []
 requires_context:
-  - docs/stories/README.md
   - docs/contracts/README.md
   - docs/contracts/log-events.md
   - docs/contracts/target-calculator.md

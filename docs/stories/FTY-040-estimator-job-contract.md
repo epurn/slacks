@@ -20,7 +20,6 @@ tags:
   - contracts
 approved_dependencies: []
 requires_context:
-  - docs/stories/README.md
   - docs/contracts/README.md
   - docs/architecture/system-overview.md
   - docs/adr/0002-product-architecture.md

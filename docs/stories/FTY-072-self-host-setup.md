@@ -15,8 +15,6 @@ tags:
   - secrets
 approved_dependencies: []
 requires_context:
-  - docs/stories/README.md
-  - docs/stories/FTY-011-docker-compose-dev-stack.md
   - docs/adr/0002-product-architecture.md
   - docs/contracts/llm-provider.md
   - docs/security/security-baseline.md

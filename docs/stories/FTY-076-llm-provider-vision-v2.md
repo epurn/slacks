@@ -11,7 +11,6 @@ tags:
   - contracts
 approved_dependencies: []
 requires_context:
-  - docs/stories/README.md
   - docs/contracts/llm-provider.md
   - docs/security/security-baseline.md
   - docs/standards/testing-standards.md

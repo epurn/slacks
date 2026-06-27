@@ -13,7 +13,6 @@ tags:
   - contracts
 approved_dependencies: []
 requires_context:
-  - docs/stories/README.md
   - docs/standards/coding-standards.md
   - docs/standards/testing-standards.md
 review_focus:

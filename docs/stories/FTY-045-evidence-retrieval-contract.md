@@ -13,7 +13,6 @@ tags:
   - providers
 approved_dependencies: []
 requires_context:
-  - docs/stories/README.md
   - docs/architecture/system-overview.md
   - docs/architecture/evidence-retrieval.md
   - docs/security/security-baseline.md

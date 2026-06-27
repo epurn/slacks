@@ -28,7 +28,11 @@ references stay under `fatty/docs/…`). A ready story:
 
 - targets one small vertical slice with a clear contract,
 - names its lane(s) and any story dependencies,
-- references the relevant ADR/architecture/standards/contract docs,
+- references the relevant ADR/architecture/standards/contract docs — in
+  `requires_context`, only paths that exist in the author's public `fatty`
+  worktree (`fatty/docs/...`). Never `docs/stories/...` or other command-centre-
+  only paths: the author can't see them and gets the spec embedded already, so
+  they are dead pointers that derail the run,
 - lists explicit acceptance criteria and the verification commands,
 - calls out security, privacy, and testing requirements when relevant,
 - estimates risk (low/medium/high) so the steward routes the right model.

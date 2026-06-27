@@ -1,6 +1,6 @@
 ---
 id: FTY-062
-state: ready_with_notes
+state: needs_attention
 primary_lane: security-privacy
 touched_lanes:
   - estimator
@@ -22,7 +22,6 @@ tags:
   - security
 approved_dependencies: []
 requires_context:
-  - docs/stories/README.md
   - docs/architecture/evidence-retrieval.md
   - docs/contracts/food-resolution.md
   - docs/contracts/parse-candidates.md
@@ -220,3 +219,5 @@ retention, and migrations.
   and migration rollback.
 - Assumptions safe for autonomy: yes — Brave-default-disabled, self-host
   fallback, and deferred search billing are documented non-blocking notes.
+
+> Circuit breaker: pulled from the ready queue after 3 implement attempts produced no merged PR. A human should diagnose (scope too wide, missing context, or a real bug) and reset the attempt count before returning this to ready.

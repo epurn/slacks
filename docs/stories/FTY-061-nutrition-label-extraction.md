@@ -1,6 +1,6 @@
 ---
 id: FTY-061
-state: ready
+state: merged
 primary_lane: estimator
 touched_lanes:
   - backend-core
@@ -12,7 +12,6 @@ tags:
   - vision
 approved_dependencies: []
 requires_context:
-  - docs/stories/README.md
   - docs/contracts/food-resolution.md
   - docs/contracts/parse-candidates.md
   - docs/contracts/estimation-jobs.md

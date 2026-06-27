@@ -19,20 +19,11 @@ tags:
   - v1-gate
 approved_dependencies: []
 requires_context:
-  - docs/stories/README.md
   - docs/security/threat-model.md
   - docs/security/security-baseline.md
   - docs/security/data-retention.md
   - docs/architecture/evidence-retrieval.md
   - docs/contracts/llm-provider.md
-  - docs/stories/FTY-044-generic-food-calculator.md
-  - docs/stories/FTY-045-evidence-retrieval-contract.md
-  - docs/stories/FTY-060-barcode-lookup.md
-  - docs/stories/FTY-061-nutrition-label-extraction.md
-  - docs/stories/FTY-062-official-source-search.md
-  - docs/stories/FTY-020-auth-user-model-contracts.md
-  - docs/stories/FTY-051-corrections-audit.md
-  - docs/stories/FTY-052-saved-foods-aliases.md
   - docs/standards/testing-standards.md
 review_focus:
   - threat-model-currency

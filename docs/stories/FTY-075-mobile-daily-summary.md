@@ -12,7 +12,6 @@ tags:
   - macros
 approved_dependencies: []
 requires_context:
-  - docs/stories/README.md
   - docs/standards/coding-standards.md
   - docs/standards/testing-standards.md
   - docs/architecture/system-overview.md

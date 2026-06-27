@@ -18,7 +18,6 @@ tags:
   - time-series
 approved_dependencies: []
 requires_context:
-  - docs/stories/README.md
   - docs/contracts/identity-and-profile.md
   - docs/contracts/log-events.md
   - docs/contracts/target-calculator.md

@@ -20,7 +20,6 @@ tags:
   - evidence
 approved_dependencies: []
 requires_context:
-  - docs/stories/README.md
   - docs/architecture/evidence-retrieval.md
   - docs/contracts/food-resolution.md
   - docs/contracts/parse-candidates.md

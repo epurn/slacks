@@ -1,6 +1,6 @@
 ---
 id: FTY-077
-state: ready
+state: merged
 primary_lane: security-privacy
 touched_lanes:
   - backend-core
@@ -11,7 +11,6 @@ tags:
   - migration
 approved_dependencies: []
 requires_context:
-  - docs/stories/README.md
   - docs/contracts/log-events.md
   - docs/security/data-retention.md
   - docs/security/security-baseline.md

@@ -113,7 +113,13 @@ Resolve everything a ready story needs — these map directly to the template:
 - **autonomous** — is this safe to hand to an autonomous author as-is, or does it
   need a human product decision first? If it needs a decision, that's a blocker
   to resolve now or a reason to mark the story `ready_with_notes`/`candidate`.
-- **review_focus**, **tags**, **requires_context** as relevant.
+- **review_focus**, **tags**, **requires_context** as relevant. `requires_context`
+  must list **only docs that exist in the author's `fatty` worktree** — i.e.
+  public `fatty/docs/...` paths (architecture, standards, contracts, security).
+  Never list command-centre-only paths like `docs/stories/...`: the author builds
+  from `fatty` origin/main and can't see them (it already gets the full spec
+  embedded), so a `docs/stories/*` entry is a dead pointer that makes the run
+  hunt for a missing file.
 
 ## 3. Write each story as its design resolves
 
