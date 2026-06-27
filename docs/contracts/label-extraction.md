@@ -60,8 +60,9 @@ quantity (`unit` / `amount` / `quantity_text`, defaulting to **one serving**:
 choice). The image is untrusted user content; it is validated as **data** before
 anything else (size + content-type allowlist + magic-number signature, reusing
 `services/attachments.validate_upload`) and an invalid image fails closed without
-any model call. The HTTP upload path that supplies this (mobile capture) is FTY-064;
-this contract is the backend pipeline that consumes a validated upload.
+any model call. The HTTP upload path that supplies this (mobile capture) is FTY-064
+(`label-upload.md`); this contract is the backend pipeline that consumes a validated
+upload.
 
 ### Nutrition-panel extraction schema (`NutritionPanel`)
 
