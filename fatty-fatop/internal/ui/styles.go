@@ -20,7 +20,20 @@ var (
 	Err    = lipgloss.NewStyle().Foreground(ColorErr)
 	Muted  = lipgloss.NewStyle().Foreground(ColorMuted)
 	Run    = lipgloss.NewStyle().Foreground(ColorRunning)
+
+	// Chrome for the redesigned multi-view dashboard.
+	PanelTitle  = lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
+	TabActive   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Background(ColorAccent).Bold(true).Padding(0, 1)
+	TabInactive = lipgloss.NewStyle().Foreground(ColorMuted).Padding(0, 1)
+	Selected    = lipgloss.NewStyle().Background(ColorAccent).Foreground(lipgloss.Color("#FFFFFF"))
+	Cost        = lipgloss.NewStyle().Foreground(ColorWarn).Bold(true)
+	TableHead   = lipgloss.NewStyle().Foreground(ColorMuted).Bold(true)
 )
+
+// Border returns a rounded border style for a panel of the given inner width.
+func Border() lipgloss.Style {
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(ColorMuted)
+}
 
 // Dot returns a colored status dot for an up/down state.
 func Dot(up bool) string {

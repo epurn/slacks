@@ -33,16 +33,32 @@ fatop inspect PR-6
 fatop doctor               # verify fatop can read every source
 ```
 
+The dashboard is multi-view (k9s-style). The header always shows service health,
+author count, and today's spend + burn rate.
+
+- **1 Overview** — agents, runs, a queue summary, and open PRs in the left rail;
+  the live event stream on the right.
+- **2 Queue** — the full story queue in assignment order, each row marked
+  assignable / blocked-on-which-deps / running / needs-attention, with breaker
+  attempt counts. Press `enter` to inspect a story's full spec.
+- **3 Usage** — token + cost accounting for today: totals, burn rate, cache-hit
+  ratio, per-model rollup, and recent runs.
+- **Story** — the selected story's full markdown spec (reached with `enter` from
+  the queue; `esc` returns).
+
 ### TUI keys
 
 ```
-↑/k ↓/j   move selection in the left rail (agents + runs)
-f         toggle follow (auto-scroll to newest)
-l         cycle minimum level: debug → info → warn → error
-g / G     jump to top / bottom of the stream
-pgup/pgdn scroll the stream
-r         force a refresh now
-?         help    ·    q  quit
+1 / 2 / 3   switch view: Overview · Queue · Usage   (tab cycles)
+↑/k ↓/j     move selection (overview rail / queue rows)
+enter       (queue) inspect the selected story's spec
+esc         (story) back to the queue
+f           (overview) toggle stream follow
+l           (overview) cycle minimum level: debug → info → warn → error
+g / G       jump to top / bottom
+pgup/pgdn   scroll
+r           force a refresh now
+?           help    ·    q  quit
 ```
 
 ## How it reads state

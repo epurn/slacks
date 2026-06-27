@@ -21,6 +21,7 @@ type QueueStory struct {
 	UnmetDeps []string // deps not yet merged
 	Active    bool     // an author is currently running it
 	Attempts  int      // circuit-breaker implement-attempt count
+	Path      string   // absolute path to the story file (for inspect), or ""
 }
 
 // Ready reports whether the steward considers the story assignable by state.
@@ -94,7 +95,8 @@ func LoadQueue(roadmapPath, storiesDir, runDir string) ([]QueueStory, error) {
 		q.Active = active[r.id]
 		q.Attempts = attempts[r.id]
 		if r.file != "" {
-			q.Deps = storyDeps(filepath.Join(storiesDir, r.file), r.id)
+			q.Path = filepath.Join(storiesDir, r.file)
+			q.Deps = storyDeps(q.Path, r.id)
 			for _, d := range q.Deps {
 				if !merged[d] {
 					q.UnmetDeps = append(q.UnmetDeps, d)
@@ -104,6 +106,19 @@ func LoadQueue(roadmapPath, storiesDir, runDir string) ([]QueueStory, error) {
 		out = append(out, q)
 	}
 	return out, nil
+}
+
+// StoryContent returns the full markdown of a story file for the inspect view.
+// Missing path → a friendly placeholder, never an error to the UI.
+func StoryContent(path string) string {
+	if path == "" {
+		return "(no story file linked in the roadmap)"
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "(could not read " + path + ": " + err.Error() + ")"
+	}
+	return string(data)
 }
 
 func linkText(cell string) string {

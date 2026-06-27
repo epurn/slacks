@@ -128,6 +128,60 @@ func truncate(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
+func fmtUSD(v float64) string {
+	switch {
+	case v == 0:
+		return "$0.00"
+	case v < 0.01:
+		return fmt.Sprintf("$%.4f", v)
+	default:
+		return fmt.Sprintf("$%.2f", v)
+	}
+}
+
+func fmtTokens(n int64) string {
+	switch {
+	case n < 1000:
+		return fmt.Sprintf("%d", n)
+	case n < 1_000_000:
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	default:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	}
+}
+
+func pct(r float64) string { return fmt.Sprintf("%.0f%%", r*100) }
+
+// wordWrap wraps text to width on word boundaries, preserving existing newlines.
+func wordWrap(text string, width int) []string {
+	if width < 8 {
+		width = 8
+	}
+	var out []string
+	for _, line := range strings.Split(text, "\n") {
+		if line == "" {
+			out = append(out, "")
+			continue
+		}
+		var cur strings.Builder
+		for _, word := range strings.Fields(line) {
+			switch {
+			case cur.Len() == 0:
+				cur.WriteString(word)
+			case cur.Len()+1+len(word) <= width:
+				cur.WriteByte(' ')
+				cur.WriteString(word)
+			default:
+				out = append(out, cur.String())
+				cur.Reset()
+				cur.WriteString(word)
+			}
+		}
+		out = append(out, cur.String())
+	}
+	return out
+}
+
 func shortDur(d time.Duration) string {
 	if d <= 0 {
 		return "0s"
