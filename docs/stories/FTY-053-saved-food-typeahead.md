@@ -28,6 +28,12 @@ autonomous: true
 
 ready_with_notes
 
+> 2026-06-27: churned ~8× with no PR during the runaway incident, but its
+> dependencies (FTY-050, FTY-052) were in fact satisfied and its file was
+> tracked — the failures trace to the author usage-limit crash bug (now fixed),
+> not a defect in this story. Restored to ready. The steward circuit breaker now
+> caps retries so a recurrence self-limits instead of looping.
+
 ## Lane
 
 mobile-core

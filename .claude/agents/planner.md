@@ -35,6 +35,26 @@ references stay under `fatty/docs/…`). A ready story:
 
 When risk is ambiguous, estimate big and mark it higher.
 
+## Scope guardrail (a story too wide never gets built)
+
+One story = one author run = one vertical slice. An over-scoped story doesn't
+ship: the author exhausts its turn budget flailing and the run fails with no PR.
+Size is a correctness requirement. **Refuse to write a single story — split it
+into dependent stories instead — when it breaches two or more of:**
+
+- **touched_lanes ≥ 3** beyond the primary lane (two is the ceiling),
+- **review_focus ≥ 6** distinct concerns (five is the ceiling),
+- **requires_context ≥ 9** docs (eight is the ceiling).
+
+Also split (regardless of counts) when a story bundles more than one "big rock":
+a **public contract change**, a **schema migration adding a table**, or a **new
+untrusted-input trust boundary** (vision/image, fetched pages, OCR, uploads).
+Pull each big rock into its own prerequisite story and have the feature logic
+depend on them. If asked to write a story that breaches these, return the split
+(the prerequisite stories + the narrowed dependent story with correct dependency
+links) rather than one oversized story. Note the sizing decision in the
+Readiness Sanity Pass.
+
 ## How to work
 
 1. Read the existing stories, roadmap, and any referenced product docs first.

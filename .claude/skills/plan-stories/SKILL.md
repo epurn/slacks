@@ -49,13 +49,50 @@ decisions one-by-one until you reach shared understanding. Rules:
   recommendation first); ask in prose when it's open-ended.
 - **Explore before asking.** Resolve from the codebase/docs whenever you can.
 - **Relentless but convergent** — stop when the open branches are resolved.
-- **Watch the scope.** If it won't fit one vertical slice, plan to split it into
-  several dependent stories and grill each slice's boundary.
+- **Watch the scope — enforce the guardrail in §2a.** If it won't fit one
+  vertical slice, split it into several dependent stories and grill each slice's
+  boundary. Over-scoped stories don't get built — the author runs out of turns
+  flailing and the run fails; size is a correctness requirement, not a nicety.
 - **Write in the background, never stop grilling.** As soon as one slice's design
   is fully resolved, dispatch its planner subagent to write that story (see §4)
   and immediately continue interviewing on the next slice or open branch while it
   works. The user should never be left waiting on a write — keep asking questions
   the whole time. Collect the subagents' results as they finish.
+
+### 2a. Scope guardrail (hard split rules)
+
+One story = one author run = one vertical slice an author can finish and open a
+PR for in a bounded number of turns. A story that's too wide never converges:
+the author burns its whole turn budget and the run fails with no PR. So before
+writing any story, size it against these limits.
+
+**A story MUST be split if it breaches two or more of:**
+
+- **touched_lanes ≥ 3** (beyond the primary lane). Two is the comfortable
+  ceiling; three distinct lanes in one slice is a strong split signal.
+- **review_focus ≥ 6** distinct concerns. Five is the ceiling; six means too
+  many independent things to get right at once.
+- **requires_context ≥ 9** docs. Eight is the ceiling; more and the author
+  can't hold the spec plus its context in one run.
+
+**A story MUST be split (regardless of counts) if it bundles more than one of
+these "big rocks" — each is its own slice and usually its own story:**
+
+- a **public contract change** (API/provider/DTO/job/estimator boundary, e.g. a
+  `…-provider` version bump),
+- a **schema/DB migration** that introduces a new table,
+- a **new untrusted-input trust boundary** (LLM vision/image, fetched pages,
+  OCR, uploaded files) with its own validation + retention + egress rules.
+
+Canonical decomposition: pull the **contract change** into its own prerequisite
+story, the **migration/new table + its retention/security rules** into a second,
+and have the **feature logic** depend on both. The dependent story stays small
+because the hard parts are already contracted upstream.
+
+These are limits, not targets: most stories should sit well under them. When a
+story is near a limit, prefer splitting and grill each slice's boundary. A
+genuinely cohesive slice that lands on one limit and nothing else can ship — but
+say why in the Readiness Sanity Pass.
 
 Resolve everything a ready story needs — these map directly to the template:
 

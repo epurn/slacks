@@ -62,7 +62,9 @@ Backend evidence slices (060/061/062) depend only on FTY-045 and are independent
 | ID | State | Lane | Story | Acceptance |
 | --- | --- | --- | --- | --- |
 | FTY-060 | merged | estimator | [Barcode lookup (backend)](FTY-060-barcode-lookup.md) | A barcode resolves via Open Food Facts through a hardened client and stores source evidence. |
-| FTY-061 | ready_with_notes | estimator | [Nutrition label extraction (backend)](FTY-061-nutrition-label-extraction.md) | A label image yields schema-validated nutrition facts via a vision-extended provider; image discarded unless saved. |
+| FTY-076 | ready | contracts | [LLM provider v2 — image input](FTY-076-llm-provider-vision-v2.md) | structured_completion gains an optional image argument (vision model required when used); text-only path unchanged. Prerequisite for FTY-061. |
+| FTY-077 | ready | security-privacy | [log_attachments + retention](FTY-077-log-attachments-retention.md) | A log_attachments table holds an uploaded image only on explicit save; discard-by-default retention; additive reversible migration. Prerequisite for FTY-061. |
+| FTY-061 | ready | estimator | [Nutrition label extraction pipeline (backend)](FTY-061-nutrition-label-extraction.md) | A label image yields schema-validated nutrition facts via the v2 vision provider; deterministic calories/macros; image discarded unless saved. Depends on FTY-076 + FTY-077. |
 | FTY-062 | ready_with_notes | security-privacy | [Official source search (backend)](FTY-062-official-source-search.md) | Sanitized search + a hardened SSRF-safe fetcher retrieve official nutrition evidence for unresolved named products. |
 | FTY-063 | ready | mobile-core | [Mobile barcode scanner](FTY-063-mobile-barcode-scanner.md) | Scanning a barcode creates a log event resolved by FTY-060; introduces the reusable camera scaffold. |
 | FTY-064 | ready | mobile-core | [Mobile label capture](FTY-064-mobile-label-capture.md) | Capturing a label photo uploads it for FTY-061 extraction; opt-in save of the attachment. |
