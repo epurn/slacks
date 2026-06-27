@@ -12,13 +12,14 @@ from collections.abc import Mapping
 
 from app.estimator.fdc import FDC_SOURCE, FDC_SOURCE_TYPE, load_fdc_settings
 from app.estimator.off import OFF_SOURCE, OFF_SOURCE_TYPE, load_off_settings
+from app.estimator.official_fetch import load_official_fetch_settings
 from app.estimator.search import (
     OFFICIAL_SOURCE,
     OFFICIAL_SOURCE_TYPE,
     SEARCH_KINDS,
     load_search_settings,
 )
-from app.schemas.sources import SourceCapability, SourcesStatus
+from app.schemas.sources import EgressPolicy, SourceCapability, SourcesStatus
 
 
 def list_source_capabilities(environ: Mapping[str, str] | None = None) -> SourcesStatus:
@@ -59,4 +60,22 @@ def list_source_capabilities(environ: Mapping[str, str] | None = None) -> Source
                 available=fdc.is_configured,
             ),
         ]
+    )
+
+
+def describe_egress_policy(environ: Mapping[str, str] | None = None) -> EgressPolicy:
+    """Return the official-source fetch egress policy (FTY-078) for diagnostics.
+
+    Surfaces the configured host allowlist and the page-fetch bounds (size, timeout,
+    content types) plus the fixed hardened-fetch invariants, so a self-hoster can see
+    the SSRF / egress boundary without reading code. Reads config only — never a
+    secret — and makes no external calls, so it is safe on a liveness-adjacent endpoint.
+    """
+
+    official = load_official_fetch_settings(environ)
+    return EgressPolicy(
+        allowed_hosts=sorted(official.allowed_hosts),
+        max_bytes=official.max_bytes,
+        timeout_seconds=official.timeout_seconds,
+        allowed_content_types=sorted(official.allowed_content_types),
     )

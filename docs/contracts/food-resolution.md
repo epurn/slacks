@@ -48,6 +48,12 @@ source system id `open_food_facts` (source type `product_database`) is recorded 
 evidence and on each cached product / evidence row it produces. See **Barcode Source
 (Open Food Facts)** below.
 
+3 (FTY-078) extends the shared `hardened_fetch` policy with an **official-source page
+fetch** (`fetch_text` → inert text) and its egress configuration, without changing the
+FTY-044 USDA path or the FTY-060 OFF path. This is the SSRF / egress prerequisite for
+official-source resolution (FTY-062); it ships no search adapter or resolution pipeline
+of its own. See **Official-Source Fetch Boundary (FTY-078)** below.
+
 ## Inputs
 
 ### Config (`FdcSettings`, `FATTY_FDC_` env vars)
@@ -291,6 +297,66 @@ surfaced.
 (`id`, `source_type`, `kinds`, `enabled`, `available`) — Open Food Facts (`barcode`)
 and USDA FDC (`generic_food`) — so a self-hoster can confirm which sources are on
 without any trial call. It carries no secrets and makes no external calls.
+
+## Official-Source Fetch Boundary (FTY-078)
+
+The **official-source fetch** retrieves an allowlisted public official-source page
+(restaurant, manufacturer, or product page) and returns sanitized,
+active-content-stripped text for downstream extraction (FTY-062). It is the
+SSRF / egress-boundary prerequisite for official-source resolution: it ships **no**
+search adapter (FTY-079) and **no** resolution pipeline of its own. It extends
+FTY-044's `hardened_fetch` so official-source and USDA/OFF fetches share one audited
+egress boundary; FTY-044's USDA behavior is unchanged.
+
+### Owner (additional)
+
+`backend/app/estimator/hardened_fetch.py` (`fetch_text` + the inert-text extractor
+`strip_active_content`), `backend/app/estimator/official_fetch.py`
+(`OfficialFetchSettings`, `fetch_official_source`), and the egress diagnostics
+(`backend/app/routers/health.py`, `backend/app/services/sources.py`,
+`backend/app/schemas/sources.py`).
+
+### Config (`OfficialFetchSettings`, `FATTY_OFFICIAL_FETCH_` env vars)
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `FATTY_OFFICIAL_FETCH_ALLOWED_HOSTS` | _(empty)_ | Comma-separated official-source host allowlist (lower-cased). **Empty → nothing is fetchable** (fail closed). |
+| `FATTY_OFFICIAL_FETCH_TIMEOUT_SECONDS` | `10` | Per-request wall-clock timeout. |
+| `FATTY_OFFICIAL_FETCH_MAX_BYTES` | `2000000` | Response-size cap; a larger body fails closed. |
+| `FATTY_OFFICIAL_FETCH_ALLOWED_CONTENT_TYPES` | `text/html, application/xhtml+xml, text/plain` | Accepted content types; anything else fails closed. |
+
+The settings are frozen and reject unknown keys. Only the explicit result URLs handed
+to the fetcher are fetched — no crawling, no multi-page traversal, no open-ended
+browsing.
+
+### SSRF / egress policy (fail-closed)
+
+Every official-source fetch is gated, before and across the request, by the shared
+`hardened_fetch` policy:
+
+- **HTTPS + public-IP only.** The target is resolved and any loopback, private,
+  link-local (incl. cloud metadata `169.254.169.254`), multicast, reserved, or
+  unspecified address is refused; non-HTTPS and `file:`/other schemes are refused.
+- **Host allowlist.** Only the configured `FATTY_OFFICIAL_FETCH_ALLOWED_HOSTS` are
+  reachable; anything off-allowlist fails closed (an empty allowlist blocks everything).
+- **Redirects refused.** Every 3xx is refused rather than followed, so a redirect can
+  never bounce an allowlisted request to a private/off-allowlist target.
+- **Bounded size, timeout, and content type.** Each is enforced and fails closed; a
+  non-allowed content type is rejected.
+- **Active-content stripping.** The body is reduced to inert text — scripts, styles,
+  and other active-content subtrees are dropped and every tag and attribute is
+  discarded — so downstream extraction only ever sees text, never executable markup
+  (no `<script>`, inline event handler, or `javascript:` URL can survive).
+- **Content-free errors.** Fetch error messages never include the URL, request
+  headers, request body, or response body, so a failed fetch is always safe to log.
+
+### Diagnostics (egress policy)
+
+`GET /healthz/egress` returns the configured egress policy — the host allowlist, the
+size/timeout/content-type limits, and the fixed invariants (`https_only`,
+`public_ip_only`, `redirects_followed=false`, `active_content_stripped`) — so an
+operator can see the egress boundary without reading code. It carries **no** secrets
+and makes no external calls.
 
 ## Migration / Compatibility
 
