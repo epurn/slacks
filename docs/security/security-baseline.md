@@ -32,10 +32,18 @@ This project uses the following as design references:
 
 ## Authentication and Authorization
 
-- Keep authentication identities separate from users.
-- Prefer Sign in with Apple for iOS hosted auth when available.
-- Self-hosted auth must support a secure local path.
-- Enforce object-level authorization on every user-owned record.
+- Keep authentication identities separate from users. *(v1: `AuthIdentity` rows are
+  distinct from `User`; the local path uses email + a hashed password.)*
+- Prefer Sign in with Apple for iOS hosted auth when available. *(Deferred; v1 ships
+  the local path only.)*
+- Self-hosted auth must support a secure local path. *(v1: local email + password
+  with stateless, HMAC-SHA256-signed bearer tokens; login is constant-time and does
+  not reveal whether an email exists. Tokens are not yet revocable — tracked
+  finding.)*
+- Enforce object-level authorization on every user-owned record. *(v1: every
+  user-owned service authorizes the owner and scopes the query to the owner, failing
+  closed as `404`; proven by the FTY-073 `tests/security/test_authz_fail_closed.py`
+  sweep.)*
 - Add negative authorization tests for new data access paths.
 
 ## LLM and Agent Safety
@@ -50,10 +58,10 @@ This project uses the following as design references:
 
 ## Logging and Telemetry
 
-- Logs must not contain secrets, auth tokens, raw sensitive prompts, full food histories, or unnecessary body data.
+- Logs must not contain secrets, auth tokens, raw sensitive prompts, full food histories, or unnecessary body data. *(v1: structured single-line JSON logs with a `RedactionFilter` that scrubs secret/header-shaped fields; the LLM layer logs only provider/attempt/error-count — never the prompt, key, image, or raw response. Proven by `tests/security/test_secret_no_disclosure.py`.)*
 - Use request IDs and event IDs instead of personal values where possible.
-- Redact sensitive fields in errors and provider traces.
-- Telemetry must be opt-in or clearly documented before public launch.
+- Redact sensitive fields in errors and provider traces. *(v1: transport and fetch errors are content-free — no URL, headers, request body, or response body.)*
+- Telemetry must be opt-in or clearly documented before public launch. *(v1 ships no product telemetry.)*
 
 ## Supply Chain
 
