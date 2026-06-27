@@ -62,6 +62,14 @@ Self-hosted deployments may disable any optional provider, but v1 must make
 provider availability explicit in health/config diagnostics and estimation
 source status.
 
+## Contract
+
+The public contracts for source-backed estimation — the evidence-source record,
+provider capability/status values, normalized nutrition-fact fields, and the
+search/fetch boundaries — are specified in
+`docs/contracts/evidence-retrieval.md` (FTY-045). The USDA-only first
+implementation is `docs/contracts/food-resolution.md` (FTY-044).
+
 ## References
 
 - USDA FoodData Central API Guide: https://fdc.nal.usda.gov/api-guide
