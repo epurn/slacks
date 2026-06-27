@@ -32,3 +32,23 @@ class SourcesStatus(BaseModel):
     """Response body for ``GET /healthz/sources`` — all configured evidence sources."""
 
     sources: list[SourceCapability]
+
+
+class EgressPolicy(BaseModel):
+    """The official-source fetch egress policy (FTY-078), for operator diagnostics.
+
+    The configured SSRF / egress boundary surfaced at ``GET /healthz/egress`` so a
+    self-hoster can confirm the policy without reading code. Carries **no** secrets —
+    only the non-secret host allowlist and the (non-secret) bound values. The boolean
+    invariants (``https_only`` / ``public_ip_only`` / ``redirects_followed``) are fixed
+    properties of the hardened fetch, restated here so the egress contract is visible.
+    """
+
+    allowed_hosts: list[str]
+    max_bytes: int
+    timeout_seconds: float
+    allowed_content_types: list[str]
+    https_only: bool = True
+    public_ip_only: bool = True
+    redirects_followed: bool = False
+    active_content_stripped: bool = True
