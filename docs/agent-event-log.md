@@ -75,7 +75,7 @@ calls. The service-level files are append-only across the process lifetime.
   the fatty repo. `info`. `fields`: `story_id`. The fatty checkout is left
   pristine so `health.sync_base` can fast-forward it; the steward overlays these
   ids as `merged` when routing each cycle, so a merged story is never
-  re-assigned even if the origin roadmap still lists it as ready.
+  re-assigned even if the roadmap still lists it as ready.
 - `prune_closed_pr` — a `PR-<n>` fix-job's PR is no longer open, so its run-state
   (`<run_dir>/PR-<n>.json` + `.log`) and worktree were cleaned up. `info`.
   `fields`: `pr`. Story prune (`prune_merged_branch`) only covers roadmap
@@ -123,17 +123,16 @@ git action — push, force-push, rebase, branch delete — those only warn):
   assignment is held. `warn`. `fields`: `story_id`.
 - `story_file_missing` — a ready story's linked file is absent on disk;
   assignment held. `warn`. `fields`: `story_id`, `path`.
-- `story_file_untracked` — a ready story's file is not committed; authors build
-  from origin/`base` and would get no context, so assignment is held. `warn`.
-- `story_file_unpushed` — a ready story's file is committed but not on
-  origin/`base` yet; assignment is held **only** when origin was freshly
-  fetched (otherwise warn-only, to avoid false holds on a stale ref). `warn`.
+  (Stories live in the command-centre repo, not the operated app repo, and the
+  steward embeds each spec into the assignment, so the former
+  `story_file_untracked` / `story_file_unpushed` git guards are retired — these
+  are the only structural story-file holds left.)
 - `git_drift` — local `base` diverged from origin in a way the steward won't
   auto-resolve (local commits present, dirty tree, or on another branch).
   `warn`. `fields`: `ahead`, `behind`, `base`.
-- `synced_base` — the steward fast-forwarded local `base` to origin/`base`
-  (clean tree, no local commits) so the roadmap can't drift. `info`.
-  `fields`: `base`, `behind`.
+- `synced_base` — the steward fast-forwarded the operated app repo's local
+  `base` to origin/`base` (clean tree, no local commits) so author worktrees
+  branch off a fresh base. `info`. `fields`: `base`, `behind`.
 - `recovered_stale_marker` — removed a `.active` lane marker whose author
   process is gone, freeing the lane. `warn`. `fields`: `story_id`, `age_seconds`.
 

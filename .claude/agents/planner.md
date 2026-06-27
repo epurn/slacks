@@ -21,8 +21,10 @@ Your job is to create, refine, and promote stories — nothing else.
 
 ## What a good story is
 
-Read `fatty/docs/stories/README.md` for the readiness rule and
-`fatty/docs/stories/v1-roadmap.md` for context before writing. A ready story:
+Read `docs/stories/README.md` for the readiness rule and
+`docs/stories/v1-roadmap.md` for context before writing (stories live in this
+command-centre repo, not the public `fatty` app repo; product docs the story
+references stay under `fatty/docs/…`). A ready story:
 
 - targets one small vertical slice with a clear contract,
 - names its lane(s) and any story dependencies,
@@ -37,7 +39,8 @@ When risk is ambiguous, estimate big and mark it higher.
 
 1. Read the existing stories, roadmap, and any referenced product docs first.
 2. Reuse the established story format and lane vocabulary.
-3. Write the story as a markdown file under `fatty/docs/stories/` (or refine the
-   existing one). Keep it scoped; split oversized work into dependent stories.
+3. Write the story as a markdown file under `docs/stories/` in this command-centre
+   repo (or refine the existing one). Keep it scoped; split oversized work into
+   dependent stories.
 4. Summarize what you created/changed and whether it is ready to promote, but do
    not assign or launch any work yourself.

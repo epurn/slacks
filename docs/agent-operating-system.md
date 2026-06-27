@@ -26,9 +26,11 @@ approve the same implementation.
 ## Public Repository Boundary
 
 `fatty` is a public product repo: product code, public architecture docs,
-standards, stories, contracts, and review policy. Everything about *how the
+standards, contracts, and review policy. Everything about *how the
 automation runs* stays here in the command centre instead:
 
+- the story roadmap + specs (`docs/stories/`) — the steward embeds each spec into
+  the author's assignment, so they never ship in the public app repo,
 - runner code and local automation configuration,
 - durable agent memory, thread IDs, and queue state,
 - machine-specific paths, tokens, private keys, provider secrets,

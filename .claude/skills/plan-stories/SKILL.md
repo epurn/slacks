@@ -17,19 +17,26 @@ product work only.
 
 _Interview style adapted from Matt Pocock's `grill-me`._
 
+Stories live in **this command-centre repo** under `docs/stories/` — not in the
+public `fatty` app repo. The steward reads the roadmap from here and embeds each
+story spec into the author's assignment, so product code never ships story files.
+Product code, contracts, architecture, standards, and security docs still live in
+`fatty/docs/…`; read those there, but write stories here.
+
 ## 1. Ground yourself first
 
 Before asking anything, read so your questions and recommendations are informed:
 
-- `fatty/docs/stories/README.md` — story format, the template, and the readiness
+- `docs/stories/README.md` — story format, the template, and the readiness
   rule (including the Readiness Sanity Pass).
-- `fatty/docs/stories/v1-roadmap.md` — roadmap, ordering, and the lane vocabulary.
-- The architecture / contract / standards / security docs the idea touches.
+- `docs/stories/v1-roadmap.md` — roadmap, ordering, and the lane vocabulary.
+- The architecture / contract / standards / security docs the idea touches
+  (under `fatty/docs/…`).
 - **Explore the `fatty/` codebase.** Anything the code, docs, or roadmap can
   answer, you answer yourself and confirm — do not interrogate the user for it.
 
-Note the next free story id by scanning existing `FTY-###` stories and the
-roadmap.
+Note the next free story id by scanning existing `docs/stories/FTY-###` stories
+and the roadmap.
 
 ## 2. Grill, one question at a time
 
@@ -78,8 +85,8 @@ resolved, hand that slice off to the **planner** subagent (Agent tool,
 `subagent_type: "planner"`) and keep interviewing on the next slice while it
 writes. Dispatch one subagent per story so several can write concurrently. Pass
 each subagent the resolved decisions for its slice, and have it write the story
-under `fatty/docs/stories/` using the template and YAML front matter from the
-stories README, with:
+under `docs/stories/` in this command-centre repo (not `fatty/`) using the
+template and YAML front matter from the stories README, with:
 
 - the assigned `FTY-###` id(s) and correct dependency links between split stories,
 - a completed **Readiness Sanity Pass** (product-decision gaps, cross-lane

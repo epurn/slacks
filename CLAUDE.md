@@ -12,13 +12,13 @@ here — work inside them on their own.
 
 | Path | What it is |
 | --- | --- |
-| `fatty/` | The product repo (public `epurn/fatty`). Product code, contracts, stories, standards. Its own repo. |
+| `fatty/` | The product repo (public `epurn/fatty`). Product code, contracts, standards. Its own repo. |
 | `fatty-steward-agent/` | Always-on poller. Routes ready stories, assigns authors, watches PR state. |
 | `fatty-reviewer-agent/` | Always-on poller. Reviews PR heads read-only, posts the reviewer-approved status. |
 | `fatty-author-agent/` | One-shot worker. Implements/fixes one assigned story in a worktree, opens a PR. |
 | `fatty-worktrees/` | Per-assignment git worktrees + steward run state. |
 | `fatty-fatop/` | Read-only Go TUI/CLI that monitors the agents. Reads the structured event logs; never operates the services. |
-| `docs/` | The agent operating system: roles, polling, model policy, event log. |
+| `docs/` | The agent operating system: roles, polling, model policy, event log. Also `docs/stories/` — the canonical story roadmap + specs the steward reads and embeds into author assignments (kept out of the public app repo). |
 | `.claude/` | Skills and the planner subagent used to manage everything from here. |
 
 ## The Four Roles
