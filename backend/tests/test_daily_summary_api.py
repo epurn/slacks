@@ -243,6 +243,8 @@ def test_aggregation_returns_correct_separated_totals(
     assert body["intake"]["protein_g"] == 25.5
     assert body["intake"]["carbs_g"] == 58.0
     assert body["intake"]["fat_g"] == 11.0
+    # Finalized food items were logged → has_intake is True.
+    assert body["has_intake"] is True
 
     # Exercise: not netted into intake
     assert body["exercise"]["active_calories"] == 210.0
@@ -305,6 +307,9 @@ def test_empty_day_returns_zeroed_intake_and_burn(client: TestClient, db_engine:
     assert resp.status_code == 200
     body = resp.json()
     assert body["intake"] == {"calories": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0}
+    # No finalized food item → has_intake is False even though intake is zeroed,
+    # so a consumer can tell this unlogged day from a genuine 0-kcal day.
+    assert body["has_intake"] is False
     assert body["exercise"] == {"active_calories": 0.0}
     assert body["target"]["calories"]["effective"] == 2000
     assert body["target"]["calories"]["source"] == "derived"
@@ -794,3 +799,222 @@ def test_inactive_goal_yields_null_target(client: TestClient, db_engine: Engine)
     assert resp.status_code == 200
     # Inactive goal: target must be null, not 1500
     assert resp.json()["target"] is None
+
+
+# ---------------------------------------------------------------------------
+# Range read-model: GET /daily-summary/range?from&to
+# ---------------------------------------------------------------------------
+
+
+def test_range_returns_one_summary_per_day_oldest_first(
+    client: TestClient, db_engine: Engine
+) -> None:
+    """A range read returns every calendar day in ``[from, to]``, oldest-first.
+
+    Each day's intake is attributed to that day; days without finalized data come
+    back zeroed (never absent), so the client renders the strip from one request.
+    """
+
+    user_id, auth = _register(client, "range-series@example.com")
+    _set_timezone(client, user_id, auth, "UTC")
+
+    # Finalized food on 2026-03-02 (100 kcal) and 2026-03-04 (250 kcal); the days
+    # in between have no data.
+    event_d2 = _seed_completed_event(
+        db_engine, user_id, created_at=datetime(2026, 3, 2, 12, 0, 0, tzinfo=UTC)
+    )
+    _seed_food_item(db_engine, user_id, event_d2, calories=100.0)
+    event_d4 = _seed_completed_event(
+        db_engine, user_id, created_at=datetime(2026, 3, 4, 12, 0, 0, tzinfo=UTC)
+    )
+    _seed_food_item(db_engine, user_id, event_d4, calories=250.0)
+
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary/range",
+        headers={"Authorization": auth},
+        params={"from": "2026-03-01", "to": "2026-03-05"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    # One entry per day, inclusive, oldest-first.
+    assert [row["date"] for row in body] == [
+        "2026-03-01",
+        "2026-03-02",
+        "2026-03-03",
+        "2026-03-04",
+        "2026-03-05",
+    ]
+    by_date = {row["date"]: row for row in body}
+    assert by_date["2026-03-02"]["intake"]["calories"] == 100.0
+    assert by_date["2026-03-04"]["intake"]["calories"] == 250.0
+    # Empty days are present and zeroed (not omitted, not netted).
+    assert by_date["2026-03-01"]["intake"]["calories"] == 0.0
+    assert by_date["2026-03-03"]["intake"]["calories"] == 0.0
+    assert by_date["2026-03-03"]["exercise"]["active_calories"] == 0.0
+
+
+def test_range_has_intake_distinguishes_unlogged_from_zero_kcal_days(
+    client: TestClient, db_engine: Engine
+) -> None:
+    """``has_intake`` separates an unlogged range day from a genuine 0-kcal day.
+
+    The range path returns every calendar day with a zeroed ``intake`` for days the
+    user never logged. Without a signal a consumer cannot tell that zero from a day
+    whose only logged food is genuinely zero-kcal (e.g. water). ``has_intake`` is
+    that signal — ``False`` only for the unlogged day — so the Trends adherence
+    average excludes unlogged days instead of counting them as real 0-kcal days.
+    """
+
+    user_id, auth = _register(client, "range-has-intake@example.com")
+    _set_timezone(client, user_id, auth, "UTC")
+
+    # 2026-07-01: a real meal (300 kcal). 2026-07-02: never logged. 2026-07-03: a
+    # genuinely logged zero-kcal item (water).
+    event_logged = _seed_completed_event(
+        db_engine, user_id, created_at=datetime(2026, 7, 1, 12, 0, 0, tzinfo=UTC)
+    )
+    _seed_food_item(db_engine, user_id, event_logged, calories=300.0)
+    event_zero = _seed_completed_event(
+        db_engine, user_id, created_at=datetime(2026, 7, 3, 12, 0, 0, tzinfo=UTC)
+    )
+    _seed_food_item(
+        db_engine, user_id, event_zero, calories=0.0, protein_g=0.0, carbs_g=0.0, fat_g=0.0
+    )
+
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary/range",
+        headers={"Authorization": auth},
+        params={"from": "2026-07-01", "to": "2026-07-03"},
+    )
+
+    assert resp.status_code == 200
+    by_date = {row["date"]: row for row in resp.json()}
+    # Both the logged meal and the logged-zero day carry has_intake True; only the
+    # unlogged day in between is False — yet all three serialize intake as a number.
+    assert by_date["2026-07-01"]["intake"]["calories"] == 300.0
+    assert by_date["2026-07-01"]["has_intake"] is True
+    assert by_date["2026-07-02"]["intake"]["calories"] == 0.0
+    assert by_date["2026-07-02"]["has_intake"] is False
+    assert by_date["2026-07-03"]["intake"]["calories"] == 0.0
+    assert by_date["2026-07-03"]["has_intake"] is True
+
+
+def test_range_matches_single_day_endpoint_per_day(client: TestClient, db_engine: Engine) -> None:
+    """Each day in a range read carries the same DTO the single-day route returns."""
+
+    user_id, auth = _register(client, "range-parity@example.com")
+    _set_timezone(client, user_id, auth, "UTC")
+
+    event_id = _seed_completed_event(
+        db_engine, user_id, created_at=datetime(2026, 4, 10, 9, 0, 0, tzinfo=UTC)
+    )
+    _seed_food_item(db_engine, user_id, event_id, calories=300.0, protein_g=20.0)
+    _seed_exercise_item(db_engine, user_id, event_id, active_calories=180.0)
+    _seed_daily_target(
+        db_engine, user_id, for_date=date(2026, 4, 10), daily_calorie_target_kcal=1900
+    )
+
+    single = client.get(
+        f"/api/users/{user_id}/daily-summary",
+        headers={"Authorization": auth},
+        params={"day": "2026-04-10"},
+    )
+    ranged = client.get(
+        f"/api/users/{user_id}/daily-summary/range",
+        headers={"Authorization": auth},
+        params={"from": "2026-04-10", "to": "2026-04-10"},
+    )
+
+    assert single.status_code == 200
+    assert ranged.status_code == 200
+    assert ranged.json() == [single.json()]
+
+
+def test_range_target_is_null_on_days_without_a_stored_target(
+    client: TestClient, db_engine: Engine
+) -> None:
+    """Days in range without a daily_targets row carry an explicit null target."""
+
+    user_id, auth = _register(client, "range-null-target@example.com")
+    _set_timezone(client, user_id, auth, "UTC")
+    _seed_daily_target(
+        db_engine, user_id, for_date=date(2026, 5, 2), daily_calorie_target_kcal=2100
+    )
+
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary/range",
+        headers={"Authorization": auth},
+        params={"from": "2026-05-01", "to": "2026-05-03"},
+    )
+
+    assert resp.status_code == 200
+    by_date = {row["date"]: row for row in resp.json()}
+    assert by_date["2026-05-02"]["target"]["calories"]["effective"] == 2100
+    assert by_date["2026-05-01"]["target"] is None
+    assert by_date["2026-05-03"]["target"] is None
+
+
+def test_range_with_from_after_to_returns_422(client: TestClient) -> None:
+    """``from`` after ``to`` is rejected with 422."""
+
+    user_id, auth = _register(client, "range-inverted@example.com")
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary/range",
+        headers={"Authorization": auth},
+        params={"from": "2026-06-10", "to": "2026-06-01"},
+    )
+    assert resp.status_code == 422
+
+
+def test_range_exceeding_max_span_returns_422(client: TestClient) -> None:
+    """A range wider than the bounded maximum is rejected with 422 (no unbounded scan)."""
+
+    user_id, auth = _register(client, "range-too-wide@example.com")
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary/range",
+        headers={"Authorization": auth},
+        # > 366 days
+        params={"from": "2025-01-01", "to": "2026-06-01"},
+    )
+    assert resp.status_code == 422
+
+
+def test_range_cross_user_access_fails_closed(client: TestClient, db_engine: Engine) -> None:
+    """A cross-user range request fails closed as 404, never revealing the owner's data."""
+
+    _alice_id, alice_auth = _register(client, "alice-range@example.com")
+    bob_id, bob_auth = _register(client, "bob-range@example.com")
+
+    event_id = _seed_completed_event(
+        db_engine, bob_id, created_at=datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
+    )
+    _seed_food_item(db_engine, bob_id, event_id, calories=777.0)
+
+    resp = client.get(
+        f"/api/users/{bob_id}/daily-summary/range",
+        headers={"Authorization": alice_auth},
+        params={"from": "2026-06-01", "to": "2026-06-02"},
+    )
+    assert resp.status_code == 404
+
+    # Bob can still read his own range.
+    bob_resp = client.get(
+        f"/api/users/{bob_id}/daily-summary/range",
+        headers={"Authorization": bob_auth},
+        params={"from": "2026-06-01", "to": "2026-06-02"},
+    )
+    assert bob_resp.status_code == 200
+    by_date = {row["date"]: row for row in bob_resp.json()}
+    assert by_date["2026-06-01"]["intake"]["calories"] == 777.0
+
+
+def test_range_missing_token_returns_401(client: TestClient) -> None:
+    """A range request without a bearer token is rejected with 401."""
+
+    user_id = "11111111-1111-1111-1111-111111111111"
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary/range",
+        params={"from": "2026-06-01", "to": "2026-06-02"},
+    )
+    assert resp.status_code == 401

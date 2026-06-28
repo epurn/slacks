@@ -22,7 +22,11 @@ from app.db import get_session
 from app.deps import CurrentUser
 from app.schemas.daily_summary import DailySummaryDTO
 from app.services import daily_summary as daily_summary_service
-from app.services.daily_summary import DailySummaryForbidden
+from app.services.daily_summary import (
+    MAX_RANGE_DAYS,
+    DailySummaryForbidden,
+    DailySummaryRangeTooLarge,
+)
 
 router = APIRouter(prefix="/api/users", tags=["daily-summary"])
 
@@ -59,3 +63,51 @@ def get_daily_summary(
         return daily_summary_service.get_daily_summary(session, user_id, current_user, day)
     except DailySummaryForbidden as exc:
         raise _NOT_FOUND from exc
+
+
+@router.get("/{user_id}/daily-summary/range", response_model=list[DailySummaryDTO])
+def get_daily_summary_range(
+    user_id: uuid.UUID,
+    current_user: CurrentUser,
+    session: Annotated[Session, Depends(get_session)],
+    from_date: Annotated[
+        date,
+        Query(
+            alias="from",
+            description=("Inclusive start day (YYYY-MM-DD) in the user's profile timezone."),
+        ),
+    ],
+    to_date: Annotated[
+        date,
+        Query(
+            alias="to",
+            description=(
+                "Inclusive end day (YYYY-MM-DD) in the user's profile timezone; "
+                f"the span may not exceed {MAX_RANGE_DAYS} days."
+            ),
+        ),
+    ],
+) -> list[DailySummaryDTO]:
+    """Return the caller's per-day summaries for every day in ``[from, to]``.
+
+    The range read-model behind the Trends adherence series: one request yields
+    the whole window — every calendar day present, with zeroed intake/burn and a
+    ``null`` target for days that have no finalized data — so the client never
+    fans out one request per day. Ordered oldest-first.
+
+    ``from`` must be on or before ``to`` and the span may not exceed
+    ``MAX_RANGE_DAYS`` days (``422`` otherwise). Fails closed (``404``) on
+    cross-user access; ``422`` for a malformed date; ``401`` for a missing or
+    invalid bearer token.
+    """
+
+    try:
+        return daily_summary_service.get_daily_summaries(
+            session, user_id, current_user, from_date, to_date
+        )
+    except DailySummaryForbidden as exc:
+        raise _NOT_FOUND from exc
+    except DailySummaryRangeTooLarge as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc

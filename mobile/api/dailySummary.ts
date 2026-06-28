@@ -47,6 +47,14 @@ export interface DailySummaryDTO {
     readonly carbs_g: number;
     readonly fat_g: number;
   };
+  /**
+   * True iff the day has at least one finalized food item. `intake` is zeroed
+   * both for an unlogged day and for a genuinely zero-kcal logged day, so the
+   * zero alone can't tell them apart — this flag does. The Trends adherence
+   * series excludes `has_intake: false` days from its logged-intake average and
+   * on/off-target denominator instead of counting them as real 0-kcal days.
+   */
+  readonly has_intake: boolean;
   readonly target: TargetReadModel | null;
   readonly exercise: {
     readonly active_calories: number;
@@ -73,10 +81,11 @@ export class DailySummaryApiError extends Error {
 function dailySummaryUrl(
   session: DailySummarySession,
   query?: string,
+  subpath = "",
 ): string {
   const base = `${session.baseUrl}/api/users/${encodeURIComponent(
     session.userId,
-  )}/daily-summary`;
+  )}/daily-summary${subpath}`;
   return query ? `${base}?${query}` : base;
 }
 
@@ -122,4 +131,30 @@ export async function getDailySummary(
     throw await readError(response, "load your summary");
   }
   return (await response.json()) as DailySummaryDTO;
+}
+
+/**
+ * Fetch the authenticated user's daily summaries for every day in `[from, to]`
+ * (inclusive, `YYYY-MM-DD`, oldest-first) in a single request.
+ *
+ * This backs the Trends adherence series: one range read instead of one request
+ * per day. Every calendar day in the range is returned — days without finalized
+ * data carry zeroed intake/burn and a `null` target — so the client maps the
+ * response straight onto the strip without fanning out.
+ */
+export async function getDailySummaryRange(
+  session: DailySummarySession,
+  from: string,
+  to: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<DailySummaryDTO[]> {
+  const query = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+  const response = await fetchImpl(dailySummaryUrl(session, query, "/range"), {
+    method: "GET",
+    headers: authHeaders(session),
+  });
+  if (!response.ok) {
+    throw await readError(response, "load your summary");
+  }
+  return (await response.json()) as DailySummaryDTO[];
 }

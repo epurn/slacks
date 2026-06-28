@@ -42,15 +42,18 @@ DEFAULT_BINARY = "claude"
 #: Every built-in Claude Code tool, listed so the invocation can explicitly deny
 #: each one. The empty allow-list below already permits nothing, but naming the
 #: tools in the deny-list makes the "no tools" intent auditable and survives a
-#: tool being added to Claude Code's defaults. Keep this in sync conservatively:
-#: an unknown new tool is still denied by the empty allow-list.
+#: tool being added to Claude Code's defaults. Only currently-known tools may be
+#: listed: Claude Code rejects the whole invocation with "deny rule '<name>'
+#: matches no known tool" if a deny entry names a tool it doesn't recognize, so a
+#: removed/renamed tool must be dropped here (the empty allow-list still denies
+#: it, and any genuinely new tool, regardless). ``MultiEdit`` was removed from
+#: Claude Code (folded into ``Edit``) and so is intentionally absent.
 _BUILTIN_TOOLS = (
     "Agent",
     "Bash",
     "Edit",
     "Glob",
     "Grep",
-    "MultiEdit",
     "NotebookEdit",
     "Read",
     "Task",

@@ -46,6 +46,9 @@ Today/daily item read-model below; it does not change the aggregate totals math.
 FTY-094/FTY-095 replace the single-integer `target` component with the **target
 read-model**: per target (calorie + each macro) the effective value, the derived
 value, and a `derived | user` provenance flag (see `target-calculator.md`).
+FTY-101 adds the boolean **`has_intake`** flag (finalized-food-item presence) so a
+range consumer can tell an unlogged day from a genuine zero-kcal day; it does not
+change any existing component.
 
 ## Inputs
 
@@ -61,6 +64,32 @@ Authorization: Bearer <token>
   Defaults to the current day in that timezone when omitted. A malformed `day`
   is rejected as `422`.
 
+### HTTP request — range read (FTY-101)
+
+```
+GET /api/users/{user_id}/daily-summary/range?from=YYYY-MM-DD&to=YYYY-MM-DD
+Authorization: Bearer <token>
+```
+
+The range read returns one daily-summary DTO **per calendar day** in
+`[from, to]` inclusive, so a consumer that needs an adherence/history series
+(FTY-101 Trends) issues **one** request rather than one request per day. It is
+the canonical read for multi-day series; clients must not fan out per-day
+single-day calls to build a range. (This is a totals series — the per-item
+day-listing read described under "Per-item provenance" is a separate, items-level
+read path.)
+
+- `from`, `to` — required `YYYY-MM-DD` calendar days in the user's profile
+  timezone. `from` must be on or before `to`, and the span may not exceed
+  **366 days**; either violation (or a malformed date) is rejected as `422`.
+- Every day in the inclusive range is present in the response, oldest-first.
+  Days with no finalized data carry zeroed `intake`/`exercise`, `has_intake:
+  false`, and a `null` `target` — exactly the DTO the single-day endpoint returns
+  for that day. The response is the JSON array `[DailySummaryDTO, …]`.
+- Same finalized-state filtering, day/timezone resolution, no-target
+  representation, rounding, authorization, and privacy rules as the single-day
+  read — it is the same read-model computed over a window, not a new shape.
+
 ## Outputs
 
 ### Daily-summary DTO
@@ -74,6 +103,7 @@ Authorization: Bearer <token>
     "carbs_g": 150.0,
     "fat_g": 40.0
   },
+  "has_intake": true,
   "target": {
     "calories": { "effective": 1800, "derived": 1678, "source": "user" },
     "protein_g": { "effective": 128, "derived": 128, "source": "derived" },
@@ -89,6 +119,12 @@ Authorization: Bearer <token>
 - `date` — the requested calendar day (echoed back).
 - `intake` — summed calories (kcal) and macros (grams) from finalized food items
   for the day. Zeroed when no finalized food items exist.
+- `has_intake` — boolean, `true` iff the day has **at least one finalized food
+  item**. Because `intake` is zeroed both for an unlogged day and for a day whose
+  only logged food is genuinely zero-kcal, the zero alone cannot distinguish the
+  two; this flag does. A range/series consumer (FTY-101 Trends adherence) excludes
+  `has_intake: false` days from its logged-intake average and on/off-target
+  denominator rather than counting every unlogged day as a real 0-kcal day.
 - `target` — the **target read-model** for the stored `daily_targets` row of the
   user's active goal on this day, or `null` (JSON `null`) when none exists (no
   active goal, or the day predates the goal). See **No-target representation**
