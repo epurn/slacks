@@ -93,6 +93,19 @@ from being publicly enumerable on a self-host (FTY-112). This is a
 reconnaissance reduction, not a substitute for authorization. In `development`
 and `test` the docs remain available.
 
+## Container Security
+
+- The backend image runs as a dedicated non-root system user (`fatty`, UID/GID
+  10001) rather than root (FTY-116). A fixed UID/GID keeps ownership stable
+  across rebuilds and named-volume mounts.
+- All runtime paths owned by the `fatty` user: `/app` (app source + `.venv`),
+  `/home/fatty` (CLI scratch / cache), and `/claude-config` (Claude Code session
+  volume mountpoint — inherits owner on first use).
+- `HOME` is set to `/home/fatty` so the `claude` CLI has a writable home
+  directory without falling back to root-owned paths.
+- Future hardening (read-only root filesystem, `cap_drop`, `no-new-privileges`,
+  seccomp) is deferred to dedicated stories and is not yet applied.
+
 ## Supply Chain
 
 - Use pinned or locked dependencies.

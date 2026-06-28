@@ -41,7 +41,7 @@ from pydantic import (
 )
 
 from app.estimator.evidence_utils import _content_hash
-from app.estimator.food_serving import NutritionFacts
+from app.estimator.food_serving import NutritionFacts, nutrition_facts_plausible
 from app.estimator.hardened_fetch import (
     FetchPolicyError,
     FetchResponseError,
@@ -408,6 +408,8 @@ def _food_to_facts(query_key: str, food: FdcFood) -> ProductFacts | None:
         carbs_g=float(values.get(_CARBS_ID, 0.0)),
         fat_g=float(values.get(_FAT_ID, 0.0)),
     )
+    if not nutrition_facts_plausible(facts):
+        return None
     source_ref = f"{FDC_SOURCE}:{food.fdcId}"
     return ProductFacts(
         source=FDC_SOURCE,

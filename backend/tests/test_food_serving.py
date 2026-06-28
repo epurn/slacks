@@ -7,10 +7,13 @@ database, no network — pure functions only.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from app.estimator.food_serving import (
     NutritionFacts,
+    nutrition_facts_plausible,
     resolve_grams,
     scale_facts,
 )
@@ -110,3 +113,50 @@ def test_scale_facts_is_proportional_at_100g() -> None:
         23.0,
         0.3,
     )
+
+
+# ---------------------------------------------------------------------------
+# Plausibility gate (FTY-115)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("calories", "protein_g", "carbs_g", "fat_g"),
+    [
+        (130.0, 2.69, 28.2, 0.28),  # white rice — typical food
+        (884.0, 0.0, 0.0, 100.0),  # olive oil — high-fat, zero macros valid
+        (900.0, 0.0, 0.0, 100.0),  # exactly at cap — should pass (> 900 rejects)
+        (1.0, 0.0, 0.0, 0.0),  # minimal positive energy
+        (200.0, 0.0, 0.0, 0.0),  # zero macros explicitly valid
+        (0.0, 0.0, 0.0, 0.0),  # genuine zero-calorie food (water/black coffee) — costable
+    ],
+)
+def test_nutrition_facts_plausible_valid(
+    calories: float, protein_g: float, carbs_g: float, fat_g: float
+) -> None:
+    facts = NutritionFacts(calories=calories, protein_g=protein_g, carbs_g=carbs_g, fat_g=fat_g)
+    assert nutrition_facts_plausible(facts) is True
+
+
+@pytest.mark.parametrize(
+    ("calories", "protein_g", "carbs_g", "fat_g"),
+    [
+        (-1.0, 0.0, 0.0, 0.0),  # negative energy
+        (900.1, 0.0, 0.0, 100.0),  # just above cap
+        (1500.0, 10.0, 20.0, 50.0),  # kJ-mislabelled value
+        (200.0, -0.1, 0.0, 0.0),  # negative protein
+        (200.0, 0.0, -0.1, 0.0),  # negative carbs
+        (200.0, 0.0, 0.0, -0.1),  # negative fat
+        (math.nan, 0.0, 0.0, 0.0),  # NaN calories slips every comparison
+        (200.0, math.nan, 0.0, 0.0),  # NaN protein
+        (200.0, 0.0, math.nan, 0.0),  # NaN carbs
+        (200.0, 0.0, 0.0, math.nan),  # NaN fat
+        (math.inf, 0.0, 0.0, 0.0),  # +Infinity calories
+        (200.0, math.inf, 0.0, 0.0),  # +Infinity macro
+    ],
+)
+def test_nutrition_facts_plausible_invalid(
+    calories: float, protein_g: float, carbs_g: float, fat_g: float
+) -> None:
+    facts = NutritionFacts(calories=calories, protein_g=protein_g, carbs_g=carbs_g, fat_g=fat_g)
+    assert nutrition_facts_plausible(facts) is False

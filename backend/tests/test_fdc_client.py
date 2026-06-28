@@ -317,3 +317,138 @@ def test_load_fdc_settings_reads_env_prefix() -> None:
     assert settings.max_results == 10
     # The key is a secret: it must not render in repr.
     assert "from-env" not in repr(settings)
+
+
+# ---------------------------------------------------------------------------
+# Plausibility gate tests (FTY-115)
+# ---------------------------------------------------------------------------
+
+
+def _food_response(
+    fdcId: int, energy: float, protein: float = 0.0, carbs: float = 0.0, fat: float = 0.0
+) -> dict[str, Any]:
+    """Build a minimal FDC /foods/search reply with the given per-100g nutrient values."""
+    return {
+        "foods": [
+            {
+                "fdcId": fdcId,
+                "description": "Test Food",
+                "foodNutrients": [
+                    {"nutrientId": 1008, "value": energy},
+                    {"nutrientId": 1003, "value": protein},
+                    {"nutrientId": 1005, "value": carbs},
+                    {"nutrientId": 1004, "value": fat},
+                ],
+            }
+        ]
+    }
+
+
+def test_lookup_rejects_over_cap_energy_kj_as_kcal() -> None:
+    """A kJ-mislabelled energy value (~1500/100g) maps to None — no ProductFacts."""
+    client, _ = _client(_food_response(fdcId=1, energy=1500.0, protein=10.0, carbs=20.0, fat=50.0))
+
+    assert client.lookup("butter") is None
+
+
+def test_lookup_rejects_negative_energy() -> None:
+    """A negative energy value maps to None — no ProductFacts."""
+    client, _ = _client(_food_response(fdcId=2, energy=-10.0))
+
+    assert client.lookup("bad food") is None
+
+
+def test_lookup_accepts_zero_energy() -> None:
+    """A genuine zero-calorie food (e.g. water) is a costable 0-kcal match, not a non-match."""
+    client, _ = _client(_food_response(fdcId=3, energy=0.0))
+
+    facts = client.lookup("water")
+
+    assert facts is not None
+    assert facts.facts.calories == pytest.approx(0.0)
+
+
+def test_lookup_rejects_negative_protein() -> None:
+    """A negative protein value maps to None — physically impossible macro."""
+    client, _ = _client(_food_response(fdcId=4, energy=200.0, protein=-5.0, carbs=10.0, fat=5.0))
+
+    assert client.lookup("bad food") is None
+
+
+def test_lookup_rejects_negative_carbs() -> None:
+    """A negative carbs value maps to None — physically impossible macro."""
+    client, _ = _client(_food_response(fdcId=5, energy=200.0, protein=5.0, carbs=-3.0, fat=5.0))
+
+    assert client.lookup("bad food") is None
+
+
+def test_lookup_rejects_negative_fat() -> None:
+    """A negative fat value maps to None — physically impossible macro."""
+    client, _ = _client(_food_response(fdcId=6, energy=200.0, protein=5.0, carbs=10.0, fat=-2.0))
+
+    assert client.lookup("bad food") is None
+
+
+def test_lookup_no_false_reject_high_fat_food() -> None:
+    """Olive oil (~884 kcal/100g, ~100g fat, 0 protein, 0 carbs) still resolves."""
+    client, _ = _client(_food_response(fdcId=7, energy=884.0, protein=0.0, carbs=0.0, fat=100.0))
+
+    facts = client.lookup("olive oil")
+
+    assert facts is not None
+    assert facts.facts.calories == pytest.approx(884.0)
+    assert facts.facts.fat_g == pytest.approx(100.0)
+    assert facts.facts.protein_g == pytest.approx(0.0)
+    assert facts.facts.carbs_g == pytest.approx(0.0)
+
+
+def test_lookup_accepts_exactly_900_kcal_per_100g() -> None:
+    """A row at exactly the cap (900 kcal/100g) is accepted — the bound is inclusive."""
+    # The plausibility rule rejects calories > 900, so the boundary value 900 passes.
+    client, _ = _client(_food_response(fdcId=8, energy=900.0, protein=0.0, carbs=0.0, fat=100.0))
+
+    facts = client.lookup("theoretical max food")
+
+    assert facts is not None
+    assert facts.facts.calories == pytest.approx(900.0)
+
+
+def test_lookup_rejects_energy_just_above_cap() -> None:
+    """A row at 900.1 kcal/100g (just above cap) maps to None."""
+    client, _ = _client(_food_response(fdcId=9, energy=900.1, protein=0.0, carbs=0.0, fat=100.0))
+
+    assert client.lookup("impossible food") is None
+
+
+def test_list_matches_rejects_over_cap_energy() -> None:
+    """list_matches also rejects implausible energy via the shared _food_to_facts path."""
+    client, _ = _client(_food_response(fdcId=10, energy=1500.0, protein=10.0, carbs=20.0, fat=50.0))
+
+    assert client.list_matches("butter") == []
+
+
+def test_list_matches_accepts_zero_energy() -> None:
+    """list_matches also accepts a genuine zero-calorie food via the shared _food_to_facts path."""
+    client, _ = _client(_food_response(fdcId=11, energy=0.0))
+
+    matches = client.list_matches("water")
+
+    assert len(matches) == 1
+    assert matches[0].facts.calories == pytest.approx(0.0)
+
+
+def test_list_matches_rejects_negative_macro() -> None:
+    """list_matches also rejects a negative macro via the shared _food_to_facts path."""
+    client, _ = _client(_food_response(fdcId=12, energy=200.0, protein=-1.0))
+
+    assert client.list_matches("bad food") == []
+
+
+def test_list_matches_no_false_reject_high_fat_food() -> None:
+    """list_matches also accepts olive oil (~884 kcal/100g) — no false reject."""
+    client, _ = _client(_food_response(fdcId=13, energy=884.0, protein=0.0, carbs=0.0, fat=100.0))
+
+    matches = client.list_matches("olive oil")
+
+    assert len(matches) == 1
+    assert matches[0].facts.calories == pytest.approx(884.0)

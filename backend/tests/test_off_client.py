@@ -278,3 +278,135 @@ def test_load_off_settings_reads_env_prefix() -> None:
 )
 def test_normalize_barcode(raw: str | None, expected: str | None) -> None:
     assert normalize_barcode(raw) == expected
+
+
+# ---------------------------------------------------------------------------
+# Plausibility gate tests (FTY-115)
+# ---------------------------------------------------------------------------
+
+_BARCODE = "0123456789012"
+
+
+def _per_100g_response(
+    energy: float, protein: float = 0.0, carbs: float = 0.0, fat: float = 0.0
+) -> dict[str, Any]:
+    """Build a minimal OFF reply with per-100g nutriment values."""
+    return {
+        "status": 1,
+        "product": {
+            "product_name": "Test Product",
+            "nutriments": {
+                "energy-kcal_100g": energy,
+                "proteins_100g": protein,
+                "carbohydrates_100g": carbs,
+                "fat_100g": fat,
+            },
+        },
+    }
+
+
+def _per_serving_response(
+    energy: float, serving_g: float, protein: float = 0.0, carbs: float = 0.0, fat: float = 0.0
+) -> dict[str, Any]:
+    """Build a minimal OFF reply with per-serving nutriment values and a gram serving size."""
+    return {
+        "status": 1,
+        "product": {
+            "product_name": "Test Product",
+            "serving_quantity": serving_g,
+            "nutriments": {
+                "energy-kcal_serving": energy,
+                "proteins_serving": protein,
+                "carbohydrates_serving": carbs,
+                "fat_serving": fat,
+            },
+        },
+    }
+
+
+def test_lookup_rejects_over_cap_energy_per_100g() -> None:
+    """An OFF product with kJ-mislabelled per-100g energy (~1500/100g) maps to None."""
+    client, _ = _client(_per_100g_response(energy=1500.0, protein=10.0, carbs=20.0, fat=50.0))
+
+    assert client.lookup(_BARCODE) is None
+
+
+def test_lookup_rejects_negative_energy_per_100g() -> None:
+    """A negative per-100g energy maps to None."""
+    client, _ = _client(_per_100g_response(energy=-10.0))
+
+    assert client.lookup(_BARCODE) is None
+
+
+def test_lookup_accepts_zero_energy_per_100g() -> None:
+    """A genuine zero-calorie food (e.g. sparkling water) is a costable 0-kcal match."""
+    client, _ = _client(_per_100g_response(energy=0.0))
+
+    facts = client.lookup(_BARCODE)
+
+    assert facts is not None
+    assert facts.facts.calories == pytest.approx(0.0)
+
+
+def test_lookup_rejects_negative_macro_per_100g() -> None:
+    """A negative protein in per-100g facts maps to None."""
+    client, _ = _client(_per_100g_response(energy=200.0, protein=-5.0, carbs=10.0, fat=5.0))
+
+    assert client.lookup(_BARCODE) is None
+
+
+def test_lookup_rejects_over_cap_energy_per_serving_branch() -> None:
+    """A per-serving energy that converts to an over-cap per-100g value maps to None.
+
+    Example: 750 kcal per 50g serving → 1500 kcal/100g, which exceeds the 900 cap.
+    """
+    # 750 kcal / 50g × 100 = 1500 kcal/100g → rejected
+    client, _ = _client(_per_serving_response(energy=750.0, serving_g=50.0, fat=50.0))
+
+    assert client.lookup(_BARCODE) is None
+
+
+def test_lookup_accepts_zero_energy_per_serving_branch() -> None:
+    """A zero per-serving energy converts to a valid zero per-100g, a costable match."""
+    client, _ = _client(_per_serving_response(energy=0.0, serving_g=50.0))
+
+    facts = client.lookup(_BARCODE)
+
+    assert facts is not None
+    assert facts.facts.calories == pytest.approx(0.0)
+
+
+def test_lookup_rejects_negative_macro_per_serving_branch() -> None:
+    """A negative per-serving macro converts to negative per-100g and maps to None."""
+    # −5g protein per 50g serving → −10g/100g → rejected
+    client, _ = _client(_per_serving_response(energy=200.0, serving_g=50.0, protein=-5.0))
+
+    assert client.lookup(_BARCODE) is None
+
+
+def test_lookup_no_false_reject_high_fat_food_per_100g() -> None:
+    """Olive oil (~884 kcal/100g, ~100g fat, 0 protein, 0 carbs) still resolves."""
+    client, _ = _client(_per_100g_response(energy=884.0, protein=0.0, carbs=0.0, fat=100.0))
+
+    facts = client.lookup(_BARCODE)
+
+    assert facts is not None
+    assert facts.facts.calories == pytest.approx(884.0)
+    assert facts.facts.fat_g == pytest.approx(100.0)
+    assert facts.facts.protein_g == pytest.approx(0.0)
+    assert facts.facts.carbs_g == pytest.approx(0.0)
+
+
+def test_lookup_no_false_reject_high_fat_food_per_serving_branch() -> None:
+    """A high-fat serving that converts just under the cap per-100g resolves correctly.
+
+    442 kcal per 50g serving → 884 kcal/100g (< 900 cap) → accepted.
+    """
+    # 442 kcal / 50g serving × 100 = 884 kcal/100g → accepted
+    client, _ = _client(_per_serving_response(energy=442.0, serving_g=50.0, fat=50.0))
+
+    facts = client.lookup(_BARCODE)
+
+    assert facts is not None
+    assert facts.facts.calories == pytest.approx(884.0)
+    assert facts.facts.fat_g == pytest.approx(100.0)

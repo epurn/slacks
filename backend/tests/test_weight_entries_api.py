@@ -11,6 +11,7 @@ Weight values are sensitive personal data and are never logged.
 from __future__ import annotations
 
 import uuid
+from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -416,3 +417,128 @@ def test_cross_user_entry_id_on_own_path_fails_closed(client: TestClient) -> Non
     )
 
     assert resp.status_code == 404
+
+
+def _set_timezone(client: TestClient, user_id: str, auth: str, tz: str) -> None:
+    """Update the user's profile timezone."""
+
+    resp = client.put(
+        f"/api/users/{user_id}/profile",
+        headers={"Authorization": auth},
+        json={"timezone": tz},
+    )
+    assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Date-bound validation (FTY-119)
+# ---------------------------------------------------------------------------
+
+
+def test_create_rejects_far_future_date(client: TestClient) -> None:
+    user_id, auth = _register(client, "weight-future@example.com")
+
+    resp = client.post(
+        f"/api/users/{user_id}/weight-entries",
+        headers={"Authorization": auth},
+        json={"weight": 70.0, "effective_date": "9999-01-01"},
+    )
+
+    assert resp.status_code == 422
+
+
+def test_create_rejects_date_before_floor(client: TestClient) -> None:
+    user_id, auth = _register(client, "weight-pastfloor@example.com")
+
+    resp = client.post(
+        f"/api/users/{user_id}/weight-entries",
+        headers={"Authorization": auth},
+        json={"weight": 70.0, "effective_date": "1800-01-01"},
+    )
+
+    assert resp.status_code == 422
+
+
+def test_create_accepts_today_utc(client: TestClient) -> None:
+    user_id, auth = _register(client, "weight-today@example.com")
+    today = date.today().isoformat()
+
+    resp = client.post(
+        f"/api/users/{user_id}/weight-entries",
+        headers={"Authorization": auth},
+        json={"weight": 70.0, "effective_date": today},
+    )
+
+    assert resp.status_code == 201
+
+
+def test_create_accepts_recent_past_date(client: TestClient) -> None:
+    user_id, auth = _register(client, "weight-recentpast@example.com")
+
+    resp = client.post(
+        f"/api/users/{user_id}/weight-entries",
+        headers={"Authorization": auth},
+        json={"weight": 70.0, "effective_date": "2025-01-15"},
+    )
+
+    assert resp.status_code == 201
+
+
+def test_create_rejects_future_date_no_row_written(client: TestClient) -> None:
+    """A rejected future date must write no row."""
+
+    user_id, auth = _register(client, "weight-futurenorow@example.com")
+
+    resp = client.post(
+        f"/api/users/{user_id}/weight-entries",
+        headers={"Authorization": auth},
+        json={"weight": 70.0, "effective_date": "9999-12-31"},
+    )
+    assert resp.status_code == 422
+
+    list_resp = client.get(
+        f"/api/users/{user_id}/weight-entries",
+        headers={"Authorization": auth},
+    )
+    assert list_resp.json() == []
+
+
+def test_create_timezone_boundary_ahead_of_utc(client: TestClient) -> None:
+    """A date that is 'today' in a timezone ahead of UTC must be accepted.
+
+    Pacific/Auckland is UTC+12 (or UTC+13 during NZDT). When the server's UTC
+    date is D, the user's local date in Auckland is already D+1. An entry for
+    D+1 (local today) must be accepted — not spuriously rejected by a UTC-based
+    bound — because the slack accommodates this clock/tz skew.
+    """
+
+    user_id, auth = _register(client, "weight-tzahead@example.com")
+    # Set the user's timezone well ahead of UTC so their "local today" may be UTC "tomorrow".
+    _set_timezone(client, user_id, auth, "Pacific/Auckland")
+
+    # tomorrow in UTC == within the +1 day slack, so this must be accepted regardless
+    # of whether Auckland is +12 or +13 right now.
+    tomorrow_utc = (date.today() + timedelta(days=1)).isoformat()
+
+    resp = client.post(
+        f"/api/users/{user_id}/weight-entries",
+        headers={"Authorization": auth},
+        json={"weight": 70.0, "effective_date": tomorrow_utc},
+    )
+
+    assert resp.status_code == 201
+
+
+def test_create_rejects_day_beyond_slack(client: TestClient) -> None:
+    """A date two days beyond today (UTC) must be rejected even with the slack."""
+
+    user_id, auth = _register(client, "weight-beyond-slack@example.com")
+    two_days_ahead = (date.today() + timedelta(days=2)).isoformat()
+
+    resp = client.post(
+        f"/api/users/{user_id}/weight-entries",
+        headers={"Authorization": auth},
+        json={"weight": 70.0, "effective_date": two_days_ahead},
+    )
+
+    assert resp.status_code == 422

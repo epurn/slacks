@@ -23,6 +23,7 @@ from app.deps import CurrentUser
 from app.schemas.weight_entries import WeightEntryCreateRequest, WeightEntryDTO
 from app.services import weight_entries as weight_entry_service
 from app.services.weight_entries import (
+    InvalidWeightDate,
     InvalidWeightValue,
     WeightEntryForbidden,
     WeightEntryNotFound,
@@ -38,6 +39,13 @@ _INVALID_RANGE = HTTPException(
 _INVALID_WEIGHT = HTTPException(
     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
     detail="weight is outside the plausible (0, 1000] kg range after unit conversion",
+)
+_INVALID_DATE = HTTPException(
+    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+    detail=(
+        "effective_date must be on or after 1900-01-01 and on or before"
+        " today in the user's timezone (plus one day slack)"
+    ),
 )
 
 
@@ -65,6 +73,8 @@ def create_weight_entry(
         )
     except WeightEntryForbidden as exc:
         raise _NOT_FOUND from exc
+    except InvalidWeightDate as exc:
+        raise _INVALID_DATE from exc
     except InvalidWeightValue as exc:
         raise _INVALID_WEIGHT from exc
     return WeightEntryDTO.model_validate(entry)

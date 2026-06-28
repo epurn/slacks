@@ -18,7 +18,7 @@ checklist, smoke check) see the README **Self-Hosting** section.
 | `postgres` | `postgres:16.4-alpine` | Application database. | — (internal only) |
 | `redis` | `redis:7.4-alpine` | Celery broker / result backend. | — (internal only) |
 | `migrate` | `./backend` (Alembic) | One-shot first-boot migration runner. | — |
-| `api` | `./backend` (FastAPI) | HTTP API; serves `GET /healthz` and `GET /healthz/sources`. | `${API_PORT:-8000}` |
+| `api` | `./backend` (FastAPI) | HTTP API; serves `GET /healthz` (liveness), `GET /readyz` (readiness — checks DB), and `GET /healthz/sources`. | `${API_PORT:-8000}` |
 | `worker` | `./backend` (Celery) | Background estimation worker. | — |
 
 - Postgres and Redis are **not published to host interfaces by default** (FTY-109).
@@ -146,7 +146,8 @@ never commit it. The image contains only the Claude Code binary — no credentia
 
 ```sh
 docker compose up -d
-curl -fsS http://localhost:8000/healthz          # -> {"status":"ok"}
+curl -fsS http://localhost:8000/healthz          # -> {"status":"ok"} — liveness (process-up, no DB)
+curl -fsS http://localhost:8000/readyz           # -> {"status":"ready"} — readiness (200 DB reachable / 503 not ready)
 curl -fsS http://localhost:8000/healthz/sources  # -> provider capability list
 docker compose ps                                # migrate exited 0, api/postgres/redis/worker all healthy
 docker compose down                              # add -v to drop all volumes
@@ -157,6 +158,14 @@ its `enabled` and `available` flags, so you can confirm provider configuration
 without making any estimation calls. The `claude_code` entry specifically shows
 whether the CLI is installed and the session is valid — both must be `true` for
 the provider to work.
+
+## Container User
+
+The backend image runs all three services (`migrate`, `api`, `worker`) as a
+dedicated non-root user — `fatty` (UID/GID 10001) — rather than root (FTY-116).
+This limits the blast radius of an in-container exploit to an unprivileged
+account. The `claude-config` volume mountpoint is created owned by this user so
+`claude login` and subsequent session writes succeed without elevated privileges.
 
 ## Out of Scope
 

@@ -49,7 +49,7 @@ from pydantic import (
 
 from app.estimator.evidence_utils import _content_hash
 from app.estimator.fdc import ProductFacts
-from app.estimator.food_serving import NutritionFacts
+from app.estimator.food_serving import NutritionFacts, nutrition_facts_plausible
 from app.estimator.hardened_fetch import (
     FetchPolicyError,
     FetchResponseError,
@@ -378,22 +378,24 @@ def _facts_per_100g(nutriments: OffNutriments, serving_g: float | None) -> Nutri
     """
 
     if nutriments.energy_kcal_100g is not None:
-        return NutritionFacts(
+        facts = NutritionFacts(
             calories=float(nutriments.energy_kcal_100g),
             protein_g=float(nutriments.proteins_100g or 0.0),
             carbs_g=float(nutriments.carbohydrates_100g or 0.0),
             fat_g=float(nutriments.fat_100g or 0.0),
         )
+        return facts if nutrition_facts_plausible(facts) else None
 
     if nutriments.energy_kcal_serving is not None and serving_g is not None and serving_g > 0:
         # Convert per-serving facts to per-100g for canonical storage.
         factor = 100.0 / serving_g
-        return NutritionFacts(
+        facts = NutritionFacts(
             calories=round(float(nutriments.energy_kcal_serving) * factor, 4),
             protein_g=round(float(nutriments.proteins_serving or 0.0) * factor, 4),
             carbs_g=round(float(nutriments.carbohydrates_serving or 0.0) * factor, 4),
             fat_g=round(float(nutriments.fat_serving or 0.0) * factor, 4),
         )
+        return facts if nutrition_facts_plausible(facts) else None
 
     return None
 

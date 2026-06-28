@@ -34,6 +34,11 @@ RUN apt-get update \
     && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
     && rm -rf /var/lib/apt/lists/*
 
+# Non-root runtime user (FTY-116): fixed UID/GID keeps ownership stable across
+# rebuilds; a real home dir gives the claude CLI a writable scratch location.
+RUN groupadd --gid 10001 fatty \
+    && useradd --uid 10001 --gid fatty --shell /bin/bash --create-home fatty
+
 WORKDIR /app
 
 ENV UV_LINK_MODE=copy \
@@ -43,7 +48,8 @@ ENV UV_LINK_MODE=copy \
     PYTHONPATH=/app \
     # Bind all interfaces inside the container so the host can reach the API.
     FATTY_HOST=0.0.0.0 \
-    FATTY_PORT=8000
+    FATTY_PORT=8000 \
+    HOME=/home/fatty
 
 # Install locked production dependencies first for a cached layer.
 COPY pyproject.toml uv.lock ./
@@ -56,7 +62,18 @@ COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
 
+# Transfer ownership of the app tree (incl. .venv) to the runtime user so all
+# three service commands (.venv/bin/python, .venv/bin/alembic, .venv/bin/celery)
+# are readable/executable by it. Create the claude-config mountpoint owned by
+# the same user so named-volume population inherits the correct owner on first
+# use (FTY-116, FTY-088).
+RUN chown -R fatty:fatty /app \
+    && mkdir -p /claude-config \
+    && chown fatty:fatty /claude-config
+
 EXPOSE 8000
+
+USER fatty
 
 # Default to the API; the worker service overrides this command in compose.
 CMD [".venv/bin/python", "-m", "app"]

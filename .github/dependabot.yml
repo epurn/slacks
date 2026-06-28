@@ -20,11 +20,17 @@ updates:
           - "minor"
 
   # Mobile npm: Expo SDK 56 managed project.
-  # Packages pinned by the SDK (expo, react, react-native, jest, etc.) and the eslint toolchain
-  # are ignored here—they can only be advanced coherently via `expo install` or an SDK upgrade.
-  # Dependabot ignores patch/minor bumps to prevent dead PRs that fail CI; a major expo bump
-  # (the SDK upgrade tripwire) is allowed through to signal when a new SDK is available.
-  # Independent mobile libraries still flow.
+  # In an Expo managed project, the entire JS dependency set is governed by `expo install`:
+  # all expo-* modules, the @react-native/* toolchain, Expo-pinned react-native-* libs,
+  # React type packages, and the SDK-tied eslint config move as a coherent unit.
+  # Enumerating them individually leaked: we use prefix wildcards to cover the Expo-managed surface.
+  # Security trade-off (stated plainly): GitHub applies `ignore` to BOTH version updates AND security
+  # updates, so the blanket dependency-name ignores below intentionally suppress automated security-update
+  # PRs for the ignored Expo-managed packages. Vulnerabilities are still surfaced as Dependabot *alerts*
+  # (the repo Security tab, which is not governed by this file) and are remediated by `expo install --fix`
+  # or an SDK upgrade — not by Dependabot opening a fix PR against an individually-pinned package.
+  # A major expo bump still flows (the SDK upgrade tripwire from FTY-125), and independent deps like
+  # typescript still flow. The upgrade path: run `expo install --fix` when a new SDK is available.
   - package-ecosystem: "npm"
     directory: "/mobile"
     schedule:
@@ -38,6 +44,13 @@ updates:
         update-types:
           - "minor"
     ignore:
+      # Expo-managed surface: governed by `expo install`, not individual updates
+      - dependency-name: "expo-*"
+      - dependency-name: "@expo/*"
+      - dependency-name: "@react-native/*"
+      - dependency-name: "react-native-*"
+      - dependency-name: "@types/react*"
+      - dependency-name: "eslint-config-expo"
       # SDK-pinned packages; advance via SDK upgrade
       # Major expo bumps (new SDK) are the upgrade tripwire—they are allowed through to signal
       # when a new SDK is available. The failing CI is intentional; run `expo install --fix` when it appears.
