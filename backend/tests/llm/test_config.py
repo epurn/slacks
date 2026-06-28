@@ -83,6 +83,33 @@ def test_openai_compatible_with_base_url_is_valid() -> None:
     assert settings.resolved_base_url() == "https://llm.internal/v1"
 
 
+def test_claude_code_loads_without_key_or_model() -> None:
+    # Claude Code authenticates via its own local session, so no Fatty key and no
+    # model are required; the settings must load cleanly.
+    settings = load_llm_settings({"FATTY_LLM_PROVIDER": "claude_code"})
+
+    assert settings.provider == "claude_code"
+    assert settings.api_key is None
+    assert settings.model == ""
+
+
+def test_claude_code_passes_model_through_when_supplied() -> None:
+    settings = load_llm_settings(
+        {"FATTY_LLM_PROVIDER": "claude_code", "FATTY_LLM_MODEL": "claude-sonnet-4-5"}
+    )
+
+    assert settings.provider == "claude_code"
+    assert settings.model == "claude-sonnet-4-5"
+
+
+def test_claude_code_ignores_a_supplied_key() -> None:
+    # A key is not required and not used for claude_code, but supplying one must
+    # not break loading.
+    settings = LLMSettings(provider="claude_code", api_key=SecretStr("unused"))
+
+    assert settings.provider == "claude_code"
+
+
 def test_real_provider_requires_api_key() -> None:
     with pytest.raises(ValidationError):
         LLMSettings(provider="openai", model="gpt-4o-mini")

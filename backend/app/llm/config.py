@@ -23,8 +23,10 @@ ENV_PREFIX = "FATTY_LLM_"
 
 #: Supported provider selectors. ``openai_compatible`` covers any endpoint that
 #: speaks the OpenAI Chat Completions wire format (vLLM, LM Studio, Together, ...).
-#: ``fake`` is the in-memory test/dev provider and never makes network calls.
-ProviderName = Literal["openai", "anthropic", "openai_compatible", "fake"]
+#: ``claude_code`` wraps a locally installed, first-party Claude Code session
+#: (subscription auth, no Fatty-side key). ``fake`` is the in-memory test/dev
+#: provider and never makes network calls.
+ProviderName = Literal["openai", "anthropic", "openai_compatible", "claude_code", "fake"]
 
 #: Default OpenAI API base. ``openai_compatible`` has no default — the operator
 #: must supply ``FATTY_LLM_BASE_URL`` for their endpoint.
@@ -51,6 +53,10 @@ class LLMSettings(BaseModel):
     api_key: SecretStr | None = None
     base_url: str | None = None
     #: Provider model identifier (e.g. ``gpt-4o-mini``, ``claude-3-5-sonnet``).
+    #: Required for ``openai``/``anthropic``/``openai_compatible``. **Optional for
+    #: ``claude_code``**: the local Claude Code session/plan selects the model, so
+    #: an empty value lets it use its session default; a supplied value is passed
+    #: through to the invocation (``--model``).
     model: str = Field(default="", description="Provider model identifier.")
     #: Per-attempt wall-clock timeout. A documented tunable.
     timeout_seconds: float = Field(default=30.0, gt=0, le=600)
@@ -68,6 +74,12 @@ class LLMSettings(BaseModel):
         """Enforce the per-provider requirements the wire calls depend on."""
 
         if self.provider == "fake":
+            return self
+        if self.provider == "claude_code":
+            # Claude Code owns its own authentication (``claude login``) and picks
+            # the model from the active session/plan, so a Fatty-side key is
+            # meaningless and the model is optional. A supplied model is honored
+            # (passed through to the invocation); a supplied key is simply unused.
             return self
         if self.api_key is None or not self.api_key.get_secret_value():
             raise ValueError(f"provider {self.provider!r} requires FATTY_LLM_API_KEY")

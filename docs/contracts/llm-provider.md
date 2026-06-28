@@ -15,7 +15,10 @@ estimator lane (`backend/app/llm/`).
 
 ## Version
 
-2 (image input added in FTY-076; v1 introduced in FTY-041).
+3 (`claude_code` subscription provider added in FTY-087; image input added in
+FTY-076; v1 introduced in FTY-041). v3 is **backward-compatible**: it only adds a
+new opt-in `FATTY_LLM_PROVIDER` value — every existing provider, env var, and the
+`structured_completion` signature behave exactly as before.
 
 ## Inputs
 
@@ -56,16 +59,40 @@ Provider configuration is read from `FATTY_LLM_`-prefixed environment variables:
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `FATTY_LLM_PROVIDER` | `fake` | One of `openai`, `anthropic`, `openai_compatible`, `fake`. |
-| `FATTY_LLM_API_KEY` | _(none)_ | Required for every non-`fake` provider. Secret; env/secret-manager only. |
-| `FATTY_LLM_MODEL` | _(empty)_ | Required for every non-`fake` provider (e.g. `gpt-4o-mini`, `claude-3-5-sonnet`). |
+| `FATTY_LLM_PROVIDER` | `fake` | One of `openai`, `anthropic`, `openai_compatible`, `claude_code`, `fake`. |
+| `FATTY_LLM_API_KEY` | _(none)_ | Required for `openai`/`anthropic`/`openai_compatible`. **Not required (and unused) for `claude_code`** — it authenticates via the local Claude Code session. Secret; env/secret-manager only. |
+| `FATTY_LLM_MODEL` | _(empty)_ | Required for `openai`/`anthropic`/`openai_compatible` (e.g. `gpt-4o-mini`, `claude-3-5-sonnet`). **Optional for `claude_code`** — Claude Code picks the model from the session/plan; a supplied value is passed through to the invocation. |
 | `FATTY_LLM_BASE_URL` | provider default | Required for `openai_compatible`; overrides the default OpenAI/Anthropic base. |
 | `FATTY_LLM_TIMEOUT_SECONDS` | `30` | Per-attempt wall-clock timeout (0–600). Tunable. |
 | `FATTY_LLM_MAX_RETRIES` | `2` | Additional attempts after the first, on transient failures only (0–10). Tunable. |
 | `FATTY_LLM_SUPPORTS_VISION` | `false` | Declares the configured model as vision-capable. Required to be `true` before `images` may be supplied; otherwise image input fails fast. |
 
-Invalid or inconsistent configuration (a real provider with no key/model, or
-`openai_compatible` with no base URL) fails fast at load with a `ValidationError`.
+Invalid or inconsistent configuration (an `openai`/`anthropic`/`openai_compatible`
+provider with no key/model, or `openai_compatible` with no base URL) fails fast at
+load with a `ValidationError`. `claude_code` requires neither a key nor a model.
+
+### `claude_code` (subscription, no per-token billing)
+
+`FATTY_LLM_PROVIDER=claude_code` runs the estimator through a **locally installed,
+first-party Claude Code** session in headless mode. A self-hoster who already pays
+for a Claude monthly plan pays nothing per token.
+
+- **No `FATTY_LLM_API_KEY`.** Claude Code owns its own authentication
+  (`claude login`); Fatty supplies no key and stores, reads, or logs **no**
+  operator credential. A supplied key is ignored.
+- **`FATTY_LLM_MODEL` is optional.** Claude Code selects the model from the active
+  session/plan when the value is empty; a supplied model is passed through
+  (`--model`).
+- **All tools disabled / sandboxed.** The invocation runs with every Claude Code
+  tool turned off (no bash, file, or web/fetch) and no MCP servers, so a
+  prompt-injection in untrusted food-log text cannot trigger tool use, file
+  access, or code execution on the host. The only network performed is Claude
+  Code's own model call.
+- **Trust boundary is identical.** Claude Code output is an untrusted analyst's
+  output, returned only after it validates against the caller's schema.
+- `FATTY_LLM_TIMEOUT_SECONDS` and `FATTY_LLM_MAX_RETRIES` apply unchanged.
+- Operator setup, installation, and health diagnostics are out of scope here
+  (tracked separately); image input is **not** supported via `claude_code`.
 
 ## Outputs
 
@@ -141,6 +168,11 @@ result = provider.structured_completion(
   variable defaults to `false`, so existing deployments behave exactly as in v1.
 - Adding a provider means adding an adapter behind the same interface; the
   signature and env-var contract stay stable.
+- **v3 is backward-compatible.** `claude_code` is a new opt-in
+  `FATTY_LLM_PROVIDER` value; the existing providers, every `FATTY_LLM_*`
+  variable, and the `structured_completion` signature are unchanged. The only
+  relaxation is scoped to `claude_code`: it needs no key and its model is
+  optional.
 - Per-provider structured-output mechanics (OpenAI JSON-schema `response_format`
   vs. Anthropic forced tool use) and multimodal mechanics (OpenAI `image_url`
   content parts vs. Anthropic base64 `image` blocks) are implementation details

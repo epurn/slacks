@@ -12,6 +12,7 @@ from app.llm.base import Provider
 from app.llm.config import LLMSettings
 from app.llm.errors import LLMConfigurationError
 from app.llm.providers.anthropic import AnthropicProvider
+from app.llm.providers.claude_code import ClaudeCodeProvider
 from app.llm.providers.fake import FakeProvider
 from app.llm.providers.openai import OpenAIProvider
 
@@ -29,6 +30,16 @@ def build_provider(settings: LLMSettings) -> Provider:
             timeout_seconds=settings.timeout_seconds,
             max_retries=settings.max_retries,
             supports_vision=settings.supports_vision,
+        )
+
+    # Claude Code authenticates via its own local session, so it legitimately has
+    # no Fatty-side key and an optional model. Build it *before* the
+    # ``api_key is None`` guard, which must not reject it.
+    if settings.provider == "claude_code":
+        return ClaudeCodeProvider(
+            model=settings.model,  # may be empty — Claude Code uses its session default
+            timeout_seconds=settings.timeout_seconds,
+            max_retries=settings.max_retries,
         )
 
     # Guaranteed non-None by LLMSettings validation for non-fake providers; the

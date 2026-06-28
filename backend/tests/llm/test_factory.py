@@ -7,6 +7,7 @@ from pydantic import SecretStr
 from app.llm.config import LLMSettings
 from app.llm.factory import build_provider
 from app.llm.providers.anthropic import AnthropicProvider
+from app.llm.providers.claude_code import ClaudeCodeProvider
 from app.llm.providers.fake import FakeProvider
 from app.llm.providers.openai import OpenAIProvider
 
@@ -45,6 +46,24 @@ def test_anthropic_selected() -> None:
     provider = build_provider(settings)
 
     assert isinstance(provider, AnthropicProvider)
+
+
+def test_claude_code_selected_without_key() -> None:
+    # The api_key-is-None guard must not reject claude_code; it has no key.
+    settings = LLMSettings(provider="claude_code")
+
+    provider = build_provider(settings)
+
+    assert isinstance(provider, ClaudeCodeProvider)
+
+
+def test_claude_code_model_is_passed_through() -> None:
+    settings = LLMSettings(provider="claude_code", model="claude-sonnet-4-5")
+
+    provider = build_provider(settings)
+
+    assert isinstance(provider, ClaudeCodeProvider)
+    assert provider._model == "claude-sonnet-4-5"
 
 
 def test_supports_vision_is_threaded_to_provider() -> None:
