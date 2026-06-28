@@ -1,6 +1,6 @@
 ---
 id: FTY-073
-state: ready_with_notes
+state: merged
 primary_lane: security-privacy
 touched_lanes:
   - estimator

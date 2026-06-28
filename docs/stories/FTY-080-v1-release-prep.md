@@ -1,6 +1,6 @@
 ---
 id: FTY-080
-state: candidate
+state: merged
 primary_lane: governance
 touched_lanes:
   - backend-core
@@ -28,14 +28,16 @@ autonomous: true
 
 ## State
 
-candidate
+merged
 
 > This is **Phase 4 of the release runbook** (`docs/release-runbook.md`): the
-> mechanical release-prep PR. Held as `candidate` on purpose — promote it to
-> `ready` only after BOTH (a) every dependency below has merged AND (b) the
-> full-system audit + fix loop (runbook Phases 1–3) is clean. It must not run
-> before the audit. It prepares the release; it never implements features. The
-> actual tag + GitHub release + deploy is a human step (see Non-Goals).
+> mechanical release-prep PR. Promoted `candidate → ready` on 2026-06-28 after the
+> gate was satisfied: all dependencies (FTY-062/064/070/073/074/075) plus the
+> release-audit fixes (FTY-081/082/083/084) are merged, and the full-system audit
+> + fix loop (runbook Phases 1–3) is clean with `make verify`, the security suite,
+> and migration apply/rollback all green. It prepares the release; it never
+> implements features. The actual tag + GitHub release + deploy remains a human
+> step (see Non-Goals).
 
 ## Lane
 

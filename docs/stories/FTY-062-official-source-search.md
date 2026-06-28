@@ -1,6 +1,6 @@
 ---
 id: FTY-062
-state: ready
+state: merged
 primary_lane: estimator
 touched_lanes:
   - backend-core
