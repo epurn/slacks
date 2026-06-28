@@ -170,12 +170,16 @@ provenance is read (the `evidence-retrieval.md` global-vs-user split is respecte
 
 ### `is_edited`
 
-A boolean, **true iff the item carries at least one `user_edit` value-override
-correction** (the canonical rule defined in `corrections.md`). A never-edited item
-and an item that has only been **amount-adjusted** (a provenance-preserving portion
-fix, `corrections.md`) are both `false`; a direct value override (`calories` / a
-macro / `active_calories`) is `true`. Derived from the append-only `corrections`
-history, so it never drifts and needs no backfill.
+A boolean, **true iff the item carries a `user_edit` value-override correction not
+superseded by a later `re_match`** (the canonical rule defined in `corrections.md` —
+this restatement defers to it). A direct value override (`calories` / a macro /
+`active_calories`) sets it `true`; a later **re-match** (`re_match`, a re-resolution
+to a different real source, FTY-093) **supersedes** that edit and returns it to
+`false` — the item's honesty then comes from the new source, not a stale override —
+until a genuine edit after the re-match makes it `true` again. A never-edited item,
+an item that has only been **amount-adjusted** (a provenance-preserving portion fix,
+`corrections.md`), and an edited-then-rematched item are all `false`. Derived from the
+append-only `corrections` history, so it never drifts and needs no backfill.
 
 ## Rounding rule
 
