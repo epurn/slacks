@@ -57,3 +57,40 @@ SAFETY_FLOOR_KCAL_MINUS161: Final[int] = 1200
 #: *gain* over a very short horizon would demand an enormous surplus; targets
 #: above this conservative cap are clamped down and flagged rather than returned.
 SAFETY_CEILING_KCAL: Final[int] = 4000
+
+# --- Macro targets (FTY-094) -------------------------------------------------
+#
+# The three macro targets are derived from the safety-clamped daily calorie
+# target in a fixed evidence-based order — protein first (anchored to
+# bodyweight), then a fat floor, then carbohydrate as the non-negative
+# remainder. Every default below is sourced; see docs/contracts/target-calculator.md.
+
+#: Atwater energy factors — kcal per gram of each macronutrient. The familiar
+#: 4/9/4 metabolizable-energy values; used to convert between grams and kcal.
+KCAL_PER_G_PROTEIN: Final[int] = 4
+KCAL_PER_G_CARB: Final[int] = 4
+KCAL_PER_G_FAT: Final[int] = 9
+
+#: Protein target, grams per kg of bodyweight per day. The largest meta-analysis
+#: to date (Morton et al., *Br J Sports Med* 2018) identifies ~1.6 g/kg/day as
+#: the breakpoint beyond which added protein yields no further lean-mass benefit;
+#: systematic reviews of hypocaloric diets in adults with overweight/obesity find
+#: 1.2–1.6 g/kg/day optimal for fat loss with lean-mass preservation. 1.6 g/kg
+#: sits at the top of that protective band and at the muscle-protein-synthesis
+#: ceiling — a strong, simple, total-bodyweight-anchored default. Anchored to
+#: *current/start* bodyweight (not the lower goal weight): in a deficit you anchor
+#: to current mass to protect lean tissue. Total-bodyweight scaling slightly
+#: overestimates need at high adiposity (lean-mass-based anchoring is more
+#: precise) — a known refinement, not a v1 blocker.
+PROTEIN_G_PER_KG: Final[float] = 1.6
+
+#: Fat target as a share of the daily calorie target. The Dietary Guidelines for
+#: Americans place fat at 20–35% of energy; 30% is a calm evidence-based midpoint.
+FAT_PCT_OF_CALORIES: Final[float] = 0.30
+
+#: Hormonal-health floor on fat, grams per kg of bodyweight per day. Evidence
+#: shows dropping below ~20% of energy / ~0.8 g/kg lowers sex-hormone (e.g.
+#: testosterone) levels; this floor guarantees enough fat for essential fatty
+#: acids / sex-hormone health when a deep deficit would otherwise push the
+#: percentage share too low.
+FAT_FLOOR_G_PER_KG: Final[float] = 0.8

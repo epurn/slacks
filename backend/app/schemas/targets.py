@@ -75,6 +75,16 @@ class TargetAssumptions(BaseModel):
     safety_floor_kcal: int
     safety_ceiling_kcal: int
     rounding: str
+    #: Macro defaults (FTY-094), so every derived macro target is reproducible and
+    #: explainable from the snapshot alone. Protein is anchored to bodyweight
+    #: (``protein_anchor``); fat takes ``fat_pct_of_calories`` of the calorie
+    #: target with a ``fat_floor_g_per_kg`` hormonal-health floor; carbohydrate is
+    #: the non-negative remainder.
+    protein_g_per_kg: float
+    protein_anchor: str
+    fat_pct_of_calories: float
+    fat_floor_g_per_kg: float
+    macro_rounding: str
 
 
 class TargetCalculatorResult(BaseModel):
@@ -91,6 +101,17 @@ class TargetCalculatorResult(BaseModel):
     #: to the boundary — i.e. the requested trajectory is not safely achievable in
     #: the requested time and the returned number is the safe limit, not the plan.
     clamped: bool
+    #: Macro targets in whole grams (FTY-094), derived from the *safety-clamped*
+    #: ``daily_calorie_target_kcal`` so they match the calorie number the user is
+    #: shown. Derivation order: protein (bodyweight anchor) → fat (calorie share
+    #: with a hormonal floor) → carbohydrate (the non-negative remainder).
+    protein_target_g: int
+    carbs_target_g: int
+    fat_target_g: int
+    #: True when protein + fat already meet or exceed the calorie target so
+    #: carbohydrate floored at 0 — the macro analogue of ``clamped``, keeping the
+    #: rare over-constrained case honest rather than silently negative.
+    macros_clamped: bool
     assumptions: TargetAssumptions
 
 

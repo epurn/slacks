@@ -53,11 +53,34 @@ The three steps
 A safety floor (and ceiling) clamps the final number: a target below the
 clinically conservative minimum for unsupervised dieting is never returned as
 guidance — it is clamped up to the floor and flagged via ``clamped``.
+
+Macro targets (FTY-094)
+-----------------------
+
+Alongside the calorie target the calculator derives protein, carbohydrate, and
+fat targets (grams), in a fixed evidence-based order against the *safety-clamped*
+calorie target so the macros match the calorie number the user is shown:
+
+1. **Protein** — ``round(PROTEIN_G_PER_KG · start_weight_kg)`` (1.6 g/kg),
+   anchored to *current/start* bodyweight, not the lower goal weight, to protect
+   lean mass in a deficit.
+2. **Fat** — the larger of an energy share
+   (``FAT_PCT_OF_CALORIES · target / 9``, 30%) and a hormonal-health floor
+   (``FAT_FLOOR_G_PER_KG · start_weight_kg``, 0.8 g/kg).
+3. **Carbohydrate** — the non-negative remainder after protein and fat. If
+   protein + fat already meet or exceed the calorie target, carbohydrate floors
+   at 0 and ``macros_clamped`` is set (the analogue of ``clamped``).
+
+Each macro is rounded to the nearest whole gram, rounding half up (documented and
+deterministic, to avoid banker's-rounding ambiguity in pinned tests). The
+evidence basis for every default lives in :mod:`app.estimator.constants` and
+``docs/contracts/target-calculator.md``.
 """
 
 from __future__ import annotations
 
 import math
+from decimal import ROUND_HALF_UP, Decimal
 
 from app.enums import GoalDirection, MetabolicFormula
 from app.estimator import constants
@@ -71,6 +94,11 @@ from app.schemas.targets import (
 MODEL_NAME = "mifflin_st_jeor + single-compartment NIDDK-style dynamic energy balance"
 
 _ROUNDING_NOTE = "RMR/TDEE rounded to 0.1 kcal; daily target rounded to nearest kcal"
+
+_MACRO_ROUNDING_NOTE = "macro targets rounded to the nearest whole gram, rounding half up"
+
+#: How the protein target is anchored, recorded in the assumptions snapshot.
+_PROTEIN_ANCHOR = "start_weight_kg"
 
 _MIFFLIN_CONSTANT: dict[MetabolicFormula, float] = {
     MetabolicFormula.MIFFLIN_ST_JEOR_PLUS_5: constants.MIFFLIN_PLUS5_CONSTANT_KCAL,
@@ -147,6 +175,53 @@ def _dynamic_daily_intake(payload: TargetCalculatorInput) -> float:
     return m * (a + b * equilibrium_weight)
 
 
+def _round_half_up(value: float) -> int:
+    """Round to the nearest whole number, halves rounding **up**.
+
+    Python's built-in :func:`round` uses banker's rounding (half to even); the
+    macro contract pins round-half-up so a future edit cannot silently shift a
+    pinned gram value. ``str(value)`` yields the shortest exact float repr, so
+    ``Decimal`` quantizes the value the reader sees, not a binary artefact.
+    """
+
+    return int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def _derive_macros(
+    daily_calorie_target_kcal: int, start_weight_kg: float
+) -> tuple[int, int, int, bool]:
+    """Derive protein/carb/fat gram targets from the safety-clamped calorie target.
+
+    Pure and deterministic, in the fixed evidence-based order (protein → fat
+    floor → carbohydrate remainder). Computed against the already safety-clamped
+    ``daily_calorie_target_kcal`` so the macros are consistent with the calorie
+    number the user is shown. Returns ``(protein_g, carbs_g, fat_g, clamped)``
+    where ``clamped`` is true when protein + fat met or exceeded the calorie
+    target and carbohydrate floored at 0. See ``docs/contracts/target-calculator.md``.
+    """
+
+    # 1. Protein — anchored to current/start bodyweight to protect lean mass.
+    protein_target_g = _round_half_up(constants.PROTEIN_G_PER_KG * start_weight_kg)
+
+    # 2. Fat — an evidence share of calories, never below the hormonal-health floor.
+    fat_from_share_g = _round_half_up(
+        constants.FAT_PCT_OF_CALORIES * daily_calorie_target_kcal / constants.KCAL_PER_G_FAT
+    )
+    fat_floor_g = _round_half_up(constants.FAT_FLOOR_G_PER_KG * start_weight_kg)
+    fat_target_g = max(fat_from_share_g, fat_floor_g)
+
+    # 3. Carbohydrate — the non-negative remainder after the two anchored macros.
+    carbs_kcal = (
+        daily_calorie_target_kcal
+        - constants.KCAL_PER_G_PROTEIN * protein_target_g
+        - constants.KCAL_PER_G_FAT * fat_target_g
+    )
+    macros_clamped = carbs_kcal < 0
+    carbs_target_g = _round_half_up(max(0, carbs_kcal) / constants.KCAL_PER_G_CARB)
+
+    return protein_target_g, carbs_target_g, fat_target_g, macros_clamped
+
+
 def _direction(start_weight_kg: float, target_weight_kg: float) -> GoalDirection:
     if target_weight_kg < start_weight_kg:
         return GoalDirection.LOSS
@@ -164,6 +239,11 @@ def _assumptions(metabolic_formula: MetabolicFormula) -> TargetAssumptions:
         safety_floor_kcal=_SAFETY_FLOOR[metabolic_formula],
         safety_ceiling_kcal=constants.SAFETY_CEILING_KCAL,
         rounding=_ROUNDING_NOTE,
+        protein_g_per_kg=constants.PROTEIN_G_PER_KG,
+        protein_anchor=_PROTEIN_ANCHOR,
+        fat_pct_of_calories=constants.FAT_PCT_OF_CALORIES,
+        fat_floor_g_per_kg=constants.FAT_FLOOR_G_PER_KG,
+        macro_rounding=_MACRO_ROUNDING_NOTE,
     )
 
 
@@ -190,6 +270,10 @@ def compute_targets(payload: TargetCalculatorInput) -> TargetCalculatorResult:
     ceiling = constants.SAFETY_CEILING_KCAL
     clamped_target = max(floor, min(ceiling, rounded_target))
 
+    protein_target_g, carbs_target_g, fat_target_g, macros_clamped = _derive_macros(
+        clamped_target, payload.start_weight_kg
+    )
+
     return TargetCalculatorResult(
         rmr_kcal=rmr,
         tdee_kcal=tdee,
@@ -197,5 +281,9 @@ def compute_targets(payload: TargetCalculatorInput) -> TargetCalculatorResult:
         direction=_direction(payload.start_weight_kg, payload.target_weight_kg),
         horizon_days=payload.horizon_days,
         clamped=clamped_target != rounded_target,
+        protein_target_g=protein_target_g,
+        carbs_target_g=carbs_target_g,
+        fat_target_g=fat_target_g,
+        macros_clamped=macros_clamped,
         assumptions=_assumptions(payload.metabolic_formula),
     )

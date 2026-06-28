@@ -154,6 +154,99 @@ def test_implausibly_fast_gain_is_clamped_to_ceiling() -> None:
     assert result.clamped is True
 
 
+# --- Macro targets (FTY-094) -------------------------------------------------
+
+
+def test_maintenance_macros_pinned_example() -> None:
+    # Male 80 kg, 1.80 m, age 30, target 80 kg → 2136 kcal.
+    # protein = round(1.6 × 80)            = 128 g
+    # fat     = round(0.30 × 2136 / 9)     = 71 g  (> 0.8 × 80 = 64 g floor)
+    # carbs   = round((2136 − 512 − 639)/4) = round(246.25) = 246 g
+    result = compute_targets(_input(target_weight_kg=80.0))
+    assert result.daily_calorie_target_kcal == 2136
+    assert result.protein_target_g == 128
+    assert result.fat_target_g == 71
+    assert result.carbs_target_g == 246
+    assert result.macros_clamped is False
+    # The macro kcal reconstruct within one gram's rounding of the calorie target.
+    macro_kcal = 4 * result.protein_target_g + 4 * result.carbs_target_g + 9 * result.fat_target_g
+    assert abs(macro_kcal - result.daily_calorie_target_kcal) <= 4
+
+
+def test_weight_loss_macros_fat_floor_pinned_example() -> None:
+    # Same profile, target 75 kg over 90 days → 1678 kcal.
+    # protein stays anchored to the 80 kg START weight (not the 75 kg goal) = 128 g.
+    # fat: 0.8 × 80 = 64 g floor wins over round(0.30 × 1678 / 9) = 56 g.
+    result = compute_targets(_input(target_weight_kg=75.0))
+    assert result.daily_calorie_target_kcal == 1678
+    assert result.direction is GoalDirection.LOSS
+    assert result.protein_target_g == 128
+    assert result.fat_target_g == 64
+    assert result.macros_clamped is False
+    # carbs = round((1678 − 512 − 576) / 4) = round(147.5) = 148 g (half up).
+    assert result.carbs_target_g == 148
+
+
+def test_protein_anchors_to_start_weight_not_goal_weight() -> None:
+    # Proof of the anchor choice: the lower goal weight must NOT lower protein,
+    # and the floor (not the percentage share) must set fat in the deficit.
+    maintain = compute_targets(_input(target_weight_kg=80.0))
+    loss = compute_targets(_input(target_weight_kg=75.0))
+    assert loss.protein_target_g == maintain.protein_target_g == 128
+    # Fat in the deficit is the 0.8 g/kg floor, below the maintenance % share.
+    assert loss.fat_target_g == 64
+    assert loss.fat_target_g < maintain.fat_target_g
+    fat_floor_g = round(constants.FAT_FLOOR_G_PER_KG * 80.0)
+    fat_share_g = round(constants.FAT_PCT_OF_CALORIES * loss.daily_calorie_target_kcal / 9)
+    assert loss.fat_target_g == fat_floor_g > fat_share_g
+
+
+def test_over_constrained_macros_clamp_carbs_to_zero() -> None:
+    # Heavy start weight + a deep deficit clamps the calorie target to the floor;
+    # protein + fat then meet/exceed it, so carbohydrate floors at 0 and the flag
+    # is honest rather than silently negative.
+    result = compute_targets(
+        _input(
+            metabolic_formula=FEMALE,
+            height_m=1.60,
+            start_weight_kg=90.0,
+            target_weight_kg=60.0,
+            target_date=date(2026, 1, 31),  # 30-day horizon → calorie floor
+        )
+    )
+    assert result.daily_calorie_target_kcal == constants.SAFETY_FLOOR_KCAL_MINUS161  # 1200
+    assert result.protein_target_g == 144  # round(1.6 × 90)
+    assert result.fat_target_g == 72  # round(0.8 × 90) floor, > round(0.30×1200/9)=40
+    # 4×144 + 9×72 = 1224 kcal ≥ 1200 → carbs floored at 0, flag set.
+    assert result.carbs_target_g == 0
+    assert result.macros_clamped is True
+
+
+def test_macros_are_never_negative() -> None:
+    # Even in the over-constrained case the gram outputs stay non-negative.
+    result = compute_targets(
+        _input(
+            metabolic_formula=FEMALE,
+            height_m=1.60,
+            start_weight_kg=95.0,
+            target_weight_kg=60.0,
+            target_date=date(2026, 1, 31),
+        )
+    )
+    assert result.carbs_target_g >= 0
+    assert result.protein_target_g >= 0
+    assert result.fat_target_g >= 0
+
+
+def test_macro_assumptions_snapshot_documents_defaults() -> None:
+    assumptions = compute_targets(_input(target_weight_kg=75.0)).assumptions
+    assert assumptions.protein_g_per_kg == 1.6
+    assert assumptions.protein_anchor == "start_weight_kg"
+    assert assumptions.fat_pct_of_calories == 0.30
+    assert assumptions.fat_floor_g_per_kg == 0.8
+    assert "half up" in assumptions.macro_rounding
+
+
 # --- Assumptions snapshot ----------------------------------------------------
 
 
