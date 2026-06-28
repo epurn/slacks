@@ -7,7 +7,7 @@ their day's separated calorie/macro intake, calorie target, and exercise burn,
 all resolved in their profile timezone — as individual components the client can
 use to render a daily summary UI (FTY-075) and compute net (intake − burn) itself.
 
-This contract covers four things:
+This contract covers five things:
 
 1. the **request shape** — the `day` query parameter, profile-timezone resolution,
    and the day-default rule;
@@ -16,7 +16,10 @@ This contract covers four things:
 3. the **finalized-state filter** — the exact predicate used to exclude non-ready
    items so pending/failed work never inflates a total;
 4. the **object-level authorization rule** — scoped to the owner, fail-closed
-   `404` on cross-user access, mirroring `log-events.md`.
+   `404` on cross-user access, mirroring `log-events.md`;
+5. the **per-item provenance read shape** (FTY-092) — the `source` descriptor +
+   `is_edited` flag the Today timeline renders per item, derived server-side so the
+   client never joins `evidence_sources` / `corrections` itself.
 
 It **reads** existing contracts without redefining them:
 `derived_food_items` current calories/macros (FTY-044, post-correction per FTY-051),
@@ -30,10 +33,16 @@ No new persistence, no migration, no pre-netting.
 
 backend-core / contracts lane (`backend/app/schemas/daily_summary.py`,
 `backend/app/services/daily_summary.py`, `backend/app/routers/daily_summary.py`).
+The per-item provenance read shape (FTY-092) is owned by
+`backend/app/schemas/corrections.py` (`ItemSourceDTO`, the `source` + `is_edited`
+fields on the item DTOs) and `backend/app/services/item_read_model.py` (the shared
+serializer that derives them).
 
 ## Version
 
-1 (FTY-071).
+1 (FTY-071). FTY-092 adds the **per-item provenance read shape** (`source`
+descriptor + `is_edited`) to the Today/daily item read-model below; it does not
+change the aggregate DTO or the totals math.
 
 ## Inputs
 
@@ -120,6 +129,54 @@ this contract):
 A `null` target is distinct from a zero-calorie target and must be rendered
 differently by the client (e.g. "no target set" vs. "target: 0 kcal").
 
+## Per-item provenance read shape (FTY-092)
+
+Each derived food/exercise item the Today timeline renders carries two fields,
+**computed server-side** so the client maps the always-on **source icon** and the
+**"✎ edited"** marker from one DTO rather than joining `evidence_sources` /
+`derived_items` / `corrections` itself. They appear on the shared item DTO
+(`DerivedFoodItemDTO` / `DerivedExerciseItemDTO`) returned by every read path that
+surfaces a Today item — the corrections `PATCH` response today, and any future
+day-listing read — so all read paths inherit them.
+
+```json
+{
+  "id": "…", "name": "white rice", "amount": 1.0,
+  "calories": 205.0, "protein_g": 4.3, "carbs_g": 44.5, "fat_g": 0.4,
+  "source": {
+    "source_type": "trusted_nutrition_database",
+    "label": "USDA",
+    "ref": "usda_fdc:168880"
+  },
+  "is_edited": false
+}
+```
+
+### `source` descriptor
+
+A small, read-only descriptor derived from the item's `evidence_sources` row
+(`evidence-retrieval.md`). `null` when no evidence record exists (defensive) and on
+exercise items (burn comes from MET tables, not an evidence row).
+
+| Field | Meaning |
+| --- | --- |
+| `source_type` | The `evidence-retrieval.md` hierarchy enum on the item's `evidence_sources` row: `trusted_nutrition_database`, `product_database`, `official_source`, `user_label`, `model_prior`. A `model_prior` value is the client's signal to render the "≈ rough estimate · make it exact" treatment (ux-design §4a). |
+| `label` | A human, display-ready string mapped deterministically from `source_type` / `ref`: `trusted_nutrition_database` → "USDA", `product_database` → "Open Food Facts", `user_label` → "Label scan", `official_source` → the URL host, `model_prior` → "Rough estimate". |
+| `ref` | The stable `source_ref` (`usda_fdc:<id>`, `open_food_facts:<barcode>`, `official_source:<url>`, `user_label:<hash>`, `model_prior`) for the sheet's deeper provenance line. For an `official_source` item this is the **URL only** (no headers, body, or query secrets). |
+
+The descriptor is **derived at read time** from the existing `evidence_sources` row
+— no new persisted provenance column, no de-normalization, and only the owner's own
+provenance is read (the `evidence-retrieval.md` global-vs-user split is respected).
+
+### `is_edited`
+
+A boolean, **true iff the item carries at least one `user_edit` value-override
+correction** (the canonical rule defined in `corrections.md`). A never-edited item
+and an item that has only been **amount-adjusted** (a provenance-preserving portion
+fix, `corrections.md`) are both `false`; a direct value override (`calories` / a
+macro / `active_calories`) is `true`. Derived from the append-only `corrections`
+history, so it never drifts and needs no backfill.
+
 ## Rounding rule
 
 Final sums are rounded to **0.1** (one decimal place) in canonical units (kcal,
@@ -183,3 +240,8 @@ curl -s ':8000/api/users/<uid>/daily-summary?day=not-a-date' \
   not the `*_estimated` snapshots.
 - Macro targets are not part of FTY-022; when FTY-022 is extended with macro
   targets, this contract should be versioned to expose them.
+- **FTY-092** adds the per-item `source` descriptor + `is_edited` flag to the item
+  read shape. Both are **derived reads** (from `evidence_sources` and the
+  `corrections` history) — no new table, no migration, no change to the aggregate
+  totals. Consumers (FTY-098/100 timeline + sheet) depend on the `source` / `is_edited`
+  shape defined here for the source icon + ✎ marker.

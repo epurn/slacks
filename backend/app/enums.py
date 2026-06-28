@@ -150,15 +150,43 @@ class DerivedItemStatus(StrEnum):
 
 
 class CorrectionSource(StrEnum):
-    """Origin of a ``corrections`` audit row (FTY-051).
+    """Origin of a ``corrections`` audit row (FTY-051, FTY-092).
 
-    A correction records who/what changed a derived item's value. v1 only writes
-    :attr:`USER_EDIT` — a deterministic user override through the edit endpoint.
-    Later learning/adaptation work (FTY-052+) may append other sources (e.g. a
-    re-estimate) without redefining the append-only audit contract.
+    A correction records who/what changed a derived item's value:
+
+    - :attr:`USER_EDIT` — a direct **value override** of ``calories`` / a macro /
+      ``active_calories`` through the edit endpoint. It is the load-bearing signal
+      for ``is_edited``: an item is *edited* iff it carries at least one
+      ``user_edit`` correction (FTY-092).
+    - :attr:`AMOUNT_ADJUST` — a **provenance-preserving portion change** (FTY-092):
+      editing an item's ``quantity`` deterministically rescales calories/macros but
+      keeps the item's resolved source intact and does **not** mark it edited. The
+      rescaled rows are an honest audit trail tagged distinctly from a value override.
+
+    Later learning/adaptation work (FTY-052+) may append other sources without
+    redefining the append-only audit contract.
     """
 
     USER_EDIT = "user_edit"
+    AMOUNT_ADJUST = "amount_adjust"
+
+
+class SourceType(StrEnum):
+    """Evidence source-hierarchy classification for a resolved item (FTY-045/092).
+
+    The canonical vocabulary recorded on each ``evidence_sources`` row's
+    ``source_type`` (see ``docs/contracts/evidence-retrieval.md``). FTY-092 reads it
+    into the per-item ``source`` descriptor the Today timeline renders, so the client
+    maps a source icon + label without re-deriving the hierarchy. ``model_prior``
+    surfaces a rough estimate plainly so the client can render the
+    "≈ rough estimate · make it exact" treatment.
+    """
+
+    TRUSTED_NUTRITION_DATABASE = "trusted_nutrition_database"
+    PRODUCT_DATABASE = "product_database"
+    OFFICIAL_SOURCE = "official_source"
+    USER_LABEL = "user_label"
+    MODEL_PRIOR = "model_prior"
 
 
 class SavedFoodSource(StrEnum):

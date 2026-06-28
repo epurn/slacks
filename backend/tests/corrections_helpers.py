@@ -10,6 +10,7 @@ item that must snapshot on its first edit).
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy.engine import Engine
@@ -17,6 +18,7 @@ from sqlalchemy.engine import Engine
 from app.db import create_session_factory
 from app.enums import DerivedItemStatus, LogEventStatus
 from app.models.derived import DerivedExerciseItem, DerivedFoodItem
+from app.models.food_sources import EvidenceSource
 from app.models.log_events import LogEvent
 
 
@@ -78,6 +80,44 @@ def seed_food_item(
         session.add(item)
         session.commit()
         return item.id
+
+
+def seed_evidence(
+    db_engine: Engine,
+    user_id: str,
+    item_id: uuid.UUID,
+    *,
+    source_type: str,
+    source_ref: str,
+) -> uuid.UUID:
+    """Insert a user-owned ``evidence_sources`` row for a derived food item.
+
+    Lets the provenance read-model tests assert the source descriptor mapping and
+    that an amount adjust leaves this snapshot untouched. Reuses the item's owning
+    ``log_event_id`` so ownership cascades stay consistent.
+    """
+
+    factory = create_session_factory(db_engine)
+    with factory() as session:
+        item = session.get(DerivedFoodItem, item_id)
+        assert item is not None
+        evidence = EvidenceSource(
+            user_id=uuid.UUID(user_id),
+            log_event_id=item.log_event_id,
+            derived_food_item_id=item_id,
+            product_id=None,
+            source_type=source_type,
+            source_ref=source_ref,
+            content_hash="0" * 64,
+            fetched_at=datetime.now(UTC),
+            calories_per_100g=130.0,
+            protein_per_100g=2.7,
+            carbs_per_100g=28.0,
+            fat_per_100g=0.3,
+        )
+        session.add(evidence)
+        session.commit()
+        return evidence.id
 
 
 def seed_exercise_item(

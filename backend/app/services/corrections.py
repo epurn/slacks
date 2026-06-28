@@ -14,11 +14,15 @@ contract:
    creation by the estimator, or here on the first edit if not already set) and
    never mutated again. The current value is then overwritten (last edit wins).
 
-3. **The servings rescale rule.** Editing a food item's ``quantity`` rescales its
-   current calories and macros by ``ratio = new_quantity / old_quantity`` and
-   appends a correction row for the quantity change **and** for each rescaled
-   field. A direct edit to a single value field overrides only that field and
-   appends exactly one row.
+3. **The servings rescale rule (provenance-preserving).** Editing a food item's
+   ``quantity`` rescales its current calories and macros by
+   ``ratio = new_quantity / old_quantity`` and appends a correction row for the
+   quantity change **and** for each rescaled field, every row tagged
+   :attr:`~app.enums.CorrectionSource.AMOUNT_ADJUST`. A portion fix is **not** a
+   re-resolution: the item's evidence/source snapshot is untouched and the item
+   stays un-edited (``is_edited`` false, FTY-092). A direct edit to a single value
+   field is a **value override** — it overrides only that field, appends exactly one
+   :attr:`~app.enums.CorrectionSource.USER_EDIT` row, and marks the item edited.
 
 Every change appends an immutable :class:`~app.models.corrections.Correction`.
 Old/new values are sensitive personal data and are never written to logs.
@@ -154,7 +158,10 @@ def _apply_direct(
     spec: tuple[str, str, float],
     value: float,
 ) -> Correction:
-    """Override a single value field, snapshotting its original first."""
+    """Override a single value field, snapshotting its original first.
+
+    A direct override is a ``user_edit``: it marks the item edited (FTY-092).
+    """
 
     attribute, estimated_attribute, upper_bound = spec
     _check_upper_bound(field, value, upper_bound)
@@ -163,7 +170,9 @@ def _apply_direct(
     _snapshot_original(item, estimated_attribute, old_value)
     new_value = round(value, _VALUE_DECIMALS)
     setattr(item, attribute, new_value)
-    return _make_correction(owner_id, item_type, item, field, old_value, new_value)
+    return _make_correction(
+        owner_id, item_type, item, field, old_value, new_value, CorrectionSource.USER_EDIT
+    )
 
 
 def _apply_quantity_rescale(
@@ -171,9 +180,11 @@ def _apply_quantity_rescale(
 ) -> list[Correction]:
     """Rescale a food item's calories/macros by ``new_quantity / old_quantity``.
 
-    Writes a correction for the quantity change and for each currently-resolved
-    field that is rescaled. Fails closed on a zero/invalid old quantity (no ratio
-    is defined) or a non-positive new quantity.
+    A **provenance-preserving** adjustment (FTY-092): writes an ``amount_adjust``
+    correction for the quantity change and for each currently-resolved field that is
+    rescaled, leaving the item's ``evidence_sources`` snapshot untouched and the item
+    un-edited. Fails closed on a zero/invalid old quantity (no ratio is defined) or a
+    non-positive new quantity.
     """
 
     _check_upper_bound(QUANTITY_FIELD, value, _MAX_QUANTITY)
@@ -188,7 +199,13 @@ def _apply_quantity_rescale(
 
     corrections = [
         _make_correction(
-            owner_id, CandidateType.FOOD, item, QUANTITY_FIELD, old_quantity, new_quantity
+            owner_id,
+            CandidateType.FOOD,
+            item,
+            QUANTITY_FIELD,
+            old_quantity,
+            new_quantity,
+            CorrectionSource.AMOUNT_ADJUST,
         )
     ]
     item.amount = new_quantity
@@ -202,7 +219,15 @@ def _apply_quantity_rescale(
         rescaled = round(current * ratio, _VALUE_DECIMALS)
         setattr(item, attribute, rescaled)
         corrections.append(
-            _make_correction(owner_id, CandidateType.FOOD, item, field, current, rescaled)
+            _make_correction(
+                owner_id,
+                CandidateType.FOOD,
+                item,
+                field,
+                current,
+                rescaled,
+                CorrectionSource.AMOUNT_ADJUST,
+            )
         )
 
     return corrections
@@ -233,8 +258,14 @@ def _make_correction(
     field: str,
     old_value: float | None,
     new_value: float,
+    source: CorrectionSource,
 ) -> Correction:
-    """Build an immutable correction row for one field change."""
+    """Build an immutable correction row for one field change.
+
+    ``source`` distinguishes a value override (``user_edit``) from a
+    provenance-preserving portion change (``amount_adjust``) — the signal that
+    drives the read-model's ``is_edited`` flag (FTY-092).
+    """
 
     return Correction(
         user_id=owner_id,
@@ -244,7 +275,7 @@ def _make_correction(
         field=field,
         old_value=old_value,
         new_value=new_value,
-        source=CorrectionSource.USER_EDIT,
+        source=source,
     )
 
 
