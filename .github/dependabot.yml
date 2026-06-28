@@ -13,10 +13,10 @@ updates:
     open-pull-requests-limit: 5
     groups:
       dependency-patch:
-        dependency-types:
+        update-types:
           - "patch"
       dependency-minor:
-        dependency-types:
+        update-types:
           - "minor"
 
   - package-ecosystem: "npm"
@@ -26,10 +26,10 @@ updates:
     open-pull-requests-limit: 5
     groups:
       dependency-patch:
-        dependency-types:
+        update-types:
           - "patch"
       dependency-minor:
-        dependency-types:
+        update-types:
           - "minor"
 
   - package-ecosystem: "docker"
