@@ -3,9 +3,9 @@
 The canonical description of what the Fatty product *is*: its frame, information
 architecture, core flows, screens, interaction model, visual direction, states,
 and cross-cutting stance. UX work should implement a slice of this doc rather than
-re-deciding the design; the living taste that governs it is in
-[`design-philosophy.md`](../../../docs/design-philosophy.md) (maintained in the
-command centre and embedded into agent work).
+re-deciding the design; the living taste that governs it — Fatty's design
+philosophy — is maintained alongside the agent tooling, embedded into agent work,
+and enforced in review. This doc must stay consistent with it.
 
 > Status: v1 design, resolved whole-product. Two sourcing details remain open and
 > are noted inline (the exact licensed display font; final chart range options).
