@@ -134,24 +134,24 @@ def assert_url_allowed(
 
 
 def _is_public_address(address: str) -> bool:
-    """Return whether ``address`` is a public, globally-routable IP.
+    """Return whether ``address`` is a public, globally-routable *unicast* IP.
 
-    Anything loopback, private, link-local (incl. the metadata service), multicast,
-    reserved, or unspecified is non-public and must be blocked.
+    Allowlist-by-property, not denylist-by-category: an address is accepted only
+    when it is globally routable (:attr:`ipaddress.ip_address.is_global`) and is
+    not multicast. This is fail-closed by construction — any non-global range is
+    rejected, including ranges no enumerated category names, such as RFC 6598
+    carrier-grade-NAT space (``100.64.0.0/10``). Loopback, private, link-local
+    (incl. the metadata service), reserved, and unspecified addresses are all
+    non-global and so refused. Multicast is excluded explicitly: the stdlib
+    classes IPv4 multicast as ``is_global`` even though it is never a valid unicast
+    egress target, so the positive requirement is paired with ``not is_multicast``.
     """
 
     try:
         ip = ipaddress.ip_address(address)
     except ValueError:
         return False
-    return not (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_multicast
-        or ip.is_reserved
-        or ip.is_unspecified
-    )
+    return ip.is_global and not ip.is_multicast
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):

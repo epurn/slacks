@@ -189,9 +189,11 @@ loaded the event scoped to the job's `user_id`; see `estimation-jobs.md`).
 
 - **Hardened, allowlisted egress (SSRF).** All external calls go through
   `hardened_fetch`: HTTPS only, the configured FDC host allowlisted, every resolved
-  IP required to be public (loopback/private/link-local incl. `169.254.169.254`,
-  multicast, reserved, unspecified blocked), redirects refused, and bounded
-  time/size. A non-https or non-allowlisted target fails closed.
+  IP required to be globally routable (allowlist-by-property: only `is_global`
+  unicast addresses pass, so loopback/private/link-local incl. `169.254.169.254`,
+  RFC 6598 CGNAT `100.64.0.0/10`, multicast, reserved, and unspecified are all
+  blocked fail-closed), redirects refused, and bounded time/size. A non-https or
+  non-allowlisted target fails closed.
 - **No personal context leaves the system.** Only the normalized food name is sent;
   no profile, weight, history, or event metadata.
 - **Key safety.** The FDC key is env-only, never sent to clients, never logged, and
@@ -343,9 +345,11 @@ browsing.
 Every official-source fetch is gated, before and across the request, by the shared
 `hardened_fetch` policy:
 
-- **HTTPS + public-IP only.** The target is resolved and any loopback, private,
-  link-local (incl. cloud metadata `169.254.169.254`), multicast, reserved, or
-  unspecified address is refused; non-HTTPS and `file:`/other schemes are refused.
+- **HTTPS + public-IP only.** The target is resolved and every resolved IP must be
+  globally routable (allowlist-by-property: only `is_global` unicast addresses
+  pass). Any loopback, private, link-local (incl. cloud metadata `169.254.169.254`),
+  RFC 6598 CGNAT (`100.64.0.0/10`), multicast, reserved, or unspecified address is
+  refused; non-HTTPS and `file:`/other schemes are refused.
 - **Host allowlist.** Only the configured `FATTY_OFFICIAL_FETCH_ALLOWED_HOSTS` are
   reachable; anything off-allowlist fails closed (an empty allowlist blocks everything).
 - **Redirects refused.** Every 3xx is refused rather than followed, so a redirect can
