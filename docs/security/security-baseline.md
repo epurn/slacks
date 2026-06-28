@@ -63,6 +63,29 @@ This project uses the following as design references:
 - Redact sensitive fields in errors and provider traces. *(v1: transport and fetch errors are content-free — no URL, headers, request body, or response body.)*
 - Telemetry must be opt-in or clearly documented before public launch. *(v1 ships no product telemetry.)*
 
+## HTTP Security Headers
+
+Every API response carries baseline defense-in-depth headers applied by a
+dedicated middleware in `app/main.py` (FTY-112):
+
+- `X-Content-Type-Options: nosniff` — blocks MIME-confusion attacks.
+- `X-Frame-Options: DENY` — blocks clickjacking; the API is consumed by a
+  native client and is never framed.
+- `Referrer-Policy: no-referrer` — limits referrer leakage on redirects.
+
+`Strict-Transport-Security` (HSTS) is intentionally omitted: TLS termination
+is the self-hoster's reverse-proxy concern, not the application's.
+`Content-Security-Policy` is omitted because this is a JSON API consumed by a
+native client, making a CSP low-value.
+
+## API Schema Exposure
+
+In `production`, the interactive docs (`/docs`, `/redoc`) and the raw OpenAPI
+schema (`/openapi.json`) are disabled (`404`) to prevent the full API surface
+from being publicly enumerable on a self-host (FTY-112). This is a
+reconnaissance reduction, not a substitute for authorization. In `development`
+and `test` the docs remain available.
+
 ## Supply Chain
 
 - Use pinned or locked dependencies.
