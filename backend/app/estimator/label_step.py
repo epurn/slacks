@@ -91,6 +91,7 @@ UNREADABLE_LABEL_QUESTION = (
     "We couldn't read that nutrition label clearly. Which food was it, and how much?"
 )
 SERVING_QUESTION = "What is the serving size on the label (for example, in grams or millilitres)?"
+QUANTITY_QUESTION = "How much did you consume (for example, in grams or servings)?"
 
 #: Instruction framing for the extraction call. The image is labelled as untrusted
 #: data; any instructions printed on it are to be ignored. The real guarantee is
@@ -255,7 +256,7 @@ class LabelResolveStep:
             default_serving_g=serving_g,
         )
         if grams is None:
-            context.clarification_questions = [SERVING_QUESTION]
+            context.clarification_questions = [QUANTITY_QUESTION]
             raise NeedsClarification("unresolvable_quantity")
 
         scaled = scale_facts(per_100g, grams)

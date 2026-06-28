@@ -332,6 +332,46 @@ def test_unresolvable_serving_size_needs_clarification(
     assert _foods(session, event_id) == []
 
 
+def test_unresolvable_consumed_quantity_needs_clarification(
+    client: TestClient, session: Session
+) -> None:
+    # The panel is legible with a resolvable serving size, but the consumed quantity
+    # cannot be resolved to grams: ask for the consumed amount, not the serving size.
+    user_id, event_id = _seed_event(client, "label-quantity@example.com")
+    panel = {
+        "disposition": "extracted",
+        "confidence": 0.9,
+        "facts": {
+            "product_name": "Cereal",
+            "serving_size_amount": 30.0,
+            "serving_size_unit": "g",
+            "energy_kcal_per_serving": 120.0,
+            "protein_g_per_serving": 3.0,
+            "carbs_g_per_serving": 25.0,
+            "fat_g_per_serving": 1.0,
+        },
+    }
+    # Unresolvable consumed quantity: amount=None means resolve_grams will return None.
+    label_with_unresolvable_quantity = LabelInput(
+        data=_PNG_BYTES,
+        content_type="image/png",
+        unit=None,
+        amount=None,
+        quantity_text="",
+    )
+
+    result = process_estimation(
+        session,
+        log_event_id=event_id,
+        user_id=user_id,
+        pipeline=_vision_pipeline([panel]),
+        label_upload=label_with_unresolvable_quantity,
+    )
+
+    assert result.job_status is EstimationJobStatus.NEEDS_CLARIFICATION
+    assert _foods(session, event_id) == []
+
+
 def test_transient_provider_error_is_retryable(client: TestClient, session: Session) -> None:
     user_id, event_id = _seed_event(client, "label-transient@example.com")
     pipeline = _vision_pipeline([LLMTransientError("boom")])
