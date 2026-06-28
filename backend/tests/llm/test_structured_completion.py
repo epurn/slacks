@@ -13,6 +13,7 @@ import pytest
 
 from app.llm.errors import (
     LLMConfigurationError,
+    LLMResponseError,
     LLMTransientError,
     StructuredOutputValidationError,
 )
@@ -54,6 +55,7 @@ def test_retries_then_succeeds_within_bound() -> None:
             {"name": "apple", "calories": 95},
         ],
         max_retries=2,
+        sleep=lambda _: None,
     )
 
     result = provider.structured_completion("an apple", Candidate)
@@ -67,6 +69,7 @@ def test_retries_are_bounded_and_then_raise() -> None:
     provider = FakeProvider(
         responses=[LLMTransientError("boom"), LLMTransientError("boom")],
         max_retries=1,
+        sleep=lambda _: None,
     )
 
     with pytest.raises(LLMTransientError):
@@ -103,6 +106,7 @@ def test_transient_failures_are_logged_without_prompt(
     provider = FakeProvider(
         responses=[LLMTransientError("boom"), {"name": "burrito", "calories": 600}],
         max_retries=1,
+        sleep=lambda _: None,
     )
 
     with caplog.at_level(logging.INFO, logger="app.llm"):
@@ -110,3 +114,89 @@ def test_transient_failures_are_logged_without_prompt(
 
     assert "SENSITIVE_BURRITO" not in caplog.text
     assert "llm call transient failure" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Backoff seam tests — no real wall-clock delays.
+# ---------------------------------------------------------------------------
+
+
+def test_happy_path_no_sleep() -> None:
+    sleeps: list[float] = []
+    provider = FakeProvider(
+        responses=[{"name": "apple", "calories": 95}],
+        sleep=sleeps.append,
+    )
+
+    result = provider.structured_completion("an apple", Candidate)
+
+    assert result.calories == 95
+    assert sleeps == []
+
+
+def test_rate_limit_retries_then_succeeds() -> None:
+    """A transient error on attempt 1 followed by success: sleep called once."""
+    sleeps: list[float] = []
+    provider = FakeProvider(
+        responses=[LLMTransientError("rate limited"), {"name": "apple", "calories": 95}],
+        max_retries=1,
+        sleep=sleeps.append,
+    )
+
+    result = provider.structured_completion("an apple", Candidate)
+
+    assert result.calories == 95
+    assert len(sleeps) == 1
+    assert 0.0 <= sleeps[0] <= 8.0
+
+
+def test_persistent_rate_limit_fails_closed() -> None:
+    """Persistent transient errors exhaust the bound; sleep called between each pair."""
+    sleeps: list[float] = []
+    provider = FakeProvider(
+        responses=[
+            LLMTransientError("rate limited"),
+            LLMTransientError("rate limited"),
+            LLMTransientError("rate limited"),
+        ],
+        max_retries=2,
+        sleep=sleeps.append,
+    )
+
+    with pytest.raises(LLMTransientError):
+        provider.structured_completion("an apple", Candidate)
+
+    # max_retries=2 → 3 attempts → 2 sleeps (between attempt 1→2 and 2→3, never after 3).
+    assert len(sleeps) == 2
+    assert all(0.0 <= s <= 8.0 for s in sleeps)
+
+
+def test_no_trailing_sleep_after_final_attempt() -> None:
+    """sleep is not called after the last failed attempt."""
+    sleeps: list[float] = []
+    provider = FakeProvider(
+        responses=[LLMTransientError("boom"), LLMTransientError("boom")],
+        max_retries=1,
+        sleep=sleeps.append,
+    )
+
+    with pytest.raises(LLMTransientError):
+        provider.structured_completion("an apple", Candidate)
+
+    # 2 attempts, 1 sleep (between them), 0 after the final failure.
+    assert len(sleeps) == 1
+
+
+def test_non_retryable_error_no_sleep() -> None:
+    """A non-retryable LLMResponseError propagates immediately with zero sleeps."""
+    sleeps: list[float] = []
+    provider = FakeProvider(
+        responses=[LLMResponseError("bad request")],
+        max_retries=2,
+        sleep=sleeps.append,
+    )
+
+    with pytest.raises(LLMResponseError):
+        provider.structured_completion("an apple", Candidate)
+
+    assert sleeps == []

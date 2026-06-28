@@ -83,6 +83,54 @@ def test_http_401_is_response_error(monkeypatch: pytest.MonkeyPatch) -> None:
         _post()
 
 
+def test_http_400_is_response_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise urllib.error.HTTPError(
+            "https://api.example.com", 400, "bad request", Message(), io.BytesIO(b"")
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+
+    with pytest.raises(LLMResponseError):
+        _post()
+
+
+def test_http_429_is_transient(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise urllib.error.HTTPError(
+            "https://api.example.com", 429, "too many requests", Message(), io.BytesIO(b"")
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+
+    with pytest.raises(LLMTransientError):
+        _post()
+
+
+def test_http_408_is_transient(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise urllib.error.HTTPError(
+            "https://api.example.com", 408, "request timeout", Message(), io.BytesIO(b"")
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+
+    with pytest.raises(LLMTransientError):
+        _post()
+
+
+def test_http_425_is_transient(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise urllib.error.HTTPError(
+            "https://api.example.com", 425, "too early", Message(), io.BytesIO(b"")
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+
+    with pytest.raises(LLMTransientError):
+        _post()
+
+
 def test_connection_failure_is_transient(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(*_a: Any, **_k: Any) -> Any:
         raise urllib.error.URLError("connection refused")

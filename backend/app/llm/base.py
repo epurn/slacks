@@ -18,8 +18,10 @@ prompt, the key, or the raw response.
 from __future__ import annotations
 
 import logging
+import random
+import time
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
@@ -40,6 +42,12 @@ OutputT = TypeVar("OutputT", bound=BaseModel)
 ALLOWED_IMAGE_MEDIA_TYPES = frozenset({"image/jpeg", "image/png", "image/webp", "image/gif"})
 
 logger = logging.getLogger("app.llm")
+
+# Full-jitter exponential backoff constants for transient-error retries.
+# base * 2**(attempt-1) seconds, capped at _BACKOFF_CAP, with uniform jitter.
+# These are intentionally internal — not promoted to FATTY_LLM_* config.
+_BACKOFF_BASE: float = 0.5
+_BACKOFF_CAP: float = 8.0
 
 
 @dataclass(frozen=True)
@@ -90,6 +98,7 @@ class Provider(ABC):
         timeout_seconds: float,
         max_retries: int,
         supports_vision: bool = False,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._timeout_seconds = timeout_seconds
         self._max_retries = max_retries
@@ -97,6 +106,9 @@ class Provider(ABC):
         #: (``FATTY_LLM_SUPPORTS_VISION``); image input with a non-vision model
         #: fails fast in :meth:`structured_completion` before any provider call.
         self._supports_vision = supports_vision
+        # Injectable sleep seam: default is time.sleep in production; tests pass
+        # a fake that records delays and returns instantly (no real wall-clock wait).
+        self._sleep = sleep
 
     def structured_completion(
         self,
@@ -170,9 +182,19 @@ class Provider(ABC):
                     prompt, schema, images=images, timeout_seconds=self._timeout_seconds
                 )
             except LLMTransientError as exc:
-                # Log the failure *type* and attempt number only; the exception
-                # message is deliberately content-free (see errors module).
                 last_error = exc
+                has_next = attempt < attempts
+                # Only compute a backoff when there is a next attempt to delay.
+                # Never sleep after the final attempt — the caller gets the error
+                # immediately, without a trailing wait.
+                backoff = (
+                    random.uniform(0, min(_BACKOFF_CAP, _BACKOFF_BASE * 2 ** (attempt - 1)))  # noqa: S311
+                    if has_next
+                    else 0.0
+                )
+                # Log the failure type and attempt number only; the exception
+                # message is deliberately content-free (see errors module).
+                # backoff_seconds is a bounded number and safe to log.
                 logger.warning(
                     "llm call transient failure",
                     extra={
@@ -180,8 +202,11 @@ class Provider(ABC):
                         "attempt": attempt,
                         "max_attempts": attempts,
                         "error_type": type(exc).__name__,
+                        "backoff_seconds": backoff,
                     },
                 )
+                if has_next:
+                    self._sleep(backoff)
                 continue
             logger.info(
                 "llm call succeeded",

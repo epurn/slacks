@@ -3,8 +3,9 @@
 Implemented on the standard library (``urllib``) so the provider layer adds no
 runtime dependencies. Providers call :func:`post_json`; tests monkeypatch it to
 avoid live network calls. Error mapping lives here so every provider classifies
-failures identically: timeouts, connection errors, and ``5xx`` become
-retryable :class:`LLMTransientError`; ``4xx`` and non-JSON bodies become
+failures identically: timeouts, connection errors, ``5xx``, and rate-limit /
+server-side retry signals (``429``, ``408``, ``425``) become retryable
+:class:`LLMTransientError`; other ``4xx`` and non-JSON bodies become
 non-retryable :class:`LLMResponseError`.
 
 Error messages and the raised exception chain never include the request URL,
@@ -36,8 +37,9 @@ def post_json(
 
     Raises:
         LLMConfigurationError: ``url`` is not an ``http(s)`` URL.
-        LLMTransientError: timeout, connection failure, or a ``5xx`` response.
-        LLMResponseError: a ``4xx`` response or a non-JSON body.
+        LLMTransientError: timeout, connection failure, a ``5xx`` response, or
+            a rate-limit / server-side retry signal (``429``, ``408``, ``425``).
+        LLMResponseError: any other ``4xx`` response or a non-JSON body.
     """
 
     scheme = urllib.parse.urlsplit(url).scheme.lower()
@@ -62,7 +64,12 @@ def post_json(
         status = exc.code
         # Drain so the connection can be reused, but never surface the body.
         exc.read()
-        if status >= 500:
+        # 429 (Too Many Requests), 408 (Request Timeout), and 425 (Too Early)
+        # are server-side "try again" signals — semantically closer to a 5xx
+        # hiccup than to a deterministic client error. Everything else in 4xx
+        # (auth, not-found, bad-request) is a client error where retrying is
+        # pointless; those stay LLMResponseError.
+        if status >= 500 or status in (408, 425, 429):
             raise LLMTransientError(f"provider returned HTTP {status}") from None
         raise LLMResponseError(f"provider returned HTTP {status}") from None
     except (urllib.error.URLError, TimeoutError):

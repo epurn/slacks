@@ -142,12 +142,14 @@ never returned in responses. No bundled default key or default hosted provider.
 | Error | Meaning | Retryable |
 | --- | --- | --- |
 | `LLMConfigurationError` | Misconfiguration (no key, bad base URL scheme, image input with a non-vision model, or an unsupported image media type). | No |
-| `LLMTransientError` | Timeout, connection failure, or provider `5xx`. | Yes (bounded) |
-| `LLMResponseError` | `4xx`, non-JSON body, or missing expected fields. | No |
+| `LLMTransientError` | Timeout, connection failure, provider `5xx`, or rate-limit / retry signals (`429`, `408`, `425`). | Yes (bounded, with jittered exponential backoff) |
+| `LLMResponseError` | Other `4xx` (auth, bad-request, not-found), non-JSON body, or missing expected fields. | No |
 | `StructuredOutputValidationError` | Response failed schema validation. | No |
 
-Transient errors are retried up to `FATTY_LLM_MAX_RETRIES` additional attempts;
-once exhausted the last transient error propagates.
+Transient errors are retried up to `FATTY_LLM_MAX_RETRIES` additional attempts
+with a short jittered exponential backoff between each attempt (base 0.5 s, cap
+8 s, full-jitter). Once the retry budget is exhausted the last transient error
+propagates.
 
 ## Examples
 
