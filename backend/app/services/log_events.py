@@ -22,16 +22,16 @@ This module owns two contracts:
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, time
-from zoneinfo import ZoneInfo
+from datetime import date, datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.enums import LogEventStatus
-from app.models.identity import User, UserProfile
+from app.models.identity import User
 from app.models.log_events import LogEvent
+from app.timeutils import day_bounds_utc, user_timezone
 
 #: The log-event status state machine: each status maps to the set of statuses
 #: it may legally transition to. Terminal statuses map to an empty set. This is
@@ -157,10 +157,10 @@ def list_events_for_day(
     """
 
     _authorize(owner_id, current_user)
-    tz = _user_timezone(session, owner_id)
+    tz = user_timezone(session, owner_id)
     if day is None:
         day = datetime.now(tz).date()
-    start_utc, end_utc = _day_bounds_utc(day, tz)
+    start_utc, end_utc = day_bounds_utc(day, tz)
 
     return list(
         session.scalars(
@@ -233,31 +233,3 @@ def _find_by_key(session: Session, owner_id: uuid.UUID, idempotency_key: str) ->
             LogEvent.idempotency_key == idempotency_key,
         )
     ).one_or_none()
-
-
-def _user_timezone(session: Session, owner_id: uuid.UUID) -> ZoneInfo:
-    """Resolve the owner's display timezone, falling back to UTC.
-
-    Day windows for the Today timeline are computed in this zone. The profile is
-    created at registration with a validated IANA name, so this normally loads;
-    the UTC fallback keeps listing robust if a profile is somehow absent.
-    """
-
-    tz_name = session.scalars(
-        select(UserProfile.timezone).where(UserProfile.user_id == owner_id)
-    ).one_or_none()
-    return ZoneInfo(tz_name or "UTC")
-
-
-def _day_bounds_utc(day: date, tz: ZoneInfo) -> tuple[datetime, datetime]:
-    """Return the ``[start, end)`` UTC instants bounding ``day`` in ``tz``."""
-
-    start_local = datetime.combine(day, time.min, tzinfo=tz)
-    end_local = datetime.combine(_next_day(day), time.min, tzinfo=tz)
-    return start_local.astimezone(ZoneInfo("UTC")), end_local.astimezone(ZoneInfo("UTC"))
-
-
-def _next_day(day: date) -> date:
-    """Return the calendar day after ``day`` (avoids importing timedelta inline)."""
-
-    return date.fromordinal(day.toordinal() + 1)
