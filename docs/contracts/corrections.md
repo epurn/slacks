@@ -173,6 +173,16 @@ override is `true`. Computed at read time from the append-only audit trail, so i
 never drifts and needs no backfill. This flag is exposed per item on the
 Today/daily read-model — see `daily-summary.md`.
 
+> **Re-match is a third, distinct lever (FTY-093).** The "Change match" operation
+> re-resolves an item to a *different real source* (see
+> `evidence-retrieval.md` → **Item Re-match — FTY-093**). It is **not** a correction:
+> it writes **no** `corrections` row of either source, rewrites the item's
+> `evidence_sources` provenance to the new source, and **re-snapshots** `*_estimated`
+> to the newly computed values (deliberately diverging from the captured-once rule,
+> which governs `user_edit` overrides). Because it writes no `user_edit` row, a
+> re-matched item stays `is_edited == false` — its honesty comes from the new source,
+> not from a value override. Do not "fix" this back to `user_edit`.
+
 ## Validation
 
 - **Known field.** A field outside the editable set for the item type →

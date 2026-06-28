@@ -65,6 +65,12 @@ search-provider adapter, Brave default, disabled by default) without changing th
 contract; see **Search Provider Adapter (Brave) — FTY-079**. The six lookup-status
 values and the sanitized-query / header-only-key rules are exactly those fixed here.
 
+FTY-093 adds the **item re-match** capability (list alternative source matches +
+re-resolve an item to a chosen source) on top of the existing resolution pipeline,
+without changing the source hierarchy, the lookup-status vocabulary, the fallback
+rule, the normalized-fact schema, the serving math, or the `evidence_sources` record
+shape. It introduces **no** schema migration. See **Item Re-match — FTY-093**.
+
 ## Source Hierarchy
 
 The estimator selects the highest-preference applicable source and only falls
@@ -448,6 +454,144 @@ applicable) while a named/branded item USDA misses does.
   assumptions); the `status` lookup outcome continues to be surfaced via the run
   `source_refs` and the `source_type`.
 
+## Item Re-match — FTY-093
+
+The **item re-match** capability is the "Change match" lever of the correction sheet:
+a user whose entry matched the **wrong food** (Fatty heard "turkey", matched chicken)
+fixes it without delete-and-retype. It is two cohesive halves of one capability,
+layered on the resolution pipeline — a *list-alternatives* (read) operation and a
+*re-resolve-to-chosen-source* (write) operation. It is distinct from the **portion
+stepper** (FTY-092, which changes the *amount* and preserves the source) and from the
+**manual value override** (FTY-051, which marks the item `user_edited`): re-match
+changes the *source*.
+
+### Owner (additional)
+
+`backend/app/estimator/re_match.py` (the `ReMatchCapability` — listing, server-side
+candidate caching, re-resolve, evidence rewrite — plus the candidate-provider seam and
+`FdcClient.list_matches`), the thin backend operation
+(`backend/app/routers/re_match.py`, `backend/app/schemas/re_match.py`). It reuses the
+FTY-044 serving math, the `products` / `evidence_sources` split, the FTY-079
+`sanitize_query` chokepoint, and the FTY-092 read-model unchanged.
+
+### (a) List alternatives
+
+Given an existing `derived_food_items` row, the capability runs the existing
+resolution providers in a **list-candidates** mode that surfaces *multiple*
+energy-bearing matches (USDA FoodData Central beyond the resolver's first pick) rather
+than only the first. An optional **caller-supplied query override** (the corrected
+term, e.g. "turkey") re-aims the search to a different food; it is a single
+item-identity string that passes through the **same** `sanitize_query` chokepoint
+(FTY-079) — item identity only, control-stripped, length-bounded — so no profile,
+history, or metrics can egress. Each returned candidate carries its `source_type`, a
+stable `source_ref` (the opaque candidate id), a display name, the match `basis`
+(per-100g — providers canonicalise to per-100g during listing), and a compact facts
+preview (per-basis calories + macros). A non-schema-valid / energy-less (`partial`)
+match is **excluded** — it is not an offerable match. The list is **bounded** (the
+provider fan-out is capped by `FATTY_FDC_MAX_RESULTS`, and the aggregated result by a
+hard ceiling).
+
+Each surfaced candidate's facts are extracted/validated **server-side during listing**
+and cached into the global `products` cache, **addressable by `source_ref`** (a
+list-mode row is keyed by its `source_ref` so several candidates from one search never
+collide on the name-based `(source, query_key)` uniqueness). That cache is the **trust
+anchor** the write half re-derives from.
+
+> **v1 candidate source.** The implemented candidate provider is USDA FDC (name search,
+> multi-candidate) behind a provider seam. The optional official-source search-fallback
+> and barcode (OFF) participation plug into the same seam as additive providers; OFF is
+> barcode-keyed (single-result) and is not a name-alternative source.
+
+### (b) Re-resolve to a chosen source
+
+The write operation takes the existing item plus a **chosen candidate reference**
+(`source_ref`) — and **never** caller-supplied nutrition values — and re-aims the item:
+
+1. **Re-derive the chosen source's facts server-side** from that reference, by looking
+   it up in the global `products` cache (the listing step populated it). A reference
+   that does not resolve to a server-cached candidate is **rejected; nothing mutates**
+   (the client cannot inject facts, and re-resolve issues **no** fresh network egress).
+2. **Recompute at the current portion.** The item's current `amount` / quantity is kept
+   (the FTY-092 portion is the user's choice); `resolve_grams` runs against the new
+   source's `default_serving_g`, then `scale_facts` produces new `calories` / macros,
+   rounded 0.1 (the FTY-044 serving math, reused unchanged). If the new source cannot
+   cost the current quantity, the operation routes to **`needs_clarification`** rather
+   than fabricate a number (consistent with FTY-044 routing).
+3. **Rewrite provenance to the new source.** The item's `evidence_sources` row is
+   updated **in place** (`source_type`, `source_ref`, `content_hash`, `fetched_at`, the
+   immutable per-100g facts snapshot, `product_id` link, `assumptions`). The item keeps
+   its `id`, `log_event_id`, name slot, and timeline position.
+4. **Re-snapshot `*_estimated` to the newly computed values.** A re-match is a fresh
+   source-backed estimate, not a manual override, so the estimated/original snapshot is
+   **reset** to the new source's computed values and the item is **not** marked
+   `user_edited`.
+
+Re-resolve is **deterministic**: given the same cached facts, the same chosen reference
+yields the same recomputed item and provenance. The new source reaches the client
+through FTY-092's read-model (the existing item DTO) — re-match changes **no** DTO.
+
+### Re-match vs. `user_edit` (the honest-provenance crux)
+
+The corrections contract (`corrections.md`, FTY-051) snapshots `*_estimated` **exactly
+once** and marks any value change `user_edit`. That rule governs the **manual override**
+lever. A **re-match is a re-resolution to a different real source**, so it instead
+**re-snapshots** `*_estimated` to the new source's computed values and leaves the item
+**un-`user_edited`** — the provenance honestly reflects the new source. **A re-match
+writes no `user_edit` correction row** (and `is_edited` stays `false` for a re-matched
+item, per FTY-092). This distinction is deliberate: do **not** "fix" it back to
+`user_edit`. A dedicated re-match audit row is a candidate follow-up; in v1 the change
+of source is carried honestly by the rewritten `evidence_sources` provenance.
+
+### Backend operation (thin pass-through)
+
+The exposed operations are a **thin** pass-through to the estimator capability —
+request validation + object-level authz + delegate; all resolution, recompute, and
+persistence live in the estimator package:
+
+- `POST /api/users/{user_id}/derived-items/food/{item_id}/source-candidates` →
+  `{ candidates: [...] }` (optional `{ "query": "<override>" }` body).
+- `POST /api/users/{user_id}/derived-items/food/{item_id}/re-resolve` with
+  `{ "source_ref": "<chosen ref>" }` → the updated `DerivedFoodItemDTO`.
+
+The `re-resolve` request body is `extra="forbid"` over a single `source_ref` field, so
+a client cannot smuggle nutrition values through it.
+
+### Security / Authorization
+
+- **No new untrusted-input boundary.** Egress flows only through the existing hardened
+  source clients during the **listing** step; re-resolve performs **no** fetch. The
+  SSRF/egress and query-sanitization guarantees are inherited, not reintroduced.
+- **No personal-context egress.** The optional override and all provider queries are
+  item-identity only, through the `sanitize_query` chokepoint. A test proves no personal
+  context egresses on listing.
+- **Server never trusts client-supplied facts.** Re-resolve accepts a candidate
+  **reference** only and re-derives facts server-side; an un-re-derivable reference (or
+  any attempt to pass facts) is rejected with no mutation.
+- **Object-level authorization, fail-closed.** Both operations load the item scoped to
+  the owning user; a cross-user or unknown item is a `404` (no existence disclosure, no
+  mutation), matching the FTY-051 corrections posture.
+
+### Errors
+
+| Condition | Result |
+| --- | --- |
+| Cross-user / unknown item (either operation) | `404`, fail-closed, no mutation, no existence disclosure. |
+| Re-resolve reference not re-derivable (uncached) | `422` `{ "error": "source_not_resolvable" }`; nothing mutates. |
+| Re-resolve body carries facts / extra keys | `422` (request validation, `extra="forbid"`). |
+| New source cannot cost the current quantity | `422` `{ "error": "needs_clarification", "question": … }`; no fabricated number. |
+| Listing with no enabled candidate source | `200` with an empty candidate list. |
+
+### Examples (tests)
+
+`backend/tests/test_item_re_match.py` proves: multi-candidate USDA listing (beyond the
+first energy-bearing match) with a query override and the per-`source_ref` candidate
+cache; listing egresses only the sanitized item identity; `FdcClient.list_matches`
+excludes energy-less results; re-resolve recompute + provenance rewrite + `*_estimated`
+re-snapshot + not-`user_edited` + no `user_edit` row + determinism; identity / portion
+preserved; an un-re-derivable reference and client-supplied facts rejected with no
+mutation; needs-clarification when uncostable; and cross-user / unknown / unauthenticated
+fail-closed.
+
 ## Migration / Compatibility
 
 - This contract is **additive documentation**; it introduces no schema or code
@@ -484,3 +628,14 @@ applicable) while a named/branded item USDA misses does.
   (`0012` migration). It does not redefine the hierarchy, the status vocabulary, or the
   fallback rule; it fixes the pipeline ordering (official source last before
   model-prior). See `food-resolution.md` (**Official-Source Resolution**).
+- FTY-093 adds the **item re-match** capability (`re_match.py` + the thin
+  `re-match` router/schemas) and `FdcClient.list_matches`. It is additive with **no
+  schema migration**: re-resolve is an in-place `UPDATE` of the existing
+  `derived_food_items` resolution columns, its `evidence_sources` row, and the
+  `*_estimated` columns; surfaced candidates are cached as ordinary `products` rows
+  (keyed by `source_ref`). It reuses the source hierarchy, lookup-status vocabulary,
+  fallback rule, normalized-fact schema, serving math, the `sanitize_query` chokepoint,
+  and the FTY-092 read-model unchanged. It deliberately diverges from the FTY-051
+  captured-once rule: a re-match re-snapshots `*_estimated` and is **not** `user_edit`
+  (see **Item Re-match — FTY-093**). The provenance read-model dependency is enforced by
+  the steward (FTY-093 ships after FTY-092).

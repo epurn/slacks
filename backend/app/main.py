@@ -22,6 +22,7 @@ from app.routers import (
     health,
     log_events,
     profile,
+    re_match,
     saved_foods,
     weight_entries,
 )
@@ -63,6 +64,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
     app.include_router(profile.router)
     app.include_router(log_events.router)
     app.include_router(corrections.router)
+    app.include_router(re_match.router)
     app.include_router(saved_foods.router)
     app.include_router(daily_summary.router)
     app.include_router(weight_entries.router)
