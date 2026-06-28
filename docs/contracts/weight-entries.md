@@ -32,6 +32,7 @@ backend-core / contracts lane (`backend/app/models/weight_entries.py`,
 ## Version
 
 1 (FTY-070): introduces the `weight_entries` table and the create/list/delete API.
+2 (FTY-119): tightens the accepted range of `effective_date` — see Validation below.
 
 ## Inputs
 
@@ -109,7 +110,10 @@ consumer all agree on the same factor.
   same bounds used by the profile `weight_kg` field); values outside the
   post-conversion range are rejected with `422`.
 - `effective_date`: a valid `YYYY-MM-DD` calendar date; malformed strings are
-  rejected with `422`.
+  rejected with `422`. The accepted range is `[1900-01-01, today-in-user-tz + 1 day]`
+  where "today" is resolved in the user's profile timezone (falling back to UTC).
+  The +1 day slack absorbs clock/timezone skew between the client and the server's
+  resolved "today". Dates before the floor or beyond the slack are rejected with `422`.
 - Range params (`from` / `to`): valid `YYYY-MM-DD` dates; when both are
   provided, `from` must be on or before `to`; violation returns `422`.
 - Unknown request-body keys are rejected with `422` (`extra="forbid"`).
@@ -143,7 +147,7 @@ consumer all agree on the same factor.
 | --- | --- |
 | `401` | Missing/invalid/expired bearer token. |
 | `404` | Creating, listing, or deleting entries for an account the caller does not own; a delete whose entry does not exist or belongs to another user (fail closed). |
-| `422` | Non-positive weight, post-conversion weight outside `(0, 1000]` kg, malformed date, inverted range (`from > to`), unknown body key. |
+| `422` | Non-positive weight, post-conversion weight outside `(0, 1000]` kg, malformed date, `effective_date` before `1900-01-01` or after today-in-user-tz + 1 day, inverted range (`from > to`), unknown body key. |
 
 ## Examples
 

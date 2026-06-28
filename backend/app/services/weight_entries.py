@@ -19,7 +19,8 @@ This module owns two contracts:
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -34,6 +35,14 @@ _LB_TO_KG: float = 0.45359237
 #: Upper bound of plausible body weight in canonical kg (mirrors profile validation).
 _MAX_WEIGHT_KG: float = 1000.0
 
+#: Earliest accepted effective_date — rejects absurd past typos while leaving any
+#: realistic historical backfill untouched.
+_DATE_FLOOR: date = date(1900, 1, 1)
+
+#: How many days ahead of "today in the user's timezone" we accept — absorbs
+#: clock/tz skew between the client and the server's resolved "today".
+_DATE_SLACK_DAYS: int = 1
+
 
 class WeightEntryForbidden(Exception):
     """Raised when a caller tries to access weight entries they do not own."""
@@ -45,6 +54,13 @@ class WeightEntryNotFound(Exception):
 
 class InvalidWeightValue(Exception):
     """Raised when the canonical kg weight is outside the plausible (0, 1000] range."""
+
+
+class InvalidWeightDate(Exception):
+    """Raised when effective_date is outside the accepted range.
+
+    The accepted range is [1900-01-01, today-in-user-tz + 1 day slack].
+    """
 
 
 def lb_to_kg(weight_lb: float) -> float:
@@ -87,6 +103,17 @@ def create_entry(
     """
 
     _authorize(owner_id, current_user)
+    tz = _user_timezone(session, owner_id)
+    today = datetime.now(tz).date()
+    if effective_date < _DATE_FLOOR:
+        raise InvalidWeightDate(
+            f"effective_date must be on or after {_DATE_FLOOR}; got {effective_date}"
+        )
+    if effective_date > today + timedelta(days=_DATE_SLACK_DAYS):
+        raise InvalidWeightDate(
+            f"effective_date must be on or before today in the user's timezone"
+            f" (+{_DATE_SLACK_DAYS} day slack); got {effective_date}"
+        )
     units = _user_units_preference(session, owner_id)
     weight_kg = to_canonical_kg(weight, units)
     if weight_kg <= 0 or weight_kg > _MAX_WEIGHT_KG:
@@ -166,3 +193,17 @@ def _user_units_preference(session: Session, owner_id: uuid.UUID) -> str:
         select(UserProfile.units_preference).where(UserProfile.user_id == owner_id)
     ).one_or_none()
     return pref or UnitsPreference.METRIC
+
+
+def _user_timezone(session: Session, owner_id: uuid.UUID) -> ZoneInfo:
+    """Resolve the owner's profile timezone, falling back to UTC.
+
+    Mirrors the same resolver used by daily_summary and targets so "today" is
+    always interpreted in the user's local calendar. The UTC fallback keeps
+    creates robust if a profile is somehow absent.
+    """
+
+    tz_name = session.scalars(
+        select(UserProfile.timezone).where(UserProfile.user_id == owner_id)
+    ).one_or_none()
+    return ZoneInfo(tz_name or "UTC")
