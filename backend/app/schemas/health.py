@@ -15,3 +15,14 @@ class HealthStatus(BaseModel):
     """
 
     status: Literal["ok"] = "ok"
+
+
+class ReadinessStatus(BaseModel):
+    """Response body for ``GET /readyz``.
+
+    Reports DB reachability: ``{"status": "ready"}`` when the database answers
+    a ``SELECT 1`` probe. A DB-down path returns a generic ``503`` with no
+    internal detail; this body is only returned on the ``200`` path.
+    """
+
+    status: Literal["ready"] = "ready"
