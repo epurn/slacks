@@ -22,15 +22,36 @@ export type DerivedItemStatus = "unresolved" | "resolved";
 export type DerivedItemType = "food" | "exercise";
 
 /**
+ * Per-item provenance source descriptor (FTY-092).
+ * Derived server-side from the item's evidence_sources row; null when no
+ * evidence record exists (defensive) and on exercise items.
+ */
+export interface ItemSourceDTO {
+  /**
+   * Evidence hierarchy type from evidence-retrieval.md.
+   * `model_prior` signals the "≈ rough estimate · make it exact" treatment.
+   */
+  readonly source_type:
+    | "trusted_nutrition_database"
+    | "product_database"
+    | "official_source"
+    | "user_label"
+    | "model_prior";
+  /** Display-ready label (e.g. "USDA", "Open Food Facts", "Label scan", "Rough estimate"). */
+  readonly label: string;
+  /** Stable source reference (e.g. "usda_fdc:168880", "open_food_facts:barcode"). */
+  readonly ref: string;
+}
+
+/**
  * Edit response for a food item: the editable current values plus the immutable
  * estimated/original snapshot the backend preserves. `amount` is the current
  * servings/quantity (driven by a `quantity` edit); there is no estimated
  * snapshot for it, since quantity is an input that drives the rescale, not a
  * snapshotted estimator output.
  *
- * `source` is a client-side annotation set to `'saved_food'` when the item's
- * values were applied from a saved food via the typeahead (FTY-053). The
- * backend does not return this field; it is never undefined for API-sourced items.
+ * FTY-092 adds `source` (provenance descriptor, server-derived) and `is_edited`
+ * (true iff a direct value-override correction has been applied).
  */
 export interface DerivedFoodItemDTO {
   readonly item_type: "food";
@@ -53,8 +74,10 @@ export interface DerivedFoodItemDTO {
   readonly fat_g_estimated: number | null;
   readonly created_at: string;
   readonly updated_at: string;
-  /** Client-only: set to `'saved_food'` when values came from a typeahead selection (FTY-053). */
-  readonly source?: "saved_food";
+  /** FTY-092 provenance descriptor; null when no evidence record exists (defensive). */
+  readonly source?: ItemSourceDTO | null;
+  /** FTY-092: true iff a direct value-override correction has been applied. */
+  readonly is_edited?: boolean;
 }
 
 /** Edit response for an exercise item: current burn plus the original snapshot. */
@@ -72,6 +95,10 @@ export interface DerivedExerciseItemDTO {
   readonly active_calories_estimated: number | null;
   readonly created_at: string;
   readonly updated_at: string;
+  /** FTY-092 provenance source; always null for exercise items (burn from MET tables). */
+  readonly source?: null;
+  /** FTY-092: true iff a direct value-override correction (burn override) has been applied. */
+  readonly is_edited?: boolean;
 }
 
 /** A derived food or exercise item, discriminated by `item_type`. */
