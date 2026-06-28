@@ -2,11 +2,74 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from unittest.mock import MagicMock
+
 from fastapi.testclient import TestClient
+
+from app.db import get_session
 
 
 def test_healthz_returns_ok(client: TestClient) -> None:
     response = client.get("/healthz")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_readyz_returns_ready_when_db_reachable(client: TestClient) -> None:
+    response = client.get("/readyz")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready"}
+
+
+def test_readyz_returns_503_when_db_fails(client: TestClient) -> None:
+    def broken_session() -> Iterator[MagicMock]:
+        session = MagicMock()
+        session.execute.side_effect = Exception("connection refused: host=db.internal")
+        yield session
+
+    client.app.dependency_overrides[get_session] = broken_session  # type: ignore[attr-defined]
+    try:
+        response = client.get("/readyz")
+    finally:
+        del client.app.dependency_overrides[get_session]  # type: ignore[attr-defined]
+
+    assert response.status_code == 503
+    assert response.status_code != 500
+    body_text = response.text
+    # The 503 must contain no internal detail — no exception message, host, DSN, or trace.
+    assert "connection refused" not in body_text
+    assert "db.internal" not in body_text
+    assert "traceback" not in body_text.lower()
+    assert response.json()["detail"] == "not ready"
+
+
+def test_readyz_and_healthz_are_independent(client: TestClient) -> None:
+    """Liveness and readiness are separate routes with distinct bodies."""
+
+    liveness = client.get("/healthz")
+    readiness = client.get("/readyz")
+
+    assert liveness.json() == {"status": "ok"}
+    assert readiness.json() == {"status": "ready"}
+    assert liveness.json() != readiness.json()
+
+
+def test_healthz_never_touches_db(client: TestClient) -> None:
+    """GET /healthz must return 200 even when the DB session is broken."""
+
+    def broken_session() -> Iterator[MagicMock]:
+        session = MagicMock()
+        session.execute.side_effect = Exception("db down")
+        yield session
+
+    client.app.dependency_overrides[get_session] = broken_session  # type: ignore[attr-defined]
+    try:
+        response = client.get("/healthz")
+    finally:
+        del client.app.dependency_overrides[get_session]  # type: ignore[attr-defined]
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
