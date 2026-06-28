@@ -26,6 +26,7 @@ from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.enums import LogEventStatus
@@ -77,21 +78,68 @@ def is_legal_transition(current: LogEventStatus, target: LogEventStatus) -> bool
 
 
 def create_event(
-    session: Session, owner_id: uuid.UUID, current_user: User, raw_text: str
-) -> LogEvent:
-    """Create a ``pending`` log event for ``owner_id``, enforcing ownership.
+    session: Session,
+    owner_id: uuid.UUID,
+    current_user: User,
+    raw_text: str,
+    idempotency_key: str | None = None,
+) -> tuple[LogEvent, bool]:
+    """Create — or idempotently replay — a ``pending`` log event for ``owner_id``.
 
     ``raw_text`` is the already-validated, trimmed user input (see the create
     DTO). The event starts at :attr:`~app.enums.LogEventStatus.PENDING`; the
     estimator (Milestone 4) advances it later.
+
+    Returns ``(event, created)``. ``created`` is :data:`True` for a fresh insert
+    and :data:`False` for an idempotent replay, so the router enqueues the
+    estimation job **only** on a fresh create and signals ``201`` vs ``200``.
+
+    Idempotency (FTY-096) is **first-write-wins**, keyed per user:
+
+    - **No ``idempotency_key``** → always a fresh ``pending`` event (the original
+      behaviour; back-compatible).
+    - **Key supplied, no event yet for ``(owner_id, key)``** → create it, store
+      the key, return ``(event, True)``.
+    - **Key supplied, an event already exists** → return that existing event at
+      its current status, create no row, return ``(event, False)``. A divergent
+      ``raw_text`` on the replay is ignored — the stored event is authoritative.
+
+    The create path is race-safe: two concurrent same-key submits collide on the
+    ``(user_id, idempotency_key)`` unique index; the loser catches the integrity
+    violation, re-reads the now-committed sibling, and returns it as a replay —
+    never a ``500``, never a duplicate.
     """
 
     _authorize(owner_id, current_user)
-    event = LogEvent(user_id=owner_id, raw_text=raw_text, status=LogEventStatus.PENDING)
+
+    if idempotency_key is not None:
+        existing = _find_by_key(session, owner_id, idempotency_key)
+        if existing is not None:
+            return existing, False
+
+    event = LogEvent(
+        user_id=owner_id,
+        raw_text=raw_text,
+        status=LogEventStatus.PENDING,
+        idempotency_key=idempotency_key,
+    )
     session.add(event)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        # A concurrent same-key submit committed first and won the unique index.
+        # Re-read its event and return it as the idempotent replay. A no-key
+        # create cannot hit this index, so re-raise anything unexpected.
+        session.rollback()
+        if idempotency_key is None:
+            raise
+        existing = _find_by_key(session, owner_id, idempotency_key)
+        if existing is None:
+            raise
+        return existing, False
+
     session.refresh(event)
-    return event
+    return event, True
 
 
 def list_events_for_day(
@@ -170,6 +218,21 @@ def _authorize(owner_id: uuid.UUID, current_user: User) -> None:
 
     if owner_id != current_user.id:
         raise LogEventForbidden("cross-user log-event access denied")
+
+
+def _find_by_key(session: Session, owner_id: uuid.UUID, idempotency_key: str) -> LogEvent | None:
+    """Return ``owner_id``'s event for ``idempotency_key``, or ``None``.
+
+    The lookup is scoped to ``owner_id`` so the key namespace is per-user: one
+    user's key can never address another user's event (FTY-096 security).
+    """
+
+    return session.scalars(
+        select(LogEvent).where(
+            LogEvent.user_id == owner_id,
+            LogEvent.idempotency_key == idempotency_key,
+        )
+    ).one_or_none()
 
 
 def _user_timezone(session: Session, owner_id: uuid.UUID) -> ZoneInfo:
