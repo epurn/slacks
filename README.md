@@ -77,6 +77,14 @@ API_PORT=8001          # default 8000
 
 Open `.env` and configure any providers you want:
 - **LLM:** set `FATTY_LLM_PROVIDER`, `FATTY_LLM_API_KEY`, and `FATTY_LLM_MODEL`. Leave `FATTY_LLM_PROVIDER=fake` to skip.
+  - **Zero-cost local option:** run [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), or [vLLM](https://github.com/vllm-project/vllm) locally, then set:
+    ```
+    FATTY_LLM_PROVIDER=openai_compatible
+    FATTY_LLM_BASE_URL=http://localhost:11434/v1   # Ollama default; adjust for LM Studio / vLLM
+    FATTY_LLM_MODEL=<your loaded model name>
+    # No FATTY_LLM_API_KEY needed — local runtimes don't authenticate
+    ```
+    This uses the same OpenAI Chat Completions wire format these runtimes expose locally, with no API key and no per-token billing.
 - **USDA FDC:** set `FATTY_FDC_API_KEY` with your free data.gov key. Omit to skip generic-food lookups.
 - **Open Food Facts:** enabled by default (no key needed). Set `FATTY_OFF_ENABLED=false` to disable.
 - **Brave Search:** set `FATTY_SEARCH_API_KEY` and `FATTY_SEARCH_ENABLED=true`. Disabled by default.

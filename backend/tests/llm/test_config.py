@@ -150,3 +150,47 @@ def test_api_key_is_not_exposed_in_repr_or_str() -> None:
     assert "sk-super-secret" not in repr(settings)
     assert "sk-super-secret" not in str(settings)
     assert "sk-super-secret" not in settings.model_dump_json()
+
+
+# ---------------------------------------------------------------------------
+# FTY-089: Keyless openai_compatible path
+# ---------------------------------------------------------------------------
+
+
+def test_openai_compatible_loads_without_key() -> None:
+    # A keyless local endpoint (Ollama/LM Studio/vLLM) must validate cleanly
+    # when base_url and model are present but no api_key is supplied.
+    settings = LLMSettings(
+        provider="openai_compatible",
+        model="llama3",
+        base_url="http://localhost:11434/v1",
+    )
+
+    assert settings.provider == "openai_compatible"
+    assert settings.api_key is None
+    assert settings.model == "llama3"
+    assert settings.resolved_base_url() == "http://localhost:11434/v1"
+
+
+def test_openai_compatible_keyless_missing_base_url_fails() -> None:
+    # base_url is still required even when no key is present — fail closed.
+    with pytest.raises(ValidationError):
+        LLMSettings(provider="openai_compatible", model="llama3")
+
+
+def test_openai_compatible_keyless_missing_model_fails() -> None:
+    # model is still required even when no key is present — fail closed.
+    with pytest.raises(ValidationError):
+        LLMSettings(provider="openai_compatible", base_url="http://localhost:11434/v1")
+
+
+def test_openai_keyless_still_fails() -> None:
+    # Keyless openai must still be rejected — only openai_compatible may run keyless.
+    with pytest.raises(ValidationError):
+        LLMSettings(provider="openai", model="gpt-4o-mini")
+
+
+def test_anthropic_keyless_still_fails() -> None:
+    # Keyless anthropic must still be rejected — only openai_compatible may run keyless.
+    with pytest.raises(ValidationError):
+        LLMSettings(provider="anthropic", model="claude-3-5-haiku-20241022")

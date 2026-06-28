@@ -128,6 +128,62 @@ def test_key_and_prompt_never_logged(
     assert "SENSITIVE_FOOD" not in caplog.text
 
 
+# ---------------------------------------------------------------------------
+# FTY-089: Keyless openai_compatible path
+# ---------------------------------------------------------------------------
+
+
+def _keyless_provider() -> OpenAIProvider:
+    return OpenAIProvider(
+        api_key=None,
+        model="llama3",
+        base_url="http://localhost:11434/v1",
+        timeout_seconds=5.0,
+        max_retries=0,
+    )
+
+
+def test_keyless_sends_no_authorization_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A keyless adapter must not emit an Authorization header — not even
+    # "Bearer " with an empty value.
+    captured: dict[str, Any] = {}
+
+    def fake_post_json(
+        url: str, *, headers: dict[str, str], payload: dict[str, Any], timeout_seconds: float
+    ) -> dict[str, Any]:
+        captured["headers"] = headers
+        return openai_completion(json.dumps({"name": "apple", "calories": 95}))
+
+    monkeypatch.setattr(transport, "post_json", fake_post_json)
+
+    _keyless_provider().structured_completion("an apple", Candidate)
+
+    assert "Authorization" not in captured["headers"]
+
+
+def test_keyed_openai_compatible_sends_bearer_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Regression guard: a keyed openai_compatible adapter still sends Bearer <key>.
+    captured: dict[str, Any] = {}
+
+    def fake_post_json(
+        url: str, *, headers: dict[str, str], payload: dict[str, Any], timeout_seconds: float
+    ) -> dict[str, Any]:
+        captured["headers"] = headers
+        return openai_completion(json.dumps({"name": "apple", "calories": 95}))
+
+    monkeypatch.setattr(transport, "post_json", fake_post_json)
+
+    OpenAIProvider(
+        api_key="sk-keyed-compat",
+        model="llama3",
+        base_url="http://localhost:11434/v1",
+        timeout_seconds=5.0,
+        max_retries=0,
+    ).structured_completion("an apple", Candidate)
+
+    assert captured["headers"]["Authorization"] == "Bearer sk-keyed-compat"
+
+
 def test_transient_error_logging_is_sanitized(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

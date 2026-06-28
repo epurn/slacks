@@ -15,10 +15,12 @@ estimator lane (`backend/app/llm/`).
 
 ## Version
 
-3 (`claude_code` subscription provider added in FTY-087; image input added in
-FTY-076; v1 introduced in FTY-041). v3 is **backward-compatible**: it only adds a
-new opt-in `FATTY_LLM_PROVIDER` value — every existing provider, env var, and the
-`structured_completion` signature behave exactly as before.
+4 (keyless `openai_compatible` path added in FTY-089; `claude_code` subscription
+provider added in FTY-087; image input added in FTY-076; v1 introduced in
+FTY-041). v4 is **backward-compatible**: `FATTY_LLM_API_KEY` is now optional for
+`openai_compatible` (keyless local endpoints — Ollama/LM Studio/vLLM) while
+remaining required for `openai` and `anthropic`; every other env var and the
+`structured_completion` signature are unchanged.
 
 ## Inputs
 
@@ -60,16 +62,30 @@ Provider configuration is read from `FATTY_LLM_`-prefixed environment variables:
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `FATTY_LLM_PROVIDER` | `fake` | One of `openai`, `anthropic`, `openai_compatible`, `claude_code`, `fake`. |
-| `FATTY_LLM_API_KEY` | _(none)_ | Required for `openai`/`anthropic`/`openai_compatible`. **Not required (and unused) for `claude_code`** — it authenticates via the local Claude Code session. Secret; env/secret-manager only. |
+| `FATTY_LLM_API_KEY` | _(none)_ | Required for `openai`/`anthropic`. **Optional for `openai_compatible`** — a keyless local endpoint (Ollama/LM Studio/vLLM) requires no authentication; when absent no `Authorization` header is sent. **Not required (and unused) for `claude_code`** — it authenticates via the local Claude Code session. Secret; env/secret-manager only. |
 | `FATTY_LLM_MODEL` | _(empty)_ | Required for `openai`/`anthropic`/`openai_compatible` (e.g. `gpt-4o-mini`, `claude-3-5-sonnet`). **Optional for `claude_code`** — Claude Code picks the model from the session/plan; a supplied value is passed through to the invocation. |
 | `FATTY_LLM_BASE_URL` | provider default | Required for `openai_compatible`; overrides the default OpenAI/Anthropic base. |
 | `FATTY_LLM_TIMEOUT_SECONDS` | `30` | Per-attempt wall-clock timeout (0–600). Tunable. |
 | `FATTY_LLM_MAX_RETRIES` | `2` | Additional attempts after the first, on transient failures only (0–10). Tunable. |
 | `FATTY_LLM_SUPPORTS_VISION` | `false` | Declares the configured model as vision-capable. Required to be `true` before `images` may be supplied; otherwise image input fails fast. |
 
-Invalid or inconsistent configuration (an `openai`/`anthropic`/`openai_compatible`
-provider with no key/model, or `openai_compatible` with no base URL) fails fast at
-load with a `ValidationError`. `claude_code` requires neither a key nor a model.
+Invalid or inconsistent configuration fails fast at load with a `ValidationError`:
+`openai`/`anthropic` without a key or model; `openai_compatible` without a base URL
+or model (the key is optional for `openai_compatible` — a keyless local endpoint is
+the intended use case). `claude_code` requires neither a key nor a model.
+
+### `openai_compatible` keyless (local / LAN — zero per-token cost)
+
+`FATTY_LLM_PROVIDER=openai_compatible` with no `FATTY_LLM_API_KEY` is the
+intended path for a **local or LAN model runtime** — Ollama, LM Studio, or vLLM.
+These runtimes expose the OpenAI Chat Completions wire format locally and require no
+authentication. Set `FATTY_LLM_BASE_URL` to your runtime's endpoint (e.g.
+`http://localhost:11434/v1` for Ollama) and `FATTY_LLM_MODEL` to the loaded model
+name; leave `FATTY_LLM_API_KEY` unset. The adapter sends no `Authorization` header.
+
+The existing base-URL scheme expectations (SSRF/egress posture) are unchanged;
+keyless only affects whether an `Authorization` header is emitted — it does not
+relax which URLs are reachable.
 
 ### `claude_code` (subscription, no per-token billing)
 
@@ -173,6 +189,12 @@ result = provider.structured_completion(
   variable, and the `structured_completion` signature are unchanged. The only
   relaxation is scoped to `claude_code`: it needs no key and its model is
   optional.
+- **v4 is backward-compatible.** `FATTY_LLM_API_KEY` becomes optional for
+  `openai_compatible` only (keyless local endpoints — Ollama/LM Studio/vLLM).
+  `openai` and `anthropic` still require a key; `openai_compatible` still requires
+  `FATTY_LLM_BASE_URL` and `FATTY_LLM_MODEL`; all other variables and the
+  `structured_completion` signature are unchanged. A keyed `openai_compatible`
+  deployment continues to work exactly as in v3.
 - Per-provider structured-output mechanics (OpenAI JSON-schema `response_format`
   vs. Anthropic forced tool use) and multimodal mechanics (OpenAI `image_url`
   content parts vs. Anthropic base64 `image` blocks) are implementation details

@@ -32,7 +32,7 @@ class OpenAIProvider(Provider):
     def __init__(
         self,
         *,
-        api_key: str,
+        api_key: str | None,
         model: str,
         base_url: str,
         timeout_seconds: float,
@@ -69,9 +69,14 @@ class OpenAIProvider(Provider):
                 },
             },
         }
+        # When no key is configured (keyless local endpoint), omit the header
+        # entirely — never send "Bearer " with an empty value.
+        headers: dict[str, str] = {}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
         response = transport.post_json(
             f"{self._base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {self._api_key}"},
+            headers=headers,
             payload=payload,
             timeout_seconds=timeout_seconds,
         )

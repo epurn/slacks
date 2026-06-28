@@ -42,15 +42,13 @@ def build_provider(settings: LLMSettings) -> Provider:
             max_retries=settings.max_retries,
         )
 
-    # Guaranteed non-None by LLMSettings validation for non-fake providers; the
-    # guard keeps the type checker honest and fails closed if that ever changes.
-    if settings.api_key is None:
-        raise LLMConfigurationError(f"provider {settings.provider!r} requires an API key")
-    api_key = settings.api_key.get_secret_value()
-
     if settings.provider == "anthropic":
+        # Anthropic always requires a key; config.py already enforces this, but
+        # the guard keeps the type checker honest and fails closed if that changes.
+        if settings.api_key is None:
+            raise LLMConfigurationError("provider 'anthropic' requires an API key")
         return AnthropicProvider(
-            api_key=api_key,
+            api_key=settings.api_key.get_secret_value(),
             model=settings.model,
             base_url=settings.resolved_base_url(),
             timeout_seconds=settings.timeout_seconds,
@@ -59,7 +57,10 @@ def build_provider(settings: LLMSettings) -> Provider:
         )
 
     # "openai" and "openai_compatible" share the Chat Completions wire format;
-    # they differ only in the configured base URL.
+    # they differ only in the configured base URL. openai_compatible may run
+    # keyless (local endpoint — Ollama, LM Studio, vLLM), so api_key may be None;
+    # the adapter omits the Authorization header when no key is provided.
+    api_key: str | None = settings.api_key.get_secret_value() if settings.api_key else None
     return OpenAIProvider(
         api_key=api_key,
         model=settings.model,

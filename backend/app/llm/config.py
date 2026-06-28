@@ -81,12 +81,22 @@ class LLMSettings(BaseModel):
             # meaningless and the model is optional. A supplied model is honored
             # (passed through to the invocation); a supplied key is simply unused.
             return self
+        if self.provider == "openai_compatible":
+            # A keyless local endpoint (Ollama, LM Studio, vLLM) requires no API key
+            # — authentication is either absent or handled out-of-band by the runtime.
+            # The base URL and model are still required: without them the adapter has
+            # nowhere to connect and nothing to ask for, so missing either is a
+            # fail-closed misconfiguration.
+            if not self.base_url:
+                raise ValueError("provider 'openai_compatible' requires FATTY_LLM_BASE_URL")
+            if not self.model:
+                raise ValueError("provider 'openai_compatible' requires FATTY_LLM_MODEL")
+            return self
+        # All other non-fake providers (openai, anthropic) require both a key and a model.
         if self.api_key is None or not self.api_key.get_secret_value():
             raise ValueError(f"provider {self.provider!r} requires FATTY_LLM_API_KEY")
         if not self.model:
             raise ValueError(f"provider {self.provider!r} requires FATTY_LLM_MODEL")
-        if self.provider == "openai_compatible" and not self.base_url:
-            raise ValueError("provider 'openai_compatible' requires FATTY_LLM_BASE_URL")
         return self
 
     def resolved_base_url(self) -> str:

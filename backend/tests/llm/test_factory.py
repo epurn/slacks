@@ -87,3 +87,18 @@ def test_supports_vision_defaults_off_on_provider() -> None:
     provider = build_provider(settings)
 
     assert provider._supports_vision is False
+
+
+def test_openai_compatible_keyless_builds_provider() -> None:
+    # A keyless openai_compatible config (no api_key) must build an OpenAIProvider
+    # without raising — the factory must not hard-fail on None api_key for this provider.
+    settings = LLMSettings(
+        provider="openai_compatible",
+        model="llama3",
+        base_url="http://localhost:11434/v1",
+    )
+
+    provider = build_provider(settings)
+
+    assert isinstance(provider, OpenAIProvider)
+    assert provider._api_key is None
