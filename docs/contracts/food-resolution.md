@@ -514,12 +514,18 @@ fallback; and no direct egress. `tests/test_food_migration.py` applies/rolls bac
 
 ## Liveness & Diagnostics
 
-The backend exposes three health-check endpoints, all returning structured JSON with no external calls:
+The backend exposes four health-check endpoints, all returning structured JSON with no external calls:
 
 - **`GET /healthz`** — liveness probe. Returns `{"status": "ok"}` (200) whenever the
   API process is running and able to serve requests; it performs no readiness checks
   (no database or queue probe). Used by health checks and orchestration (Kubernetes,
   Docker Compose, monitoring).
+- **`GET /readyz`** — readiness probe. Runs a cheap `SELECT 1` through the
+  request-scoped database session and returns `{"status": "ready"}` (200) when the
+  database answers. Any database failure is caught and converted to a deliberate
+  `503 {"detail": "not ready"}` with a generic body — no stack trace, driver message,
+  DSN, or host is surfaced. Distinct from `/healthz` so orchestration can gate traffic
+  on database reachability without coupling it to liveness.
 - **`GET /healthz/sources`** — evidence source capability descriptor. Returns each
   configured source's `id`, `source_type`, `kinds` (e.g. `["generic_food"]`,
   `["barcode"]`), `enabled`, and `available` (matches the configuration and any
