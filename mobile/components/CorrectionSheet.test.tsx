@@ -213,6 +213,18 @@ describe("provenance block", () => {
     expect(labels.some((l) => l.includes("USDA"))).toBe(true);
   });
 
+  it("shows the source label exactly once — never duplicated as 'USDA · USDA'", () => {
+    const tree = mount(<CorrectionSheet {...defaultProps()} />);
+    const texts = tree.root
+      .findAll((n) => typeof n.props.children === "string")
+      .map((n) => n.props.children as string);
+    // The provenance line must read the label once; the glyph already carries
+    // the source type, so a repeated "USDA · USDA" is a visible defect.
+    expect(texts).toContain("USDA");
+    expect(texts.some((t) => /USDA\b.*\bUSDA/.test(t))).toBe(false);
+    expect(texts.some((t) => t.includes("·"))).toBe(false);
+  });
+
   it("renders the user's original phrase quoted", () => {
     const tree = mount(
       <CorrectionSheet {...defaultProps()} logPhrase="a piece of turkey" />,
@@ -334,13 +346,62 @@ describe("change-match flow", () => {
     expect(allText(tree)).toContain("Turkey breast, roasted");
   });
 
-  it("calls listCandidates with the typed query when user searches", async () => {
-    const listCandidates = jest.fn().mockResolvedValue([]);
-    const tree = mount(<CorrectionSheet {...defaultProps({ listCandidates })} />);
-    await pressAsync(tree, "Change match");
-    typeInto(tree, "Search for a food", "chicken");
-    await act(async () => {});
-    expect(listCandidates).toHaveBeenCalledWith(SESSION, "food-1", "chicken");
+  it("debounces keystrokes into a single search request for the final query", async () => {
+    jest.useFakeTimers();
+    try {
+      const listCandidates = jest.fn().mockResolvedValue([]);
+      const tree = mount(<CorrectionSheet {...defaultProps({ listCandidates })} />);
+      await pressAsync(tree, "Change match"); // immediate initial load
+      listCandidates.mockClear();
+
+      typeInto(tree, "Search for a food", "c");
+      typeInto(tree, "Search for a food", "ch");
+      typeInto(tree, "Search for a food", "chicken");
+      // Within the debounce window no request has fired yet — no per-keystroke fan-out.
+      expect(listCandidates).not.toHaveBeenCalled();
+
+      await act(async () => {
+        jest.advanceTimersByTime(300);
+      });
+      expect(listCandidates).toHaveBeenCalledTimes(1);
+      expect(listCandidates).toHaveBeenCalledWith(SESSION, "food-1", "chicken");
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("ignores a stale earlier response that resolves after a newer query", async () => {
+    jest.useFakeTimers();
+    try {
+      const listCandidates = jest.fn().mockResolvedValue([]);
+      const tree = mount(<CorrectionSheet {...defaultProps({ listCandidates })} />);
+      await pressAsync(tree, "Change match"); // initial load resolves []
+
+      // The first typed query ("a") hangs; the second ("ab") resolves immediately.
+      let resolveStale: ((v: readonly SourceCandidate[]) => void) | undefined;
+      listCandidates.mockImplementationOnce(
+        () => new Promise((resolve) => { resolveStale = resolve; }),
+      );
+      listCandidates.mockImplementationOnce(() =>
+        Promise.resolve([candidate({ name: "Fresh match", source_ref: "usda_fdc:fresh" })]),
+      );
+
+      typeInto(tree, "Search for a food", "a");
+      await act(async () => { jest.advanceTimersByTime(300); }); // fires "a" (pending)
+      typeInto(tree, "Search for a food", "ab");
+      await act(async () => { jest.advanceTimersByTime(300); }); // fires "ab" → Fresh match
+
+      expect(allText(tree)).toContain("Fresh match");
+
+      // The slower "a" response lands last; the ordering guard must discard it.
+      await act(async () => {
+        resolveStale?.([candidate({ name: "Stale match", source_ref: "usda_fdc:stale" })]);
+      });
+      expect(allText(tree)).toContain("Fresh match");
+      expect(allText(tree)).not.toContain("Stale match");
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("calls reResolve with the chosen source_ref", async () => {

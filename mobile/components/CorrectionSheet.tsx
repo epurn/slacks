@@ -1,8 +1,8 @@
 /**
  * FTY-100: Universal detail / correction sheet.
  *
- * A native iOS slide-up sheet that opens from any timeline item and provides
- * four ordered levers for correction:
+ * A slide-up sheet (a `Modal` with `animationType="slide"`) that opens from any
+ * timeline item and provides four ordered levers for correction:
  *
  *   1. Amount stepper (primary) — provenance-preserving portion adjust (FTY-092)
  *   2. "Change match" — alternative source search + re-resolve (FTY-093)
@@ -20,6 +20,7 @@
 
 import {
   useCallback,
+  useRef,
   useState,
 } from "react";
 import {
@@ -66,6 +67,13 @@ export interface ClarificationData {
 type SheetMode = "normal" | "change-match" | "override" | "clarify";
 type SaveFoodStatus = "idle" | "saving" | "saved" | "error";
 
+/**
+ * Debounce for the Change-match search field. Each keystroke would otherwise
+ * trigger a USDA FDC name-search fan-out server-side; waiting for a typing pause
+ * keeps provider egress bounded (see evidence-retrieval.md `FATTY_FDC_MAX_RESULTS`).
+ */
+const SEARCH_DEBOUNCE_MS = 300;
+
 /** Map a correction API error to a plain, nonjudgmental message. */
 function messageForError(error: unknown, action: string): string {
   if (error instanceof CorrectionsApiError || error instanceof DerivedItemApiError) {
@@ -86,8 +94,10 @@ function formatAmount(amount: number | null): string {
  * The correction sheet. Call with `visible={true}` to present it over the
  * current screen; `onClose` is called when the user dismisses it.
  *
- * Detents: medium by default; grows to large when Change-match search or the
- * advanced override panel opens; stays medium for the quick-fix (amount / save).
+ * Height: the sheet uses a medium `maxHeight` by default and switches to a large
+ * `maxHeight` when the Change-match search or the advanced override panel opens;
+ * it stays medium for the quick-fix path (amount / save). This approximates
+ * sheet detents with a plain `Modal`; it is not a draggable native sheet.
  */
 export function CorrectionSheet({
   item: initialItem,
@@ -131,7 +141,7 @@ export function CorrectionSheet({
   /** Injectable for tests (FTY-052/053 save-as-food). */
   saveFood?: typeof saveFoodApi;
 }) {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const [item, setItem] = useState<DerivedItem>(initialItem);
 
   // Resync local item when prop changes (parent may push a confirmed edit).
@@ -166,6 +176,11 @@ export function CorrectionSheet({
   const [matchQuery, setMatchQuery] = useState("");
   const [reResolving, setReResolving] = useState(false);
   const [reResolveError, setReResolveError] = useState<string | null>(null);
+  // Debounce timer + monotonic request id for the change-match search. The id
+  // guards against out-of-order responses: a slower earlier query that resolves
+  // after a newer one must not overwrite the newer query's candidates.
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchSeq = useRef(0);
 
   // ─── Override (advanced) state ──────────────────────────────────────────────
   const [overrideField, setOverrideField] = useState<string>("calories");
@@ -236,20 +251,33 @@ export function CorrectionSheet({
 
   // ─── Change match ────────────────────────────────────────────────────────────
 
+  // Cancel any pending debounced search and invalidate in-flight responses so a
+  // late result can't land after we've moved on (leaving the panel, picking).
+  const cancelPendingSearch = useCallback(() => {
+    if (searchTimer.current) {
+      clearTimeout(searchTimer.current);
+      searchTimer.current = null;
+    }
+    searchSeq.current += 1;
+  }, []);
+
   const loadCandidates = useCallback(
     async (query?: string) => {
       if (item.item_type !== "food") return;
       const food = item as DerivedFoodItemDTO;
+      const seq = (searchSeq.current += 1);
       setCandidatesLoading(true);
       setCandidatesError(null);
       try {
         const results = await listCandidates(session, food.id, query || undefined);
+        if (seq !== searchSeq.current) return; // superseded by a newer query
         setCandidates(results);
       } catch (err) {
+        if (seq !== searchSeq.current) return; // superseded by a newer query
         setCandidatesError(messageForError(err, "load alternatives"));
         setCandidates([]);
       } finally {
-        setCandidatesLoading(false);
+        if (seq === searchSeq.current) setCandidatesLoading(false);
       }
     },
     [item, listCandidates, session],
@@ -264,7 +292,11 @@ export function CorrectionSheet({
   const handleCandidateSearch = useCallback(
     (query: string) => {
       setMatchQuery(query);
-      void loadCandidates(query);
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+      searchTimer.current = setTimeout(() => {
+        searchTimer.current = null;
+        void loadCandidates(query);
+      }, SEARCH_DEBOUNCE_MS);
     },
     [loadCandidates],
   );
@@ -273,6 +305,7 @@ export function CorrectionSheet({
     async (candidate: SourceCandidate) => {
       if (item.item_type !== "food") return;
       const food = item as DerivedFoodItemDTO;
+      cancelPendingSearch();
       setReResolving(true);
       setReResolveError(null);
       try {
@@ -288,7 +321,7 @@ export function CorrectionSheet({
         setReResolving(false);
       }
     },
-    [item, reResolve, session, onItemChange],
+    [item, reResolve, session, onItemChange, cancelPendingSearch],
   );
 
   // ─── Advanced override ───────────────────────────────────────────────────────
@@ -380,7 +413,7 @@ export function CorrectionSheet({
   const canSaveFood =
     food !== null && food.calories !== null && !!logPhrase;
 
-  const sheetBg = isDark ? colors.surfaceRaised : colors.surfaceRaised;
+  const sheetBg = colors.surfaceRaised;
 
   // ─── Render ───────────────────────────────────────────────────────────────────
 
@@ -410,7 +443,7 @@ export function CorrectionSheet({
             expanded ? styles.sheetLarge : styles.sheetMedium,
           ]}
         >
-          {/* Drag handle */}
+          {/* Decorative grabber (non-draggable; hidden from assistive tech) */}
           <View
             style={styles.handleContainer}
             accessibilityElementsHidden
@@ -514,6 +547,7 @@ export function CorrectionSheet({
                     reResolveError={reResolveError}
                     onPickCandidate={(c) => void handlePickCandidate(c)}
                     onCancel={() => {
+                      cancelPendingSearch();
                       setMode("normal");
                       setMatchQuery("");
                       setCandidates([]);
@@ -609,11 +643,7 @@ function ProvenanceBlock({
           {provenancePres.glyph}
         </Text>
         <Text style={[styles.provenanceLabel, { color: colors.textSecondary }]}>
-          {isRoughEstimate
-            ? "≈ Rough estimate"
-            : source && !isEdited
-            ? `${sourceLabel} · ${source.label}`
-            : sourceLabel}
+          {isRoughEstimate ? "≈ Rough estimate" : sourceLabel}
         </Text>
       </View>
 
