@@ -19,6 +19,10 @@ updates:
         update-types:
           - "minor"
 
+  # Mobile npm: Expo SDK 56 managed project.
+  # Packages pinned by the SDK (expo, react, react-native, jest, etc.) and the eslint toolchain
+  # are ignored here—they can only be advanced coherently via `expo install` or an SDK upgrade (FTY-122).
+  # Dependabot ignores these to prevent dead PRs that fail CI; independent mobile libraries still flow.
   - package-ecosystem: "npm"
     directory: "/mobile"
     schedule:
@@ -31,6 +35,26 @@ updates:
       dependency-minor:
         update-types:
           - "minor"
+    ignore:
+      # SDK-pinned packages; advance via SDK upgrade (FTY-122)
+      - dependency-name: "expo"
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+      - dependency-name: "react-native"
+      - dependency-name: "react-test-renderer"
+      - dependency-name: "jest"
+      - dependency-name: "jest-expo"
+      - dependency-name: "@types/jest"
+      # eslint toolchain; major bumps break CI (incompatibility with SDK versions)
+      - dependency-name: "eslint"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "eslint-plugin-*"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "@typescript-eslint/*"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "docker"
     directory: "/backend"
