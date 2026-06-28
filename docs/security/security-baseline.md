@@ -20,6 +20,13 @@ This project uses the following as design references:
 - Do not store raw fetched pages, raw OCR, raw prompts, or attachments longer than needed unless there is a product reason.
 - Store source facts separately from user-specific habits.
 - Keep personal memories inspectable, editable, and deletable.
+- On-device persistence of sensitive personal data must be scoped to the
+  signed-in user and cleared on sign-out. *(v1: the FTY-104 offline outbox stores
+  queued raw log text on-device in a per-user file while the device is offline.
+  It holds only the signed-in user's own captures, is never written to logs or
+  analytics, drains over the same authenticated/TLS log-events endpoint, and is
+  purged for that user on sign-out so a queued entry never leaks to another user
+  of the device.)*
 
 ## Encryption and Secrets
 
