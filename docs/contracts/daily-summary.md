@@ -40,9 +40,12 @@ serializer that derives them).
 
 ## Version
 
-1 (FTY-071). FTY-092 adds the **per-item provenance read shape** (`source`
-descriptor + `is_edited`) to the Today/daily item read-model below; it does not
-change the aggregate DTO or the totals math.
+2 (FTY-071; target read-model added jointly by FTY-094/FTY-095). FTY-092 adds the
+**per-item provenance read shape** (`source` descriptor + `is_edited`) to the
+Today/daily item read-model below; it does not change the aggregate totals math.
+FTY-094/FTY-095 replace the single-integer `target` component with the **target
+read-model**: per target (calorie + each macro) the effective value, the derived
+value, and a `derived | user` provenance flag (see `target-calculator.md`).
 
 ## Inputs
 
@@ -72,7 +75,10 @@ Authorization: Bearer <token>
     "fat_g": 40.0
   },
   "target": {
-    "calories": 1800
+    "calories": { "effective": 1800, "derived": 1678, "source": "user" },
+    "protein_g": { "effective": 128, "derived": 128, "source": "derived" },
+    "carbs_g": { "effective": 148, "derived": 148, "source": "derived" },
+    "fat_g": { "effective": 64, "derived": 64, "source": "derived" }
   },
   "exercise": {
     "active_calories": 210.0
@@ -83,10 +89,15 @@ Authorization: Bearer <token>
 - `date` — the requested calendar day (echoed back).
 - `intake` — summed calories (kcal) and macros (grams) from finalized food items
   for the day. Zeroed when no finalized food items exist.
-- `target` — the calorie target from the stored `daily_targets` row for the user's
-  active goal on this day, or `null` (JSON `null`) when none exists (no active
-  goal, or the day predates the goal). See **No-target representation** below.
-  Macro targets are not part of the FTY-022 contract and are not included.
+- `target` — the **target read-model** for the stored `daily_targets` row of the
+  user's active goal on this day, or `null` (JSON `null`) when none exists (no
+  active goal, or the day predates the goal). See **No-target representation**
+  below. Each of `calories` (kcal, int) and the macro targets `protein_g` /
+  `carbs_g` / `fat_g` (whole grams, int) is an object with `effective` (what the
+  app uses: override ?? derived), `derived` (the calculator value a reset
+  restores), and `source` (`derived | user`). The full override/reset semantics
+  live in `target-calculator.md`; this endpoint reads the row, it does not mutate
+  it.
 - `exercise` — summed net active-calorie burn (kcal) from finalized exercise items.
   Zeroed when no finalized exercise items exist. **Not** subtracted from intake.
 
@@ -127,7 +138,9 @@ this contract):
   computed for that date).
 
 A `null` target is distinct from a zero-calorie target and must be rendered
-differently by the client (e.g. "no target set" vs. "target: 0 kcal").
+differently by the client (e.g. "no target set" vs. "target: 0 kcal"). When the
+target is present, every component (calorie + macros) is always populated — a
+target is never partially `null`.
 
 ## Per-item provenance read shape (FTY-092)
 
@@ -187,8 +200,8 @@ Final sums are rounded to **0.1** (one decimal place) in canonical units (kcal,
 grams), matching the FTY-043/FTY-044 serving-math precision. The already-stored
 current values are summed first, then the sum is rounded. This rule applies to
 `intake.calories`, `intake.protein_g`, `intake.carbs_g`, `intake.fat_g`, and
-`exercise.active_calories`. `target.calories` is an integer (stored as
-`daily_calorie_target_kcal: int`), not rounded.
+`exercise.active_calories`. The `target` read-model values are whole integers
+(calorie kcal and macro grams), not rounded here.
 
 ## Authorization
 
@@ -242,8 +255,13 @@ curl -s ':8000/api/users/<uid>/daily-summary?day=not-a-date' \
 - FTY-051 post-correction values are automatically reflected: the endpoint reads
   current values (`calories`, `protein_g`, `carbs_g`, `fat_g`, `active_calories`),
   not the `*_estimated` snapshots.
-- Macro targets are not part of FTY-022; when FTY-022 is extended with macro
-  targets, this contract should be versioned to expose them.
+- Macro targets and the override read-model are now exposed (v2): the `target`
+  component is the calorie + macro read-model (effective / derived / `source`) per
+  `target-calculator.md`. This is a breaking change to the `target` shape (was a
+  single `{ "calories": int }`); pre-v1 with no consumers in production, so the
+  read-model replaces the old shape rather than shimming it. The endpoint still
+  reads `daily_targets`; it never sets or resets an override (that is the target
+  endpoint).
 - **FTY-092** adds the per-item `source` descriptor + `is_edited` flag to the item
   read shape. Both are **derived reads** (from `evidence_sources` and the
   `corrections` history) — no new table, no migration, no change to the aggregate

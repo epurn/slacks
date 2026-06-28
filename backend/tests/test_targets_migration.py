@@ -34,6 +34,47 @@ def test_targets_migration_applies_and_rolls_back(tmp_path: Path) -> None:
         engine.dispose()
 
 
+_DERIVED_MACRO_COLUMNS = {"protein_target_g", "carbs_target_g", "fat_target_g", "macros_clamped"}
+_OVERRIDE_COLUMNS = {
+    "override_calorie_target_kcal",
+    "override_protein_target_g",
+    "override_carbs_target_g",
+    "override_fat_target_g",
+    "override_set_at",
+}
+
+
+def test_override_columns_apply_and_rollback(tmp_path: Path) -> None:
+    """FTY-095: override + persisted-derived-macro columns apply on top of 0013 and roll back.
+
+    Layered on FTY-094's revision: upgrading to head adds the nullable override
+    columns and the NOT NULL derived macro columns; ``downgrade -1`` (to 0013)
+    drops exactly those columns while leaving ``daily_targets`` and its FTY-022
+    derived columns intact.
+    """
+
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'override.db'}")
+    try:
+        upgrade(engine, "head")
+        cols = {c["name"] for c in inspect(engine).get_columns("daily_targets")}
+        assert _DERIVED_MACRO_COLUMNS <= cols
+        assert _OVERRIDE_COLUMNS <= cols
+
+        # The derived macro columns are NOT NULL; the override columns are nullable.
+        col_meta = {c["name"]: c for c in inspect(engine).get_columns("daily_targets")}
+        assert all(not col_meta[name]["nullable"] for name in _DERIVED_MACRO_COLUMNS)
+        assert all(col_meta[name]["nullable"] for name in _OVERRIDE_COLUMNS)
+
+        downgrade(engine, "0013")
+        remaining = {c["name"] for c in inspect(engine).get_columns("daily_targets")}
+        assert not (_OVERRIDE_COLUMNS & remaining)
+        assert not (_DERIVED_MACRO_COLUMNS & remaining)
+        # The table and its FTY-022 derived columns survive the rollback.
+        assert {"daily_calorie_target_kcal", "clamped"} <= remaining
+    finally:
+        engine.dispose()
+
+
 def test_target_tables_carry_user_ownership(tmp_path: Path) -> None:
     engine = create_db_engine(f"sqlite:///{tmp_path / 'ownership.db'}")
     try:

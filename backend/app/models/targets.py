@@ -28,6 +28,7 @@ from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
+from app.enums import TargetSource
 
 
 def _utcnow() -> datetime:
@@ -63,11 +64,23 @@ class Goal(Base):
 
 
 class DailyTarget(Base):
-    """A derived daily calorie target for a goal on a specific date.
+    """A daily calorie + macro target for a goal on a specific date.
 
-    ``rmr_kcal`` / ``tdee_kcal`` / ``daily_calorie_target_kcal`` are first-class
-    queryable columns; ``inputs`` and ``assumptions`` hold the JSON snapshot that
-    makes the number fully reproducible.
+    The **derived** columns (``daily_calorie_target_kcal``, the macro
+    ``*_target_g`` columns, ``clamped`` / ``macros_clamped``, ``rmr_kcal`` /
+    ``tdee_kcal``) are the deterministic FTY-022/FTY-094 calculator output and the
+    source of truth for what a reset restores; ``inputs`` / ``assumptions`` hold
+    the JSON snapshot that makes those numbers reproducible.
+
+    The nullable ``override_*`` columns (FTY-095) carry an explicit user choice:
+    each is ``NULL`` while the target is derived, and set to the user's value when
+    they manually override it. The **effective** value a consumer measures against
+    is the override when set, else the derived value — a pure read-time
+    ``override ?? derived`` (see :attr:`effective_calorie_target_kcal` and the
+    ``*_source`` helpers). A recompute updates the derived columns in place and
+    leaves any in-force override untouched; an override is cleared only by an
+    explicit reset or by deletion/replacement of the owning goal (``ON DELETE
+    CASCADE`` from ``goal_id``).
     """
 
     __tablename__ = "daily_targets"
@@ -82,12 +95,85 @@ class DailyTarget(Base):
     for_date: Mapped[date] = mapped_column(Date, nullable=False)
     rmr_kcal: Mapped[float] = mapped_column(Float, nullable=False)
     tdee_kcal: Mapped[float] = mapped_column(Float, nullable=False)
+    # --- Derived target columns (the calculator output; source of truth) -------
     daily_calorie_target_kcal: Mapped[int] = mapped_column(Integer, nullable=False)
     clamped: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    protein_target_g: Mapped[int] = mapped_column(Integer, nullable=False)
+    carbs_target_g: Mapped[int] = mapped_column(Integer, nullable=False)
+    fat_target_g: Mapped[int] = mapped_column(Integer, nullable=False)
+    macros_clamped: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     inputs: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     assumptions: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    # --- User-override columns (FTY-095; NULL when the target is derived) -------
+    override_calorie_target_kcal: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    override_protein_target_g: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    override_carbs_target_g: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    override_fat_target_g: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    override_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
 
     goal: Mapped[Goal] = relationship(back_populates="daily_targets")
+
+    @property
+    def effective_calorie_target_kcal(self) -> int:
+        """The calorie target the app uses: the override when set, else derived."""
+
+        if self.override_calorie_target_kcal is not None:
+            return self.override_calorie_target_kcal
+        return self.daily_calorie_target_kcal
+
+    @property
+    def effective_protein_target_g(self) -> int:
+        """Effective protein target: override when set, else derived."""
+
+        if self.override_protein_target_g is not None:
+            return self.override_protein_target_g
+        return self.protein_target_g
+
+    @property
+    def effective_carbs_target_g(self) -> int:
+        """Effective carbohydrate target: override when set, else derived."""
+
+        if self.override_carbs_target_g is not None:
+            return self.override_carbs_target_g
+        return self.carbs_target_g
+
+    @property
+    def effective_fat_target_g(self) -> int:
+        """Effective fat target: override when set, else derived."""
+
+        if self.override_fat_target_g is not None:
+            return self.override_fat_target_g
+        return self.fat_target_g
+
+    @property
+    def calorie_source(self) -> TargetSource:
+        """``user`` when the calorie target is overridden, else ``derived``."""
+
+        return _source(self.override_calorie_target_kcal)
+
+    @property
+    def protein_source(self) -> TargetSource:
+        """``user`` when the protein target is overridden, else ``derived``."""
+
+        return _source(self.override_protein_target_g)
+
+    @property
+    def carbs_source(self) -> TargetSource:
+        """``user`` when the carbohydrate target is overridden, else ``derived``."""
+
+        return _source(self.override_carbs_target_g)
+
+    @property
+    def fat_source(self) -> TargetSource:
+        """``user`` when the fat target is overridden, else ``derived``."""
+
+        return _source(self.override_fat_target_g)
+
+
+def _source(override_value: int | None) -> TargetSource:
+    """Map a nullable override column to its provenance flag."""
+
+    return TargetSource.USER if override_value is not None else TargetSource.DERIVED

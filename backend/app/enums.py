@@ -42,6 +42,37 @@ class GoalDirection(StrEnum):
     MAINTAIN = "maintain"
 
 
+class TargetSource(StrEnum):
+    """Provenance of an effective target value (FTY-095).
+
+    Every target the read-model exposes carries this flag so a consumer can
+    honestly distinguish a number Fatty derived from the user's goal + metrics
+    from one the user set by hand:
+
+    - :attr:`DERIVED` — the value comes from the deterministic calculator
+      (``daily_targets`` derived columns); a reset is a no-op.
+    - :attr:`USER` — the user manually overrode the value; the derived value is
+      still reported (what a reset would restore) but the effective value and
+      ``source`` come from the override.
+    """
+
+    DERIVED = "derived"
+    USER = "user"
+
+
+class OverridableTarget(StrEnum):
+    """The four independently overridable daily targets (FTY-095).
+
+    Names the targets a user can manually set or reset, one at a time or in any
+    combination: the calorie target and each of the three macro-gram targets.
+    """
+
+    CALORIES = "calories"
+    PROTEIN = "protein"
+    CARBS = "carbs"
+    FAT = "fat"
+
+
 class UnitsPreference(StrEnum):
     """Display-unit preference. Storage is always canonical (kg, m)."""
 

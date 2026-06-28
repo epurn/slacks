@@ -28,7 +28,8 @@ estimator / contracts / backend-core lane (`backend/app/estimator/`,
 
 ## Version
 
-2 (introduced in FTY-022; macro targets added in FTY-094).
+3 (introduced in FTY-022; macro targets added in FTY-094; manual calorie/macro
+override + reset with derived-vs-overridden provenance added in FTY-095).
 
 ## Inputs
 
@@ -41,11 +42,26 @@ The `0002` migration creates two user-owned tables:
   (date), `target_weight_kg` (float), `target_date` (date), `is_active` (bool),
   `created_at`, `updated_at`. The start snapshot is stored so the planned
   trajectory is deterministic and does not drift as measured weight changes.
-- **`daily_targets`** — a derived daily target. Columns: `id` (UUID, PK),
-  `user_id` (UUID, FK → `users.id`, `ON DELETE CASCADE`), `goal_id` (UUID, FK →
-  `goals.id`, `ON DELETE CASCADE`), `for_date` (date), `rmr_kcal` (float),
-  `tdee_kcal` (float), `daily_calorie_target_kcal` (int), `clamped` (bool),
-  `inputs` (JSON), `assumptions` (JSON), `created_at`.
+- **`daily_targets`** — a daily target row carrying both the derived value and an
+  optional user override. Columns:
+  - **Identity / ownership**: `id` (UUID, PK), `user_id` (UUID, FK → `users.id`,
+    `ON DELETE CASCADE`), `goal_id` (UUID, FK → `goals.id`, `ON DELETE CASCADE`),
+    `for_date` (date), `created_at`.
+  - **Derived** (the calculator output; source of truth for what a reset
+    restores): `rmr_kcal` (float), `tdee_kcal` (float),
+    `daily_calorie_target_kcal` (int), `clamped` (bool), `protein_target_g` (int),
+    `carbs_target_g` (int), `fat_target_g` (int), `macros_clamped` (bool),
+    `inputs` (JSON), `assumptions` (JSON). The macro `*_target_g` / `macros_clamped`
+    columns persist the FTY-094 derivation (added by FTY-095's `0014` migration —
+    FTY-094 derived these in the calculator but did not store them) so the
+    read-model reports the derived macro value straight from the row.
+  - **User override** (FTY-095; `NULL` while the target is derived):
+    `override_calorie_target_kcal` (int, nullable),
+    `override_protein_target_g` (int, nullable),
+    `override_carbs_target_g` (int, nullable),
+    `override_fat_target_g` (int, nullable), and `override_set_at` (timezone-aware
+    DateTime, nullable) — when the override was last set; a bare timestamp for
+    provenance/audit, carrying no PII.
 
 Canonical units only: weight in kilograms, energy in kcal.
 
@@ -171,6 +187,74 @@ exclusion). Total-bodyweight scaling also slightly overestimates protein need at
 high adiposity — lean-mass- or reference-weight-based anchoring is more precise —
 a known refinement, not a v1 blocker.
 
+## Manual override + reset, with provenance (FTY-095)
+
+A user can manually override their daily **calorie** target and any of their
+**macro** targets, and reset each back to the derived value. The override lives on
+`daily_targets` beside the derived columns, realising the design's "every number
+shows where it came from — including the target itself" stance.
+
+### Effective value and the read-model
+
+The **effective** value a consumer displays/measures against is a pure read-time
+`override ?? derived`: the override column when set, else the derived column. The
+target **read-model** exposes, per target (calorie and each macro):
+
+- **`effective`** — the value the app uses (override when set, else derived);
+- **`derived`** — always present; the current deterministic derivation, i.e. what
+  a reset would restore;
+- **`source`** — a `derived | user` provenance flag (`user` when an override is in
+  force for that target, else `derived`).
+
+This read-model is the shape `daily-summary.md`'s `target` component and the
+owner-scoped target endpoint surface.
+
+### Set / reset semantics
+
+- **Set** records a calorie and/or macro override on the active goal's target row,
+  stamps `override_set_at`, and returns the read-model with `source: user` for the
+  overridden targets. Calorie and each macro can be set independently.
+- **Reset** clears the targeted override column(s) back to `NULL` (calorie and/or
+  macros, independently; resetting with no targets named clears all in-force
+  overrides). The effective value falls back to the derived value and `source`
+  returns to `derived`. Reset is idempotent. When the last in-force override is
+  cleared, `override_set_at` is cleared too.
+
+### Override lifetime (documented rule)
+
+An override is an explicit user choice that **persists across derived recomputes**
+and is cleared **only** by (a) an explicit reset, or (b) deletion/replacement of
+the owning goal. The override columns live on `daily_targets`, which already
+`ON DELETE CASCADE`s from `goal_id`, so a replaced/deleted goal drops the override
+with its target — no orphaned overrides. No other event silently clears it.
+
+- **Recompute preserves the override.** Editing goal/pace/metrics recomputes the
+  **derived** columns in place but leaves any set override intact and still in
+  force; the read-model reports the freshly recomputed derived value (so a future
+  reset restores the *current* derivation, not a stale one) while `source` stays
+  `user`. When a recompute materialises a target row for a **new** `for_date`, the
+  goal's in-force override is carried forward onto it so the choice does not
+  silently lapse on a date rollover.
+
+### Override validation — reject, do not clamp
+
+Because an override is explicit user input, an out-of-band value is **rejected**
+with a `422` validation error (nothing persisted) rather than silently clamped —
+the user sees their value refused, not quietly altered. (The derived path's
+`clamped` behaviour is unchanged: the system clamps numbers *it* produced.)
+
+- **Calorie override** must fall within the existing safety band the row was
+  derived against (read from its `assumptions` snapshot): floor 1500 kcal
+  (`mifflin_st_jeor_plus5`) / 1200 kcal (`mifflin_st_jeor_minus161`); ceiling 4000
+  kcal. The exact band constants are reused — no new numbers.
+- **Macro override** must be a non-negative whole-gram value whose energy
+  (grams × the Atwater factor: protein 4, carbohydrate 4, fat 9) does not exceed
+  the calorie safety ceiling — i.e. each macro is bounded by `ceiling ÷ factor`
+  (protein/carbs ≤ 1000 g, fat ≤ 444 g at the 4000 kcal ceiling). FTY-094 documents
+  no separate per-macro clinical band, so the override reuses the existing calorie
+  safety ceiling and Atwater factors as a sanity bound rather than introducing a
+  new number.
+
 ## Validation
 
 - `height_m` ∈ (0, 3]; `age_years` ∈ [13, 120]; `start_weight_kg`,
@@ -187,10 +271,14 @@ a known refinement, not a v1 blocker.
 
 ## Authorization
 
-Object-level: a caller may compute or store a daily target only for **their own**
-goal. The service fails closed (`GoalForbidden`) on any cross-user access, and an
-unowned or missing goal is indistinguishable (no existence oracle). `user_id` on
-both tables is the ownership key.
+Object-level: a caller may compute, store, override, or reset a daily target only
+for **their own** goal. The service fails closed (`GoalForbidden`) on any
+cross-user access, and an unowned or missing goal is indistinguishable (no
+existence oracle). `user_id` on both tables is the ownership key. The override
+set/reset endpoints are owner-scoped: cross-user access and a caller with no active
+goal / no stored target for the day both fail closed as `404` (the same
+`GoalForbidden` / `TargetNotFound` → `404` discipline, no existence oracle), proven
+by negative authorization tests.
 
 ## Privacy and Retention
 
@@ -202,6 +290,11 @@ both tables is the ownership key.
 - Retention follows the owning profile/goal: derived targets live until the goal
   is edited/replaced or the account is deleted. `ON DELETE CASCADE` on `user_id`
   (and `goal_id`) removes derived rows when the user or goal is deleted.
+- The FTY-095 override columns (`override_*_target_*`, `override_set_at`) are
+  sensitive derived body data on the same `daily_targets` row: user-owned, never
+  logged (diagnostics use user/goal ids, not target numbers), and removed by the
+  same `ON DELETE CASCADE`. `override_set_at` is a bare timestamp with no PII. See
+  `data-retention.md`.
 
 ## Errors
 
@@ -210,7 +303,10 @@ both tables is the ownership key.
 | `target_date` ≤ `start_date`, out-of-range metric, unknown field | `ValidationError` at the boundary. |
 | Profile missing height/birth year, or formula on the unspecified default | `IncompleteProfileError`. |
 | Cross-user, unowned, or missing goal | `GoalForbidden` (fail closed). |
-| Raw target outside the safety band | Clamped to floor/ceiling, `clamped = true`. |
+| Override set/reset with no active goal or stored target for the day | `TargetNotFound` → `404` (fail closed, no oracle). |
+| Raw **derived** target outside the safety band | Clamped to floor/ceiling, `clamped = true`. |
+| Manual **override** outside the safety band (or a macro outside its bound) | Rejected `422`, nothing persisted (no clamp). |
+| Empty override request (no calorie or macro provided) | Rejected `422` at the boundary. |
 
 ## Examples
 
@@ -235,6 +331,13 @@ both tables is the ownership key.
 - `0002` applies cleanly on top of the `0001` baseline (`alembic upgrade head`)
   and is fully reversible (`alembic downgrade 0001`), verified by a migration
   apply/rollback test against a throwaway database.
+- `0014` (FTY-095) is an **additive, reversible** migration layered on FTY-094's
+  revision: it adds the nullable `override_*` columns and the now-persisted derived
+  macro columns (`*_target_g`, `macros_clamped`, NOT NULL with a `0`/`false` server
+  default so the `ALTER` is safe on any existing row) to `daily_targets`. It
+  applies cleanly (`alembic upgrade head`) and rolls back fully
+  (`alembic downgrade -1`), dropping exactly those columns and leaving the FTY-022
+  derived columns intact — verified by an apply/rollback test. No data migration.
 - `metabolic_formula` has two computable variants (`mifflin_st_jeor_plus5`,
   `mifflin_st_jeor_minus161`) plus the unspecified `mifflin_st_jeor` family
   default; FTY-021 profile capture must offer exactly the two variants. The

@@ -10,6 +10,34 @@
  * only the HTTP status and action, never the raw numbers.
  */
 
+/** Provenance of a target value: derived by the calculator vs. set by the user. */
+export type TargetSource = "derived" | "user";
+
+/**
+ * One target value (calorie or a macro) with explicit provenance (FTY-095).
+ *
+ * `effective` is the number the app uses (the override when set, else the
+ * derived value); `derived` is the calculator value a reset restores; `source`
+ * says which of the two `effective` came from. All whole numbers in canonical
+ * units (kcal for calories, grams for macros).
+ */
+export interface TargetComponent {
+  readonly effective: number;
+  readonly derived: number;
+  readonly source: TargetSource;
+}
+
+/**
+ * The day's calorie + macro target read-model (FTY-094/FTY-095). Each component
+ * carries its effective value, derived value, and `derived | user` provenance.
+ */
+export interface TargetReadModel {
+  readonly calories: TargetComponent;
+  readonly protein_g: TargetComponent;
+  readonly carbs_g: TargetComponent;
+  readonly fat_g: TargetComponent;
+}
+
 /** The daily-summary DTO: intake, target, and exercise burn separated. */
 export interface DailySummaryDTO {
   readonly date: string;
@@ -19,9 +47,7 @@ export interface DailySummaryDTO {
     readonly carbs_g: number;
     readonly fat_g: number;
   };
-  readonly target: {
-    readonly calories: number;
-  } | null;
+  readonly target: TargetReadModel | null;
   readonly exercise: {
     readonly active_calories: number;
   };

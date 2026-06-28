@@ -146,8 +146,13 @@ def _seed_daily_target(
     for_date: date,
     daily_calorie_target_kcal: int = 2000,
     is_active: bool = True,
+    override_calorie_target_kcal: int | None = None,
 ) -> None:
-    """Insert an active goal + daily_target for ``for_date``."""
+    """Insert an active goal + daily_target for ``for_date``.
+
+    Persists the derived macro columns (FTY-094/FTY-095) so the NOT NULL schema is
+    satisfied; an optional calorie override exercises the read-model provenance.
+    """
 
     factory = create_session_factory(db_engine)
     with factory() as session:
@@ -169,6 +174,11 @@ def _seed_daily_target(
             tdee_kcal=2016.0,
             daily_calorie_target_kcal=daily_calorie_target_kcal,
             clamped=False,
+            protein_target_g=128,
+            carbs_target_g=200,
+            fat_target_g=67,
+            macros_clamped=False,
+            override_calorie_target_kcal=override_calorie_target_kcal,
             inputs={},
             assumptions={},
         )
@@ -230,9 +240,16 @@ def test_aggregation_returns_correct_separated_totals(
     # Exercise: not netted into intake
     assert body["exercise"]["active_calories"] == 210.0
 
-    # Target from stored daily_targets row
+    # Target from stored daily_targets row: derived calorie target, no override.
     assert body["target"] is not None
-    assert body["target"]["calories"] == 1800
+    assert body["target"]["calories"] == {
+        "effective": 1800,
+        "derived": 1800,
+        "source": "derived",
+    }
+    # Macro targets ride along with provenance (FTY-094/FTY-095).
+    assert body["target"]["protein_g"]["effective"] == 128
+    assert body["target"]["protein_g"]["source"] == "derived"
 
     # Date echoed back
     assert body["date"] == str(today)
@@ -282,7 +299,8 @@ def test_empty_day_returns_zeroed_intake_and_burn(client: TestClient, db_engine:
     body = resp.json()
     assert body["intake"] == {"calories": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0}
     assert body["exercise"] == {"active_calories": 0.0}
-    assert body["target"]["calories"] == 2000
+    assert body["target"]["calories"]["effective"] == 2000
+    assert body["target"]["calories"]["source"] == "derived"
 
 
 def test_empty_day_with_no_target_returns_null_target(
@@ -304,6 +322,32 @@ def test_empty_day_with_no_target_returns_null_target(
     # target is null: no active goal, not zero
     assert body["target"] is None
     assert body["intake"]["calories"] == 0.0
+
+
+def test_overridden_calorie_target_surfaces_as_user_source(
+    client: TestClient, db_engine: Engine
+) -> None:
+    """A calorie override is the effective value with source ``user``; derived holds."""
+
+    user_id, auth = _register(client, "override-summary@example.com")
+    day = date(2025, 3, 1)
+    _seed_daily_target(
+        db_engine,
+        user_id,
+        for_date=day,
+        daily_calorie_target_kcal=2000,
+        override_calorie_target_kcal=1700,
+    )
+
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary",
+        headers={"Authorization": auth},
+        params={"day": str(day)},
+    )
+
+    assert resp.status_code == 200
+    calories = resp.json()["target"]["calories"]
+    assert calories == {"effective": 1700, "derived": 2000, "source": "user"}
 
 
 # ---------------------------------------------------------------------------
