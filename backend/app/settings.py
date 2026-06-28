@@ -71,7 +71,9 @@ class Settings(BaseModel):
     # When False (default) the limiter keys on request.client.host and ignores
     # X-Forwarded-For — trusting an arbitrary inbound header would let an attacker
     # forge a fresh IP key per request and nullify per-IP limiting.  Enable only
-    # when the service sits behind a known, trusted reverse proxy.
+    # when the service sits behind exactly one known, trusted reverse proxy that
+    # writes X-Forwarded-For; the limiter then keys on the rightmost (proxy-
+    # appended) hop so a client-spoofed leftmost value cannot mint fresh keys.
     rate_limit_trusted_proxy: bool = False
 
     @model_validator(mode="after")

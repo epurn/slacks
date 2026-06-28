@@ -48,7 +48,10 @@ This project uses the following as design references:
   credential check so a throttled request pays no hash/DB cost and equalized timing
   is preserved. Fails open — a Redis blip allows the request rather than locking
   users out — and emits a warn-level log. Per-account keys use sha256(email) so no
-  raw PII is stored in Redis. FTY-118.)*
+  raw PII is stored in Redis. The source IP is the real TCP peer by default;
+  `X-Forwarded-For` is trusted only behind exactly one known proxy
+  (`FATTY_RATE_LIMIT_TRUSTED_PROXY=true`) and then read rightmost so a
+  client-spoofed hop cannot bypass the per-IP limit. FTY-118.)*
 - Enforce object-level authorization on every user-owned record. *(v1: every
   user-owned service authorizes the owner and scopes the query to the owner, failing
   closed as `404`; proven by the FTY-073 `tests/security/test_authz_fail_closed.py`

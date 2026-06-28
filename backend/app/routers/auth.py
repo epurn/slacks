@@ -41,17 +41,32 @@ def _settings(request: Request) -> Settings:
 
 
 def _client_ip(request: Request, settings: Settings) -> str:
-    """Return the effective client IP.
+    """Return the effective client IP used as the per-IP rate-limit key.
 
-    Defaults to ``request.client.host`` (the real peer). Honours the first hop
-    of ``X-Forwarded-For`` only when ``settings.rate_limit_trusted_proxy`` is
-    explicitly enabled — trusting an arbitrary inbound header would let an
-    attacker forge a fresh key per request and nullify per-IP limiting.
+    Defaults to ``request.client.host`` (the real TCP peer). Honours
+    ``X-Forwarded-For`` only when ``settings.rate_limit_trusted_proxy`` is
+    explicitly enabled, and then takes the **rightmost** entry.
+
+    Why rightmost, not leftmost: proxies *append* to ``X-Forwarded-For``, so the
+    leftmost entry is the client-supplied value. An attacker who sends
+    ``X-Forwarded-For: <forged>`` has the trusted proxy append the real peer
+    after it, leaving forged values to the left — reading the leftmost entry
+    would let them mint a fresh per-IP key per request and defeat per-IP
+    limiting (the very abuse this feature prevents). The rightmost entry is the
+    hop the trusted proxy itself wrote, i.e. the address it observed the request
+    coming from, so it cannot be spoofed.
+
+    Assumption: exactly one trusted proxy sits directly in front of the app
+    (the only safe topology for trusting XFF). If that proxy *overwrites* XFF
+    with a single value, leftmost == rightmost and this is equivalent; with
+    additional hops, the trusted layer must overwrite, or this must be extended
+    to strip the known trusted hops from the right.
     """
     if settings.rate_limit_trusted_proxy:
         forwarded = request.headers.get("X-Forwarded-For", "")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
+        hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
+        if hops:
+            return hops[-1]
     return request.client.host if request.client else "unknown"
 
 
