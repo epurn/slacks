@@ -7,6 +7,8 @@ database, no network — pure functions only.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from app.estimator.food_serving import (
@@ -145,6 +147,12 @@ def test_nutrition_facts_plausible_valid(
         (200.0, -0.1, 0.0, 0.0),  # negative protein
         (200.0, 0.0, -0.1, 0.0),  # negative carbs
         (200.0, 0.0, 0.0, -0.1),  # negative fat
+        (math.nan, 0.0, 0.0, 0.0),  # NaN calories slips every comparison
+        (200.0, math.nan, 0.0, 0.0),  # NaN protein
+        (200.0, 0.0, math.nan, 0.0),  # NaN carbs
+        (200.0, 0.0, 0.0, math.nan),  # NaN fat
+        (math.inf, 0.0, 0.0, 0.0),  # +Infinity calories
+        (200.0, math.inf, 0.0, 0.0),  # +Infinity macro
     ],
 )
 def test_nutrition_facts_plausible_invalid(

@@ -18,6 +18,7 @@ handled elsewhere. Richer portion inference (``portion_memories``) is a later st
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from typing import Final
@@ -252,11 +253,22 @@ def nutrition_facts_plausible(facts: NutritionFacts) -> bool:
     - Any negative macro (``protein_g``, ``carbs_g``, ``fat_g`` ``< 0``): physically
       impossible. Zero macros are explicitly valid (a pure-fat food has zero
       protein and zero carbs).
+    - Any non-finite value (``NaN`` or ``±Infinity``) in calories or a macro: not a
+      real measurement. ``Infinity`` is already above the ceiling, but ``NaN`` slips
+      every comparison (``NaN <= 0``, ``NaN > 900`` and ``NaN < 0`` are all
+      ``False``), so it is rejected explicitly. Untrusted fetched JSON can carry
+      bare ``NaN``/``Infinity`` tokens (stdlib ``json.loads`` accepts them and
+      pydantic floats allow them by default), so this gate must reject them.
 
     The gate lives in the canonical per-100g space so the same threshold governs
     every source uniformly, including OFF per-serving values converted to per-100g.
     """
 
+    if not all(
+        math.isfinite(value)
+        for value in (facts.calories, facts.protein_g, facts.carbs_g, facts.fat_g)
+    ):
+        return False
     if facts.calories <= 0 or facts.calories > _MAX_ENERGY_KCAL_PER_100G:
         return False
     if facts.protein_g < 0 or facts.carbs_g < 0 or facts.fat_g < 0:
