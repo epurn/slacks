@@ -24,9 +24,13 @@ updates:
   # all expo-* modules, the @react-native/* toolchain, Expo-pinned react-native-* libs,
   # React type packages, and the SDK-tied eslint config move as a coherent unit.
   # Enumerating them individually leaked: we use prefix wildcards to cover the Expo-managed surface.
-  # Dependabot still flags security advisories and surfaces a major expo bump (the SDK upgrade tripwire
-  # from FTY-125); independent deps like typescript still flow. The upgrade path: run `expo install --fix`
-  # when a new SDK is available.
+  # Security trade-off (stated plainly): GitHub applies `ignore` to BOTH version updates AND security
+  # updates, so the blanket dependency-name ignores below intentionally suppress automated security-update
+  # PRs for the ignored Expo-managed packages. Vulnerabilities are still surfaced as Dependabot *alerts*
+  # (the repo Security tab, which is not governed by this file) and are remediated by `expo install --fix`
+  # or an SDK upgrade — not by Dependabot opening a fix PR against an individually-pinned package.
+  # A major expo bump still flows (the SDK upgrade tripwire from FTY-125), and independent deps like
+  # typescript still flow. The upgrade path: run `expo install --fix` when a new SDK is available.
   - package-ecosystem: "npm"
     directory: "/mobile"
     schedule:
