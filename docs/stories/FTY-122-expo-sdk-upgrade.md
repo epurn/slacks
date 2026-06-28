@@ -1,6 +1,6 @@
 ---
 id: FTY-122
-state: ready
+state: candidate
 primary_lane: mobile-core
 touched_lanes: []
 risk: medium
