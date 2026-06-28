@@ -28,12 +28,19 @@ deleting/undoing derived items (corrections are append-only history, not undo).
 backend-core / contracts / security-privacy lane:
 `backend/app/models/corrections.py`, `backend/app/models/derived.py`
 (`*_estimated` snapshot columns), `backend/app/schemas/corrections.py`,
-`backend/app/services/corrections.py`, `backend/app/routers/corrections.py`,
-`backend/app/enums.py` (`CorrectionSource`), `backend/alembic/` (`0008`).
+`backend/app/services/corrections.py`,
+`backend/app/services/item_read_model.py` (FTY-092 — the `source` descriptor +
+`is_edited` derivation), `backend/app/routers/corrections.py`,
+`backend/app/enums.py` (`CorrectionSource`, `SourceType`), `backend/alembic/`
+(`0008`).
 
 ## Version
 
-1 (FTY-051).
+2 (FTY-092). v1 was FTY-051. FTY-092 adds the `amount_adjust` `CorrectionSource`
+value, redefines the quantity-edit rescale as a **provenance-preserving** adjustment
+(tagged `amount_adjust`, evidence untouched, item stays un-edited), and defines the
+`is_edited` derivation. The value-override path (`user_edit`, single row,
+`is_edited = true`) is unchanged.
 
 ## Inputs
 
@@ -97,38 +104,74 @@ One immutable row per changed field:
 | `field` | Changed field name. |
 | `old_value` | Prior value in canonical units (`NULL` only if the field had no value yet). |
 | `new_value` | New value in canonical units. |
-| `source` | Origin (`CorrectionSource`); v1 is `user_edit`. |
+| `source` | Origin (`CorrectionSource`): `user_edit` (a direct value override) or `amount_adjust` (a provenance-preserving portion change, FTY-092). See **`CorrectionSource`** and **`is_edited` derivation** below. |
 | `created_at` | Append timestamp. |
 
-### The servings rescale rule (deterministic)
+### `CorrectionSource`
 
-Editing a food item's `quantity`:
+| Value | Meaning |
+| --- | --- |
+| `user_edit` | A direct **value override** of `calories` / a single macro / `active_calories`. The load-bearing signal for `is_edited`. |
+| `amount_adjust` | A **provenance-preserving portion change** (FTY-092): the rows a `quantity` edit produces (the `quantity` change and each rescaled field). It never marks the item edited and never rewrites provenance. |
+
+Stored as a string column, so adding `amount_adjust` is additive with **no
+migration** and **no backfill** (pre-v1, no production data; the new semantics apply
+going forward).
+
+### The servings rescale rule (deterministic, provenance-preserving)
+
+Editing a food item's `quantity` is a **provenance-preserving amount adjustment**
+(FTY-092), **not** a value override:
 
 1. `old_quantity` is the item's current `amount`; `new_quantity` is the request
    value. `ratio = new_quantity / old_quantity`.
 2. Each currently-resolved `calories`/`protein_g`/`carbs_g`/`fat_g` is rescaled to
    `current × ratio`, **rounded to 0.1** (the same canonical rounding the FTY-044
    serving math uses). `amount` is set to `new_quantity` (rounded to 3 dp, matching
-   resolved-grams precision). `grams` and evidence are **not** recomputed — edits
-   are user overrides, not re-estimation.
+   resolved-grams precision). `grams` and evidence are **not** recomputed — a portion
+   fix is not a re-resolution.
 3. A correction row is appended for the `quantity` change **and** for each rescaled
-   field (each snapshotting its original first).
+   field (each snapshotting its original first), every row tagged **`amount_adjust`**.
+4. The item's **evidence/source is unchanged** — the `evidence_sources`
+   `source_type` / `source_ref` snapshot stays exactly as resolved — and the item's
+   `is_edited` stays **false**. Fixing the amount does not turn the item into a manual
+   override (matches `docs/design/ux-design.md` §4a).
 
-A direct edit to `calories`, a single macro, or `active_calories` overrides only
-that field, rounds to 0.1, and appends exactly **one** correction row. Last edit
-wins.
+A direct edit to `calories`, a single macro, or `active_calories` is a **value
+override**: it overrides only that field, rounds to 0.1, appends exactly **one**
+`user_edit` correction row, does not change the amount, leaves provenance unchanged,
+and sets `is_edited` **true**. Last edit wins.
 
 #### Worked example
 
 ```
 food item: amount 2, calories 300, protein_g 10, carbs_g 40, fat_g 5
-PATCH {field: "quantity", value: 3}
+PATCH {field: "quantity", value: 3}                       # provenance-preserving
   → ratio = 3 / 2 = 1.5
   → calories 450.0, protein_g 15.0, carbs_g 60.0, fat_g 7.5; amount 3
   → corrections += quantity(2→3), calories(300→450), protein_g(10→15),
-    carbs_g(40→60), fat_g(5→7.5)   (5 rows)
+    carbs_g(40→60), fat_g(5→7.5)   (5 rows, all source=amount_adjust)
   → *_estimated unchanged (300/10/40/5 preserved)
+  → evidence_sources unchanged; is_edited stays false
+
+PATCH {field: "calories", value: 280}                     # value override
+  → calories 280.0; amount unchanged
+  → corrections += calories(450→280)   (1 row, source=user_edit)
+  → is_edited becomes true
 ```
+
+### `is_edited` derivation (canonical rule)
+
+An item's `is_edited` flag is **derived, never stored**:
+
+> `is_edited` is **true iff the item has at least one correction whose
+> `source == user_edit`** (a value override).
+
+`amount_adjust` corrections never make an item edited. So a never-edited item and an
+item that has only been amount-adjusted are both `false`; an item with a value
+override is `true`. Computed at read time from the append-only audit trail, so it
+never drifts and needs no backfill. This flag is exposed per item on the
+Today/daily read-model — see `daily-summary.md`.
 
 ## Validation
 
@@ -187,8 +230,10 @@ See the worked example above. Covered by `tests/test_corrections_api.py`
 (endpoint, validation, error shapes, cross-user fail-closed), `tests/`
 `test_corrections_rescale.py` (deterministic rescale math, per-field rows,
 snapshot-once, last-edit-wins), `tests/test_corrections_immutability.py`
-(`UPDATE`/`DELETE` rejected), and `tests/test_corrections_migration.py`
-(apply/rollback, ownership, check constraint).
+(`UPDATE`/`DELETE` rejected), `tests/test_corrections_migration.py`
+(apply/rollback, ownership, check constraint), and `tests/test_item_provenance.py`
+(FTY-092 — the three `is_edited` cases, provenance-preserving amount adjust vs.
+value override, and the source-descriptor mapping).
 
 ## Migration / Compatibility
 
@@ -202,3 +247,11 @@ snapshot-once, last-edit-wins), `tests/test_corrections_immutability.py`
   discriminator, with a check constraint enforcing exactly one reference. The 0.1
   rounding for energy/macros and 3-dp for servings, and the `100000` sanity bounds,
   are documented v1 choices.
+- **FTY-092 (no migration).** Adding the `amount_adjust` `CorrectionSource` value is
+  additive over the existing string `source` column — no schema migration, no
+  backfill. FTY-051 tagged quantity-rescale rows `user_edit`; FTY-092 retags them
+  `amount_adjust` and declares the rescale provenance-preserving. This is a **clean
+  redefinition** (pre-v1, no production data): a portion fix no longer marks an item
+  edited. The `source` descriptor and `is_edited` flag are **derived reads** (from
+  `evidence_sources` and the `corrections` history) with no new persisted column or
+  read table.

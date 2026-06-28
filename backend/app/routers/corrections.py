@@ -14,7 +14,7 @@ machine-readable error shape that never echoes the item's values.
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -22,12 +22,14 @@ from sqlalchemy.orm import Session
 from app.db import get_session
 from app.deps import CurrentUser
 from app.enums import CandidateType
+from app.models.derived import DerivedExerciseItem, DerivedFoodItem
 from app.schemas.corrections import (
     DerivedExerciseItemDTO,
     DerivedFoodItemDTO,
     DerivedItemEditRequest,
 )
 from app.services import corrections as corrections_service
+from app.services import item_read_model
 from app.services.corrections import (
     DerivedItemForbidden,
     DerivedItemNotFound,
@@ -53,10 +55,13 @@ def edit_derived_item(
 ) -> DerivedFoodItemDTO | DerivedExerciseItemDTO:
     """Edit one field of the caller's own derived item.
 
-    Snapshots the original value, overrides the current one (rescaling calories
-    and macros when ``quantity`` changes on a food item), and appends the immutable
-    correction row(s). Cross-user/unknown targets fail closed as ``404``; invalid
-    edits return ``422`` with a clear error shape.
+    A ``quantity`` edit on a food item is a **provenance-preserving** amount adjust
+    (rescales calories/macros, keeps the source, leaves the item un-edited); a direct
+    value edit is a **user override** (marks the item edited). Either way the original
+    value is snapshotted and immutable correction row(s) are appended. The response
+    carries the per-item ``source`` descriptor and ``is_edited`` flag. Cross-user or
+    unknown targets fail closed as ``404``; invalid edits return ``422`` with a clear
+    error shape.
     """
 
     try:
@@ -78,5 +83,7 @@ def edit_derived_item(
         ) from exc
 
     if item_type is CandidateType.FOOD:
-        return DerivedFoodItemDTO.model_validate(result.item)
-    return DerivedExerciseItemDTO.model_validate(result.item)
+        return item_read_model.serialize_food_item(session, cast("DerivedFoodItem", result.item))
+    return item_read_model.serialize_exercise_item(
+        session, cast("DerivedExerciseItem", result.item)
+    )
