@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from sqlalchemy.engine import Engine
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.db import create_db_engine, create_session_factory
 from app.estimator.enqueue import celery_enqueuer
@@ -32,6 +33,26 @@ from app.settings import Settings, load_settings
 logger = logging.getLogger(__name__)
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add baseline security headers to every response.
+
+    These headers are defense-in-depth controls (FTY-112):
+    - ``X-Content-Type-Options: nosniff`` blocks MIME-confusion attacks.
+    - ``X-Frame-Options: DENY`` blocks clickjacking (the API is never framed).
+    - ``Referrer-Policy: no-referrer`` limits referrer leakage on redirects.
+
+    HSTS and CSP are intentionally omitted: TLS termination is the reverse-proxy's
+    concern, and a CSP is low-value for a JSON API consumed by a native client.
+    """
+
+    async def dispatch(self, request: Request, call_next: object) -> Response:
+        response: Response = await call_next(request)  # type: ignore[operator]
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+
+
 def create_app(settings: Settings | None = None, engine: Engine | None = None) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -41,12 +62,26 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
     one is supplied (tests inject a SQLite engine with the schema already
     migrated). The session factory is stored on ``app.state`` for the
     request-scoped ``get_session`` dependency.
+
+    In ``production`` the interactive docs (``/docs``, ``/redoc``) and the raw
+    OpenAPI schema (``/openapi.json``) are disabled so the full API surface is
+    not publicly enumerable on a self-host. In ``development`` and ``test`` they
+    remain available (current behaviour preserved).
     """
 
     settings = settings or load_settings()
     configure_logging(settings.log_level)
 
-    app = FastAPI(title=settings.app_name)
+    # Gate interactive docs and OpenAPI schema off in production to reduce
+    # reconnaissance exposure. Development and test keep them enabled.
+    is_production = settings.environment == "production"
+    app = FastAPI(
+        title=settings.app_name,
+        docs_url=None if is_production else "/docs",
+        redoc_url=None if is_production else "/redoc",
+        openapi_url=None if is_production else "/openapi.json",
+    )
+    app.add_middleware(SecurityHeadersMiddleware)
     app.state.settings = settings
     db_engine = engine or create_db_engine(settings.database_url)
     app.state.db_engine = db_engine
