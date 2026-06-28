@@ -15,17 +15,37 @@ checklist, smoke check) see the README **Self-Hosting** section.
 
 | Service | Image / build | Purpose | Host port |
 | --- | --- | --- | --- |
-| `postgres` | `postgres:16.4-alpine` | Application database. | `${POSTGRES_PORT:-5432}` |
-| `redis` | `redis:7.4-alpine` | Celery broker / result backend. | `${REDIS_PORT:-6379}` |
+| `postgres` | `postgres:16.4-alpine` | Application database. | — (internal only) |
+| `redis` | `redis:7.4-alpine` | Celery broker / result backend. | — (internal only) |
 | `migrate` | `./backend` (Alembic) | One-shot first-boot migration runner. | — |
 | `api` | `./backend` (FastAPI) | HTTP API; serves `GET /healthz` and `GET /healthz/sources`. | `${API_PORT:-8000}` |
 | `worker` | `./backend` (Celery) | Background estimation worker. | — |
 
+- Postgres and Redis are **not published to host interfaces by default** (FTY-109).
+  The `api`, `worker`, and `migrate` services reach them over the internal compose
+  network by service name (`postgres`, `redis`). This removes an unauthenticated
+  Redis and Postgres exposure from the self-host box's LAN. To re-enable direct
+  host access (e.g. for a DB GUI or local `psql`), add a loopback-only mapping to
+  the relevant service in `docker-compose.yml`:
+  ```yaml
+  ports:
+    - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"   # postgres
+    - "127.0.0.1:${REDIS_PORT:-6379}:6379"       # redis
+  ```
+  Alternatively, access the database without a host port via:
+  ```sh
+  docker compose exec postgres psql -U fatty fatty
+  ```
+- `api`, `worker`, `postgres`, and `redis` all declare `restart: unless-stopped`;
+  they restart automatically if they crash. The one-shot `migrate` service has no
+  restart policy and exits after applying migrations.
 - Postgres and Redis define healthchecks (`pg_isready`, `redis-cli ping`).
 - The `migrate` service runs `alembic upgrade head` once and exits; it depends on
   `postgres` being healthy. The `api` and `worker` services depend on `migrate`
   completing successfully before they start.
 - The API healthcheck polls its own `GET /healthz` and expects HTTP 200.
+- The worker healthcheck runs `celery inspect ping` against the configured
+  `app.worker:celery_app` to confirm the worker is alive and connected to Redis.
 - Images for Postgres and Redis are pinned per the security baseline's
   pinned-dependency principle.
 - The `backend/` image includes a pinned Node.js runtime and the Claude Code CLI
@@ -58,7 +78,7 @@ Key variable groups (see `.env.example` for full documentation):
 | --- | --- | --- |
 | Auth | `FATTY_AUTH_SECRET`, `FATTY_AUTH_TOKEN_TTL_SECONDS` | Auth secret is required; generate before first boot. |
 | Datastores | `POSTGRES_*`, `FATTY_DATABASE_URL`, `REDIS_PORT`, `FATTY_REDIS_URL` | Service hostnames must match compose service names. |
-| Host ports | `POSTGRES_PORT`, `REDIS_PORT`, `API_PORT` | Published host ports; containers always listen on fixed ports. |
+| Host ports | `API_PORT` | Published host port for the API; containers always listen on fixed ports. `POSTGRES_PORT` / `REDIS_PORT` are meaningful only if you re-enable loopback-only host mappings for direct datastore access (see Services above). |
 | Application | `FATTY_ENVIRONMENT`, `FATTY_LOG_LEVEL` | App config. |
 | LLM provider | `FATTY_LLM_*` | Optional; defaults to `fake` (model-prior-with-status). See LLM providers below. |
 | USDA FDC | `FATTY_FDC_*` | Optional; free data.gov key. Disabled when key absent. |
@@ -128,7 +148,7 @@ never commit it. The image contains only the Claude Code binary — no credentia
 docker compose up -d
 curl -fsS http://localhost:8000/healthz          # -> {"status":"ok"}
 curl -fsS http://localhost:8000/healthz/sources  # -> provider capability list
-docker compose ps                                # migrate exited 0, api/postgres/redis healthy, worker running
+docker compose ps                                # migrate exited 0, api/postgres/redis/worker all healthy
 docker compose down                              # add -v to drop all volumes
 ```
 
