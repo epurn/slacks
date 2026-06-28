@@ -24,6 +24,7 @@ import {
   type SavedFoodDTO,
 } from "@/api/savedFoods";
 import { BarcodeScannerScreen } from "@/components/BarcodeScannerScreen";
+import { ConnectionBanner } from "@/components/ConnectionBanner";
 import { LabelCaptureScreen } from "@/components/LabelCaptureScreen";
 import { TypeaheadSuggestionBar } from "@/components/TypeaheadSuggestionBar";
 import { Skeleton } from "@/components/ui";
@@ -33,6 +34,18 @@ import {
   isNonTerminal,
   useIntervalPolling,
 } from "@/state/polling";
+import {
+  createOutboxEntry,
+  generateIdempotencyKey,
+  pendingCount,
+  type OutboxEntry,
+  type OutboxStore,
+  type OutboxSubmit,
+  type OutboxSyncState,
+} from "@/state/outbox";
+import { fileOutboxStore } from "@/state/outboxStore";
+import { isUnreachableError } from "@/state/reachability";
+import { useOfflineQueue } from "@/state/useOfflineQueue";
 import {
   OPTIMISTIC_ID_PREFIX,
   optimisticLogEvent,
@@ -72,6 +85,12 @@ interface FeedEntry {
    * polling.
    */
   savedFood: SavedFoodDTO | null;
+  /**
+   * Present iff this row is an offline-queued capture (FTY-104) that has not yet
+   * reached the server. It carries the local sync state so the row shows the
+   * right calm offline indicator. Online rows leave this undefined.
+   */
+  offline?: OutboxSyncState;
 }
 
 function messageFor(error: unknown): string {
@@ -103,6 +122,10 @@ export function LogScreen({
   labelTakePhoto,
   useActive = useScreenActive,
   pollIntervalMs = POLL_INTERVAL_MS,
+  outboxStore = fileOutboxStore,
+  retryIntervalMs,
+  generateKey = generateIdempotencyKey,
+  now = () => new Date().toISOString(),
 }: {
   session?: Session;
   create?: typeof createLogEventApi;
@@ -113,6 +136,14 @@ export function LogScreen({
   labelTakePhoto?: () => Promise<{ uri: string }>;
   useActive?: () => boolean;
   pollIntervalMs?: number;
+  /** Durable offline-outbox storage (FTY-104) — injectable for tests. */
+  outboxStore?: OutboxStore;
+  /** Reconnect-retry cadence for the outbox drain — injectable for tests. */
+  retryIntervalMs?: number;
+  /** Idempotency-key generator — injectable for deterministic tests. */
+  generateKey?: () => string;
+  /** Capture-timestamp source — injectable for deterministic tests. */
+  now?: () => string;
 } = {}) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
@@ -131,6 +162,45 @@ export function LogScreen({
   const [scannerOpen, setScannerOpen] = useState(false);
   const [labelCaptureOpen, setLabelCaptureOpen] = useState(false);
   const tempId = useRef(0);
+
+  // ── Offline outbox (FTY-104) ────────────────────────────────────────────────
+  // When an offline-queued entry is accepted on reconnect, fold the real server
+  // event into the feed (replacing any leftover optimistic row for its key) so it
+  // follows the normal server-driven pending → resolved flow and begins counting.
+  const handleAccepted = useCallback(
+    (entry: OutboxEntry, event: LogEventDTO) => {
+      setFeed((prev) => [
+        { key: event.id, event, savedFood: null },
+        ...prev.filter(
+          (f) => f.key !== entry.idempotencyKey && f.key !== event.id,
+        ),
+      ]);
+    },
+    [],
+  );
+
+  const queueSubmit = useCallback<OutboxSubmit>(
+    (entry) => {
+      if (!apiSession) {
+        return Promise.reject(new Error("No session for outbox submit."));
+      }
+      return create(apiSession, entry.rawText, entry.idempotencyKey);
+    },
+    [apiSession, create],
+  );
+
+  const {
+    reachability,
+    entries: outboxEntries,
+    enqueue,
+    drainNow,
+  } = useOfflineQueue({
+    userId: apiSession?.userId ?? null,
+    submit: queueSubmit,
+    store: outboxStore,
+    onAccepted: handleAccepted,
+    retryIntervalMs,
+  });
 
   // Poll while any feed entry is non-terminal and the screen is active.
   const pollOnce = useCallback(() => {
@@ -157,48 +227,112 @@ export function LogScreen({
   const shouldPoll = isActive && hasPendingWork(feedEvents);
   useIntervalPolling(shouldPoll, pollIntervalMs, pollOnce);
 
+  // Offline-queued entries render as calm offline-pending rows alongside the
+  // online feed. They are uncounted and carry no fabricated number.
+  const offlineRows = useMemo<readonly FeedEntry[]>(
+    () =>
+      outboxEntries
+        .filter((e) => e.syncState !== "accepted")
+        .map((e) => ({
+          key: e.idempotencyKey,
+          event: optimisticLogEvent({
+            id: e.idempotencyKey,
+            userId: e.userId,
+            rawText: e.rawText,
+            createdAt: e.capturedAt,
+          }),
+          savedFood: null,
+          offline: e.syncState,
+        })),
+    [outboxEntries],
+  );
+
+  // One newest-first list: online optimistic/resolved rows plus offline rows.
+  const rows = useMemo<readonly FeedEntry[]>(
+    () =>
+      [...feed, ...offlineRows].sort((a, b) =>
+        b.event.created_at.localeCompare(a.event.created_at),
+      ),
+    [feed, offlineRows],
+  );
+
+  const queuedCount = pendingCount(outboxEntries);
+
   const handleSubmit = useCallback(async () => {
     const trimmed = text.trim();
     if (!trimmed || !apiSession || submitting) return;
 
-    const tempKey = `${OPTIMISTIC_ID_PREFIX}${tempId.current++}`;
+    // The idempotency key is minted once, here, and reused on every retry — that
+    // is what makes a reconnect drain of this entry dedup-safe (FTY-104).
+    const idempotencyKey = generateKey();
+    const capturedAt = now();
     const pendingSavedFood = selectedSavedFood;
     setSelectedSavedFood(null);
 
     const optimistic = optimisticLogEvent({
-      id: tempKey,
+      id: idempotencyKey,
       userId: apiSession.userId,
       rawText: trimmed,
-      createdAt: new Date().toISOString(),
+      createdAt: capturedAt,
     });
 
-    setFeed((prev) => [{ key: tempKey, event: optimistic, savedFood: pendingSavedFood }, ...prev]);
+    setFeed((prev) => [
+      { key: idempotencyKey, event: optimistic, savedFood: pendingSavedFood },
+      ...prev,
+    ]);
     // Clear the composer immediately so the next entry can be typed at once.
     setText("");
     setSubmitting(true);
     setSubmitError(null);
 
     try {
-      const created = await create(apiSession, trimmed);
+      const created = await create(apiSession, trimmed, idempotencyKey);
       // Re-key the optimistic entry to the real server id.
       setFeed((prev) =>
         prev.map((entry) =>
-          entry.key === tempKey
+          entry.key === idempotencyKey
             ? { key: created.id, event: created, savedFood: entry.savedFood }
             : entry,
         ),
       );
+      // We just reached the server — flush any earlier offline backlog now.
+      drainNow();
     } catch (error) {
-      setFeed((prev) => prev.filter((entry) => entry.key !== tempKey));
-      setText(trimmed);
-      // Restore the saved-food association too, so the user need not re-tap the
-      // typeahead suggestion to retry.
-      setSelectedSavedFood(pendingSavedFood);
-      setSubmitError(messageFor(error));
+      if (isUnreachableError(error)) {
+        // The server was unreachable: never a dead-end. Drop the transient
+        // online-optimistic row and enqueue the raw capture into the durable
+        // outbox — it re-renders as a calm offline-pending row, uncounted.
+        setFeed((prev) => prev.filter((entry) => entry.key !== idempotencyKey));
+        await enqueue(
+          createOutboxEntry({
+            idempotencyKey,
+            userId: apiSession.userId,
+            rawText: trimmed,
+            capturedAt,
+          }),
+        );
+      } else {
+        // The server answered with an error — surface it and restore the
+        // composer (including the saved-food association) so retry is one tap.
+        setFeed((prev) => prev.filter((entry) => entry.key !== idempotencyKey));
+        setText(trimmed);
+        setSelectedSavedFood(pendingSavedFood);
+        setSubmitError(messageFor(error));
+      }
     } finally {
       setSubmitting(false);
     }
-  }, [text, apiSession, submitting, create, selectedSavedFood]);
+  }, [
+    text,
+    apiSession,
+    submitting,
+    create,
+    selectedSavedFood,
+    generateKey,
+    now,
+    enqueue,
+    drainNow,
+  ]);
 
   const handleBarcodeScanned = useCallback(
     async (barcode: string) => {
@@ -308,6 +442,9 @@ export function LogScreen({
         ]}
         keyboardShouldPersistTaps="handled"
       >
+        {/* Calm connection-status banner (hidden when online and caught up). */}
+        <ConnectionBanner state={reachability} queuedCount={queuedCount} />
+
         {/* Composer: keyboard-up natural-language input */}
         <View style={styles.composer}>
           <TextInput
@@ -408,7 +545,7 @@ export function LogScreen({
           </Text>
         ) : null}
 
-        {feed.length > 0 && (
+        {rows.length > 0 && (
           <View style={styles.feedSection}>
             <Text style={[styles.feedLabel, { color: colors.textMuted }]}>
               Added this session
@@ -419,7 +556,7 @@ export function LogScreen({
                 { backgroundColor: colors.surfaceRaised },
               ]}
             >
-              {feed.map((entry, index) => (
+              {rows.map((entry, index) => (
                 <View key={entry.key}>
                   {index > 0 && (
                     <View
@@ -451,6 +588,13 @@ export function LogScreen({
 function FeedRow({ entry }: { entry: FeedEntry }) {
   const { colors } = useTheme();
 
+  // An offline-queued capture is not on the server yet — it renders as a calm,
+  // uncounted offline-pending row (raw text + an explicit offline indicator),
+  // never a shimmer (it is not being estimated) and never a fabricated number.
+  if (entry.offline) {
+    return <OfflineFeedRow entry={entry} />;
+  }
+
   // A saved-food entry has nutrition immediately; skip the skeleton for it.
   const showResolved =
     entry.savedFood != null || !isNonTerminal(entry.event.status);
@@ -479,6 +623,75 @@ function FeedRow({ entry }: { entry: FeedEntry }) {
     >
       {!showResolved && <Skeleton width="100%" height={FEED_ROW_HEIGHT} />}
       {showResolved && <FeedRowResolved entry={entry} />}
+    </View>
+  );
+}
+
+/**
+ * Calm presentation for the offline indicator, by local sync state. The state is
+ * always carried in words (never colour alone), and no kcal/macro value is ever
+ * shown — an offline-queued entry is uncounted until the server resolves it.
+ */
+function offlineIndicator(state: OutboxSyncState): {
+  readonly glyph: string;
+  readonly label: string;
+  readonly a11y: string;
+} {
+  switch (state) {
+    case "submitting":
+      return { glyph: "⟳", label: "Sending…", a11y: "sending" };
+    case "failed":
+      return {
+        glyph: "!",
+        label: "Couldn't send",
+        a11y: "couldn't send",
+      };
+    case "queued":
+    case "accepted":
+    default:
+      return {
+        glyph: "⇡",
+        label: "Offline — queued",
+        a11y: "offline, queued to send",
+      };
+  }
+}
+
+/**
+ * A single offline-queued row. It shows the raw captured text and an explicit,
+ * accessible offline indicator, at the same fixed height as every other feed row
+ * so the layout never shifts when the entry later resolves online.
+ */
+function OfflineFeedRow({ entry }: { entry: FeedEntry }) {
+  const { colors } = useTheme();
+  const indicator = offlineIndicator(entry.offline ?? "queued");
+  const displayName = entry.event.raw_text;
+
+  return (
+    <View
+      style={[styles.feedRow, { backgroundColor: colors.surfaceRaised }]}
+      accessible
+      accessibilityLabel={`${displayName}, ${indicator.a11y}`}
+    >
+      <View style={styles.feedRowContent}>
+        <Text
+          style={[styles.feedRowName, { color: colors.text }]}
+          numberOfLines={1}
+        >
+          {displayName}
+        </Text>
+        <View style={styles.offlineIndicator}>
+          <Text style={[styles.offlineGlyph, { color: colors.textMuted }]}>
+            {indicator.glyph}
+          </Text>
+          <Text
+            style={[styles.feedRowMeta, { color: colors.textMuted }]}
+            numberOfLines={1}
+          >
+            {indicator.label}
+          </Text>
+        </View>
+      </View>
     </View>
   );
 }
@@ -634,6 +847,15 @@ const styles = StyleSheet.create({
   },
   feedRowMeta: {
     fontSize: typeScale.footnote,
+  },
+  offlineIndicator: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  offlineGlyph: {
+    fontSize: typeScale.footnote,
+    fontWeight: "600",
   },
   separator: {
     height: StyleSheet.hairlineWidth,

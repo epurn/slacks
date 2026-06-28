@@ -105,16 +105,32 @@ export async function listTodayLogEvents(
  * Create a `pending` log event from the user's natural-language input and
  * return the stored event. The caller is responsible for trimming; the backend
  * also trims and rejects empty/oversized input as the trust boundary.
+ *
+ * `idempotencyKey` is the FTY-096 first-write-wins token (contract v2): when
+ * supplied, the create is safe to retry — a fresh key creates the event (`201`),
+ * a replay of an already-accepted key returns the existing event (`200`) without
+ * a duplicate. Both are `2xx`, so this client treats them identically and
+ * returns the resulting event. The offline outbox (FTY-104) generates the key
+ * once at capture time and reuses it on every retry, which is what makes a
+ * reconnect drain dedup-safe. The key is an opaque write-only token: it is sent
+ * in the body and never logged.
  */
 export async function createLogEvent(
   session: LogEventSession,
   rawText: string,
+  idempotencyKey?: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<LogEventDTO> {
+  const body: { raw_text: string; idempotency_key?: string } = {
+    raw_text: rawText,
+  };
+  if (idempotencyKey !== undefined) {
+    body.idempotency_key = idempotencyKey;
+  }
   const response = await fetchImpl(logEventsUrl(session), {
     method: "POST",
     headers: authHeaders(session),
-    body: JSON.stringify({ raw_text: rawText }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     throw await readError(response, "save your entry");
