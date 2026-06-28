@@ -9,11 +9,11 @@ things:
 1. the `goals` and `daily_targets` persistence schema and their migration
    (FTY-022 owns these tables);
 2. the calculator's input contract (profile fields + goal trajectory) and output
-   contract (RMR, TDEE, daily calorie target, and the assumptions snapshot),
-   which are estimator contracts;
+   contract (RMR, TDEE, the daily calorie target, the derived protein/carb/fat
+   gram targets, and the assumptions snapshot), which are estimator contracts;
 3. the documented assumptions behind every number (baseline activity multiplier,
-   the NIDDK-style dynamic model parameters, rounding, and the safety
-   floor/ceiling).
+   the NIDDK-style dynamic model parameters, rounding, the safety floor/ceiling,
+   and the evidence-based macro default ratios).
 
 It deliberately excludes logging exercise burn into the daily allowance, adaptive
 calibration from observed weight trend, profile capture UI (FTY-021), and the
@@ -28,7 +28,7 @@ estimator / contracts / backend-core lane (`backend/app/estimator/`,
 
 ## Version
 
-1 (introduced in FTY-022).
+2 (introduced in FTY-022; macro targets added in FTY-094).
 
 ## Inputs
 
@@ -64,8 +64,11 @@ preference; the goal supplies the trajectory.
 
 `rmr_kcal`, `tdee_kcal`, `daily_calorie_target_kcal`, `direction`
 (`loss` | `gain` | `maintain`), `horizon_days`, `clamped` (true when the raw
-target was outside the safety band and clamped to the boundary), and an
-`assumptions` snapshot.
+target was outside the safety band and clamped to the boundary), the three macro
+targets `protein_target_g` / `carbs_target_g` / `fat_target_g` (whole grams),
+`macros_clamped` (the macro analogue of `clamped`; see below), and an
+`assumptions` snapshot. All fields are additive; existing consumers see no change
+to the calorie/RMR/TDEE numbers.
 
 ### The math
 
@@ -101,6 +104,72 @@ target was outside the safety band and clamped to the boundary), and an
    TDEE; a longer horizon gives a gentler target approaching goal-weight
    maintenance; an impossibly short horizon gives an extreme target that the
    safety band then refuses.
+
+### Macro targets (FTY-094)
+
+Alongside the calorie target the calculator derives **protein, carbohydrate, and
+fat targets in whole grams**, computed against the **already safety-clamped**
+`daily_calorie_target_kcal` (so the macros are consistent with the number the
+user is shown) in this fixed, evidence-based priority order — protein first, then
+the fat floor, then carbohydrate as the remainder:
+
+1. **Protein — anchored to bodyweight.**
+   `protein_target_g = round(1.6 × start_weight_kg)`
+   (`PROTEIN_G_PER_KG = 1.6`). Anchored to `start_weight_kg` — the goal's fixed
+   start-weight snapshot — **not** the (lower) target weight: in a deficit you
+   anchor protein to *current* body mass to protect lean tissue.
+2. **Fat — an energy share with a hormonal-health floor.**
+   `fat_target_g = max( round(0.30 × daily_calorie_target_kcal / 9),
+   round(0.8 × start_weight_kg) )`
+   (`FAT_PCT_OF_CALORIES = 0.30`, `FAT_FLOOR_G_PER_KG = 0.8`). The floor
+   guarantees enough fat for essential fatty acids / sex-hormone health when a
+   deep deficit would otherwise push the percentage share too low.
+3. **Carbohydrate — the non-negative remainder.**
+   `carbs_kcal = daily_calorie_target_kcal − 4·protein_target_g − 9·fat_target_g`;
+   `carbs_target_g = round(max(0, carbs_kcal) / 4)`. When protein + fat already
+   meet or exceed the calorie target, carbohydrate floors at 0 and **`macros_clamped`
+   is set true** (the analogue of the calorie `clamped` flag) so the rare
+   over-constrained case is honest, never silently negative.
+
+Each macro is rounded to the **nearest whole gram, rounding half up** — a
+documented, deterministic rule (not Python's default banker's rounding) so a
+future edit cannot silently shift a pinned macro. The macros are derived, not
+user-set: their machine-readable provenance is the assumptions snapshot (the
+defaults below); the UI provenance label is rendered by a later Profile story.
+
+The Atwater energy factors used (kcal per gram) are protein 4, carbohydrate 4,
+fat 9.
+
+#### Evidence basis for the macro defaults
+
+- **Protein 1.6 g/kg bodyweight.** The largest meta-analysis to date (Morton et
+  al., *Br J Sports Med* 2018) identifies ~1.6 g/kg/day as the breakpoint beyond
+  which added protein yields no further lean-mass benefit; systematic reviews of
+  hypocaloric diets in adults with overweight/obesity find **1.2–1.6 g/kg/day**
+  optimal for fat loss with lean-mass preservation. 1.6 g/kg sits at the top of
+  that protective band and at the muscle-protein-synthesis ceiling — a strong,
+  simple, total-bodyweight-anchored default. This overrides the intuition that
+  protein should scale with the lower *goal* weight: in a deficit you anchor to
+  *current* mass to protect lean tissue.
+- **Fat ≥ 0.30 of calories, floored at 0.8 g/kg.** The Dietary Guidelines for
+  Americans place fat at 20–35% of energy; evidence shows dropping below ~20% of
+  energy / ~0.8 g/kg lowers sex-hormone (e.g. testosterone) levels. 30% is a calm
+  midpoint; the 0.8 g/kg floor protects hormonal health when a deep deficit would
+  otherwise shrink the percentage share.
+- **Carbohydrate as remainder.** Carbohydrate is the least essential macro to pin
+  (no essential-carbohydrate requirement); letting it flex as the remainder after
+  the two evidence-anchored macros is the standard evidence-based macro-setting
+  order (protein first, fat floor, carbs fill).
+
+#### Bodyweight-anchor limitation
+
+Anchoring protein to `start_weight_kg` keeps derivation deterministic and
+consistent with the trajectory math, but within a single goal protein does not
+drift down as the user loses weight; re-anchoring to *current* weight is future
+adaptive-calibration work (already out of scope per the FTY-022 adaptive
+exclusion). Total-bodyweight scaling also slightly overestimates protein need at
+high adiposity — lean-mass- or reference-weight-based anchoring is more precise —
+a known refinement, not a v1 blocker.
 
 ## Validation
 
@@ -146,11 +215,20 @@ both tables is the ownership key.
 ## Examples
 
 - **Maintenance.** Male, 80 kg, 1.80 m, age 30, target 80 kg → RMR 1780,
-  TDEE 2136, daily target 2136 kcal.
-- **Weight loss.** Same profile, target 75 kg over 90 days → daily target
-  1678 kcal (a deficit below TDEE); over ~365 days → 1998 kcal (gentler).
+  TDEE 2136, daily target 2136 kcal. Macros: protein 128 g (1.6 × 80), fat 71 g
+  (round(0.30 × 2136 / 9), above the 0.8 × 80 = 64 g floor), carbs 246 g
+  (round((2136 − 512 − 639) / 4)), `macros_clamped = false`.
+- **Weight loss (fat floor wins).** Same profile, target 75 kg over 90 days →
+  daily target 1678 kcal (a deficit below TDEE); over ~365 days → 1998 kcal
+  (gentler). Macros at 1678 kcal: protein 128 g (still anchored to the **80 kg
+  start weight**, not the 75 kg goal), fat 64 g (the 0.8 × 80 = 64 g floor wins
+  over round(0.30 × 1678 / 9) = 56 g), carbs 148 g, `macros_clamped = false`.
 - **Refused plan.** Same profile, target 60 kg in 30 days → raw target is
   negative; clamped up to the 1500 kcal floor, `clamped = true`.
+- **Over-constrained macros.** Female, 90 kg, 1.60 m, target 60 kg in 30 days →
+  calorie target clamped to the 1200 kcal floor; protein 144 g + fat 72 g already
+  exceed it (4 × 144 + 9 × 72 = 1224 kcal), so carbs floor at 0 g and
+  `macros_clamped = true`.
 
 ## Migration / Compatibility
 
