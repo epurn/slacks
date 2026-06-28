@@ -14,7 +14,9 @@ interface ButtonProps extends Omit<PressableProps, 'style'> {
 /**
  * Themed Button primitive.
  *
- * Primary: amber accent background with high-contrast dark text.
+ * Primary: amber accent background with high-contrast dark ink
+ * (`accentForeground`) — readable in both light and dark (a near-white label
+ * on the light dark-mode amber would fail WCAG contrast).
  * Secondary: muted control background with primary text.
  *
  * Minimum touch target is 44×44pt (WCAG success criterion 2.5.5).
@@ -30,7 +32,7 @@ export function Button({
 
   const isPrimary = variant === 'primary';
   const bg = isPrimary ? colors.accent : colors.controlBackground;
-  const textColor = isPrimary ? colors.text : colors.textSecondary;
+  const textColor = isPrimary ? colors.accentForeground : colors.textSecondary;
   const opacity = disabled ? 0.45 : 1;
 
   return (

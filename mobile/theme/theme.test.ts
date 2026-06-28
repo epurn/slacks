@@ -136,6 +136,12 @@ describe('lightPalette — WCAG AA token contrast on surface', () => {
   it('accentText (#92400E) on surface (#F2F2F7) meets 4.5:1', () => {
     expect(contrastRatio(lightPalette.accentText, lightPalette.surface)).toBeGreaterThanOrEqual(WCAG_AA);
   });
+
+  it('accentForeground on accent fill (primary button label) meets 4.5:1', () => {
+    expect(
+      contrastRatio(lightPalette.accentForeground, lightPalette.accent),
+    ).toBeGreaterThanOrEqual(WCAG_AA);
+  });
 });
 
 describe('darkPalette — WCAG AA token contrast on surface', () => {
@@ -149,5 +155,11 @@ describe('darkPalette — WCAG AA token contrast on surface', () => {
 
   it('accentText (#F5A623) on surface (#1C1C1E) meets 4.5:1', () => {
     expect(contrastRatio(darkPalette.accentText, darkPalette.surface)).toBeGreaterThanOrEqual(WCAG_AA);
+  });
+
+  it('accentForeground on accent fill (primary button label) meets 4.5:1', () => {
+    expect(
+      contrastRatio(darkPalette.accentForeground, darkPalette.accent),
+    ).toBeGreaterThanOrEqual(WCAG_AA);
   });
 });

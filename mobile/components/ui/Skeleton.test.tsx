@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
-import { AccessibilityInfo, useColorScheme } from 'react-native';
+import { AccessibilityInfo, Animated, useColorScheme } from 'react-native';
 import { ThemeProvider } from '@/theme';
 import { Skeleton } from '@/components/ui';
 
@@ -24,6 +24,11 @@ describe('Skeleton', () => {
     jest
       .spyOn(AccessibilityInfo, 'isReduceMotionEnabled')
       .mockResolvedValue(false);
+    // The component subscribes to live Reduce Motion changes; return a no-op
+    // removable subscription so the effect cleanup has something to call.
+    jest
+      .spyOn(AccessibilityInfo, 'addEventListener')
+      .mockReturnValue({ remove: jest.fn() } as never);
   });
 
   afterEach(() => {
@@ -70,10 +75,33 @@ describe('Skeleton', () => {
     expect(combined.height).toBe(48);
   });
 
-  it('does not crash when Reduce Motion is enabled', async () => {
+  it('starts the shimmer loop once Reduce Motion is known to be off', async () => {
+    const loopSpy = jest
+      .spyOn(Animated, 'loop')
+      .mockReturnValue({ start: jest.fn(), stop: jest.fn() } as never);
+
+    act(() => {
+      create(
+        React.createElement(
+          ThemeProvider,
+          { override: 'light' },
+          React.createElement(Skeleton, { width: 80, height: 20 }),
+        ),
+      );
+    });
+    // Let the isReduceMotionEnabled promise resolve inside useEffect.
+    await act(async () => {});
+
+    expect(loopSpy).toHaveBeenCalled();
+  });
+
+  it('does not animate (no shimmer loop) when Reduce Motion is enabled', async () => {
     jest
       .spyOn(AccessibilityInfo, 'isReduceMotionEnabled')
       .mockResolvedValue(true);
+    const loopSpy = jest
+      .spyOn(Animated, 'loop')
+      .mockReturnValue({ start: jest.fn(), stop: jest.fn() } as never);
 
     let tree: ReturnType<typeof create> | null = null;
     act(() => {
@@ -85,11 +113,13 @@ describe('Skeleton', () => {
         ),
       );
     });
-    // Let the isReduceMotionEnabled promise resolve inside useEffect
+    // Let the isReduceMotionEnabled promise resolve inside useEffect.
     await act(async () => {});
-    expect(tree).not.toBeNull();
+
+    // The placeholder still renders, but the shimmer loop must never start.
     expect(
       tree!.root.find((n) => n.props.accessibilityRole === 'progressbar'),
     ).toBeTruthy();
+    expect(loopSpy).not.toHaveBeenCalled();
   });
 });

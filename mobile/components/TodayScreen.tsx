@@ -466,7 +466,11 @@ export function TodayScreen({
         style={styles.screen}
         contentContainerStyle={[
           styles.content,
-          { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 24 },
+          // +96 (not +24) so the last entry clears the floating, absolutely-
+          // positioned tab bar that now overlays the scroll content; mirrors
+          // the placeholder tabs' insets.bottom + 80 reservation with extra
+          // breathing room for a scrollable list.
+          { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 96 },
         ]}
         keyboardShouldPersistTaps="handled"
       >

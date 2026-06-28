@@ -59,6 +59,13 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Today',
+          // TodayScreen draws its own large "Today" title, refresh, and gear
+          // (it predates the tab shell and owns its chrome + tests). Suppress
+          // the native header here so the user doesn't see a duplicate "Today"
+          // title and a second gear button. The placeholder tabs keep the
+          // native header (and its gear), so the gear stays reachable on every
+          // tab.
+          headerShown: false,
           tabBarAccessibilityLabel: 'Today tab',
           tabBarIcon: ({ color }) => (
             <Text style={{ fontSize: 22, color }}>☀</Text>

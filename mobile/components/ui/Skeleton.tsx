@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, StyleSheet, View, type DimensionValue, type ViewProps } from 'react-native';
 import { useTheme } from '@/theme';
 
@@ -32,20 +32,32 @@ export function Skeleton({
   const { colors, isDark } = useTheme();
   // eslint-disable-next-line react-hooks/refs
   const shimmer = useRef(new Animated.Value(0)).current;
-  const reduceMotion = useRef(false);
+  // `null` until the async Reduce Motion check resolves, then the live value.
+  // Held in state (not a ref) so the animation effect below re-runs once the
+  // setting is known and whenever the user toggles it — a ref would resolve
+  // after the loop had already started and never re-trigger it.
+  const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
 
   useEffect(() => {
     let mounted = true;
     AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
-      if (mounted) reduceMotion.current = enabled;
+      if (mounted) setReduceMotion(enabled);
     });
+    const subscription = AccessibilityInfo.addEventListener(
+      'reduceMotionChanged',
+      (enabled) => setReduceMotion(enabled),
+    );
     return () => {
       mounted = false;
+      subscription.remove();
     };
   }, []);
 
   useEffect(() => {
-    if (reduceMotion.current) {
+    // Animate only once we know Reduce Motion is off. While unknown (`null`) or
+    // enabled, leave the placeholder static — never force motion on opt-out.
+    if (reduceMotion !== false) {
+      shimmer.setValue(0);
       return;
     }
 
@@ -65,7 +77,7 @@ export function Skeleton({
     );
     loop.start();
     return () => loop.stop();
-  }, [shimmer]);
+  }, [shimmer, reduceMotion]);
 
   // eslint-disable-next-line react-hooks/refs
   const opacity = shimmer.interpolate({

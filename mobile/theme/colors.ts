@@ -13,6 +13,9 @@ export interface ColorPalette {
   readonly textMuted: string;
   /** Warm amber accent — use for decorative elements (bars, icons, highlights). */
   readonly accent: string;
+  /** Text/icon colour to render ON TOP of the accent fill (e.g. a primary
+   *  button label). Meets WCAG AA against `accent` in both light and dark. */
+  readonly accentForeground: string;
   /** Amber safe for use as text — meets WCAG AA on both surfaces. */
   readonly accentText: string;
   /** Coral / over-budget colour — accent for the over-segment. */
@@ -34,6 +37,7 @@ export const lightPalette: ColorPalette = {
   textSecondary: '#636366',
   textMuted: '#8E8E93',
   accent: '#E8960C',
+  accentForeground: '#1C1C1E',
   accentText: '#92400E',
   coral: '#C0392B',
   separator: '#E5E5EA',
@@ -49,6 +53,7 @@ export const darkPalette: ColorPalette = {
   textSecondary: '#AEAEB2',
   textMuted: '#8E8E93',
   accent: '#F5A623',
+  accentForeground: '#1C1C1E',
   accentText: '#F5A623',
   coral: '#FF6B6B',
   separator: '#38383A',
