@@ -22,7 +22,20 @@ Retention defaults should minimize stored personal data while preserving user va
 
 ## Deletion Requirements
 
-- Users must be able to delete entries, attachments, saved foods, recipes, aliases, memories, weight entries, and accounts.
+Users control deletion of their own data at two levels:
+
+**Direct user-initiated deletion** — delete individual items:
+- Food and exercise log entries (which cascade to derived items, clarification questions, and corrections).
+- Body weight entries.
+- Saved foods, recipes, aliases, and portion memories.
+- Attachments (nutrition label images).
+
+**Account deletion** — delete the entire account, which cascades:
+- All user-owned data (profile, logs, entries, saved foods, memories, attachments, corrections, weight history, evidence).
+- The user and auth identity.
+
+No per-event or per-field `DELETE` endpoint exists for individual `evidence_sources` or `clarification_questions` — they are deleted only as cascade consequences of the parent event or account deletion. Global source facts (`products`, cached USDA/OFF data) remain after user deletion since they contain no user-specific data.
+
 - Deletion should remove or anonymize user-specific data from derived summaries.
 - Global source facts may remain if they contain no user-specific data.
 

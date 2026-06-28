@@ -476,6 +476,24 @@ candidates and only after a USDA/OFF miss; the disabled-provider model-prior-wit
 fallback; and no direct egress. `tests/test_food_migration.py` applies/rolls back the
 `0012` `assumptions` migration.
 
+## Liveness & Diagnostics
+
+The backend exposes three health-check endpoints, all returning structured JSON with no external calls:
+
+- **`GET /healthz`** — liveness probe. Returns `{"status": "ok"}` (200) when the API is
+  running and the database is reachable. Used by health checks and orchestration
+  (Kubernetes, Docker Compose, monitoring).
+- **`GET /healthz/sources`** — evidence source capability descriptor. Returns each
+  configured source's `id`, `source_type`, `kinds` (e.g. `["generic_food"]`,
+  `["barcode"]`), `enabled`, and `available` (matches the configuration and any
+  credentials). Open Food Facts and USDA FDC are listed; allows self-hosters to
+  confirm configuration without trial calls.
+- **`GET /healthz/egress`** — official-source fetch egress policy (FTY-078).
+  Returns the configured allowlist, size/timeout/content-type limits, and fixed
+  invariants (`https_only`, `public_ip_only`, `redirects_followed=false`,
+  `active_content_stripped`). Allows operators to audit the hardened-fetch
+  boundary without reading code.
+
 ## Migration / Compatibility
 
 - The `0007` migration applies (`alembic upgrade head`) on top of the `0006`

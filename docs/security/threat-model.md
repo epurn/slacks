@@ -1,11 +1,11 @@
 # Threat Model
 
 This threat model is reviewed against the as-built surface at each security gate.
-It was last reconciled with the built v1 surface in the FTY-073 security pass —
-estimator pipeline, evidence retrieval (USDA/OFF/label/official-source), LLM
-provider transport, and auth/profile/corrections/saved-foods/weight data — whose
-adversarial test suite (`backend/tests/security/`) enforces the controls below.
-Update it when architecture, data flows, or providers change.
+It was last reconciled with the built v1 surface through comprehensive adversarial
+testing (FTY-073): the security test suite (`backend/tests/security/`) enforces the
+controls below across the estimator pipeline, evidence retrieval (USDA/OFF/label/
+official-source), LLM provider transport, and auth/profile/corrections/saved-foods/
+weight data. Update it when architecture, data flows, or providers change.
 
 ## Assets
 

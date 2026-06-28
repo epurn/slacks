@@ -62,7 +62,18 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 Open `.env` and replace the `FATTY_AUTH_SECRET` placeholder with the output.
 The app will not start in production mode with the placeholder in place.
 
-**4. (Optional) Configure providers:**
+**4. (Optional) Configure host ports:**
+
+If `5432` (Postgres), `6379` (Redis), or `8000` (API) are already in use on your host,
+set the environment variables in `.env`:
+
+```sh
+POSTGRES_PORT=5433      # default 5432
+REDIS_PORT=6380        # default 6379
+API_PORT=8001          # default 8000
+```
+
+**5. (Optional) Configure providers:**
 
 Open `.env` and configure any providers you want:
 - **LLM:** set `FATTY_LLM_PROVIDER`, `FATTY_LLM_API_KEY`, and `FATTY_LLM_MODEL`. Leave `FATTY_LLM_PROVIDER=fake` to skip.
@@ -72,7 +83,7 @@ Open `.env` and configure any providers you want:
 
 See `.env.example` for all available options with documentation.
 
-**5. Start the stack:**
+**6. Start the stack:**
 
 ```sh
 docker compose up
@@ -82,7 +93,7 @@ Docker Compose builds the backend image, runs first-boot Alembic migrations
 automatically (the `migrate` service completes before the API starts), then
 brings up all four services.
 
-**6. Confirm health:**
+**7. Confirm health:**
 
 ```sh
 curl -fsS http://localhost:8000/healthz
