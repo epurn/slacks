@@ -6,7 +6,7 @@ The product principle is simple: natural input, deterministic math, visible evid
 
 ## Current Status
 
-This repository is in Milestone 0: project operating system. The first checked-in work establishes agent guidance, development standards, security/privacy requirements, contracts, and review gates before application code is added.
+**v1.0.0** — the first stable release. All v1 milestones are shipped: accounts and profile, the logging spine, the evidence-backed estimator, editing and saved foods, barcode and label evidence inputs, and weight tracking with a daily summary. See [CHANGELOG.md](CHANGELOG.md) for the full feature summary.
 
 ## Product Shape
 
@@ -146,9 +146,8 @@ make verify
 ```
 
 `make verify` is the single entry point: it runs repository governance and then
-each package's verification hook. Packages are scaffolded empty for now, so their
-checks are skipped until a package adds an executable `verify.sh`. Language-specific
-tooling arrives with the backend and mobile skeleton stories.
+each package's verification hook — ruff, mypy, and pytest for the backend;
+TypeScript, ESLint, and Jest for mobile.
 
 See `docs/operations/local-dev-stack.md` for the service contract and details.
 
@@ -158,5 +157,5 @@ See `CONTRIBUTING.md`, `AGENTS.md`, and `docs/operations/branching-and-prs.md`.
 
 ## License
 
-The project is intended to be open source. The license has not been selected yet.
+The project is intended to be open source. A license has not been formally selected yet; self-hosting for personal use is encouraged in the meantime.
 
