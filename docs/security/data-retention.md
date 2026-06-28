@@ -6,7 +6,7 @@ Retention defaults should minimize stored personal data while preserving user va
 
 - Account data: retained until account deletion.
 - Profile data: retained until edited or account deletion.
-- Food and exercise logs: retained until user deletion or account deletion.
+- Food and exercise logs: retained until user deletion or account deletion. A log event may carry an optional, opaque client `idempotency_key` (FTY-096) used to dedup a safe-to-retry offline submit — stored verbatim on `log_events`, never parsed, never logged, and never returned to the client. It adds no new retention surface: it lives on the owning event and is removed with it by the existing `ON DELETE CASCADE` on user/account deletion.
 - Body weight entries: retained until user deletion or account deletion.
 - Saved foods, recipes, aliases, and memories: retained until user deletion or account deletion.
 - Nutrition label images (`log_attachments`, FTY-077): discard by default — an uploaded image is retained only while needed for extraction and discarded afterward unless the user explicitly saves it. An explicit save writes exactly one user-owned `log_attachments` row (the image bytes plus the content-type, byte size, and content hash needed to retrieve and delete it); the default flow persists no raw image. Uploads are size- and content-type limited and rejected fail-closed before storage. The row is `ON DELETE CASCADE` from both the user and the owning log event, so a saved image is removed on log-event, user, or account deletion. It never stores model output (that is `evidence_sources`).
