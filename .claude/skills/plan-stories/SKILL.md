@@ -7,8 +7,8 @@ description: The single planning entry point for Fatty. Interview the user one q
 
 This is the planner's workbench. You interview the user until the design is
 resolved, then turn the result into one or more ready Fatty stories. One grilling
-session may produce a single story or a set of dependent stories when the work is
-too big for one vertical slice — hence "stories".
+session may produce a single story or a set of dependent stories when the work
+spans more than one boundary — hence "stories".
 
 Hard boundaries: planning only. Never implement, review, assign, launch authors,
 or operate the steward/reviewer services — the steward picks up ready stories on
@@ -23,6 +23,14 @@ story spec into the author's assignment, so product code never ships story files
 Product code, contracts, architecture, standards, and security docs still live in
 `fatty/docs/…`; read those there, but write stories here.
 
+This is the **story** workbench — one feature/idea, or decomposing an
+already-resolved design, into well-sized boundary stories. Whole-product or large
+UX *design* belongs in the `design` skill first (it produces the UX design doc you
+then slice); dogfooding an already-designed product belongs in `polish`. Fatty is
+pre-v1 with no users, so per `docs/design-philosophy.md` you may write stories that
+break behaviour, schemas, or contracts when that's the right call — don't default
+to additive-only.
+
 ## 1. Ground yourself first
 
 Before asking anything, read so your questions and recommendations are informed:
@@ -31,7 +39,11 @@ Before asking anything, read so your questions and recommendations are informed:
   rule (including the Readiness Sanity Pass).
 - `docs/stories/v1-roadmap.md` — roadmap, ordering, and the lane vocabulary.
 - The architecture / contract / standards / security docs the idea touches
-  (under `fatty/docs/…`).
+  (under `fatty/docs/…`), plus any UX design doc under `fatty/docs/design/` the
+  idea implements.
+- `docs/design-philosophy.md` (command centre) — the living taste your stories
+  must honor (the author and reviewer enforce it). When a decision expresses a
+  durable principle, note it for that doc.
 - **Explore the `fatty/` codebase.** Anything the code, docs, or roadmap can
   answer, you answer yourself and confirm — do not interrogate the user for it.
 
@@ -63,36 +75,53 @@ decisions one-by-one until you reach shared understanding. Rules:
   why. Use the AskUserQuestion tool when the choice is discrete (put your
   recommendation first); ask in prose when it's open-ended.
 - **Explore before asking.** Resolve from the codebase/docs whenever you can.
-- **Relentless but convergent** — stop when the open branches are resolved.
-- **Watch the scope — enforce the guardrail in §2a.** If it won't fit one
-  vertical slice, split it into several dependent stories and grill each slice's
-  boundary. Over-scoped stories don't get built — the author runs out of turns
-  flailing and the run fails; size is a correctness requirement, not a nicety.
+- **Relentless and deep — do NOT wrap early.** Go in depth: exhaust each branch
+  and the sub-branches it opens before moving on. Default to *more* questions, not
+  fewer; a session that ends after only a few questions is too light. The only
+  stop conditions are: the user explicitly says stop, or you genuinely have a
+  clear, complete, unambiguous understanding — NOT merely "enough to write a
+  story." When in doubt, ask the next question.
+- **Watch the scope — enforce the guardrail in §2a.** A story is **one boundary**
+  (one serializing code lane). If the work spans more than one code lane, split it
+  into dependent per-boundary stories joined by a contract and grill each boundary.
+  Over-scoped stories don't get built — the author runs out of turns flailing and
+  the run fails; size is a correctness requirement, not a nicety.
 - **Write in the background, never stop grilling.** As soon as one slice's design
   is fully resolved, dispatch its planner subagent to write that story (see §4)
   and immediately continue interviewing on the next slice or open branch while it
   works. The user should never be left waiting on a write — keep asking questions
   the whole time. Collect the subagents' results as they finish.
 
+### Ground evidence-sensitive decisions in research (background, concurrent with the interview)
+
+Fatty's guidance must be science/evidence-backed, not folk wisdom or guesswork (the **Evidence-backed by default** principle in `docs/design-philosophy.md`). When a planning decision turns on a factual, health, nutritional, or behavioural question where real evidence exists (e.g. weigh-in frequency, macro splits, deficit/pace rates, habit formation), launch background research (the `deep-research` skill or a research subagent) to ground it — concurrently with continuing the interview, never blocking the user. Fold the cited finding back into the decision: recommend the evidence-based answer, flag where it overrides intuition, and record the evidence basis in the story. Reserve research for decisions where being wrong has real cost and evidence can settle it; don't research the obvious, the purely preferential, or what the codebase/docs already answer.
+
 ### 2a. Scope guardrail (hard split rules)
 
-One story = one author run = one vertical slice an author can finish and open a
-PR for in a bounded number of turns. A story that's too wide never converges:
-the author burns its whole turn budget and the run fails with no PR. So before
-writing any story, size it against these limits.
+One story = one author run = **one boundary**: the code work in a single
+serializing lane (backend-core, mobile-core, estimator, contracts, infra,
+governance) an author can finish and open a PR for in a bounded number of turns.
+A user-visible feature is delivered by a small DAG of boundary stories joined by
+an explicit contract — **never one story that spans lanes**. This isn't only
+sizing: lanes serialize code ownership, so single-boundary stories run in parallel
+across lanes, stay convergent, and force the contract at the seam to be explicit.
+A too-wide story never converges — the author burns its turn budget and the run
+fails with no PR. So size every story against the rules below.
 
 **A story MUST be split if it breaches two or more of:**
 
-- **touched_lanes ≥ 3** (beyond the primary lane). Two is the comfortable
-  ceiling; three distinct lanes in one slice is a strong split signal.
 - **review_focus ≥ 6** distinct concerns. Five is the ceiling; six means too
   many independent things to get right at once.
 - **requires_context ≥ 9** docs. Eight is the ceiling; more and the author
   can't hold the spec plus its context in one run.
 
-**A story MUST be split (regardless of counts) if it bundles more than one of
-these "big rocks" — each is its own slice and usually its own story:**
+**A story MUST be split (regardless of counts) when it crosses a boundary —
+spans more than one code lane, or bundles more than one of these "big rocks"
+(each is its own boundary story):**
 
+- **more than one serializing code lane** — keep the code in one lane; pull any
+  second code lane into its own boundary story behind a contract. The
+  non-serializing lanes (security-privacy, docs) ride along and don't count.
 - a **public contract change** (API/provider/DTO/job/estimator boundary, e.g. a
   `…-provider` version bump),
 - a **schema/DB migration** that introduces a new table,
