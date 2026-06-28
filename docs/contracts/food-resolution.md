@@ -112,9 +112,12 @@ cache hit makes **no** external call.
 Nutrient mapping: energy kcal (id 1008, **required**), protein (1003), carbohydrate
 (1005), total fat (1004); missing macros default to 0. A result with no energy value
 is skipped, as is one whose mapped per-100g facts fail the **plausibility bound**
-(FTY-115): `calories` must be `> 0` and `≤ 900` kcal/100g (just above pure oil at
+(FTY-115): `calories` must be `≥ 0` and `≤ 900` kcal/100g (just above pure oil at
 ~884; a kJ value mislabelled as kcal lands ~4× higher and is rejected) and every
-macro must be `≥ 0` (zero is valid — a pure-fat food has zero protein/carbs). Every
+macro must be `≥ 0` (zero is valid — a pure-fat food has zero protein/carbs).
+Exactly-zero calories is **valid** — genuine zero-calorie foods (water, black
+coffee, diet sodas) carry `energy = 0`, and a missing energy value is already
+filtered upstream, so only a *negative* calorie value is rejected here. Every
 value must also be finite — untrusted fetched JSON can carry bare `NaN`/`Infinity`
 tokens, and `NaN` slips every comparison, so non-finite calories or macros are
 rejected. The same
@@ -294,7 +297,7 @@ to 0 when absent (mirroring FTY-044). Per-100g facts are preferred; when OFF sup
 only **per-serving** facts plus a **gram** serving size (`serving_quantity`), they are
 converted to per-100g (`× 100 / serving_g`) for canonical storage. A product with no
 energy on a usable basis, with neither a per-100g basis nor a gram serving size, or
-whose canonical per-100g facts fail the **plausibility bound** (FTY-115 — `0 <
+whose canonical per-100g facts fail the **plausibility bound** (FTY-115 — `0 ≤
 calories ≤ 900` kcal/100g, non-negative macros, and all values finite, applied
 *after* the per-serving → per-100g conversion so a kJ-mislabelled or corrupt row is
 caught on either basis; defined under the FDC mapping above), is a **non-match**. Default serving grams come

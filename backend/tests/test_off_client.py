@@ -338,11 +338,14 @@ def test_lookup_rejects_negative_energy_per_100g() -> None:
     assert client.lookup(_BARCODE) is None
 
 
-def test_lookup_rejects_zero_energy_per_100g() -> None:
-    """A zero per-100g energy maps to None — not a costable match."""
+def test_lookup_accepts_zero_energy_per_100g() -> None:
+    """A genuine zero-calorie food (e.g. sparkling water) is a costable 0-kcal match."""
     client, _ = _client(_per_100g_response(energy=0.0))
 
-    assert client.lookup(_BARCODE) is None
+    facts = client.lookup(_BARCODE)
+
+    assert facts is not None
+    assert facts.facts.calories == pytest.approx(0.0)
 
 
 def test_lookup_rejects_negative_macro_per_100g() -> None:
@@ -363,11 +366,14 @@ def test_lookup_rejects_over_cap_energy_per_serving_branch() -> None:
     assert client.lookup(_BARCODE) is None
 
 
-def test_lookup_rejects_zero_energy_per_serving_branch() -> None:
-    """A zero per-serving energy converts to zero per-100g and maps to None."""
+def test_lookup_accepts_zero_energy_per_serving_branch() -> None:
+    """A zero per-serving energy converts to a valid zero per-100g, a costable match."""
     client, _ = _client(_per_serving_response(energy=0.0, serving_g=50.0))
 
-    assert client.lookup(_BARCODE) is None
+    facts = client.lookup(_BARCODE)
+
+    assert facts is not None
+    assert facts.facts.calories == pytest.approx(0.0)
 
 
 def test_lookup_rejects_negative_macro_per_serving_branch() -> None:

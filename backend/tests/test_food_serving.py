@@ -128,6 +128,7 @@ def test_scale_facts_is_proportional_at_100g() -> None:
         (900.0, 0.0, 0.0, 100.0),  # exactly at cap — should pass (> 900 rejects)
         (1.0, 0.0, 0.0, 0.0),  # minimal positive energy
         (200.0, 0.0, 0.0, 0.0),  # zero macros explicitly valid
+        (0.0, 0.0, 0.0, 0.0),  # genuine zero-calorie food (water/black coffee) — costable
     ],
 )
 def test_nutrition_facts_plausible_valid(
@@ -140,7 +141,6 @@ def test_nutrition_facts_plausible_valid(
 @pytest.mark.parametrize(
     ("calories", "protein_g", "carbs_g", "fat_g"),
     [
-        (0.0, 0.0, 0.0, 0.0),  # zero energy — not costable
         (-1.0, 0.0, 0.0, 0.0),  # negative energy
         (900.1, 0.0, 0.0, 100.0),  # just above cap
         (1500.0, 10.0, 20.0, 50.0),  # kJ-mislabelled value

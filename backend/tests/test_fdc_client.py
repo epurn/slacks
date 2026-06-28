@@ -358,11 +358,14 @@ def test_lookup_rejects_negative_energy() -> None:
     assert client.lookup("bad food") is None
 
 
-def test_lookup_rejects_zero_energy() -> None:
-    """A zero energy value maps to None — not a costable match."""
+def test_lookup_accepts_zero_energy() -> None:
+    """A genuine zero-calorie food (e.g. water) is a costable 0-kcal match, not a non-match."""
     client, _ = _client(_food_response(fdcId=3, energy=0.0))
 
-    assert client.lookup("empty food") is None
+    facts = client.lookup("water")
+
+    assert facts is not None
+    assert facts.facts.calories == pytest.approx(0.0)
 
 
 def test_lookup_rejects_negative_protein() -> None:
@@ -424,11 +427,14 @@ def test_list_matches_rejects_over_cap_energy() -> None:
     assert client.list_matches("butter") == []
 
 
-def test_list_matches_rejects_zero_energy() -> None:
-    """list_matches also rejects zero energy via the shared _food_to_facts path."""
+def test_list_matches_accepts_zero_energy() -> None:
+    """list_matches also accepts a genuine zero-calorie food via the shared _food_to_facts path."""
     client, _ = _client(_food_response(fdcId=11, energy=0.0))
 
-    assert client.list_matches("empty food") == []
+    matches = client.list_matches("water")
+
+    assert len(matches) == 1
+    assert matches[0].facts.calories == pytest.approx(0.0)
 
 
 def test_list_matches_rejects_negative_macro() -> None:

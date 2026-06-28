@@ -245,8 +245,13 @@ def nutrition_facts_plausible(facts: NutritionFacts) -> bool:
     clean ``None`` (non-match) so resolution falls through rather than committing
     an impossible calorie total. Rules:
 
-    - ``calories <= 0``: not a costable match (zero or negative energy is the
-      typical shape of an empty/garbage nutrient row).
+    - ``calories < 0``: physically impossible (negative energy is the shape of a
+      corrupt/garbage nutrient row). Exactly zero is **valid** — genuine
+      zero-calorie foods (water, black coffee, diet sodas, zero-cal sweeteners)
+      exist in FDC/OFF with ``energy = 0`` and must stay costable; a missing
+      energy value is already filtered upstream (FDC drops a food with no kcal
+      nutrient; OFF only builds facts when an energy basis is present), so a
+      zero reaching this gate is a reported zero, not an absent one.
     - ``calories > 900``: above the physical maximum energy density of food
       (pure fat ≈ 9 kcal/g; pure cooking oils sit at ~884 kcal/100g). A kJ value
       mislabelled as kcal lands ~4× higher and is caught by this ceiling.
@@ -269,7 +274,7 @@ def nutrition_facts_plausible(facts: NutritionFacts) -> bool:
         for value in (facts.calories, facts.protein_g, facts.carbs_g, facts.fat_g)
     ):
         return False
-    if facts.calories <= 0 or facts.calories > _MAX_ENERGY_KCAL_PER_100G:
+    if facts.calories < 0 or facts.calories > _MAX_ENERGY_KCAL_PER_100G:
         return False
     if facts.protein_g < 0 or facts.carbs_g < 0 or facts.fat_g < 0:
         return False
