@@ -62,16 +62,21 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 Open `.env` and replace the `FATTY_AUTH_SECRET` placeholder with the output.
 The app will not start in production mode with the placeholder in place.
 
-**4. (Optional) Configure host ports:**
+**4. (Optional) Configure the API host port:**
 
-If `5432` (Postgres), `6379` (Redis), or `8000` (API) are already in use on your host,
-set the environment variables in `.env`:
+Only the API publishes a host port by default. If `8000` is already in use on your
+host, set it in `.env`:
 
 ```sh
-POSTGRES_PORT=5433      # default 5432
-REDIS_PORT=6380        # default 6379
 API_PORT=8001          # default 8000
 ```
+
+Postgres and Redis are **not** published to the host by default (FTY-109) — the
+`api`, `worker`, and `migrate` services reach them over the internal compose
+network. `POSTGRES_PORT` / `REDIS_PORT` are therefore inert unless you add a
+loopback-only host mapping for direct datastore access (e.g. a DB GUI or local
+`psql`); see [Local Development Stack](docs/operations/local-dev-stack.md) for
+that re-enable path.
 
 **5. (Optional) Configure providers:**
 

@@ -6,7 +6,7 @@
 # production hardening are out of scope.
 
 # Pinned base image per the security baseline's pinned-dependency principle.
-FROM python:3.12-slim-bookworm
+FROM python:3.14-slim-bookworm
 
 # uv (pinned) manages the locked Python environment for reproducible installs.
 COPY --from=ghcr.io/astral-sh/uv:0.11.21 /uv /uvx /usr/local/bin/
