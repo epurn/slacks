@@ -17,7 +17,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, Uuid
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -48,6 +48,12 @@ class LogEvent(Base):
     )
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default=LogEventStatus.PENDING)
+    #: Opaque client-supplied idempotency token (FTY-096): a UUID/ULID by
+    #: convention, never parsed by the server. ``NULL`` for the online/no-key and
+    #: label-upload paths, which therefore insert freely (NULL keys are distinct
+    #: under the composite unique index). A non-null key is unique per user, so a
+    #: safe-to-retry offline submit converges on a single event.
+    idempotency_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow, index=True
     )
@@ -56,3 +62,16 @@ class LogEvent(Base):
     )
 
     user: Mapped[User] = relationship()
+
+    #: Per-user idempotency namespace. The composite unique index is the dedup
+    #: authority: two concurrent same-key submits collide here and the loser
+    #: re-reads the committed sibling. Postgres/SQLite treat NULL keys as
+    #: distinct, so unkeyed creates are never blocked.
+    __table_args__ = (
+        Index(
+            "uq_log_events_user_idempotency_key",
+            "user_id",
+            "idempotency_key",
+            unique=True,
+        ),
+    )

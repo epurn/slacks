@@ -9,6 +9,12 @@ FTY-040 extends the create path: once a ``pending`` event is committed, an
 estimation job is enqueued (through the swappable enqueuer seam) so the worker
 picks it up asynchronously.
 
+FTY-096 makes create safe-to-retry for an offline outbox: an optional opaque
+``idempotency_key`` dedups a submit per user. A fresh keyed (or unkeyed) create
+returns ``201`` and enqueues one job; a replay of an already-submitted key
+returns ``200`` with the existing event at its current status and enqueues
+nothing. See ``docs/contracts/log-events.md``.
+
 FTY-064 adds the nutrition-label upload path: a captured label image is posted as
 the raw request body and resolved synchronously in-request (the raw image is
 discarded by default and never enqueued, so it cannot reach the broker). See
@@ -21,7 +27,7 @@ import uuid
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.db import get_session
@@ -70,19 +76,33 @@ def create_log_event(
     current_user: CurrentUser,
     session: Annotated[Session, Depends(get_session)],
     enqueue: Annotated[EstimationEnqueuer, Depends(get_enqueuer)],
+    response: Response,
 ) -> LogEventDTO:
     """Create a ``pending`` log event and enqueue its estimation job.
 
     The event is committed first; only then is the job published, so the worker
     never races ahead of a persisted event. The payload carries ids only — never
     the raw text.
+
+    With an ``idempotency_key`` the submit is safe to retry (FTY-096): a fresh
+    create returns ``201`` and enqueues one job; an idempotent replay returns
+    ``200`` with the existing event at its current status and enqueues nothing.
     """
 
     try:
-        event = log_event_service.create_event(session, user_id, current_user, payload.raw_text)
+        event, created = log_event_service.create_event(
+            session,
+            user_id,
+            current_user,
+            payload.raw_text,
+            idempotency_key=payload.idempotency_key,
+        )
     except LogEventForbidden as exc:
         raise _NOT_FOUND from exc
-    enqueue(log_event_id=event.id, user_id=event.user_id)
+    if created:
+        enqueue(log_event_id=event.id, user_id=event.user_id)
+    else:
+        response.status_code = status.HTTP_200_OK
     return LogEventDTO.model_validate(event)
 
 
@@ -130,7 +150,10 @@ def upload_label_event(
         ) from exc
 
     try:
-        event = log_event_service.create_event(session, user_id, current_user, LABEL_EVENT_RAW_TEXT)
+        # A label upload carries no idempotency key, so this always creates.
+        event, _created = log_event_service.create_event(
+            session, user_id, current_user, LABEL_EVENT_RAW_TEXT
+        )
     except LogEventForbidden as exc:
         raise _NOT_FOUND from exc
 
