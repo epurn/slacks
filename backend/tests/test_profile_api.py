@@ -7,6 +7,7 @@ must fail closed.
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -166,6 +167,27 @@ def test_cross_user_read_fails_closed(client: TestClient) -> None:
         client.get(f"/api/users/{bob_id}/profile", headers={"Authorization": bob_auth}).status_code
         == 200
     )
+
+
+@pytest.mark.parametrize("field", ["timezone", "units_preference", "metabolic_formula"])
+def test_profile_rejects_explicit_null_on_required_fields(client: TestClient, field: str) -> None:
+    """An explicit JSON null on a NOT NULL profile field must return 422 with no write."""
+
+    user_id, auth = _register(client, f"null_{field}@example.com")
+
+    resp = client.put(
+        f"/api/users/{user_id}/profile",
+        headers={"Authorization": auth},
+        json={field: None},
+    )
+
+    assert resp.status_code == 422
+
+    # Stored defaults must be unchanged — no partial write occurred.
+    profile = client.get(f"/api/users/{user_id}/profile", headers={"Authorization": auth}).json()
+    assert profile["timezone"] == "UTC"
+    assert profile["units_preference"] == "metric"
+    assert profile["metabolic_formula"] == "mifflin_st_jeor"
 
 
 def test_cross_user_write_fails_closed(client: TestClient) -> None:

@@ -53,6 +53,12 @@ class ProfileUpdateRequest(BaseModel):
     profile service), so a client can capture metrics incrementally. Bounds keep
     physically implausible body metrics out of the store; FTY-021 may tighten
     them further.
+
+    ``metabolic_formula``, ``units_preference``, and ``timezone`` back NOT NULL
+    columns and are therefore required when present — an explicit ``null`` is
+    rejected with 422.  Absent (unset) still means "leave untouched".
+    ``height_m``, ``weight_kg``, and ``birth_year`` back nullable columns and
+    continue to accept absent and null values.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -64,6 +70,16 @@ class ProfileUpdateRequest(BaseModel):
     units_preference: UnitsPreference | None = None
     timezone: str | None = Field(default=None, max_length=64)
 
-    _check_timezone = field_validator("timezone")(
-        lambda v: v if v is None else _validate_timezone(v)
-    )
+    @field_validator("metabolic_formula", "units_preference", "timezone", mode="before")
+    @classmethod
+    def _reject_explicit_null(cls, v: object) -> object:
+        """Reject an explicit null on fields that back NOT NULL columns.
+
+        Absent (unset) fields bypass this validator and use the default; only a
+        JSON ``null`` that was actually present in the request reaches here.
+        """
+        if v is None:
+            raise ValueError("field cannot be null when provided")
+        return v
+
+    _check_timezone = field_validator("timezone")(_validate_timezone)
