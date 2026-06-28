@@ -400,11 +400,8 @@ def test_lookup_no_false_reject_high_fat_food() -> None:
 
 
 def test_lookup_accepts_exactly_900_kcal_per_100g() -> None:
-    """A row at exactly the cap boundary (900 kcal/100g) is implausible and rejected."""
-    # 900 is above the physical maximum of ~884, so it fails the > 900 check only if
-    # we use strict greater-than. The spec says reject calories > 900, so 900 passes.
-    # Actually the spec says cap at 900 kcal/100g, and says "just above the physical max".
-    # The rule is: reject calories > 900. So exactly 900 should pass.
+    """A row at exactly the cap (900 kcal/100g) is accepted — the bound is inclusive."""
+    # The plausibility rule rejects calories > 900, so the boundary value 900 passes.
     client, _ = _client(_food_response(fdcId=8, energy=900.0, protein=0.0, carbs=0.0, fat=100.0))
 
     facts = client.lookup("theoretical max food")
