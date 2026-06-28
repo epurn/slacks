@@ -30,6 +30,16 @@ Retention defaults should minimize stored personal data while preserving user va
   account deletion. Retained until the owning goal is edited/replaced or the user/
   account is deleted. Target numbers are never logged (diagnostics use user/goal
   ids).
+- Offline outbox (on-device, FTY-104): raw log text captured while the device is
+  offline is queued in a per-user file on the device (not on the server) until it
+  drains to the log-events create endpoint on reconnect. It holds the signed-in
+  user's own `raw_text` plus a client `idempotency_key`, capture timestamp, and
+  local sync state — sensitive personal data, never logged or sent to analytics.
+  It is scoped to the signed-in user and **cleared from on-device storage on
+  sign-out**, so a queued entry never persists for or leaks to another user of
+  the device. A drained entry becomes a normal `log_events` row and follows the
+  server-side retention above; the on-device copy adds no server retention
+  surface.
 - Logs: short operational retention; no secrets or unnecessary personal data.
 
 ## Deletion Requirements

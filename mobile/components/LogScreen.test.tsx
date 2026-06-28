@@ -5,6 +5,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { LogScreen } from "./LogScreen";
 import { LogEventApiError, type LogEventDTO } from "@/api/logEvents";
 import type { SavedFoodDTO } from "@/api/savedFoods";
+import type { OutboxEntry, OutboxStore } from "@/state/outbox";
 import type { Session } from "@/state/session";
 
 // LogScreen imports BarcodeScannerScreen which imports expo-camera native
@@ -81,6 +82,22 @@ function savedFood(overrides: Partial<SavedFoodDTO> = {}): SavedFoodDTO {
 
 const INACTIVE = () => false;
 
+const activeTrees: ReactTestRenderer[] = [];
+
+// Unmount every tree after each test so a background interval (e.g. the offline
+// outbox retry timer) can never fire into a later test and update an unmounted
+// component.
+afterEach(() => {
+  for (const tree of activeTrees) {
+    try {
+      act(() => tree.unmount());
+    } catch {
+      // Already unmounted / torn down — ignore.
+    }
+  }
+  activeTrees.length = 0;
+});
+
 function mount(element: React.ReactElement): ReactTestRenderer {
   let tree!: ReactTestRenderer;
   act(() => {
@@ -95,6 +112,7 @@ function mount(element: React.ReactElement): ReactTestRenderer {
       </SafeAreaProvider>,
     );
   });
+  activeTrees.push(tree);
   return tree;
 }
 
@@ -142,6 +160,37 @@ function inputValue(tree: ReactTestRenderer, label: string): string {
   return node.props.value as string;
 }
 
+/** A network-layer failure (server unreachable), distinct from an API error. */
+function networkError(): Error {
+  return new TypeError("Network request failed");
+}
+
+/** An in-memory OutboxStore for tests, with the backing data exposed. */
+function memoryStore(initial: Record<string, OutboxEntry[]> = {}): {
+  store: OutboxStore;
+  data: Map<string, OutboxEntry[]>;
+} {
+  const data = new Map<string, OutboxEntry[]>(
+    Object.entries(initial).map(([k, v]) => [k, [...v]]),
+  );
+  const store: OutboxStore = {
+    load: async (userId) => data.get(userId) ?? [],
+    save: async (userId, entries) => {
+      data.set(userId, [...entries]);
+    },
+    clear: async (userId) => {
+      data.delete(userId);
+    },
+  };
+  return { store, data };
+}
+
+/** A deterministic, monotonically-increasing idempotency-key generator. */
+function sequentialKeys(): () => string {
+  let n = 0;
+  return () => `key-${n++}`;
+}
+
 // ─── Basic rendering ──────────────────────────────────────────────────────────
 
 describe("LogScreen", () => {
@@ -185,10 +234,11 @@ describe("LogScreen submit — stay-on-page", () => {
     expect(hasA11yLabel(tree, "Log food or exercise")).toBe(true);
     // Entry appears in the feed with "estimating" accessible state.
     expect(hasA11yLabel(tree, "apple, estimating")).toBe(true);
-    // create was called with the trimmed text.
+    // create was called with the trimmed text and a client idempotency key.
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ userId: SESSION!.userId }),
       "apple",
+      expect.any(String),
     );
   });
 
@@ -776,5 +826,230 @@ describe("LogScreen error handling", () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+});
+
+// ─── Offline-queue logging (FTY-104) ──────────────────────────────────────────
+
+describe("LogScreen offline-queue logging", () => {
+  it("queues the capture with an offline indicator when the server is unreachable, never blocking", async () => {
+    const create = jest.fn().mockRejectedValue(networkError());
+    const { store, data } = memoryStore();
+    const tree = mount(
+      <LogScreen
+        session={SESSION}
+        create={create}
+        useActive={INACTIVE}
+        outboxStore={store}
+        generateKey={sequentialKeys()}
+        now={() => "2026-06-28T08:00:00.000Z"}
+      />,
+    );
+
+    typeInto(tree, "Log food or exercise", "two eggs");
+    await act(async () => {
+      press(tree, "Add entry");
+    });
+
+    // Capture was not blocked: composer is still mounted and the input cleared.
+    expect(hasA11yLabel(tree, "Log food or exercise")).toBe(true);
+    expect(inputValue(tree, "Log food or exercise")).toBe("");
+
+    // The entry renders as an offline-pending row (explicit offline indicator).
+    expect(hasA11yLabel(tree, "two eggs, offline, queued to send")).toBe(true);
+
+    // It is uncounted — no fabricated kcal/macro number is shown for it.
+    expect(textContent(tree)).not.toContain("kcal");
+
+    // A calm connection banner reflects the offline + queued state (in words).
+    expect(textContent(tree)).toContain("Offline");
+    expect(textContent(tree)).toContain("1 entry queued");
+
+    // The raw entry is durably persisted with a stable idempotency key.
+    expect(data.get(SESSION!.userId)).toEqual([
+      {
+        idempotencyKey: "key-0",
+        userId: SESSION!.userId,
+        rawText: "two eggs",
+        capturedAt: "2026-06-28T08:00:00.000Z",
+        syncState: "queued",
+      },
+    ]);
+  });
+
+  it("renders a queued entry persisted before an app restart", async () => {
+    // Simulate a store that already holds an entry enqueued in a prior session.
+    const { store } = memoryStore({
+      [SESSION!.userId]: [
+        {
+          idempotencyKey: "key-restart",
+          userId: SESSION!.userId,
+          rawText: "leftover curry",
+          capturedAt: "2026-06-28T07:00:00.000Z",
+          syncState: "queued",
+        },
+      ],
+    });
+
+    const tree = mount(
+      <LogScreen session={SESSION} useActive={INACTIVE} outboxStore={store} />,
+    );
+
+    // The durable entry is loaded and shown on mount (survived the "restart").
+    await act(async () => {});
+    expect(hasA11yLabel(tree, "leftover curry, offline, queued to send")).toBe(
+      true,
+    );
+  });
+
+  it("drains the outbox on reconnect with the entry's idempotency key, then follows the normal flow", async () => {
+    jest.useFakeTimers();
+    // The drained entry renders an online pending row (Skeleton); stub the
+    // reduce-motion lookups it makes so its async setState is settled in act.
+    jest
+      .spyOn(AccessibilityInfo, "isReduceMotionEnabled")
+      .mockResolvedValue(false);
+    jest
+      .spyOn(AccessibilityInfo, "addEventListener")
+      .mockReturnValue({ remove: jest.fn() } as never);
+    try {
+      const serverEvent = event({
+        id: "server-1",
+        raw_text: "two eggs",
+        status: "pending",
+      });
+      // First submit (online attempt) fails network; the reconnect drain succeeds.
+      const create = jest
+        .fn()
+        .mockRejectedValueOnce(networkError())
+        .mockResolvedValue(serverEvent);
+      const { store } = memoryStore();
+
+      const tree = mount(
+        <LogScreen
+          session={SESSION}
+          create={create}
+          useActive={INACTIVE}
+          outboxStore={store}
+          generateKey={sequentialKeys()}
+          now={() => "2026-06-28T08:00:00.000Z"}
+          retryIntervalMs={1000}
+        />,
+      );
+
+      typeInto(tree, "Log food or exercise", "two eggs");
+      await act(async () => {
+        press(tree, "Add entry");
+      });
+      expect(hasA11yLabel(tree, "two eggs, offline, queued to send")).toBe(true);
+
+      // Reconnect: advance the retry interval to trigger a drain.
+      await act(async () => {
+        jest.advanceTimersByTime(1000);
+      });
+
+      // The drain re-submitted with the SAME idempotency key minted at capture.
+      expect(create).toHaveBeenLastCalledWith(
+        expect.objectContaining({ userId: SESSION!.userId }),
+        "two eggs",
+        "key-0",
+      );
+      // The entry left the offline queue and now follows the normal pending flow.
+      expect(hasA11yLabel(tree, "two eggs, offline, queued to send")).toBe(
+        false,
+      );
+      expect(hasA11yLabel(tree, "two eggs, estimating")).toBe(true);
+      // Settle the Skeleton's async reduce-motion effect inside act.
+      await act(async () => {});
+    } finally {
+      jest.useRealTimers();
+      jest.restoreAllMocks();
+    }
+  });
+
+  it("keeps the entry queued (no duplicate) when a reconnect submit fails transiently", async () => {
+    jest.useFakeTimers();
+    try {
+      // Online attempt and the first reconnect drain both fail with a network error.
+      const create = jest.fn().mockRejectedValue(networkError());
+      const { store, data } = memoryStore();
+
+      const tree = mount(
+        <LogScreen
+          session={SESSION}
+          create={create}
+          useActive={INACTIVE}
+          outboxStore={store}
+          generateKey={sequentialKeys()}
+          now={() => "2026-06-28T08:00:00.000Z"}
+          retryIntervalMs={1000}
+        />,
+      );
+
+      typeInto(tree, "Log food or exercise", "two eggs");
+      await act(async () => {
+        press(tree, "Add entry");
+      });
+      // The reconnect drain retried the submit (2 attempts: online + 1 drain).
+      await act(async () => {
+        jest.advanceTimersByTime(1000);
+      });
+      expect(create.mock.calls.length).toBeGreaterThanOrEqual(2);
+
+      // The entry is still present, still queued — retried, never dropped or
+      // duplicated. The durable store converges to exactly one item.
+      const stored = data.get(SESSION!.userId) ?? [];
+      expect(stored).toHaveLength(1);
+      expect(stored[0]).toMatchObject({
+        idempotencyKey: "key-0",
+        syncState: "queued",
+      });
+      expect(hasA11yLabel(tree, "two eggs, offline, queued to send")).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("clears the user's on-device queue on sign-out", async () => {
+    const create = jest.fn().mockRejectedValue(networkError());
+    const { store, data } = memoryStore();
+
+    const tree = mount(
+      <LogScreen
+        session={SESSION}
+        create={create}
+        useActive={INACTIVE}
+        outboxStore={store}
+        generateKey={sequentialKeys()}
+        now={() => "2026-06-28T08:00:00.000Z"}
+      />,
+    );
+
+    typeInto(tree, "Log food or exercise", "two eggs");
+    await act(async () => {
+      press(tree, "Add entry");
+    });
+    expect(data.get(SESSION!.userId)).toHaveLength(1);
+
+    // Sign out: re-render with no session. The user's queue is purged on-device.
+    await act(async () => {
+      tree.update(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 390, height: 844 },
+            insets: { top: 47, left: 0, right: 0, bottom: 34 },
+          }}
+        >
+          <LogScreen
+            session={null}
+            create={create}
+            useActive={INACTIVE}
+            outboxStore={store}
+          />
+        </SafeAreaProvider>,
+      );
+    });
+
+    expect(data.has(SESSION!.userId)).toBe(false);
   });
 });

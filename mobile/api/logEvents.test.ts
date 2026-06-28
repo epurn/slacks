@@ -82,7 +82,12 @@ describe("createLogEvent", () => {
   it("POSTs the raw text to the owner's endpoint with a bearer token", async () => {
     const fetchMock = jest.fn().mockResolvedValue(okResponse(DTO, 201));
 
-    const result = await createLogEvent(SESSION, "two eggs and toast", fetchMock);
+    const result = await createLogEvent(
+      SESSION,
+      "two eggs and toast",
+      undefined,
+      fetchMock,
+    );
 
     expect(result).toEqual(DTO);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -99,17 +104,43 @@ describe("createLogEvent", () => {
     });
   });
 
+  it("sends the idempotency key in the body when supplied (FTY-096)", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(okResponse(DTO, 201));
+
+    await createLogEvent(
+      SESSION,
+      "two eggs and toast",
+      "01J-some-key",
+      fetchMock,
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({
+      raw_text: "two eggs and toast",
+      idempotency_key: "01J-some-key",
+    });
+  });
+
+  it("treats a 200 idempotent replay the same as a 201 create", async () => {
+    // A replay of an already-accepted key returns 200 with the existing event.
+    const fetchMock = jest.fn().mockResolvedValue(okResponse(DTO, 200));
+
+    const result = await createLogEvent(SESSION, "two eggs", "key-1", fetchMock);
+
+    expect(result).toEqual(DTO);
+  });
+
   it("maps a 422 to a nonjudgmental LogEventApiError", async () => {
     const fetchMock = jest.fn().mockResolvedValue(errorResponse(422));
     await expect(
-      createLogEvent(SESSION, "   ", fetchMock),
+      createLogEvent(SESSION, "   ", undefined, fetchMock),
     ).rejects.toMatchObject({ name: "LogEventApiError", status: 422 });
   });
 
   it("does not echo the user's raw text into the error message", async () => {
     const fetchMock = jest.fn().mockResolvedValue(errorResponse(422));
     try {
-      await createLogEvent(SESSION, "a very private note", fetchMock);
+      await createLogEvent(SESSION, "a very private note", undefined, fetchMock);
       throw new Error("expected createLogEvent to throw");
     } catch (error) {
       const message = (error as LogEventApiError).message;
