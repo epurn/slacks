@@ -69,19 +69,12 @@ def test_inward_ipv6_and_special_ipv4_targets_are_blocked(inward_ip: str) -> Non
     assert exc.value.reason == "private_address_blocked"
 
 
-@pytest.mark.xfail(
-    reason=(
-        "FINDING FTY-073-F1: RFC 6598 carrier-grade-NAT space (100.64.0.0/10) is "
-        "non-global but not blocked. _is_public_address denylists address categories "
-        "(is_private/is_reserved/...) instead of requiring is_global, so CGNAT space "
-        "slips through. Filed as a follow-up (fix is a behaviour change: require "
-        "ip.is_global). This xfail documents the gap and will xpass when fixed."
-    ),
-    strict=False,
-)
-def test_cgnat_shared_space_should_be_blocked_finding() -> None:
-    with pytest.raises(FetchPolicyError):
+def test_cgnat_shared_space_is_blocked_fail_closed() -> None:
+    # FTY-081: RFC 6598 carrier-grade-NAT space (100.64.0.0/10) is non-global, so the
+    # is_global allowlist-by-property check refuses it fail-closed (was FTY-073-F1).
+    with pytest.raises(FetchPolicyError) as exc:
         assert_url_allowed(USDA_URL, allowed_hosts=USDA, resolver=resolver_returning("100.64.0.1"))
+    assert exc.value.reason == "private_address_blocked"
 
 
 def test_host_resolving_to_mixed_public_and_private_is_blocked() -> None:
