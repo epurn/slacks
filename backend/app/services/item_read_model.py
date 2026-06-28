@@ -11,10 +11,13 @@ is no new persisted provenance column and no de-normalized read table:
   an exercise item, whose burn comes from MET tables rather than an evidence row —
   the descriptor is ``None`` defensively rather than failing the read.
 
-- :func:`item_is_edited` is ``True`` iff the item carries at least one
-  ``user_edit`` **value-override** correction. A never-edited item and an item that
-  has only been **amount-adjusted** are both ``False`` — this is the distinction that
-  lets a portion fix recompute the numbers while keeping the item's source icon.
+- :func:`item_is_edited` is ``True`` iff the item carries a ``user_edit``
+  **value-override** correction that has not been **superseded by a later re-match**
+  (FTY-093). A never-edited item and an item that has only been **amount-adjusted** are
+  both ``False`` — this is the distinction that lets a portion fix recompute the numbers
+  while keeping the item's source icon. A re-match re-aims the item to a fresh source, so
+  it clears the edited marker honestly (the new source, not the old override, is the
+  truth).
 
 :func:`serialize_food_item` / :func:`serialize_exercise_item` are the shared
 serializers every read path uses, so the descriptor and flag are computed once and
@@ -29,7 +32,7 @@ from __future__ import annotations
 import uuid
 from urllib.parse import urlparse
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
 from app.enums import CandidateType, CorrectionSource, SourceType
@@ -117,10 +120,15 @@ def build_item_source(session: Session, item: DerivedFoodItem) -> ItemSourceDTO 
 
 
 def item_is_edited(session: Session, item_type: CandidateType, item_id: uuid.UUID) -> bool:
-    """Return ``True`` iff the item has a ``user_edit`` value-override correction.
+    """Return ``True`` iff the item carries a ``user_edit`` not superseded by a re-match.
 
     Derived from the append-only audit trail, so it never drifts and needs no
-    backfill. ``amount_adjust`` corrections never make an item edited.
+    backfill. ``amount_adjust`` corrections never make an item edited. A re-match
+    (FTY-093) re-aims the item to a fresh source and appends a ``re_match`` row that
+    **supersedes** any prior value override — so a ``user_edit`` only counts when it is
+    the latest word, i.e. made *after* the most recent re-match. With no ``re_match``
+    row (the common case) this is exactly the FTY-092 rule: edited iff any ``user_edit``
+    exists.
     """
 
     if item_type is CandidateType.FOOD:
@@ -128,16 +136,19 @@ def item_is_edited(session: Session, item_type: CandidateType, item_id: uuid.UUI
     else:
         item_match = Correction.derived_exercise_item_id == item_id
 
-    return bool(
-        session.scalar(
-            select(
-                exists().where(
-                    item_match,
-                    Correction.source == CorrectionSource.USER_EDIT,
-                )
-            )
+    last_re_match = session.scalar(
+        select(func.max(Correction.created_at)).where(
+            item_match,
+            Correction.source == CorrectionSource.RE_MATCH,
         )
     )
+
+    user_edit = exists().where(
+        item_match,
+        Correction.source == CorrectionSource.USER_EDIT,
+        *((Correction.created_at > last_re_match,) if last_re_match is not None else ()),
+    )
+    return bool(session.scalar(select(user_edit)))
 
 
 def _source_label(source_type: SourceType, source_ref: str) -> str:

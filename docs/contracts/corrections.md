@@ -104,17 +104,18 @@ One immutable row per changed field:
 | `field` | Changed field name. |
 | `old_value` | Prior value in canonical units (`NULL` only if the field had no value yet). |
 | `new_value` | New value in canonical units. |
-| `source` | Origin (`CorrectionSource`): `user_edit` (a direct value override) or `amount_adjust` (a provenance-preserving portion change, FTY-092). See **`CorrectionSource`** and **`is_edited` derivation** below. |
+| `source` | Origin (`CorrectionSource`): `user_edit` (a direct value override), `amount_adjust` (a provenance-preserving portion change, FTY-092), or `re_match` (a re-resolution to a different real source, FTY-093). See **`CorrectionSource`** and **`is_edited` derivation** below. |
 | `created_at` | Append timestamp. |
 
 ### `CorrectionSource`
 
 | Value | Meaning |
 | --- | --- |
-| `user_edit` | A direct **value override** of `calories` / a single macro / `active_calories`. The load-bearing signal for `is_edited`. |
+| `user_edit` | A direct **value override** of `calories` / a single macro / `active_calories`. The load-bearing signal for `is_edited` (when not superseded by a later `re_match`). |
 | `amount_adjust` | A **provenance-preserving portion change** (FTY-092): the rows a `quantity` edit produces (the `quantity` change and each rescaled field). It never marks the item edited and never rewrites provenance. |
+| `re_match` | A **re-resolution to a different real source** (FTY-093): one row a "Change match" re-resolve appends (keyed on `calories`, the item's headline value). It is **not** a value override — it never marks the item edited — and it **supersedes** any prior `user_edit`, returning `is_edited` to `false`. It **does** rewrite the item's `evidence_sources` provenance to the new source. |
 
-Stored as a string column, so adding `amount_adjust` is additive with **no
+Stored as a string column, so adding `amount_adjust` / `re_match` is additive with **no
 migration** and **no backfill** (pre-v1, no production data; the new semantics apply
 going forward).
 
@@ -164,14 +165,28 @@ PATCH {field: "calories", value: 280}                     # value override
 
 An item's `is_edited` flag is **derived, never stored**:
 
-> `is_edited` is **true iff the item has at least one correction whose
-> `source == user_edit`** (a value override).
+> `is_edited` is **true iff the item has a `user_edit` correction not superseded by a
+> later re-match** — i.e. a `user_edit` whose `created_at` is after the most recent
+> `re_match` row (or, when the item has never been re-matched, simply any `user_edit`).
 
 `amount_adjust` corrections never make an item edited. So a never-edited item and an
-item that has only been amount-adjusted are both `false`; an item with a value
-override is `true`. Computed at read time from the append-only audit trail, so it
+item that has only been amount-adjusted are both `false`; an item with an outstanding
+value override is `true`. Computed at read time from the append-only audit trail, so it
 never drifts and needs no backfill. This flag is exposed per item on the
 Today/daily read-model — see `daily-summary.md`.
+
+> **Re-match is a third, distinct lever (FTY-093).** The "Change match" operation
+> re-resolves an item to a *different real source* (see
+> `evidence-retrieval.md` → **Item Re-match — FTY-093**). It is **not** a value override:
+> it writes **no** `user_edit` row, rewrites the item's `evidence_sources` provenance to
+> the new source, and **re-snapshots** `*_estimated` to the newly computed values
+> (deliberately diverging from the captured-once rule, which governs `user_edit`
+> overrides). It **does** append one immutable `re_match` correction row — an honest
+> audit of the re-match that **supersedes** any pre-existing `user_edit`. Because the
+> re-match is the latest word on the item's value, a re-matched item reads
+> `is_edited == false` — its honesty comes from the new source, not from a stale
+> override — even when it had been edited before. Do not "fix" this back to `user_edit`;
+> a later genuine edit (a `user_edit` after the re-match) makes it `true` again.
 
 ## Validation
 

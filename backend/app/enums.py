@@ -156,12 +156,18 @@ class CorrectionSource(StrEnum):
 
     - :attr:`USER_EDIT` — a direct **value override** of ``calories`` / a macro /
       ``active_calories`` through the edit endpoint. It is the load-bearing signal
-      for ``is_edited``: an item is *edited* iff it carries at least one
-      ``user_edit`` correction (FTY-092).
+      for ``is_edited``: an item is *edited* iff it carries a ``user_edit`` correction
+      not superseded by a later re-match (FTY-092/093).
     - :attr:`AMOUNT_ADJUST` — a **provenance-preserving portion change** (FTY-092):
       editing an item's ``quantity`` deterministically rescales calories/macros but
       keeps the item's resolved source intact and does **not** mark it edited. The
       rescaled rows are an honest audit trail tagged distinctly from a value override.
+    - :attr:`RE_MATCH` — a **re-resolution to a different real source** (FTY-093): the
+      "Change match" lever re-aims the item to a caller-chosen source and re-snapshots
+      its numbers. It is **not** a value override, so it never marks the item edited;
+      instead it **supersedes** any prior ``user_edit`` — ``is_edited`` is true only for
+      a ``user_edit`` made *after* the latest re-match (the new source carries the
+      honesty, not the stale override). See ``docs/contracts/evidence-retrieval.md``.
 
     Later learning/adaptation work (FTY-052+) may append other sources without
     redefining the append-only audit contract.
@@ -169,6 +175,7 @@ class CorrectionSource(StrEnum):
 
     USER_EDIT = "user_edit"
     AMOUNT_ADJUST = "amount_adjust"
+    RE_MATCH = "re_match"
 
 
 class SourceType(StrEnum):

@@ -313,37 +313,101 @@ class FdcClient:
         response = FdcSearchResponse.model_validate(raw)
         return self._first_match(normalized, response)
 
+    def list_matches(self, query: str) -> list[ProductFacts]:
+        """Search FDC for ``query`` and return **every** energy-bearing match.
+
+        The list-candidates counterpart to :meth:`lookup` (FTY-093 re-match): instead
+        of taking only the first energy-bearing food, it maps *all* of them — up to the
+        ``max_results`` page bound — so the re-match capability can surface alternative
+        source matches beyond the resolver's first pick. Only the sanitized food name is
+        sent; energy-less results are excluded (a fact set with no energy is not an
+        offerable match). Returns ``[]`` when the source is disabled or nothing matches.
+        Maps transport/policy failures to :class:`FdcTransientError` /
+        :class:`FdcResponseError`, exactly like :meth:`lookup`.
+        """
+
+        if not self.enabled:
+            return []
+
+        normalized = normalize_query(query)
+        if not normalized:
+            return []
+
+        payload = {
+            "query": normalized,
+            "dataType": list(_FDC_DATA_TYPES),
+            "pageSize": self._settings.max_results,
+        }
+        api_key = self._settings.api_key
+        if api_key is None:
+            return []
+        headers = {"X-Api-Key": api_key.get_secret_value()}
+
+        try:
+            raw = self._transport(
+                self._settings.search_url,
+                headers=headers,
+                payload=payload,
+                timeout_seconds=self._settings.timeout_seconds,
+                allowed_hosts=self._settings.allowed_hosts,
+                resolver=self._resolver,
+            )
+        except FetchTransientError as exc:
+            raise FdcTransientError("fdc_transient_error") from exc
+        except (FetchResponseError, FetchPolicyError) as exc:
+            raise FdcResponseError("fdc_response_error") from exc
+
+        response = FdcSearchResponse.model_validate(raw)
+        return [
+            facts
+            for food in response.foods
+            if (facts := _food_to_facts(normalized, food)) is not None
+        ]
+
     @staticmethod
     def _first_match(query_key: str, response: FdcSearchResponse) -> ProductFacts | None:
         """Map the first energy-bearing FDC food to :class:`ProductFacts`, or ``None``."""
 
         for food in response.foods:
-            values = {
-                n.nutrientId: n.value
-                for n in food.foodNutrients
-                if n.nutrientId is not None and n.value is not None
-            }
-            energy = values.get(_ENERGY_KCAL_ID)
-            if energy is None:
-                # No per-100g kcal: cannot compute calories deterministically; skip.
-                continue
-            facts = NutritionFacts(
-                calories=float(energy),
-                protein_g=float(values.get(_PROTEIN_ID, 0.0)),
-                carbs_g=float(values.get(_CARBS_ID, 0.0)),
-                fat_g=float(values.get(_FAT_ID, 0.0)),
-            )
-            source_ref = f"{FDC_SOURCE}:{food.fdcId}"
-            return ProductFacts(
-                source=FDC_SOURCE,
-                source_ref=source_ref,
-                query_key=query_key,
-                description=food.description,
-                facts=facts,
-                default_serving_g=_serving_grams(food),
-                content_hash=_content_hash(source_ref, facts),
-            )
+            facts = _food_to_facts(query_key, food)
+            if facts is not None:
+                return facts
         return None
+
+
+def _food_to_facts(query_key: str, food: FdcFood) -> ProductFacts | None:
+    """Map one FDC food to canonical per-100g :class:`ProductFacts`, or ``None``.
+
+    Returns ``None`` for a food with no per-100g energy (kcal) value, which cannot be
+    costed deterministically and is therefore not an offerable match. Shared by the
+    first-match resolver (:meth:`FdcClient._first_match`) and the list-candidates path
+    (:meth:`FdcClient.list_matches`) so both classify a food identically.
+    """
+
+    values = {
+        n.nutrientId: n.value
+        for n in food.foodNutrients
+        if n.nutrientId is not None and n.value is not None
+    }
+    energy = values.get(_ENERGY_KCAL_ID)
+    if energy is None:
+        return None
+    facts = NutritionFacts(
+        calories=float(energy),
+        protein_g=float(values.get(_PROTEIN_ID, 0.0)),
+        carbs_g=float(values.get(_CARBS_ID, 0.0)),
+        fat_g=float(values.get(_FAT_ID, 0.0)),
+    )
+    source_ref = f"{FDC_SOURCE}:{food.fdcId}"
+    return ProductFacts(
+        source=FDC_SOURCE,
+        source_ref=source_ref,
+        query_key=query_key,
+        description=food.description,
+        facts=facts,
+        default_serving_g=_serving_grams(food),
+        content_hash=_content_hash(source_ref, facts),
+    )
 
 
 def _serving_grams(food: FdcFood) -> float | None:
