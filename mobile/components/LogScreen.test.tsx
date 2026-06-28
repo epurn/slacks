@@ -303,7 +303,7 @@ describe("LogScreen added feed accumulation", () => {
         press(tree, "Add entry");
       });
       // Saved-food entry shows nutrition immediately (no skeleton).
-      expect(hasA11yLabel(tree, "Greek yogurt, 200 kcal, logged")).toBe(true);
+      expect(hasA11yLabel(tree, "Greek yogurt, 200 kcal, Logged")).toBe(true);
 
       // 3. Barcode entry.
       create.mockResolvedValue(
@@ -316,7 +316,7 @@ describe("LogScreen added feed accumulation", () => {
 
       // All three entries are in the feed.
       expect(hasA11yLabel(tree, "apple, estimating")).toBe(true);
-      expect(hasA11yLabel(tree, "Greek yogurt, 200 kcal, logged")).toBe(true);
+      expect(hasA11yLabel(tree, "Greek yogurt, 200 kcal, Logged")).toBe(true);
       expect(hasA11yLabel(tree, "5901234123457, estimating")).toBe(true);
     } finally {
       jest.useRealTimers();
@@ -422,7 +422,7 @@ describe("LogScreen typeahead reuse", () => {
     });
 
     // Saved food calories visible immediately — no skeleton, no polling wait.
-    expect(hasA11yLabel(tree, "Greek yogurt, 200 kcal, logged")).toBe(true);
+    expect(hasA11yLabel(tree, "Greek yogurt, 200 kcal, Logged")).toBe(true);
 
     // Log event was still created for persistence.
     expect(create).toHaveBeenCalledTimes(1);
@@ -545,7 +545,7 @@ describe("LogScreen in-place skeleton → value, no layout shift", () => {
     await act(async () => {});
 
     // Resolved: row now shows "logged" accessible state.
-    expect(hasA11yLabel(tree, "eggs, logged")).toBe(true);
+    expect(hasA11yLabel(tree, "eggs, Logged")).toBe(true);
     // Skeleton placeholder gone.
     expect(hasA11yLabel(tree, "eggs, estimating")).toBe(false);
   });
@@ -662,7 +662,51 @@ describe("LogScreen accessibility", () => {
       await act(async () => {});
 
       // Resolved row label contains "logged".
-      expect(hasA11yLabel(tree, "oatmeal, logged")).toBe(true);
+      expect(hasA11yLabel(tree, "oatmeal, Logged")).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("feed row reflects a failed terminal status (never reads as logged/estimating)", async () => {
+    const create = jest.fn().mockResolvedValue(
+      event({ id: "s1", raw_text: "mystery stew", status: "pending" }),
+    );
+    const poll = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: "s1", raw_text: "mystery stew", status: "failed" }),
+      ]);
+
+    jest.useFakeTimers();
+    try {
+      const tree = mount(
+        <LogScreen
+          session={SESSION}
+          create={create}
+          poll={poll}
+          useActive={() => true}
+          pollIntervalMs={300}
+        />,
+      );
+
+      typeInto(tree, "Log food or exercise", "mystery stew");
+      await act(async () => {
+        press(tree, "Add entry");
+      });
+
+      act(() => jest.advanceTimersByTime(300));
+      await act(async () => {});
+
+      // Failed status surfaces its own copy — not "logged" or "estimating".
+      expect(hasA11yLabel(tree, "mystery stew, Estimate didn't finish")).toBe(
+        true,
+      );
+      expect(hasA11yLabel(tree, "mystery stew, Logged")).toBe(false);
+      expect(hasA11yLabel(tree, "mystery stew, estimating")).toBe(false);
+      // Visible status copy reflects the failure, not a stuck "Estimating…".
+      expect(textContent(tree)).toContain("Couldn't estimate");
+      expect(textContent(tree)).not.toContain("Estimating");
     } finally {
       jest.useRealTimers();
     }
@@ -698,7 +742,7 @@ describe("LogScreen accessibility", () => {
       });
 
       // No skeleton: saved food resolved immediately.
-      expect(hasA11yLabel(tree, "Protein bar, 250 kcal, logged")).toBe(true);
+      expect(hasA11yLabel(tree, "Protein bar, 250 kcal, Logged")).toBe(true);
     } finally {
       jest.useRealTimers();
     }

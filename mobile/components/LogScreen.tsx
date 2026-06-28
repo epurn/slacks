@@ -36,6 +36,7 @@ import {
 import {
   OPTIMISTIC_ID_PREFIX,
   optimisticLogEvent,
+  statusPresentation,
 } from "@/state/today";
 import {
   useSession,
@@ -190,6 +191,9 @@ export function LogScreen({
     } catch (error) {
       setFeed((prev) => prev.filter((entry) => entry.key !== tempKey));
       setText(trimmed);
+      // Restore the saved-food association too, so the user need not re-tap the
+      // typeahead suggestion to retry.
+      setSelectedSavedFood(pendingSavedFood);
       setSubmitError(messageFor(error));
     } finally {
       setSubmitting(false);
@@ -454,11 +458,18 @@ function FeedRow({ entry }: { entry: FeedEntry }) {
   const displayName = entry.savedFood?.name ?? entry.event.raw_text;
   const calories = entry.savedFood?.calories ?? null;
 
+  // A saved-food entry carries resolved nutrition immediately, so it reads as
+  // logged; an estimator-driven entry takes its status from the exhaustive
+  // presentation map so failed / needs_clarification never read as "logged".
+  const { accessibilityLabel: statusLabel } = statusPresentation(
+    entry.savedFood != null ? "completed" : entry.event.status,
+  );
+
   const pendingLabel = `${displayName}, estimating`;
   const resolvedLabel =
     calories != null
-      ? `${displayName}, ${calories} kcal, logged`
-      : `${displayName}, logged`;
+      ? `${displayName}, ${calories} kcal, ${statusLabel}`
+      : `${displayName}, ${statusLabel}`;
 
   return (
     <View
@@ -475,6 +486,9 @@ function FeedRow({ entry }: { entry: FeedEntry }) {
 /** The resolved content of a feed row, fading in on mount. */
 function FeedRowResolved({ entry }: { entry: FeedEntry }) {
   const { colors } = useTheme();
+  // Animated.Value is a stable mutable handle stored in a ref per the RN
+  // Animated API contract (same pattern as Skeleton); reading `.current` here
+  // is intentional and safe, so the react-hooks/refs rule is suppressed.
   // eslint-disable-next-line react-hooks/refs
   const opacity = useRef(new Animated.Value(0)).current;
 
@@ -502,6 +516,11 @@ function FeedRowResolved({ entry }: { entry: FeedEntry }) {
 
   const displayName = entry.savedFood?.name ?? entry.event.raw_text;
   const calories = entry.savedFood?.calories ?? null;
+  // Terminal status copy from the exhaustive map — completed -> "Logged",
+  // failed -> "Couldn't estimate", needs_clarification -> "Add a detail".
+  const statusLabel = statusPresentation(
+    entry.savedFood != null ? "completed" : entry.event.status,
+  ).label;
 
   return (
     <Animated.View style={[styles.feedRowContent, { opacity }]}>
@@ -523,7 +542,7 @@ function FeedRowResolved({ entry }: { entry: FeedEntry }) {
           style={[styles.feedRowMeta, { color: colors.textMuted }]}
           numberOfLines={1}
         >
-          {entry.event.status === "completed" ? "Logged" : "Estimating…"}
+          {statusLabel}
         </Text>
       )}
     </Animated.View>
