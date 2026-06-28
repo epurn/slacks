@@ -111,8 +111,15 @@ cache hit makes **no** external call.
 
 Nutrient mapping: energy kcal (id 1008, **required**), protein (1003), carbohydrate
 (1005), total fat (1004); missing macros default to 0. A result with no energy value
-is skipped. Default serving grams come from `servingSize` only when `servingSizeUnit`
-is `g` (or `ml`, treated 1 ml ≈ 1 g); otherwise unknown.
+is skipped, as is one whose mapped per-100g facts fail the **plausibility bound**
+(FTY-115): `calories` must be `> 0` and `≤ 900` kcal/100g (just above pure oil at
+~884; a kJ value mislabelled as kcal lands ~4× higher and is rejected) and every
+macro must be `≥ 0` (zero is valid — a pure-fat food has zero protein/carbs). The same
+bound governs **every** source in the canonical per-100g space, applied *after* any
+per-serving → per-100g conversion; an implausible row is a non-match (`None`), so
+resolution falls through rather than committing an impossible calorie total. Default
+serving grams come from `servingSize` only when `servingSizeUnit` is `g` (or `ml`,
+treated 1 ml ≈ 1 g); otherwise unknown.
 
 ### Serving math
 
@@ -164,8 +171,9 @@ FDC facts (per 100 g): 130 kcal / 2.0 g protein / 28 g carbs / 0.2 g fat
 
 ## Validation
 
-- **Source match.** No confident FDC match (no result, or none with energy) →
-  `needs_clarification` (the food is recognisable but cannot be costed; never guessed).
+- **Source match.** No confident FDC match (no result, none with energy, or none whose
+  per-100g facts pass the plausibility bound above) → `needs_clarification` (the food is
+  recognisable but cannot be costed; never guessed).
 - **Quantity.** Must resolve to grams via the rule above. Unresolvable →
   `needs_clarification`.
 - **Source response.** FDC JSON is untrusted until it validates against the response
@@ -279,8 +287,12 @@ Mapping (untrusted until it validates against the response schema): energy **kca
 to 0 when absent (mirroring FTY-044). Per-100g facts are preferred; when OFF supplies
 only **per-serving** facts plus a **gram** serving size (`serving_quantity`), they are
 converted to per-100g (`× 100 / serving_g`) for canonical storage. A product with no
-energy on a usable basis, or with neither a per-100g basis nor a gram serving size, is
-a **non-match**. Default serving grams come from `serving_quantity` when positive.
+energy on a usable basis, with neither a per-100g basis nor a gram serving size, or
+whose canonical per-100g facts fail the **plausibility bound** (FTY-115 — `0 <
+calories ≤ 900` kcal/100g and non-negative macros, applied *after* the per-serving →
+per-100g conversion so a kJ-mislabelled or corrupt row is caught on either basis;
+defined under the FDC mapping above), is a **non-match**. Default serving grams come
+from `serving_quantity` when positive.
 Serving math (quantity → grams → calories/macros) reuses FTY-044's `resolve_grams` /
 `scale_facts` unchanged.
 
@@ -299,7 +311,7 @@ user-owned `evidence_sources` row records `source_type = product_database`,
 | --- | --- | --- | --- |
 | Barcode + OFF match + resolvable quantity | _(completes)_ | food `resolved` (`product_database`) + `products` (by barcode) + `evidence_sources` | `processing → completed` |
 | OFF preferred over USDA for a barcode candidate | _(as above)_ | OFF facts win; USDA not consulted | `processing → completed` |
-| Barcode OFF no match / invalid barcode / no usable energy | `NeedsClarification` (`barcode_unknown`) | clarification question | `processing → needs_clarification` |
+| Barcode OFF no match / invalid barcode / no usable or implausible energy | `NeedsClarification` (`barcode_unknown`) | clarification question | `processing → needs_clarification` |
 | Unresolvable quantity | `NeedsClarification` (`unresolvable_quantity`) | clarification question | `processing → needs_clarification` |
 | OFF transient failure (timeout/5xx) | `StepError` (`off_transient_error`, retryable) | nothing | retries within bound, then `failed` |
 | OFF non-retryable error (4xx/non-JSON/policy) | `StepFailed` (`off_response_error`) | nothing | `processing → failed` |
