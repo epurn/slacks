@@ -62,5 +62,12 @@ class DailySummaryDTO(BaseModel):
 
     date: date
     intake: DailySummaryIntakeDTO
+    #: True iff the day has at least one finalized food item. ``intake`` is zeroed
+    #: both for a day the user logged nothing and for a day whose only logged food
+    #: is genuinely zero-kcal, so the zero alone cannot tell the two apart. This
+    #: flag is that signal: a range consumer (FTY-101 Trends adherence) excludes
+    #: ``has_intake=False`` days from its logged-intake average and on/off-target
+    #: denominator instead of counting every unlogged day as a real 0-kcal day.
+    has_intake: bool
     target: TargetReadModel | None
     exercise: DailySummaryExerciseDTO

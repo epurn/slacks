@@ -22,6 +22,7 @@ function mockSummary(overrides: Partial<DailySummaryDTO> = {}): DailySummaryDTO 
       carbs_g: 150.0,
       fat_g: 40.0,
     },
+    has_intake: true,
     target: targetModel(1800),
     exercise: {
       active_calories: 210.0,

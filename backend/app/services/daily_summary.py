@@ -33,10 +33,11 @@ Totals, macros, target, and burn are sensitive personal data and are never logge
 from __future__ import annotations
 
 import uuid
+from collections import defaultdict
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, select
 from sqlalchemy.orm import Session
 
 from app.enums import DerivedItemStatus, LogEventStatus
@@ -55,9 +56,21 @@ from app.services.targets import build_target_read_model
 #: Rounding precision for summed totals — matches FTY-043/044 serving-math (0.1).
 _ROUND_DECIMALS = 1
 
+#: Upper bound on a range read's span (inclusive days). The widest UI range is
+#: 6 months (~180 days); one year leaves generous headroom while keeping a single
+#: request bounded — an over-wide span fails closed with 422 rather than scanning
+#: an unbounded window.
+MAX_RANGE_DAYS = 366
+
+_UTC = ZoneInfo("UTC")
+
 
 class DailySummaryForbidden(Exception):
     """Raised when a caller tries to access another user's daily summary."""
+
+
+class DailySummaryRangeTooLarge(Exception):
+    """Raised when a range read spans more than :data:`MAX_RANGE_DAYS` days."""
 
 
 def get_daily_summary(
@@ -78,11 +91,76 @@ def get_daily_summary(
         day = datetime.now(tz).date()
     start_utc, end_utc = _day_bounds_utc(day, tz)
 
-    intake = _aggregate_intake(session, owner_id, start_utc, end_utc)
+    intake, has_intake = _aggregate_intake(session, owner_id, start_utc, end_utc)
     exercise = _aggregate_exercise(session, owner_id, start_utc, end_utc)
     target = _resolve_target(session, owner_id, day)
 
-    return DailySummaryDTO(date=day, intake=intake, target=target, exercise=exercise)
+    return DailySummaryDTO(
+        date=day,
+        intake=intake,
+        has_intake=has_intake,
+        target=target,
+        exercise=exercise,
+    )
+
+
+def get_daily_summaries(
+    session: Session,
+    owner_id: uuid.UUID,
+    current_user: User,
+    start: date,
+    end: date,
+) -> list[DailySummaryDTO]:
+    """Return per-day summaries for every day in ``[start, end]`` (oldest-first).
+
+    This is the range read-model: one windowed query each for intake and exercise
+    (bucketed to the owner's local day) plus one for targets, rather than N
+    per-day round trips — the client renders an adherence series from a single
+    request. Every calendar day in the inclusive range is represented, with
+    zeroed intake/burn and a ``None`` target for days that have no finalized data,
+    so the shape matches the single-day endpoint exactly — including the
+    ``has_intake`` flag, which is ``True`` only for days that have a finalized
+    food item, so a consumer can tell an unlogged day from a genuine 0-kcal day.
+
+    ``start`` must be on or before ``end`` and the span may not exceed
+    :data:`MAX_RANGE_DAYS` days (:class:`DailySummaryRangeTooLarge` otherwise).
+    Raises :class:`DailySummaryForbidden` on cross-user access (fail closed).
+    """
+
+    _authorize(owner_id, current_user)
+    if start > end:
+        raise DailySummaryRangeTooLarge("'from' must be on or before 'to'")
+    if (end.toordinal() - start.toordinal()) + 1 > MAX_RANGE_DAYS:
+        raise DailySummaryRangeTooLarge(f"range may not exceed {MAX_RANGE_DAYS} days")
+
+    tz = _user_timezone(session, owner_id)
+    window_start_utc, _ = _day_bounds_utc(start, tz)
+    _, window_end_utc = _day_bounds_utc(end, tz)
+
+    intake_by_day = _aggregate_intake_by_day(
+        session, owner_id, window_start_utc, window_end_utc, tz
+    )
+    exercise_by_day = _aggregate_exercise_by_day(
+        session, owner_id, window_start_utc, window_end_utc, tz
+    )
+    targets_by_day = _resolve_targets_by_day(session, owner_id, start, end)
+
+    summaries: list[DailySummaryDTO] = []
+    day = start
+    while day <= end:
+        # A day is present in ``intake_by_day`` only when it bucketed at least one
+        # finalized food item, so membership is exactly the ``has_intake`` signal.
+        summaries.append(
+            DailySummaryDTO(
+                date=day,
+                intake=intake_by_day.get(day, _intake_dto([])),
+                has_intake=day in intake_by_day,
+                target=targets_by_day.get(day),
+                exercise=exercise_by_day.get(day, _exercise_dto([])),
+            )
+        )
+        day = _next_day(day)
+    return summaries
 
 
 def _authorize(owner_id: uuid.UUID, current_user: User) -> None:
@@ -117,38 +195,49 @@ def _next_day(day: date) -> date:
     return date.fromordinal(day.toordinal() + 1)
 
 
-def _aggregate_intake(
-    session: Session,
-    owner_id: uuid.UUID,
-    start_utc: datetime,
-    end_utc: datetime,
-) -> DailySummaryIntakeDTO:
-    """Sum calories and macros from finalized food items on the day.
+# ── Finalized-state predicate (single source of truth) ─────────────────────────
+#
+# Both the single-day and range read paths build their queries from these helpers
+# so the documented finalized filter is defined exactly once. The predicate:
+# ``log_events.status == 'completed'`` AND ``derived_*_items.status == 'resolved'``
+# AND the costed-value column ``IS NOT NULL``, windowed by the owning log event's
+# ``created_at`` over ``[start, end)``. Day attribution is the event's ``created_at``.
 
-    Finalized filter (documented predicate):
-    ``log_events.status == 'completed'``
-    AND ``derived_food_items.status == 'resolved'``
-    AND ``derived_food_items.calories IS NOT NULL``.
 
-    Items on non-``completed`` events and uncosted (``NULL`` calories) items are
-    excluded. Day attribution is via the owning log event's ``created_at``.
-    """
+def _food_window_conditions(
+    owner_id: uuid.UUID, start_utc: datetime, end_utc: datetime
+) -> tuple[ColumnElement[bool], ...]:
+    """WHERE conditions selecting one user's finalized food items in a window."""
 
-    food_items = list(
-        session.scalars(
-            select(DerivedFoodItem)
-            .join(LogEvent, DerivedFoodItem.log_event_id == LogEvent.id)
-            .where(
-                DerivedFoodItem.user_id == owner_id,
-                LogEvent.user_id == owner_id,
-                LogEvent.status == LogEventStatus.COMPLETED,
-                DerivedFoodItem.status == DerivedItemStatus.RESOLVED,
-                DerivedFoodItem.calories.isnot(None),
-                LogEvent.created_at >= start_utc,
-                LogEvent.created_at < end_utc,
-            )
-        )
+    return (
+        DerivedFoodItem.user_id == owner_id,
+        LogEvent.user_id == owner_id,
+        LogEvent.status == LogEventStatus.COMPLETED,
+        DerivedFoodItem.status == DerivedItemStatus.RESOLVED,
+        DerivedFoodItem.calories.isnot(None),
+        LogEvent.created_at >= start_utc,
+        LogEvent.created_at < end_utc,
     )
+
+
+def _exercise_window_conditions(
+    owner_id: uuid.UUID, start_utc: datetime, end_utc: datetime
+) -> tuple[ColumnElement[bool], ...]:
+    """WHERE conditions selecting one user's finalized exercise items in a window."""
+
+    return (
+        DerivedExerciseItem.user_id == owner_id,
+        LogEvent.user_id == owner_id,
+        LogEvent.status == LogEventStatus.COMPLETED,
+        DerivedExerciseItem.status == DerivedItemStatus.RESOLVED,
+        DerivedExerciseItem.active_calories.isnot(None),
+        LogEvent.created_at >= start_utc,
+        LogEvent.created_at < end_utc,
+    )
+
+
+def _intake_dto(food_items: list[DerivedFoodItem]) -> DailySummaryIntakeDTO:
+    """Sum a day's finalized food items into the intake DTO (rounded to 0.1)."""
 
     return DailySummaryIntakeDTO(
         calories=round(sum(item.calories or 0.0 for item in food_items), _ROUND_DECIMALS),
@@ -158,43 +247,114 @@ def _aggregate_intake(
     )
 
 
-def _aggregate_exercise(
-    session: Session,
-    owner_id: uuid.UUID,
-    start_utc: datetime,
-    end_utc: datetime,
-) -> DailySummaryExerciseDTO:
-    """Sum active calories from finalized exercise items on the day.
-
-    Finalized filter (documented predicate):
-    ``log_events.status == 'completed'``
-    AND ``derived_exercise_items.status == 'resolved'``
-    AND ``derived_exercise_items.active_calories IS NOT NULL``.
-
-    Day attribution is via the owning log event's ``created_at``.
-    """
-
-    exercise_items = list(
-        session.scalars(
-            select(DerivedExerciseItem)
-            .join(LogEvent, DerivedExerciseItem.log_event_id == LogEvent.id)
-            .where(
-                DerivedExerciseItem.user_id == owner_id,
-                LogEvent.user_id == owner_id,
-                LogEvent.status == LogEventStatus.COMPLETED,
-                DerivedExerciseItem.status == DerivedItemStatus.RESOLVED,
-                DerivedExerciseItem.active_calories.isnot(None),
-                LogEvent.created_at >= start_utc,
-                LogEvent.created_at < end_utc,
-            )
-        )
-    )
+def _exercise_dto(exercise_items: list[DerivedExerciseItem]) -> DailySummaryExerciseDTO:
+    """Sum a day's finalized exercise items into the exercise DTO (rounded to 0.1)."""
 
     return DailySummaryExerciseDTO(
         active_calories=round(
             sum(item.active_calories or 0.0 for item in exercise_items), _ROUND_DECIMALS
         )
     )
+
+
+def _to_local_date(created_at: datetime, tz: ZoneInfo) -> date:
+    """Attribute an event timestamp to a calendar day in the owner's timezone.
+
+    ``created_at`` is stored UTC-aware; a naive value (defensive — some backends
+    drop the tzinfo) is treated as UTC before conversion, matching the bounds the
+    single-day path compares against.
+    """
+
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=_UTC)
+    return created_at.astimezone(tz).date()
+
+
+def _aggregate_intake(
+    session: Session,
+    owner_id: uuid.UUID,
+    start_utc: datetime,
+    end_utc: datetime,
+) -> tuple[DailySummaryIntakeDTO, bool]:
+    """Sum calories and macros from finalized food items on the day.
+
+    Returns the intake DTO and ``has_intake`` — ``True`` when at least one
+    finalized food item was found, so a zeroed-but-logged day is distinguishable
+    from an unlogged day (both serialize ``intake`` as zero).
+    """
+
+    food_items = list(
+        session.scalars(
+            select(DerivedFoodItem)
+            .join(LogEvent, DerivedFoodItem.log_event_id == LogEvent.id)
+            .where(*_food_window_conditions(owner_id, start_utc, end_utc))
+        )
+    )
+    return _intake_dto(food_items), len(food_items) > 0
+
+
+def _aggregate_exercise(
+    session: Session,
+    owner_id: uuid.UUID,
+    start_utc: datetime,
+    end_utc: datetime,
+) -> DailySummaryExerciseDTO:
+    """Sum active calories from finalized exercise items on the day."""
+
+    exercise_items = list(
+        session.scalars(
+            select(DerivedExerciseItem)
+            .join(LogEvent, DerivedExerciseItem.log_event_id == LogEvent.id)
+            .where(*_exercise_window_conditions(owner_id, start_utc, end_utc))
+        )
+    )
+    return _exercise_dto(exercise_items)
+
+
+def _aggregate_intake_by_day(
+    session: Session,
+    owner_id: uuid.UUID,
+    start_utc: datetime,
+    end_utc: datetime,
+    tz: ZoneInfo,
+) -> dict[date, DailySummaryIntakeDTO]:
+    """Bucket finalized food items across a window into per-local-day intake DTOs.
+
+    One windowed query, bucketed in Python by the owning event's local day — the
+    same attribution rule as the single-day path, computed once for the range.
+    """
+
+    rows = session.execute(
+        select(DerivedFoodItem, LogEvent.created_at)
+        .join(LogEvent, DerivedFoodItem.log_event_id == LogEvent.id)
+        .where(*_food_window_conditions(owner_id, start_utc, end_utc))
+    ).all()
+
+    buckets: dict[date, list[DerivedFoodItem]] = defaultdict(list)
+    for item, created_at in rows:
+        buckets[_to_local_date(created_at, tz)].append(item)
+    return {day: _intake_dto(items) for day, items in buckets.items()}
+
+
+def _aggregate_exercise_by_day(
+    session: Session,
+    owner_id: uuid.UUID,
+    start_utc: datetime,
+    end_utc: datetime,
+    tz: ZoneInfo,
+) -> dict[date, DailySummaryExerciseDTO]:
+    """Bucket finalized exercise items across a window into per-local-day DTOs."""
+
+    rows = session.execute(
+        select(DerivedExerciseItem, LogEvent.created_at)
+        .join(LogEvent, DerivedExerciseItem.log_event_id == LogEvent.id)
+        .where(*_exercise_window_conditions(owner_id, start_utc, end_utc))
+    ).all()
+
+    buckets: dict[date, list[DerivedExerciseItem]] = defaultdict(list)
+    for item, created_at in rows:
+        buckets[_to_local_date(created_at, tz)].append(item)
+    return {day: _exercise_dto(items) for day, items in buckets.items()}
 
 
 def _resolve_target(
@@ -225,3 +385,31 @@ def _resolve_target(
     if target is None:
         return None
     return build_target_read_model(target)
+
+
+def _resolve_targets_by_day(
+    session: Session,
+    owner_id: uuid.UUID,
+    start: date,
+    end: date,
+) -> dict[date, TargetReadModel]:
+    """Map ``for_date`` → target read-model for the active goal across a range.
+
+    One query for every ``daily_targets`` row in ``[start, end]``; days without a
+    stored row are simply absent (the caller renders them as ``None``), preserving
+    the no-target-is-not-zero distinction the single-day path makes.
+    """
+
+    targets = session.scalars(
+        select(DailyTarget)
+        .join(Goal, DailyTarget.goal_id == Goal.id)
+        .where(
+            DailyTarget.user_id == owner_id,
+            Goal.user_id == owner_id,
+            Goal.is_active.is_(True),
+            DailyTarget.for_date >= start,
+            DailyTarget.for_date <= end,
+        )
+    ).all()
+
+    return {target.for_date: build_target_read_model(target) for target in targets}
