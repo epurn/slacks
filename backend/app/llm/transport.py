@@ -21,10 +21,18 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from app.estimator.hardened_fetch import DEFAULT_MAX_BYTES
 from app.llm.errors import LLMConfigurationError, LLMResponseError, LLMTransientError
 
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
+
+# Cap on the response body we will read from a provider, so a hostile or
+# misconfigured self-host endpoint cannot OOM the worker with an unbounded
+# ``response.read()``. Owned here rather than imported from the estimator's
+# ``hardened_fetch``: the transport is the lowest layer and must not depend on
+# the estimator package (doing so triggers ``app.estimator.__init__`` ->
+# ``app.llm`` mid-import, a circular import). The two caps are independent
+# concerns that happen to share a value.
+MAX_RESPONSE_BYTES = 1_000_000
 
 
 def post_json(
@@ -60,7 +68,7 @@ def post_json(
         with urllib.request.urlopen(  # noqa: S310 — scheme validated above
             request, timeout=timeout_seconds
         ) as response:
-            raw = response.read(DEFAULT_MAX_BYTES + 1)
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
     except urllib.error.HTTPError as exc:
         status = exc.code
         # Drain so the connection can be reused, but never surface the body.
@@ -79,7 +87,7 @@ def post_json(
         # the URL) never leak into logs.
         raise LLMTransientError("provider request failed") from None
 
-    if len(raw) > DEFAULT_MAX_BYTES:
+    if len(raw) > MAX_RESPONSE_BYTES:
         raise LLMResponseError("provider returned an oversized body") from None
 
     try:

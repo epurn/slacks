@@ -17,9 +17,9 @@ from typing import Any
 
 import pytest
 
-from app.estimator.hardened_fetch import DEFAULT_MAX_BYTES
 from app.llm import transport
 from app.llm.errors import LLMConfigurationError, LLMResponseError, LLMTransientError
+from app.llm.transport import MAX_RESPONSE_BYTES
 
 
 class _FakeResponse:
@@ -175,7 +175,7 @@ def test_json_array_body_is_response_error(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_over_cap_body_raises_response_error(monkeypatch: pytest.MonkeyPatch) -> None:
     # A body one byte over the cap must raise LLMResponseError without OOM-ing.
-    oversized = b"x" * (DEFAULT_MAX_BYTES + 1)
+    oversized = b"x" * (MAX_RESPONSE_BYTES + 1)
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResponse(oversized))
 
     with pytest.raises(LLMResponseError):
@@ -185,7 +185,7 @@ def test_over_cap_body_raises_response_error(monkeypatch: pytest.MonkeyPatch) ->
 def test_over_cap_error_message_contains_no_body(monkeypatch: pytest.MonkeyPatch) -> None:
     # The error message must never include the body (even a snippet of it).
     body_marker = b"BODY_MARKER_MUST_NOT_LEAK"
-    oversized = body_marker + b"x" * DEFAULT_MAX_BYTES
+    oversized = body_marker + b"x" * MAX_RESPONSE_BYTES
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResponse(oversized))
 
     with pytest.raises(LLMResponseError) as exc_info:
@@ -199,9 +199,9 @@ def test_at_cap_body_parses_correctly(monkeypatch: pytest.MonkeyPatch) -> None:
     # A body exactly at the cap (a valid JSON object) must parse without error.
     prefix = b'{"ok": true, "pad": "'
     suffix = b'"}'
-    padding = b"a" * (DEFAULT_MAX_BYTES - len(prefix) - len(suffix))
+    padding = b"a" * (MAX_RESPONSE_BYTES - len(prefix) - len(suffix))
     padded = prefix + padding + suffix
-    assert len(padded) == DEFAULT_MAX_BYTES
+    assert len(padded) == MAX_RESPONSE_BYTES
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResponse(padded))
 
     result = _post()
