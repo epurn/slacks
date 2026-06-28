@@ -15,6 +15,19 @@
 #
 # The real `.env` is gitignored; only `.env.example` is committed.
 #
+# Port exposure: postgres and redis are NOT published to host interfaces by
+# default (FTY-109). The api, worker, and migrate services reach them over the
+# internal compose network by service name. To enable direct host access for a
+# DB GUI or local psql, add a loopback-only mapping under the relevant service:
+#
+#   ports:
+#     - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"   # postgres
+#     - "127.0.0.1:${REDIS_PORT:-6379}:6379"       # redis
+#
+# Binding to 127.0.0.1 limits access to the local machine; never use 0.0.0.0
+# for datastore ports on a networked host. Alternatively, use:
+#   docker compose exec postgres psql -U fatty fatty   # no host port needed
+#
 # CONTRACT: the service names (postgres, redis, migrate, api, worker), the API
 # port (8000), and the env-var names below are relied on by later infra and
 # backend stories. The API healthcheck depends on FTY-012's `GET /healthz` shape.
@@ -25,10 +38,11 @@ services:
   postgres:
     # Pinned image per the security baseline's pinned-dependency principle.
     image: postgres:16.4-alpine
+    restart: unless-stopped
     env_file:
       - .env
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+    # No host port published by default (FTY-109). See the port-exposure comment
+    # at the top of this file if you need direct host access.
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -39,8 +53,9 @@ services:
 
   redis:
     image: redis:7.4-alpine
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
+    restart: unless-stopped
+    # No host port published by default (FTY-109). See the port-exposure comment
+    # at the top of this file if you need direct host access.
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -63,6 +78,7 @@ services:
   api:
     build:
       context: ./backend
+    restart: unless-stopped
     env_file:
       - .env
     # Pin the in-container bind so the host port mapping below is stable
@@ -111,6 +127,7 @@ services:
     # No task definitions exist yet (FTY-011 non-goal); the worker connects to
     # the Redis broker and idles, ready for later estimator stories.
     command: [".venv/bin/celery", "-A", "app.worker:celery_app", "worker", "--loglevel=info"]
+    restart: unless-stopped
     env_file:
       - .env
     environment:
@@ -124,6 +141,14 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - ".venv/bin/celery -A app.worker:celery_app inspect ping 2>/dev/null | grep -q 'pong'"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   postgres-data:
