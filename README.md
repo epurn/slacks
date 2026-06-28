@@ -76,20 +76,50 @@ API_PORT=8001          # default 8000
 **5. (Optional) Configure providers:**
 
 Open `.env` and configure any providers you want:
-- **LLM:** set `FATTY_LLM_PROVIDER`, `FATTY_LLM_API_KEY`, and `FATTY_LLM_MODEL`. Leave `FATTY_LLM_PROVIDER=fake` to skip.
-  - **Zero-cost local option:** run [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), or [vLLM](https://github.com/vllm-project/vllm) locally, then set:
+- **LLM:** set `FATTY_LLM_PROVIDER`. Leave `FATTY_LLM_PROVIDER=fake` to skip (estimation degrades gracefully).
+  - **Claude subscription (no API key):** if you have a Claude monthly plan, the `claude_code` provider runs estimation through your own subscription — no per-token billing:
+    ```
+    FATTY_LLM_PROVIDER=claude_code
+    # FATTY_LLM_MODEL is optional — Claude Code uses your plan's model by default
+    # No FATTY_LLM_API_KEY — auth is your 'claude login' session (see step 5a below)
+    ```
+    See **Claude Code session setup** (step 5a) to complete the one-time login.
+  - **Zero-cost local model:** run [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), or [vLLM](https://github.com/vllm-project/vllm) locally, then set:
     ```
     FATTY_LLM_PROVIDER=openai_compatible
     FATTY_LLM_BASE_URL=http://localhost:11434/v1   # Ollama default; adjust for LM Studio / vLLM
     FATTY_LLM_MODEL=<your loaded model name>
     # No FATTY_LLM_API_KEY needed — local runtimes don't authenticate
     ```
-    This uses the same OpenAI Chat Completions wire format these runtimes expose locally, with no API key and no per-token billing.
+    This uses the OpenAI Chat Completions wire format exposed by these local runtimes, with no key and no per-token billing.
+  - **API key providers:** for OpenAI or Anthropic, set `FATTY_LLM_PROVIDER`, `FATTY_LLM_API_KEY`, and `FATTY_LLM_MODEL`.
 - **USDA FDC:** set `FATTY_FDC_API_KEY` with your free data.gov key. Omit to skip generic-food lookups.
 - **Open Food Facts:** enabled by default (no key needed). Set `FATTY_OFF_ENABLED=false` to disable.
 - **Brave Search:** set `FATTY_SEARCH_API_KEY` and `FATTY_SEARCH_ENABLED=true`. Disabled by default.
 
 See `.env.example` for all available options with documentation.
+
+**5a. (Required if using `claude_code` provider) One-time Claude Code login:**
+
+The `claude_code` provider authenticates through your own Claude Code session. The Claude Code CLI is pre-installed in the backend image; you only need to log in once. The session is stored in a named Docker volume (`claude-config`) and survives `docker compose down && up` without re-login.
+
+After starting the stack for the first time:
+
+```sh
+# Open an interactive login session in the running api container:
+docker compose exec api claude login
+```
+
+Claude Code prints a URL. Open it in your browser, authorize, and paste the device code back into the terminal. The session is written into the `claude-config` volume and shared automatically with the `worker` container.
+
+To verify the session is active:
+
+```sh
+curl -fsS http://localhost:8000/healthz/sources | python3 -m json.tool
+# Look for: {"id": "claude_code", "enabled": true, "available": true, ...}
+```
+
+**Security note:** the `claude-config` Docker volume contains your OAuth session credentials. It is a host secret — never copy its contents into the image, never commit it to source control, and restrict its host-path permissions if you bind-mount it. The image itself contains only the Claude Code binary; no credentials are baked in.
 
 **6. Start the stack:**
 
