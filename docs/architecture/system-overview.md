@@ -80,9 +80,9 @@ The backend must:
 Evidence retrieval follows a priority order when a relevant source is available:
 
 1. User-provided nutrition label images (FTY-064) — extracted facts from uploaded photos.
-2. Barcode / packaged-product data from Open Food Facts (FTY-060).
-3. Generic food facts from USDA FoodData Central (FTY-044).
-4. Official restaurant or manufacturer pages (FTY-062) — last-resort search + fetch + extraction.
+2. Official restaurant or manufacturer pages (FTY-062) — search + fetch + extraction for named restaurant/manufacturer items.
+3. Barcode / packaged-product data from Open Food Facts (FTY-060).
+4. Generic food facts from USDA FoodData Central (FTY-044).
 5. Model-prior estimate with explicit source status (fallback when sources are unavailable/disabled or no confident match is found).
 6. Ingredient-based recipe calculation (deferred).
 7. Similar-dish reference estimate (deferred).
