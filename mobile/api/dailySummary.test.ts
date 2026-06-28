@@ -14,7 +14,12 @@ const SESSION: DailySummarySession = {
 const DTO: DailySummaryDTO = {
   date: "2026-06-27",
   intake: { calories: 1850, protein_g: 120, carbs_g: 180, fat_g: 60 },
-  target: { calories: 2000 },
+  target: {
+    calories: { effective: 2000, derived: 2000, source: "derived" },
+    protein_g: { effective: 128, derived: 128, source: "derived" },
+    carbs_g: { effective: 148, derived: 148, source: "derived" },
+    fat_g: { effective: 64, derived: 64, source: "derived" },
+  },
   exercise: { active_calories: 350 },
 };
 

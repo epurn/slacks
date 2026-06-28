@@ -1,7 +1,17 @@
 import { act, create as render, type ReactTestRenderer } from "react-test-renderer";
 
 import { DailySummary } from "./DailySummary";
-import type { DailySummaryDTO } from "@/api/dailySummary";
+import type { DailySummaryDTO, TargetReadModel } from "@/api/dailySummary";
+
+/** Build a derived-only target read-model whose effective calorie target is `kcal`. */
+function targetModel(kcal: number): TargetReadModel {
+  return {
+    calories: { effective: kcal, derived: kcal, source: "derived" },
+    protein_g: { effective: 128, derived: 128, source: "derived" },
+    carbs_g: { effective: 148, derived: 148, source: "derived" },
+    fat_g: { effective: 64, derived: 64, source: "derived" },
+  };
+}
 
 function mockSummary(overrides: Partial<DailySummaryDTO> = {}): DailySummaryDTO {
   return {
@@ -12,9 +22,7 @@ function mockSummary(overrides: Partial<DailySummaryDTO> = {}): DailySummaryDTO 
       carbs_g: 150.0,
       fat_g: 40.0,
     },
-    target: {
-      calories: 1800,
-    },
+    target: targetModel(1800),
     exercise: {
       active_calories: 210.0,
     },
@@ -39,7 +47,7 @@ describe("DailySummary — hero (CalorieHero)", () => {
   it("renders under-budget hero with consumed, target, percent, and remaining", () => {
     let tree: ReactTestRenderer;
     act(() => {
-      tree = render(<DailySummary summary={mockSummary({ intake: { calories: 1240, protein_g: 80, carbs_g: 150, fat_g: 40 }, target: { calories: 2000 } })} />);
+      tree = render(<DailySummary summary={mockSummary({ intake: { calories: 1240, protein_g: 80, carbs_g: 150, fat_g: 40 }, target: targetModel(2000) })} />);
     });
 
     const labels = allA11yLabels(tree!);
@@ -52,7 +60,7 @@ describe("DailySummary — hero (CalorieHero)", () => {
   it("renders over-budget hero with coral copy '500 over'", () => {
     let tree: ReactTestRenderer;
     act(() => {
-      tree = render(<DailySummary summary={mockSummary({ intake: { calories: 2500, protein_g: 80, carbs_g: 150, fat_g: 40 }, target: { calories: 2000 } })} />);
+      tree = render(<DailySummary summary={mockSummary({ intake: { calories: 2500, protein_g: 80, carbs_g: 150, fat_g: 40 }, target: targetModel(2000) })} />);
     });
 
     const labels = allA11yLabels(tree!);
@@ -86,7 +94,7 @@ describe("DailySummary — hero (CalorieHero)", () => {
         <DailySummary
           summary={mockSummary({
             intake: { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
-            target: { calories: 2000 },
+            target: targetModel(2000),
           })}
         />,
       );
@@ -171,7 +179,7 @@ describe("DailySummary — error and null states", () => {
     // changes colors, not content. Smoke-test both renders.
     const summary = mockSummary({
       intake: { calories: 500, protein_g: 30, carbs_g: 60, fat_g: 20 },
-      target: { calories: 2000 },
+      target: targetModel(2000),
     });
     let lightTree: ReactTestRenderer;
     let darkTree: ReactTestRenderer;

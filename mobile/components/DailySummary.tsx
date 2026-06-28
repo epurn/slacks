@@ -45,7 +45,7 @@ export function DailySummary({
     <View style={styles.wrapper}>
       <CalorieHero
         consumed={summary.intake.calories}
-        target={summary.target?.calories ?? null}
+        target={summary.target?.calories.effective ?? null}
       />
       <MacroTier
         protein_g={summary.intake.protein_g}
