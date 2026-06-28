@@ -128,3 +128,47 @@ export function optimisticLogEvent(args: {
     updated_at: args.createdAt,
   };
 }
+
+/** A time cluster: events whose `created_at` fall within a grace window. */
+export interface TimeCluster {
+  /** ISO datetime of the newest (anchor) event in this cluster. */
+  readonly anchorTime: string;
+  /** Events in the cluster, newest first. */
+  readonly events: readonly LogEventDTO[];
+}
+
+/**
+ * Group newest-first events into time clusters by their `created_at` timestamp.
+ * Events within `windowMs` of the cluster anchor (first/newest event) are placed
+ * in the same cluster. Produces clusters in newest-first order, mirroring the
+ * text-message-chain style described in the Today screen UX spec.
+ *
+ * Default window: 10 minutes (the spec's ~10–15-minute grace window).
+ */
+export function clusterByTime(
+  events: readonly LogEventDTO[],
+  windowMs: number = 10 * 60 * 1000,
+): readonly TimeCluster[] {
+  if (events.length === 0) return [];
+
+  const sorted = sortByNewest([...events]);
+  const clusters: TimeCluster[] = [];
+
+  for (const event of sorted) {
+    const eventTime = new Date(event.created_at).getTime();
+    if (clusters.length > 0) {
+      const last = clusters[clusters.length - 1];
+      const anchorTime = new Date(last.anchorTime).getTime();
+      if (anchorTime - eventTime <= windowMs) {
+        clusters[clusters.length - 1] = {
+          ...last,
+          events: [...last.events, event],
+        };
+        continue;
+      }
+    }
+    clusters.push({ anchorTime: event.created_at, events: [event] });
+  }
+
+  return clusters;
+}

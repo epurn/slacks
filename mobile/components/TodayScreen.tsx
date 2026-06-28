@@ -37,6 +37,7 @@ import {
 import { BarcodeScannerScreen } from "@/components/BarcodeScannerScreen";
 import { DailySummary } from "@/components/DailySummary";
 import { EntryRow } from "@/components/EntryRow";
+import { ItemTimelineRow } from "@/components/ItemTimelineRow";
 import { LabelCaptureScreen } from "@/components/LabelCaptureScreen";
 import { TypeaheadSuggestionBar } from "@/components/TypeaheadSuggestionBar";
 import {
@@ -52,11 +53,13 @@ import {
 } from "@/state/session";
 import {
   OPTIMISTIC_ID_PREFIX,
+  clusterByTime,
   optimisticLogEvent,
   reconcileEvents,
   sortByNewest,
 } from "@/state/today";
 import { useScreenActive } from "@/state/useScreenActive";
+import { useTheme, spacing, typeScale, radius } from "@/theme";
 
 /** Maximum raw-text length, mirrored from the FTY-030 contract. */
 const MAX_RAW_TEXT_LENGTH = 2000;
@@ -116,7 +119,8 @@ function syntheticSavedFoodItem(
     protein_g_estimated: savedFood.protein_g,
     carbs_g_estimated: savedFood.carbs_g,
     fat_g_estimated: savedFood.fat_g,
-    source: "saved_food",
+    source: null,
+    is_edited: false,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
@@ -164,6 +168,7 @@ export function TodayScreen({
   onPressProfile?: () => void;
 } = {}) {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
   const liveSession = useSession();
   const session = sessionOverride !== undefined ? sessionOverride : liveSession;
   const apiSession = useMemo(
@@ -463,7 +468,7 @@ export function TodayScreen({
       </Modal>
 
       <ScrollView
-        style={styles.screen}
+        style={[styles.screen, { backgroundColor: colors.surface }]}
         contentContainerStyle={[
           styles.content,
           // +96 (not +24) so the last entry clears the floating, absolutely-
@@ -475,7 +480,7 @@ export function TodayScreen({
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.header}>
-          <Text style={styles.title} accessibilityRole="header">
+          <Text style={[styles.title, { color: colors.text }]} accessibilityRole="header">
             Today
           </Text>
           <View style={styles.headerActions}>
@@ -487,7 +492,7 @@ export function TodayScreen({
               onPress={() => void refresh()}
               style={styles.refresh}
             >
-              <Text style={styles.refreshLabel}>Refresh</Text>
+              <Text style={[styles.refreshLabel, { color: colors.accent }]}>Refresh</Text>
             </Pressable>
             {onPressProfile ? (
               <Pressable
@@ -497,7 +502,7 @@ export function TodayScreen({
                 onPress={onPressProfile}
                 style={styles.gearButton}
               >
-                <Text style={styles.gearLabel}>⚙</Text>
+                <Text style={[styles.gearLabel, { color: colors.text }]}>⚙</Text>
               </Pressable>
             ) : null}
           </View>
@@ -507,13 +512,13 @@ export function TodayScreen({
           <TextInput
             accessibilityLabel="Log food or exercise"
             placeholder="Add food or exercise…"
-            placeholderTextColor="#A0A0A8"
+            placeholderTextColor={colors.textMuted}
             value={text}
             onChangeText={setText}
             multiline
             maxLength={MAX_RAW_TEXT_LENGTH}
             editable={!submitting}
-            style={styles.input}
+            style={[styles.input, { backgroundColor: colors.surfaceRaised, color: colors.text }]}
           />
           <View style={styles.composerActions}>
             <Pressable
@@ -523,9 +528,9 @@ export function TodayScreen({
               accessibilityState={{ disabled: submitting }}
               disabled={submitting}
               onPress={() => setScannerOpen(true)}
-              style={styles.scanButton}
+              style={[styles.scanButton, { backgroundColor: colors.controlBackground }]}
             >
-              <Text style={styles.scanButtonLabel}>⊡</Text>
+              <Text style={[styles.scanButtonLabel, { color: colors.text }]}>⊡</Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"
@@ -534,9 +539,9 @@ export function TodayScreen({
               accessibilityState={{ disabled: submitting || !apiSession }}
               disabled={submitting || !apiSession}
               onPress={() => setLabelCaptureOpen(true)}
-              style={styles.scanButton}
+              style={[styles.scanButton, { backgroundColor: colors.controlBackground }]}
             >
-              <Text style={styles.scanButtonLabel}>◉</Text>
+              <Text style={[styles.scanButtonLabel, { color: colors.text }]}>◉</Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"
@@ -544,9 +549,12 @@ export function TodayScreen({
               accessibilityState={{ disabled: !canSubmit }}
               disabled={!canSubmit}
               onPress={() => void handleSubmit()}
-              style={[styles.add, !canSubmit && styles.addDisabled]}
+              style={[
+                styles.add,
+                { backgroundColor: canSubmit ? colors.accent : colors.controlBackground },
+              ]}
             >
-              <Text style={styles.addLabel}>
+              <Text style={[styles.addLabel, { color: canSubmit ? colors.accentForeground : colors.textMuted }]}>
                 {submitting ? "Adding…" : "Add"}
               </Text>
             </Pressable>
@@ -562,7 +570,7 @@ export function TodayScreen({
           search={searchSavedFoods}
         />
         {submitError ? (
-          <Text style={styles.error} accessibilityRole="alert">
+          <Text style={[styles.error, { color: colors.coral }]} accessibilityRole="alert">
             {submitError}
           </Text>
         ) : null}
@@ -610,6 +618,8 @@ function Timeline({
   summary?: DailySummaryDTO | null;
   summaryError?: string | null;
 }) {
+  const { colors } = useTheme();
+
   if (events.length === 0) {
     if (phase === "loading") {
       return (
@@ -618,10 +628,8 @@ function Timeline({
         </View>
       );
     }
-    // A day with nothing logged still has a summary: zeroed intake and the
-    // calorie target. Render it (and any summary error) above the empty state so
-    // the target is visible before the first entry — DailySummary returns null
-    // when there is neither summary nor error, so this stays clean.
+    // An empty day still shows the hero (zeroed intake, full target available)
+    // and a calm single invite — never an alarming blank.
     return (
       <View>
         <DailySummary summary={summary} error={summaryError} />
@@ -636,19 +644,21 @@ function Timeline({
               onPress={onRetry}
               style={styles.retry}
             >
-              <Text style={styles.retryLabel}>Try again</Text>
+              <Text style={[styles.retryLabel, { color: colors.text }]}>Try again</Text>
             </Pressable>
           </View>
         ) : (
           <View style={styles.state}>
-            <Text style={styles.stateText}>
-              Nothing logged yet. Add your first food or exercise above.
+            <Text style={[styles.stateText, { color: colors.textMuted }]}>
+              Log your first thing
             </Text>
           </View>
         )}
       </View>
     );
   }
+
+  const clusters = clusterByTime(events);
 
   return (
     <View>
@@ -658,30 +668,128 @@ function Timeline({
           {loadError}
         </Text>
       ) : null}
-      <View style={styles.card}>
-        {events.map((event) => (
-          <EntryRow
-            key={event.id}
-            event={event}
-            items={itemsByEvent[event.id]}
-            session={session}
-            editItem={editItem}
-            onItemChange={onItemChange}
-            saveFoodFn={saveFood}
-          />
-        ))}
+
+      {clusters.map((cluster) => (
+        <ClusterView
+          key={cluster.anchorTime}
+          cluster={cluster}
+          itemsByEvent={itemsByEvent}
+          session={session}
+          editItem={editItem}
+          onItemChange={onItemChange}
+          saveFood={saveFood}
+          colors={colors}
+        />
+      ))}
+    </View>
+  );
+}
+
+/** Format an ISO timestamp as a short time label for the cluster header. */
+function formatClusterTime(isoTime: string): string {
+  try {
+    const date = new Date(isoTime);
+    return date.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return "";
+  }
+}
+
+function ClusterView({
+  cluster,
+  itemsByEvent,
+  session,
+  editItem,
+  onItemChange,
+  saveFood,
+  colors,
+}: {
+  cluster: { anchorTime: string; events: readonly LogEventDTO[] };
+  itemsByEvent: Readonly<Record<string, readonly DerivedItem[]>>;
+  session: ApiSession | null;
+  editItem: typeof editDerivedItemApi;
+  onItemChange: (item: DerivedItem) => void;
+  saveFood: typeof saveFoodApi;
+  colors: ReturnType<typeof useTheme>["colors"];
+}) {
+  return (
+    <View style={styles.cluster}>
+      <Text style={[styles.clusterTime, { color: colors.textMuted }]}>
+        {formatClusterTime(cluster.anchorTime)}
+      </Text>
+      <View style={[styles.card, { backgroundColor: colors.surfaceRaised }]}>
+        {cluster.events.map((event) => {
+          const items = itemsByEvent[event.id] ?? [];
+
+          // Completed event with resolved items → show item rows (items-forward)
+          if (event.status === "completed" && items.length > 0) {
+            return items.map((item) => (
+              <ItemTimelineRow
+                key={item.id}
+                item={item}
+                needsClarification={false}
+                onPress={() => {/* FTY-100: item detail sheet */}}
+              />
+            ));
+          }
+
+          // Optimistic / saved-food synthetic items (before server confirms)
+          if (items.length > 0) {
+            return items.map((item) => (
+              <ItemTimelineRow
+                key={item.id}
+                item={item}
+                needsClarification={false}
+                onPress={() => {/* FTY-100: item detail sheet */}}
+              />
+            ));
+          }
+
+          // needs_clarification → muted placeholder row
+          if (event.status === "needs_clarification") {
+            return (
+              <EntryRow
+                key={event.id}
+                event={event}
+                items={[]}
+                session={session}
+                editItem={editItem}
+                onItemChange={onItemChange}
+                saveFoodFn={saveFood}
+              />
+            );
+          }
+
+          // pending / processing / failed / completed-with-no-items → status placeholder
+          return (
+            <EntryRow
+              key={event.id}
+              event={event}
+              items={[]}
+              session={session}
+              editItem={editItem}
+              onItemChange={onItemChange}
+              saveFoodFn={saveFood}
+            />
+          );
+        })}
       </View>
     </View>
   );
 }
 
 function SignInRequired({ insetTop }: { insetTop: number }) {
+  const { colors } = useTheme();
   return (
-    <View style={[styles.center, { paddingTop: insetTop }]}>
-      <Text style={styles.centerTitle} accessibilityRole="header">
+    <View style={[styles.center, { paddingTop: insetTop, backgroundColor: colors.surface }]}>
+      <Text style={[styles.centerTitle, { color: colors.text }]} accessibilityRole="header">
         Sign in to see your day
       </Text>
-      <Text style={styles.centerBody}>
+      <Text style={[styles.centerBody, { color: colors.textMuted }]}>
         Your log is stored privately against your account. Sign in to add and
         review today&apos;s food and exercise.
       </Text>
@@ -692,10 +800,9 @@ function SignInRequired({ insetTop }: { insetTop: number }) {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#F2F2F7",
   },
   content: {
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.base,
   },
   header: {
     flexDirection: "row",
@@ -705,11 +812,11 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
+    gap: spacing.xs,
   },
   gearButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 8,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
     minWidth: 44,
     minHeight: 44,
     alignItems: "center",
@@ -717,28 +824,25 @@ const styles = StyleSheet.create({
   },
   gearLabel: {
     fontSize: 22,
-    color: "#1C1C1E",
   },
   title: {
-    fontSize: 34,
+    fontSize: typeScale.largeTitle,
     fontWeight: "700",
-    color: "#1C1C1E",
   },
   refresh: {
-    paddingVertical: 8,
-    paddingHorizontal: 4,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
   },
   refreshLabel: {
-    fontSize: 16,
-    color: "#0A84FF",
+    fontSize: typeScale.callout,
     fontWeight: "500",
   },
   composer: {
     flexDirection: "row",
     alignItems: "flex-end",
-    gap: 8,
-    marginTop: 8,
-    marginBottom: 16,
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    marginBottom: spacing.base,
   },
   composerActions: {
     flexDirection: "column",
@@ -748,92 +852,85 @@ const styles = StyleSheet.create({
   scanButton: {
     width: 44,
     height: 44,
-    borderRadius: 10,
-    backgroundColor: "#E4E4EA",
+    borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
   },
   scanButtonLabel: {
     fontSize: 22,
-    color: "#1C1C1E",
   },
   input: {
     flex: 1,
     minHeight: 44,
     maxHeight: 120,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 10,
+    borderRadius: radius.md,
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 17,
-    color: "#1C1C1E",
+    paddingVertical: spacing.md,
+    fontSize: typeScale.body,
   },
   add: {
-    backgroundColor: "#0A84FF",
-    borderRadius: 10,
-    paddingVertical: 12,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
     paddingHorizontal: 18,
     alignItems: "center",
     justifyContent: "center",
     minHeight: 44,
   },
-  addDisabled: {
-    backgroundColor: "#9DC9FF",
-  },
   addLabel: {
-    fontSize: 16,
+    fontSize: typeScale.callout,
     fontWeight: "600",
     color: "#FFFFFF",
   },
   error: {
-    fontSize: 14,
-    color: "#C0392B",
-    marginBottom: 12,
-    marginLeft: 4,
+    fontSize: typeScale.footnote,
+    marginBottom: spacing.md,
+    marginLeft: spacing.xs,
+  },
+  cluster: {
+    marginBottom: spacing.sm,
+  },
+  clusterTime: {
+    fontSize: typeScale.caption1,
+    fontWeight: "500",
+    marginBottom: spacing.xs,
+    paddingHorizontal: spacing.xs,
   },
   card: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 12,
+    borderRadius: radius.lg,
     overflow: "hidden",
   },
   state: {
     paddingVertical: 32,
     alignItems: "center",
-    gap: 16,
+    gap: spacing.base,
   },
   stateText: {
-    fontSize: 15,
-    color: "#8E8E93",
+    fontSize: typeScale.subhead,
     textAlign: "center",
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.base,
   },
   retry: {
     paddingVertical: 10,
     paddingHorizontal: 20,
-    borderRadius: 10,
-    backgroundColor: "#E4E4EA",
+    borderRadius: radius.md,
   },
   retryLabel: {
-    fontSize: 15,
+    fontSize: typeScale.subhead,
     fontWeight: "600",
-    color: "#1C1C1E",
   },
   center: {
     flex: 1,
-    backgroundColor: "#F2F2F7",
-    paddingHorizontal: 24,
+    paddingHorizontal: spacing.xl,
     alignItems: "center",
   },
   centerTitle: {
     fontSize: 24,
     fontWeight: "700",
-    color: "#1C1C1E",
     textAlign: "center",
   },
   centerBody: {
-    fontSize: 15,
-    color: "#8E8E93",
+    fontSize: typeScale.subhead,
     textAlign: "center",
-    marginTop: 12,
+    marginTop: spacing.md,
   },
 });
