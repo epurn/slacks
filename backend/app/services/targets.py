@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, date, datetime
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -46,6 +45,7 @@ from app.schemas.targets import (
     TargetOverrideRequest,
     TargetReadModel,
 )
+from app.timeutils import user_timezone
 
 
 class GoalForbidden(Exception):
@@ -326,20 +326,22 @@ def _resolve_day(session: Session, owner_id: uuid.UUID, for_date: date | None) -
 
     if for_date is not None:
         return for_date
-    tz_name = session.scalars(
-        select(UserProfile.timezone).where(UserProfile.user_id == owner_id)
-    ).one_or_none()
-    return datetime.now(ZoneInfo(tz_name or "UTC")).date()
+    tz = user_timezone(session, owner_id)
+    return datetime.now(tz).date()
 
 
-def _resolve_active_target(session: Session, owner_id: uuid.UUID, for_date: date) -> DailyTarget:
-    """Load the active goal's target row for ``owner_id`` on ``for_date``.
+def _resolve_active_target_row(
+    session: Session, owner_id: uuid.UUID, for_date: date
+) -> DailyTarget | None:
+    """Load the active goal's target row for ``owner_id`` on ``for_date``, or None.
 
-    Raises :class:`TargetNotFound` when the user has no active goal or no stored
-    target row for the day — the same fail-closed signal as a cross-user attempt.
+    This is the shared query predicate for the active-goal target lookup, used by
+    both the override endpoints (targets service) and the daily-summary endpoint.
+    Each caller applies its own not-found policy and return shape: the targets
+    service raises, daily_summary returns None and projects to the read-model.
     """
 
-    target = session.scalars(
+    return session.scalars(
         select(DailyTarget)
         .join(Goal, DailyTarget.goal_id == Goal.id)
         .where(
@@ -349,6 +351,16 @@ def _resolve_active_target(session: Session, owner_id: uuid.UUID, for_date: date
             DailyTarget.for_date == for_date,
         )
     ).one_or_none()
+
+
+def _resolve_active_target(session: Session, owner_id: uuid.UUID, for_date: date) -> DailyTarget:
+    """Load the active goal's target row for ``owner_id`` on ``for_date``.
+
+    Raises :class:`TargetNotFound` when the user has no active goal or no stored
+    target row for the day — the same fail-closed signal as a cross-user attempt.
+    """
+
+    target = _resolve_active_target_row(session, owner_id, for_date)
     if target is None:
         raise TargetNotFound("no active target for this user and day")
     return target

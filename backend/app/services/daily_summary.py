@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
-from datetime import date, datetime, time
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import ColumnElement, select
@@ -42,7 +42,7 @@ from sqlalchemy.orm import Session
 
 from app.enums import DerivedItemStatus, LogEventStatus
 from app.models.derived import DerivedExerciseItem, DerivedFoodItem
-from app.models.identity import User, UserProfile
+from app.models.identity import User
 from app.models.log_events import LogEvent
 from app.models.targets import DailyTarget, Goal
 from app.schemas.daily_summary import (
@@ -51,7 +51,8 @@ from app.schemas.daily_summary import (
     DailySummaryIntakeDTO,
 )
 from app.schemas.targets import TargetReadModel
-from app.services.targets import build_target_read_model
+from app.services.targets import _resolve_active_target_row, build_target_read_model
+from app.timeutils import day_bounds_utc, next_day, user_timezone
 
 #: Rounding precision for summed totals — matches FTY-043/044 serving-math (0.1).
 _ROUND_DECIMALS = 1
@@ -86,10 +87,10 @@ def get_daily_summary(
     """
 
     _authorize(owner_id, current_user)
-    tz = _user_timezone(session, owner_id)
+    tz = user_timezone(session, owner_id)
     if day is None:
         day = datetime.now(tz).date()
-    start_utc, end_utc = _day_bounds_utc(day, tz)
+    start_utc, end_utc = day_bounds_utc(day, tz)
 
     intake, has_intake = _aggregate_intake(session, owner_id, start_utc, end_utc)
     exercise = _aggregate_exercise(session, owner_id, start_utc, end_utc)
@@ -133,9 +134,9 @@ def get_daily_summaries(
     if (end.toordinal() - start.toordinal()) + 1 > MAX_RANGE_DAYS:
         raise DailySummaryRangeTooLarge(f"range may not exceed {MAX_RANGE_DAYS} days")
 
-    tz = _user_timezone(session, owner_id)
-    window_start_utc, _ = _day_bounds_utc(start, tz)
-    _, window_end_utc = _day_bounds_utc(end, tz)
+    tz = user_timezone(session, owner_id)
+    window_start_utc, _ = day_bounds_utc(start, tz)
+    _, window_end_utc = day_bounds_utc(end, tz)
 
     intake_by_day = _aggregate_intake_by_day(
         session, owner_id, window_start_utc, window_end_utc, tz
@@ -159,7 +160,7 @@ def get_daily_summaries(
                 exercise=exercise_by_day.get(day, _exercise_dto([])),
             )
         )
-        day = _next_day(day)
+        day = next_day(day)
     return summaries
 
 
@@ -168,31 +169,6 @@ def _authorize(owner_id: uuid.UUID, current_user: User) -> None:
 
     if owner_id != current_user.id:
         raise DailySummaryForbidden("cross-user daily-summary access denied")
-
-
-def _user_timezone(session: Session, owner_id: uuid.UUID) -> ZoneInfo:
-    """Resolve the owner's profile timezone, falling back to UTC.
-
-    Day windows are computed in this zone. The UTC fallback keeps the endpoint
-    robust if a profile is somehow absent.
-    """
-
-    tz_name = session.scalars(
-        select(UserProfile.timezone).where(UserProfile.user_id == owner_id)
-    ).one_or_none()
-    return ZoneInfo(tz_name or "UTC")
-
-
-def _day_bounds_utc(day: date, tz: ZoneInfo) -> tuple[datetime, datetime]:
-    """Return the ``[start, end)`` UTC instants bounding ``day`` in ``tz``."""
-
-    start_local = datetime.combine(day, time.min, tzinfo=tz)
-    end_local = datetime.combine(_next_day(day), time.min, tzinfo=tz)
-    return start_local.astimezone(ZoneInfo("UTC")), end_local.astimezone(ZoneInfo("UTC"))
-
-
-def _next_day(day: date) -> date:
-    return date.fromordinal(day.toordinal() + 1)
 
 
 # ── Finalized-state predicate (single source of truth) ─────────────────────────
@@ -371,17 +347,7 @@ def _resolve_target(
     distinguish the two states.
     """
 
-    target = session.scalars(
-        select(DailyTarget)
-        .join(Goal, DailyTarget.goal_id == Goal.id)
-        .where(
-            DailyTarget.user_id == owner_id,
-            Goal.user_id == owner_id,
-            Goal.is_active.is_(True),
-            DailyTarget.for_date == day,
-        )
-    ).one_or_none()
-
+    target = _resolve_active_target_row(session, owner_id, day)
     if target is None:
         return None
     return build_target_read_model(target)
