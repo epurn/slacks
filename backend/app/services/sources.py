@@ -8,6 +8,8 @@ external calls, so it is safe on a liveness-adjacent endpoint.
 
 from __future__ import annotations
 
+import os
+import shutil
 from collections.abc import Mapping
 
 from app.estimator.fdc import FDC_SOURCE, FDC_SOURCE_TYPE, load_fdc_settings
@@ -19,7 +21,48 @@ from app.estimator.search import (
     SEARCH_KINDS,
     load_search_settings,
 )
+from app.llm.config import load_llm_settings
 from app.schemas.sources import EgressPolicy, SourceCapability, SourcesStatus
+
+#: Claude Code LLM provider descriptor constants.
+CLAUDE_CODE_SOURCE = "claude_code"
+CLAUDE_CODE_SOURCE_TYPE = "llm_provider"
+
+
+def _session_present(config_dir: str) -> bool:
+    """Return True if a Claude Code session file is detectable in config_dir.
+
+    Pure filesystem check — never reads file contents, so no credential is
+    examined or surfaced. A JSON file in the config dir is a proxy for a
+    ``claude login`` session having been written there.
+    """
+    if not os.path.isdir(config_dir):
+        return False
+    try:
+        return any(
+            f.endswith(".json") and os.path.isfile(os.path.join(config_dir, f))
+            for f in os.listdir(config_dir)
+        )
+    except OSError:
+        return False
+
+
+def _probe_claude_code(environ: Mapping[str, str] | None = None) -> tuple[bool, bool]:
+    """Return (binary_present, session_valid) for the claude_code provider.
+
+    Both checks are cheap, local, and content-free: no subprocess, no network
+    call, no credential read. ``binary_present`` checks ``PATH`` for the ``claude``
+    executable; ``session_valid`` checks whether the config dir has a session file.
+    Nothing about the session content is read or surfaced.
+    """
+    source = os.environ if environ is None else environ
+
+    binary_present = shutil.which("claude") is not None
+    if not binary_present:
+        return False, False
+
+    config_dir = source.get("CLAUDE_CONFIG_DIR", os.path.expanduser("~/.claude"))
+    return True, _session_present(config_dir)
 
 
 def list_source_capabilities(environ: Mapping[str, str] | None = None) -> SourcesStatus:
@@ -30,11 +73,15 @@ def list_source_capabilities(environ: Mapping[str, str] | None = None) -> Source
     available=false; USDA FDC (generic foods) is always ``enabled`` but only
     ``available`` with an API key; Open Food Facts (barcode) needs no credentials, so
     it is always ``available`` and ``enabled`` unless a self-hoster turns it off.
+    The ``claude_code`` LLM provider (FTY-087/088) is ``enabled`` when selected as
+    the active provider and ``available`` when the CLI is on PATH and a session exists.
     """
 
     search = load_search_settings(environ)
     off = load_off_settings(environ)
     fdc = load_fdc_settings(environ)
+    llm = load_llm_settings(environ)
+    binary_present, session_valid = _probe_claude_code(environ)
 
     return SourcesStatus(
         sources=[
@@ -58,6 +105,15 @@ def list_source_capabilities(environ: Mapping[str, str] | None = None) -> Source
                 kinds=["generic_food"],
                 enabled=True,
                 available=fdc.is_configured,
+            ),
+            SourceCapability(
+                id=CLAUDE_CODE_SOURCE,
+                source_type=CLAUDE_CODE_SOURCE_TYPE,
+                kinds=["estimation"],
+                enabled=llm.provider == "claude_code",
+                # available = CLI on PATH AND a session file detected — booleans only,
+                # no token/identity/session content ever surfaced (FTY-088 security).
+                available=binary_present and session_valid,
             ),
         ]
     )

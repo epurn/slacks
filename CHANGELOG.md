@@ -55,6 +55,9 @@ First stable release of Fatty, an iOS-first, self-hostable calorie and macro tra
 - `.env.example` template with inline documentation for all `FATTY_*` configuration variables (FTY-072).
 - Health endpoints: `GET /healthz` (stack liveness) and `GET /healthz/sources` (per-provider availability and configuration status).
 - Egress policy visibility: `GET /healthz/egress` reports the active official-fetch host allowlist.
+- **Claude subscription provider** (`FATTY_LLM_PROVIDER=claude_code`): runs estimation through a locally installed Claude Code CLI on the operator's own Claude monthly plan — no API key, no per-token billing. The backend image ships a pinned Claude Code CLI; a one-time `claude login` establishes a session in a persistent Docker volume shared by `api` and `worker` (FTY-087, FTY-088).
+- **Keyless local-model provider** (`FATTY_LLM_PROVIDER=openai_compatible`, no `FATTY_LLM_API_KEY`): point Fatty at a local Ollama, LM Studio, or vLLM instance with no API key — the adapter omits the `Authorization` header for keyless local runtimes (FTY-089).
+- `GET /healthz/sources` now reports the `claude_code` LLM provider's `enabled`/`available` status so operators can confirm the CLI is installed and the session is valid without making any estimation calls (FTY-088).
 
 ### Security
 

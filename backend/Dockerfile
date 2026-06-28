@@ -11,6 +11,29 @@ FROM python:3.12-slim-bookworm
 # uv (pinned) manages the locked Python environment for reproducible installs.
 COPY --from=ghcr.io/astral-sh/uv:0.11.21 /uv /uvx /usr/local/bin/
 
+# ---------------------------------------------------------------------------
+# Claude Code CLI (FTY-088): Install Node.js LTS + the Claude Code CLI so the
+# Celery worker and API can invoke 'claude' in headless mode for the claude_code
+# LLM provider (FTY-087). Both versions are pinned per the security baseline's
+# pinned-dependency principle. NO credentials are added here — only the binary
+# and its runtime. The operator's Claude Code session is mounted at runtime via
+# the compose claude-config volume; nothing session-related is baked in.
+# ---------------------------------------------------------------------------
+ARG NODE_MAJOR=22
+ARG CLAUDE_CODE_VERSION=1.0.18
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+       | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && printf 'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_%s.x nodistro main\n' "${NODE_MAJOR}" \
+       > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 ENV UV_LINK_MODE=copy \

@@ -172,6 +172,20 @@ state (per the architecture doc):
 A self-hosted deployment may disable any optional provider; v1 must make
 provider `enabled`/`available` explicit in health/config diagnostics.
 
+**Diagnostics-only descriptors (LLM providers).** The same `GET /healthz/sources`
+diagnostic also surfaces the configured **LLM provider** so an operator can confirm
+the estimator's model backend is wired up, even though an LLM provider is not an
+estimation **evidence source** in the **Source Hierarchy** above. Such a descriptor
+carries two values that are intentionally **outside** the estimation enums:
+`source_type = llm_provider` and `kinds = [estimation]`. These are
+**diagnostics-only** capability values — they never appear on an evidence record,
+a `source_ref`, or a lookup `status`, and they do not participate in source
+selection or the **Fallback Rule**. The `claude_code` provider (FTY-087/088) is the
+first instance: `id = claude_code`, `enabled` when it is the active
+`FATTY_LLM_PROVIDER`, and `available` when the CLI is on `PATH` and a login session
+is detected — booleans only, no credential content surfaced. `llm-provider.md`
+owns the provider contract itself and defers its operator/health diagnostics here.
+
 ### Lookup status (the outcome of one source lookup)
 
 Every source lookup resolves to exactly one status. These are the values
@@ -450,6 +464,13 @@ applicable) while a named/branded item USDA misses does.
   contract or re-deciding the source hierarchy or fallback semantics.
 - Recipe (ingredient-sum) and similar-dish reference sources remain deferred;
   this contract leaves the hierarchy slots reserved for them.
+- FTY-088 adds a **diagnostics-only** LLM-provider descriptor to
+  `GET /healthz/sources` (`id = claude_code`, `source_type = llm_provider`,
+  `kinds = [estimation]`). It is additive and surfaces operator/health state only:
+  it introduces no estimation source, no schema change, and no new lookup status —
+  the two descriptor values live outside the estimation Source Hierarchy and `kinds`
+  enums by design (see **Provider Capability / Status** → diagnostics-only
+  descriptors). The provider contract itself stays in `llm-provider.md`.
 - FTY-079 adds the `official_source` search adapter (`search.py`) and an
   `official_source` entry in `GET /healthz/sources`. It is additive: a new
   `FATTY_SEARCH_`-prefixed config block (disabled by default, no bundled key), no
