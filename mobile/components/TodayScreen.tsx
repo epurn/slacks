@@ -135,6 +135,7 @@ export function TodayScreen({
   uploadLabel = uploadLabelImageApi,
   labelTakePhoto,
   getDailySummary = getDailySummaryApi,
+  onPressProfile,
 }: {
   session?: Session;
   load?: typeof listTodayLogEventsApi;
@@ -159,6 +160,8 @@ export function TodayScreen({
   labelTakePhoto?: () => Promise<{ uri: string }>;
   /** Injectable daily summary fetch for tests (FTY-075). */
   getDailySummary?: typeof getDailySummaryApi;
+  /** Called when the user presses the gear / profile icon in the header. */
+  onPressProfile?: () => void;
 } = {}) {
   const insets = useSafeAreaInsets();
   const liveSession = useSession();
@@ -463,7 +466,11 @@ export function TodayScreen({
         style={styles.screen}
         contentContainerStyle={[
           styles.content,
-          { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 24 },
+          // +96 (not +24) so the last entry clears the floating, absolutely-
+          // positioned tab bar that now overlays the scroll content; mirrors
+          // the placeholder tabs' insets.bottom + 80 reservation with extra
+          // breathing room for a scrollable list.
+          { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 96 },
         ]}
         keyboardShouldPersistTaps="handled"
       >
@@ -471,16 +478,29 @@ export function TodayScreen({
           <Text style={styles.title} accessibilityRole="header">
             Today
           </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Refresh"
-            accessibilityState={{ disabled: phase === "loading" }}
-            disabled={phase === "loading"}
-            onPress={() => void refresh()}
-            style={styles.refresh}
-          >
-            <Text style={styles.refreshLabel}>Refresh</Text>
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Refresh"
+              accessibilityState={{ disabled: phase === "loading" }}
+              disabled={phase === "loading"}
+              onPress={() => void refresh()}
+              style={styles.refresh}
+            >
+              <Text style={styles.refreshLabel}>Refresh</Text>
+            </Pressable>
+            {onPressProfile ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open profile"
+                accessibilityHint="Opens profile and settings"
+                onPress={onPressProfile}
+                style={styles.gearButton}
+              >
+                <Text style={styles.gearLabel}>⚙</Text>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
 
         <View style={styles.composer}>
@@ -681,6 +701,23 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  gearButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  gearLabel: {
+    fontSize: 22,
+    color: "#1C1C1E",
   },
   title: {
     fontSize: 34,
