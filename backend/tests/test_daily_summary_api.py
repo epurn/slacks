@@ -147,11 +147,15 @@ def _seed_daily_target(
     daily_calorie_target_kcal: int = 2000,
     is_active: bool = True,
     override_calorie_target_kcal: int | None = None,
+    override_protein_target_g: int | None = None,
+    override_carbs_target_g: int | None = None,
+    override_fat_target_g: int | None = None,
 ) -> None:
     """Insert an active goal + daily_target for ``for_date``.
 
     Persists the derived macro columns (FTY-094/FTY-095) so the NOT NULL schema is
-    satisfied; an optional calorie override exercises the read-model provenance.
+    satisfied; the optional calorie/macro overrides exercise the per-target
+    read-model provenance independently (FTY-105).
     """
 
     factory = create_session_factory(db_engine)
@@ -179,6 +183,9 @@ def _seed_daily_target(
             fat_target_g=67,
             macros_clamped=False,
             override_calorie_target_kcal=override_calorie_target_kcal,
+            override_protein_target_g=override_protein_target_g,
+            override_carbs_target_g=override_carbs_target_g,
+            override_fat_target_g=override_fat_target_g,
             inputs={},
             assumptions={},
         )
@@ -348,6 +355,73 @@ def test_overridden_calorie_target_surfaces_as_user_source(
     assert resp.status_code == 200
     calories = resp.json()["target"]["calories"]
     assert calories == {"effective": 1700, "derived": 2000, "source": "user"}
+
+
+def test_macro_override_is_independent_per_target(client: TestClient, db_engine: Engine) -> None:
+    """A protein override surfaces ``source: user`` for protein only; others derived.
+
+    Per-macro (and calorie) provenance is independent — overriding one target must
+    not flip another's ``source`` (FTY-105, matching FTY-095's independent
+    override/reset).
+    """
+
+    user_id, auth = _register(client, "macro-override@example.com")
+    day = date(2025, 3, 2)
+    _seed_daily_target(
+        db_engine,
+        user_id,
+        for_date=day,
+        override_protein_target_g=150,
+    )
+
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary",
+        headers={"Authorization": auth},
+        params={"day": str(day)},
+    )
+
+    assert resp.status_code == 200
+    target = resp.json()["target"]
+    # The overridden macro: effective is the override, derived holds, source ``user``.
+    assert target["protein_g"] == {"effective": 150, "derived": 128, "source": "user"}
+    # Every other target is untouched: effective == derived, source ``derived``.
+    assert target["calories"]["source"] == "derived"
+    assert target["carbs_g"] == {"effective": 200, "derived": 200, "source": "derived"}
+    assert target["fat_g"] == {"effective": 67, "derived": 67, "source": "derived"}
+
+
+def test_target_macros_are_int_grams_distinct_from_float_intake_macros(
+    client: TestClient, db_engine: Engine
+) -> None:
+    """Target macros are int grams; consumed intake macros are floats — not conflated.
+
+    The target read-model carries whole-gram ints (FTY-094/FTY-095) while intake
+    sums are 0.1-rounded floats; both must be present and read as separate
+    components (FTY-105).
+    """
+
+    user_id, auth = _register(client, "int-vs-float@example.com")
+    today = datetime.now(UTC).date()
+    event_id = _seed_completed_event(db_engine, user_id)
+    _seed_food_item(db_engine, user_id, event_id, calories=300.0, protein_g=20.5)
+    _seed_daily_target(db_engine, user_id, for_date=today)
+
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary",
+        headers={"Authorization": auth},
+        params={"day": str(today)},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    consumed = body["intake"]["protein_g"]
+    target_effective = body["target"]["protein_g"]["effective"]
+    # Both present, and the JSON types stay distinct: consumed is a 0.1-rounded
+    # float, the target is a whole-gram int (a bool is not an int here).
+    assert consumed == 20.5
+    assert isinstance(consumed, float)
+    assert target_effective == 128
+    assert isinstance(target_effective, int) and not isinstance(target_effective, bool)
 
 
 # ---------------------------------------------------------------------------
