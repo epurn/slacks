@@ -41,11 +41,14 @@ from app.enums import CandidateType, CorrectionSource, DerivedItemStatus, Source
 from app.estimator.fdc import (
     FDC_SOURCE,
     FdcClient,
+    FdcResponseError,
     FdcSettings,
+    FdcTransientError,
     ProductFacts,
 )
 from app.estimator.food_serving import NutritionFacts
 from app.estimator.re_match import (
+    AlternativesUnavailable,
     ReMatchCapability,
     ReMatchNeedsClarification,
     SourceNotResolvable,
@@ -88,6 +91,25 @@ class FakeListSource:
         if not self._enabled:
             return []
         return list(self._matches)
+
+
+class FailingListSource:
+    """A network-free :class:`FoodListSource` whose ``list_matches`` always raises.
+
+    Models a USDA transient hiccup / unusable response during listing (the same
+    exceptions ``FdcClient.list_matches`` raises) so the listing degrade-path can be
+    exercised without a network.
+    """
+
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    @property
+    def enabled(self) -> bool:
+        return True
+
+    def list_matches(self, query: str) -> list[ProductFacts]:
+        raise self._error
 
 
 def _facts(source_ref: str, *, calories: float, name: str = "candidate") -> ProductFacts:
@@ -265,6 +287,30 @@ def test_fdc_list_matches_excludes_energy_less_results() -> None:
     matches = client.list_matches("turkey")
 
     assert [m.source_ref for m in matches] == ["usda_fdc:1", "usda_fdc:3"]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [FdcTransientError("fdc_transient_error"), FdcResponseError("fdc_response_error")],
+)
+def test_list_alternatives_source_failure_raises_unavailable(
+    client: TestClient, db_engine: Engine, session: Session, error: Exception
+) -> None:
+    # A transient/unusable candidate-source failure during listing is surfaced as a
+    # dedicated unavailable signal (router → 503), never swallowed into an empty list
+    # that would falsely read as "no alternatives exist".
+    user_id, _auth = register(client, "rematch-source-down@example.com")
+    item_id = seed_food_item(db_engine, user_id)
+
+    capability = ReMatchCapability(
+        session=session, providers=(UsdaCandidateProvider(FailingListSource(error)),)
+    )
+    with pytest.raises(AlternativesUnavailable):
+        capability.list_alternatives(
+            owner_id=uuid.UUID(user_id),
+            current_user=_user(session, user_id),
+            item_id=item_id,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -621,6 +667,33 @@ def test_list_alternatives_api_empty_when_source_disabled(
 
     assert resp.status_code == 200
     assert resp.json() == {"candidates": []}
+
+
+def test_list_alternatives_api_503_when_source_fails(
+    client: TestClient, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A transient/unusable candidate-source failure during listing routes to a clear,
+    # retryable 503 (calm by default) rather than an undocumented 500 or a misleading
+    # 200 empty list.
+    user_id, auth = register(client, "rematch-api-503@example.com")
+    item_id = seed_food_item(db_engine, user_id)
+
+    def _failing_capability(session: Session) -> ReMatchCapability:
+        return ReMatchCapability(
+            session=session,
+            providers=(UsdaCandidateProvider(FailingListSource(FdcTransientError("down"))),),
+        )
+
+    monkeypatch.setattr("app.routers.re_match.build_re_match_capability", _failing_capability)
+
+    resp = client.post(
+        _candidates_url(user_id, item_id),
+        headers={"Authorization": auth},
+        json={},
+    )
+
+    assert resp.status_code == 503
+    assert resp.json()["detail"]["error"] == "alternatives_unavailable"
 
 
 def test_re_resolve_unknown_item_is_404(client: TestClient, db_engine: Engine) -> None:

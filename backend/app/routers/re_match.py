@@ -16,7 +16,9 @@ explicit so ownership is checked on every call; a cross-user or unknown item ren
 ``404`` — the API never confirms another user's item exists nor mutates it (fail
 closed), matching the FTY-051 corrections posture. A chosen reference the server
 cannot re-derive, or a re-match the new source cannot cost, renders ``422`` with a
-machine-readable shape that never echoes the item's values.
+machine-readable shape that never echoes the item's values. A transient or unusable
+candidate-source failure during listing renders a retryable ``503`` rather than a
+misleading empty candidate list.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from app.db import get_session
 from app.deps import CurrentUser
 from app.enums import SourceType
 from app.estimator.re_match import (
+    AlternativesUnavailable,
     ItemForbidden,
     ItemNotFound,
     ReMatchNeedsClarification,
@@ -67,7 +70,9 @@ def list_source_candidates(
 
     Runs the existing resolution providers in list-candidates mode over the item's
     identity (or the sanitized ``query`` override) and returns a bounded list of
-    energy-bearing matches. Cross-user or unknown items fail closed as ``404``.
+    energy-bearing matches. Cross-user or unknown items fail closed as ``404``; a
+    transient or unusable candidate-source failure returns ``503`` (retryable) rather
+    than a misleading empty list.
     """
 
     capability = build_re_match_capability(session)
@@ -80,6 +85,11 @@ def list_source_candidates(
         )
     except (ItemForbidden, ItemNotFound) as exc:
         raise _NOT_FOUND from exc
+    except AlternativesUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "alternatives_unavailable"},
+        ) from exc
 
     return AlternativesResponse(candidates=[_candidate_dto(candidate) for candidate in candidates])
 

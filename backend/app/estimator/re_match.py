@@ -49,7 +49,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.enums import CandidateType, CorrectionSource, DerivedItemStatus
-from app.estimator.fdc import FDC_SOURCE, FDC_SOURCE_TYPE, ProductFacts
+from app.estimator.fdc import (
+    FDC_SOURCE,
+    FDC_SOURCE_TYPE,
+    FdcResponseError,
+    FdcTransientError,
+    ProductFacts,
+)
 from app.estimator.food_serving import NutritionFacts, resolve_grams, scale_facts
 from app.estimator.off import OFF_SOURCE, OFF_SOURCE_TYPE
 from app.estimator.official_step import MODEL_PRIOR_SOURCE, MODEL_PRIOR_SOURCE_TYPE
@@ -94,6 +100,20 @@ class ItemNotFound(Exception):
 
     A cross-user id is loaded scoped to the owner, so it is indistinguishable from a
     missing one — both raise this and the router renders ``404`` (no existence oracle).
+    """
+
+
+class AlternativesUnavailable(Exception):
+    """Raised when a candidate source fails transiently/unusably while listing.
+
+    A provider's source lookup failed during listing — a timeout / 5xx
+    (:class:`~app.estimator.fdc.FdcTransientError`) or an unusable response
+    (:class:`~app.estimator.fdc.FdcResponseError`) — so the listing cannot be
+    completed. The router surfaces this as a retryable ``503`` rather than a
+    **misleading empty list** (which is reserved for genuinely no candidates / no
+    enabled source). This mirrors the estimator's transient/response routing
+    (``food_step.py``): a source that cannot answer is failed closed, never guessed
+    around or silently dropped to "nothing found".
     """
 
 
@@ -246,7 +266,9 @@ class ReMatchCapability:
         :attr:`max_alternatives`. Each candidate is cached into the global ``products``
         cache (addressable by ``source_ref``) so the write half can re-derive it with no
         fresh fetch. The query passes through the FTY-079 ``sanitize_query`` chokepoint;
-        only item identity egresses.
+        only item identity egresses. A provider that fails transiently or answers
+        unusably raises :class:`AlternativesUnavailable` (router → ``503``) rather than
+        degrading to a misleading empty list.
         """
 
         self._authorize(owner_id, current_user)
@@ -259,7 +281,13 @@ class ReMatchCapability:
         candidates: list[SourceCandidate] = []
         seen: set[str] = set()
         for provider in self.providers:
-            for candidate in provider.list_candidates(query):
+            # A source that fails transiently/unusably during listing fails the whole
+            # operation to a retryable 503 — never a misleading "no candidates" list.
+            try:
+                provider_candidates = provider.list_candidates(query)
+            except (FdcTransientError, FdcResponseError) as exc:
+                raise AlternativesUnavailable("candidate source unavailable") from exc
+            for candidate in provider_candidates:
                 if candidate.source_ref in seen:
                     continue
                 seen.add(candidate.source_ref)

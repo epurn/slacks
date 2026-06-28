@@ -591,12 +591,15 @@ a client cannot smuggle nutrition values through it.
 | Re-resolve body carries facts / extra keys | `422` (request validation, `extra="forbid"`). |
 | New source cannot cost the current quantity | `422` `{ "error": "needs_clarification", "question": … }`; no fabricated number. |
 | Listing with no enabled candidate source | `200` with an empty candidate list. |
+| Listing source fails transiently / answers unusably | `503` `{ "error": "alternatives_unavailable" }`; retryable. **Not** a `200` empty list — an empty list means "no matches", never "the source was down", so a source failure is surfaced honestly rather than silently looking like no alternatives exist. Mirrors the estimator's transient/response routing (`food_step.py`). |
 
 ### Examples (tests)
 
 `backend/tests/test_item_re_match.py` proves: multi-candidate USDA listing (beyond the
 first energy-bearing match) with a query override and the per-`source_ref` candidate
-cache; listing egresses only the sanitized item identity; `FdcClient.list_matches`
+cache; listing egresses only the sanitized item identity; a transient/unusable
+candidate-source failure during listing surfaces `503` (not an empty list);
+`FdcClient.list_matches`
 excludes energy-less results; re-resolve recompute + provenance rewrite + `*_estimated`
 re-snapshot + not-`user_edited` + no `user_edit` row + the `re_match` audit row that
 clears a pre-existing edit (`is_edited` false after edit-then-rematch, true again after a
