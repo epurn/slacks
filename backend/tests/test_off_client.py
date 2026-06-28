@@ -185,6 +185,53 @@ def test_response_and_policy_errors_map_to_off_response(error: Exception) -> Non
         client.lookup("0123456789012")
 
 
+def test_lookup_garbage_serving_quantity_raises_off_response_error() -> None:
+    """A non-numeric serving_quantity maps to OffResponseError — never a raw ValidationError."""
+    malformed: dict[str, Any] = {
+        "status": 1,
+        "product": {
+            "product_name": "Cola",
+            "serving_quantity": "not_a_number",
+            "nutriments": {"energy-kcal_100g": 42.0},
+        },
+    }
+    client, _ = _client(malformed)
+
+    with pytest.raises(OffResponseError):
+        client.lookup("0123456789012")
+
+
+def test_lookup_structurally_broken_product_raises_off_response_error() -> None:
+    """A product field that is not an object maps to OffResponseError, not ValidationError."""
+    malformed: dict[str, Any] = {
+        "status": 1,
+        "product": "not_a_product_object",
+    }
+    client, _ = _client(malformed)
+
+    with pytest.raises(OffResponseError):
+        client.lookup("0123456789012")
+
+
+def test_lookup_long_product_name_truncates_not_rejects() -> None:
+    """An over-long product_name is truncated to 300 chars — the row still resolves."""
+    long_name = "X" * 500
+    overlong_response: dict[str, Any] = {
+        "status": 1,
+        "product": {
+            "product_name": long_name,
+            "nutriments": {"energy-kcal_100g": 42.0},
+        },
+    }
+    client, _ = _client(overlong_response)
+
+    facts = client.lookup("0123456789012")
+
+    assert facts is not None
+    assert len(facts.description) == 300
+    assert facts.description == long_name[:300]
+
+
 def test_settings_require_https_base_url() -> None:
     with pytest.raises(ValidationError):
         OffSettings(base_url="http://insecure.example.com")
