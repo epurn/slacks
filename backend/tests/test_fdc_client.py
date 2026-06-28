@@ -143,6 +143,161 @@ def test_response_and_policy_errors_map_to_fdc_response(error: Exception) -> Non
         client.lookup("rice")
 
 
+def test_lookup_malformed_payload_non_numeric_nutrient_raises_fdc_response_error() -> None:
+    """A non-numeric nutrient value maps to FdcResponseError — never a raw ValidationError."""
+    malformed: dict[str, Any] = {
+        "foods": [
+            {
+                "fdcId": 1,
+                "description": "Bad food",
+                "foodNutrients": [{"nutrientId": 1008, "value": "not_a_number"}],
+            }
+        ]
+    }
+    client, _ = _client(malformed)
+
+    with pytest.raises(FdcResponseError):
+        client.lookup("rice")
+
+
+def test_lookup_malformed_payload_missing_fdc_id_raises_fdc_response_error() -> None:
+    """A missing required fdcId maps to FdcResponseError — never a raw ValidationError."""
+    malformed: dict[str, Any] = {
+        "foods": [
+            {
+                "description": "Bad food",
+                "foodNutrients": [{"nutrientId": 1008, "value": 100.0}],
+            }
+        ]
+    }
+    client, _ = _client(malformed)
+
+    with pytest.raises(FdcResponseError):
+        client.lookup("rice")
+
+
+def test_list_matches_malformed_payload_non_numeric_nutrient_raises_fdc_response_error() -> None:
+    """list_matches also fails closed on a non-numeric nutrient (shared _search path)."""
+    malformed: dict[str, Any] = {
+        "foods": [
+            {
+                "fdcId": 1,
+                "description": "Bad food",
+                "foodNutrients": [{"nutrientId": 1008, "value": "not_a_number"}],
+            }
+        ]
+    }
+    client, _ = _client(malformed)
+
+    with pytest.raises(FdcResponseError):
+        client.list_matches("rice")
+
+
+def test_list_matches_malformed_payload_missing_fdc_id_raises_fdc_response_error() -> None:
+    """list_matches also fails closed on a missing fdcId (shared _search path)."""
+    malformed: dict[str, Any] = {
+        "foods": [
+            {
+                "description": "Bad food",
+                "foodNutrients": [{"nutrientId": 1008, "value": 100.0}],
+            }
+        ]
+    }
+    client, _ = _client(malformed)
+
+    with pytest.raises(FdcResponseError):
+        client.list_matches("rice")
+
+
+def test_lookup_long_description_truncates_not_rejects() -> None:
+    """An over-long FDC description is truncated to 300 chars — the row still resolves."""
+    long_name = "A" * 500
+    overlong_response: dict[str, Any] = {
+        "foods": [
+            {
+                "fdcId": 1,
+                "description": long_name,
+                "foodNutrients": [{"nutrientId": 1008, "value": 100.0}],
+            }
+        ]
+    }
+    client, _ = _client(overlong_response)
+
+    facts = client.lookup("rice")
+
+    assert facts is not None
+    assert len(facts.description) == 300
+    assert facts.description == long_name[:300]
+
+
+def test_list_matches_long_description_truncates_not_rejects() -> None:
+    """list_matches also truncates over-long descriptions (shared _search path)."""
+    long_name = "B" * 400
+    overlong_response: dict[str, Any] = {
+        "foods": [
+            {
+                "fdcId": 2,
+                "description": long_name,
+                "foodNutrients": [{"nutrientId": 1008, "value": 200.0}],
+            }
+        ]
+    }
+    client, _ = _client(overlong_response)
+
+    matches = client.list_matches("protein")
+
+    assert len(matches) == 1
+    assert len(matches[0].description) == 300
+    assert matches[0].description == long_name[:300]
+
+
+def test_list_matches_maps_all_energy_bearing_foods_to_product_facts() -> None:
+    """list_matches returns all energy-bearing foods and skips energy-less ones."""
+    two_food_response: dict[str, Any] = {
+        "foods": [
+            {
+                "fdcId": 168880,
+                "description": "Rice, white, cooked",
+                "servingSize": 158.0,
+                "servingSizeUnit": "g",
+                "foodNutrients": [
+                    {"nutrientId": 1008, "value": 130.0},
+                    {"nutrientId": 1003, "value": 2.69},
+                    {"nutrientId": 1005, "value": 28.2},
+                    {"nutrientId": 1004, "value": 0.28},
+                ],
+            },
+            {
+                "fdcId": 9999,
+                "description": "No energy food",
+                "foodNutrients": [{"nutrientId": 1003, "value": 2.0}],
+            },
+        ]
+    }
+    client, _ = _client(two_food_response)
+
+    matches = client.list_matches("Rice")
+
+    assert len(matches) == 1
+    assert matches[0].source_ref == "usda_fdc:168880"
+    assert matches[0].query_key == "rice"
+    assert matches[0].facts.calories == pytest.approx(130.0)
+    assert matches[0].content_hash
+
+
+def test_lookup_and_list_matches_produce_same_content_hash_for_same_food() -> None:
+    """The shared _search path produces a consistent content_hash across both methods."""
+    client_a, _ = _client(_RICE_RESPONSE)
+    client_b, _ = _client(_RICE_RESPONSE)
+
+    lookup_facts = client_a.lookup("white rice")
+    list_facts = client_b.list_matches("white rice")
+
+    assert lookup_facts is not None
+    assert list_facts
+    assert lookup_facts.content_hash == list_facts[0].content_hash
+
+
 def test_settings_require_https_base_url() -> None:
     with pytest.raises(ValidationError):
         FdcSettings(api_key=SecretStr("k"), base_url="http://insecure.example.com/fdc/v1")

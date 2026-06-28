@@ -38,7 +38,14 @@ from collections.abc import Mapping
 from typing import Any, Final, Protocol, runtime_checkable
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from app.estimator.evidence_utils import _content_hash
 from app.estimator.fdc import ProductFacts
@@ -211,10 +218,23 @@ class OffProduct(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    product_name: str = Field(default="", max_length=_MAX_DESCRIPTION_LEN)
+    product_name: str = Field(default="")
     nutriments: OffNutriments = Field(default_factory=OffNutriments)
     #: Serving size in grams when OFF supplies one (count-unit serving math).
     serving_quantity: float | None = None
+
+    @field_validator("product_name", mode="before")
+    @classmethod
+    def _truncate_product_name(cls, value: Any) -> Any:
+        """Truncate (not reject) an over-long product name from the untrusted OFF payload.
+
+        A long product name is cosmetic; rejecting an otherwise-usable energy-bearing
+        row over a display string needlessly drops a real match. Non-string values fall
+        through to normal validation, which fails closed into OffResponseError.
+        """
+        if isinstance(value, str):
+            return value[:_MAX_DESCRIPTION_LEN]
+        return value
 
 
 class OffProductResponse(BaseModel):
@@ -310,7 +330,10 @@ class OffClient:
         except (FetchResponseError, FetchPolicyError) as exc:
             raise OffResponseError("off_response_error") from exc
 
-        response = OffProductResponse.model_validate(raw)
+        try:
+            response = OffProductResponse.model_validate(raw)
+        except ValidationError as exc:
+            raise OffResponseError("off_response_error") from exc
         return _map_product(normalized, response)
 
 
