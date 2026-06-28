@@ -28,7 +28,21 @@ autonomous: true
 
 ## State
 
-ready
+candidate
+
+<!-- DEFERRED: the app is already on the newest stable Expo SDK (56, released
+     2026-05-21). There is no newer stable SDK to upgrade to yet — SDK 57 is not
+     released (not even beta) as of 2026-06-28. This story is NOT assignable
+     (`candidate`, outside READY_STATES) until Expo ships the next stable SDK.
+     Promote to `ready` when SDK 57 (or later) lands; that release is also when
+     the deps in the closed dependabot PRs (RN 0.86, jest 30, eslint 10) first
+     become installable. -->
+
+## Trigger
+
+Promote to `ready` when a stable Expo SDK newer than 56 is released. Until then
+the mobile toolchain is already at the latest coherent pinned set and there is
+nothing to upgrade.
 
 ## Lane
 
@@ -50,8 +64,13 @@ mobile-core
 
 ## Outcome
 
-The mobile app moves off Expo **SDK 56** onto the **latest stable Expo SDK** as a
-single coherent upgrade, so the SDK-governed toolchain — `react`, `react-native`,
+**Deferred until a newer stable SDK exists** (see Trigger): as of 2026-06-28 the
+app is already on the newest stable Expo SDK (56), so there is nothing to upgrade
+*yet*. When Expo ships the next stable SDK, this story executes.
+
+When triggered, the mobile app moves off its **current** Expo SDK onto the **new
+latest stable Expo SDK** as a single coherent upgrade, so the SDK-governed
+toolchain — `react`, `react-native`,
 `react-test-renderer`, `react-dom`, `jest`, `jest-expo`, `@types/jest`, and the
 eslint stack — all move **together** to the versions that SDK pins, with mobile
 CI (lint + jest) green. This is the **only** mechanism by which the bumps in the
@@ -172,9 +191,12 @@ together.
 
 ## Readiness Sanity Pass
 
-- **Product decision gaps:** none. The only judgment call — jump straight to the
-  latest SDK vs. step one SDK at a time if blocked — has a documented fallback and
-  is settled by what CI accepts. `ready`.
+- **Product decision gaps:** none on the work itself. But the app is already on
+  the newest stable SDK (56), so there is no upgrade target today — this is
+  **`candidate` (deferred)**, promoted to `ready` only when a newer stable SDK
+  ships (see Trigger). The remaining judgment call — jump straight to the latest
+  SDK vs. step one SDK at a time if blocked — has a documented fallback and is
+  settled by what CI accepts.
 - **Sizing decision:** one boundary — **mobile-core** only. No code in a second
   serializing lane. **Zero big rocks:** no public contract change (consumes the
   same backend contracts), no schema migration, no new untrusted-input trust

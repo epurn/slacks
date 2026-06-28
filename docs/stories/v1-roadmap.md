@@ -237,7 +237,7 @@ after FTY-111/112), but the whole batch runs in parallel with the mobile-core qu
 
 | ID | State | Lane | Story | Acceptance |
 | --- | --- | --- | --- | --- |
-| FTY-113 | ready_with_notes | estimator | [LLM rate-limit retry + backoff](FTY-113-llm-rate-limit-retry-backoff.md) | 429/408/425 reclassify as transient and retry with jittered backoff (injectable sleep); persistent rate-limit still fails closed; non-retryable 4xx unchanged. |
+| FTY-113 | merged | estimator | [LLM rate-limit retry + backoff](FTY-113-llm-rate-limit-retry-backoff.md) | 429/408/425 reclassify as transient and retry with jittered backoff (injectable sleep); persistent rate-limit still fails closed; non-retryable 4xx unchanged. |
 | FTY-114 | ready_with_notes | estimator | [LLM provider output hardening](FTY-114-llm-provider-output-hardening.md) | Transport response read is size-capped (parity with `hardened_fetch`); Claude Code stdout tolerates a prose line / ```json fences but rejects trailing junk. |
 | FTY-115 | ready_with_notes | estimator | [Nutrition plausibility bound](FTY-115-nutrition-plausibility-bound.md) | Impossible per-100g facts (energy > ~900 kcal, negative macros — the OFF kJ-as-kcal case) fall through to non-match/clarify, not a stored absurd total. Coordinates with FTY-110 (same FDC/OFF mapping). |
 | FTY-116 | ready | backend-core | [Non-root backend container](FTY-116-non-root-backend-container.md) | `backend/Dockerfile` runs api/worker/migrate as a non-root user (chowned app + venv); build + compose-up stay healthy. |
@@ -276,8 +276,8 @@ mobile consumer (FTY-124, joined by that contract).
 
 | ID | State | Lane | Story | Acceptance |
 | --- | --- | --- | --- | --- |
-| FTY-121 | ready | governance | [Dependabot ignores SDK-governed mobile deps](FTY-121-dependabot-expo-sdk-ignores.md) | The `/mobile` npm entry ignores SDK-pinned packages (expo/react/react-native/jest/jest-expo/@types/jest, all updates) and major bumps of eslint/eslint-plugin-*/@typescript-eslint/*, so Dependabot stops opening doomed PRs; config-only, no dep bumps. |
-| FTY-122 | ready | mobile-core | [Upgrade the Expo SDK](FTY-122-expo-sdk-upgrade.md) | SDK 56 → latest stable via `expo install --fix` moves react/react-native/jest-expo/jest/eslint toolchain as one coherent set; clean lockfile (no ERESOLVE), lint + jest + typecheck green, app boots; the only path the closed dependabot bumps land. |
+| FTY-121 | merged | governance | [Dependabot ignores SDK-governed mobile deps](FTY-121-dependabot-expo-sdk-ignores.md) | The `/mobile` npm entry ignores SDK-pinned packages (expo/react/react-native/jest/jest-expo/@types/jest, all updates) and major bumps of eslint/eslint-plugin-*/@typescript-eslint/*, so Dependabot stops opening doomed PRs; config-only, no dep bumps. |
+| FTY-122 | candidate | mobile-core | [Upgrade the Expo SDK](FTY-122-expo-sdk-upgrade.md) | **Deferred** — app is already on the newest stable SDK (56); promote to `ready` when Expo ships SDK 57+. When triggered: `expo install --fix` moves react/react-native/jest-expo/jest/eslint as one coherent set; clean lockfile, lint + jest + typecheck green; the only path the closed dependabot bumps land. |
 | FTY-123 | ready | backend-core | [Daily-summary range read endpoint](FTY-123-daily-summary-range-endpoint.md) | New `GET …/daily-summaries?start&end` returns a dense ascending array of the existing `DailySummaryDTO` (one per day) in one call; reuses FTY-071 per-day math; bounded span (422 over max/bad range); owner-scoped fail-closed 404; contract updated; no migration. |
 | FTY-124 | ready | mobile-core | [Trends adherence consumes the range read](FTY-124-mobile-trends-range-read.md) | Trends adherence strip fetches the range in one request via FTY-123 instead of N per-day calls (fixes PR #71's fan-out); adherence math + null-target exclusion unchanged. Dep FTY-123. |
 
