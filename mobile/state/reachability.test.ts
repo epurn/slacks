@@ -1,5 +1,6 @@
 import {
   connectionBannerPresentation,
+  isRetryableError,
   isUnreachableError,
 } from "./reachability";
 import { LogEventApiError } from "@/api/logEvents";
@@ -14,6 +15,31 @@ describe("isUnreachableError", () => {
   it("treats an HTTP error (server answered) as reachable", () => {
     expect(isUnreachableError(new LogEventApiError(422, "bad"))).toBe(false);
     expect(isUnreachableError(new LogEventApiError(401, "expired"))).toBe(false);
+  });
+});
+
+describe("isRetryableError", () => {
+  it("treats transient server answers (5xx/429/401) as retryable", () => {
+    for (const status of [500, 502, 503, 429, 401]) {
+      expect(isRetryableError(new LogEventApiError(status, "transient"))).toBe(
+        true,
+      );
+    }
+  });
+
+  it("treats terminal client errors (400/404/422) as not retryable", () => {
+    for (const status of [400, 404, 422]) {
+      expect(isRetryableError(new LogEventApiError(status, "terminal"))).toBe(
+        false,
+      );
+    }
+  });
+
+  it("treats a network-layer failure (no HTTP answer) as not retryable", () => {
+    // Unreachable is handled separately (kept queued); it is not an HTTP status.
+    expect(isRetryableError(new TypeError("Network request failed"))).toBe(
+      false,
+    );
   });
 });
 

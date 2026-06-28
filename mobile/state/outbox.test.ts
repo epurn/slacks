@@ -169,6 +169,32 @@ describe("drainOutbox — transient-failure resilience", () => {
     expect(result.entries.every((e) => e.syncState === "queued")).toBe(true);
   });
 
+  it.each([500, 503, 429, 401])(
+    "keeps an entry queued and stops the pass on a transient %d (server reachable)",
+    async (status) => {
+      const submit = jest
+        .fn()
+        .mockRejectedValueOnce(new LogEventApiError(status, "transient"))
+        .mockResolvedValueOnce(dto({ id: "s2" }));
+
+      const result = await drainOutbox({
+        entries: [
+          entry({ idempotencyKey: "a" }),
+          entry({ idempotencyKey: "b" }),
+        ],
+        submit,
+      });
+
+      // a hit a transient error and stays queued; b is never attempted this pass.
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(result.accepted).toHaveLength(0);
+      expect(result.entries.map((e) => e.idempotencyKey)).toEqual(["a", "b"]);
+      expect(result.entries.every((e) => e.syncState === "queued")).toBe(true);
+      // The server answered, so we did reach it — this is online, not offline.
+      expect(result.reachedServer).toBe(true);
+    },
+  );
+
   it("marks a server-rejected entry failed (non-transient) and keeps draining", async () => {
     const submit = jest
       .fn()

@@ -21,13 +21,14 @@
  */
 
 import type { LogEventDTO } from "@/api/logEvents";
-import { isUnreachableError } from "@/state/reachability";
+import { isRetryableError, isUnreachableError } from "@/state/reachability";
 
 /**
  * Local sync state of a queued entry: `queued` → `submitting` →
  * `accepted` (server took it; about to leave the outbox) or `failed` (the server
- * rejected it — non-transient, kept for visibility rather than silently
- * retried forever).
+ * rejected it with a *terminal* client error — kept for visibility rather than
+ * silently retried forever). A transient server error keeps the entry `queued`
+ * for a later pass instead.
  */
 export type OutboxSyncState = "queued" | "submitting" | "accepted" | "failed";
 
@@ -149,9 +150,16 @@ export function normalizeLoaded(
  * - **Unreachable** (network failure) → the entry stays `queued`, and the drain
  *   stops immediately: the connection is gone, so hammering the rest is wasteful
  *   and they are retried on the next pass. No entry is dropped or duplicated.
- * - **Rejected** (the server answered with an error) → the entry is marked
- *   `failed`. It is non-transient (e.g. validation), so it is kept for
- *   visibility rather than retried forever, and the drain continues.
+ * - **Transient rejection** (the server answered `5xx`/`429`/`401`) → the entry
+ *   stays `queued` and the drain stops: the server is reachable but temporarily
+ *   unable to take the entry (restarting/deploying, rate-limited, or an expired
+ *   session), so the rest would hit the same wall and are retried next pass.
+ *   This is what keeps "resolve on reconnect" from abandoning a capture when the
+ *   server is briefly unhealthy at exactly the moment a device comes back.
+ * - **Terminal rejection** (the server answered a terminal client error such as
+ *   `422` validation) → the entry is marked `failed`. Resubmitting it would be
+ *   rejected the same way, so it is kept for visibility rather than retried
+ *   forever, and the drain continues with the rest.
  *
  * `onChange` is invoked with the working queue as states advance
  * (`queued` → `submitting` → resolved) so a caller can reflect progress and
@@ -169,14 +177,14 @@ export async function drainOutbox(opts: {
   );
   const accepted: AcceptedEntry[] = [];
   let reachedServer = false;
-  let connectionLost = false;
+  let stopDraining = false;
 
   const visible = () => working.filter((e) => e.syncState !== "accepted");
 
   for (let i = 0; i < working.length; i++) {
     const entry = working[i];
     if (entry.syncState !== "queued") continue;
-    if (connectionLost) continue;
+    if (stopDraining) continue;
 
     working[i] = { ...entry, syncState: "submitting" };
     onChange?.(visible());
@@ -191,10 +199,19 @@ export async function drainOutbox(opts: {
       if (isUnreachableError(error)) {
         // Connection dropped — keep this entry and stop draining the rest.
         working[i] = { ...entry, syncState: "queued" };
-        connectionLost = true;
+        stopDraining = true;
+      } else if (isRetryableError(error)) {
+        // The server answered, but with a transient error (5xx/429, or a 401
+        // from a session that expired mid-drain). Keep the entry queued to
+        // retry on a later pass and stop draining — the rest would hit the same
+        // condition. This preserves the capture instead of stranding it.
+        reachedServer = true;
+        working[i] = { ...entry, syncState: "queued" };
+        stopDraining = true;
       } else {
-        // The server answered with a rejection: reachable, but this entry is
-        // non-transiently bad. Mark it failed and move on.
+        // The server rejected this entry with a terminal client error (e.g. 422
+        // validation): reachable, and resubmitting would be rejected the same
+        // way. Mark it failed and move on.
         reachedServer = true;
         working[i] = { ...entry, syncState: "failed" };
       }

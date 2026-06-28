@@ -34,6 +34,29 @@ export function isUnreachableError(error: unknown): boolean {
   return !(error instanceof LogEventApiError);
 }
 
+/**
+ * Whether a reached-but-rejected submit error is *transient* — worth keeping the
+ * entry queued for a later drain rather than terminally failing it.
+ *
+ * The server answered (so it is a {@link LogEventApiError}, not an unreachable
+ * network failure), but with a status a reconnect drain can realistically
+ * recover from on its own:
+ * - `5xx` — the server is erroring/restarting, common exactly when a device
+ *   first gets back online during a deploy.
+ * - `429` — rate-limited; backing off and retrying on a later pass is correct.
+ * - `401` — the session expired during a long offline window; once it refreshes
+ *   the same entry submits cleanly.
+ *
+ * Genuinely terminal client errors (`400`/`404`/`422`) are *not* retryable:
+ * resubmitting the identical entry would be rejected the same way, so it is kept
+ * `failed` for visibility instead of retried forever.
+ */
+export function isRetryableError(error: unknown): boolean {
+  if (!(error instanceof LogEventApiError)) return false;
+  const { status } = error;
+  return status >= 500 || status === 429 || status === 401;
+}
+
 /** How the connection banner should render for a given state + backlog. */
 export interface BannerPresentation {
   /** Whether the banner is shown at all (hidden when online and caught up). */
