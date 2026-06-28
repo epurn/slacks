@@ -21,6 +21,7 @@ from app.llm.providers.claude_code import (
     ClaudeCodeProvider,
     ClaudeCodeResult,
     Invocation,
+    _parse_object,
 )
 from tests.llm.conftest import Candidate, sample_image
 
@@ -176,6 +177,70 @@ def test_image_input_fails_fast() -> None:
             images=[sample_image()],
             timeout_seconds=5.0,
         )
+
+
+# --- Tolerant JSON extraction tests (_parse_object) ---
+
+
+def test_parse_object_bare_json_unchanged() -> None:
+    # (d) A bare JSON object parses to the same dict as before.
+    result = _parse_object('{"name": "apple", "calories": 95}')
+    assert result == {"name": "apple", "calories": 95}
+
+
+def test_parse_object_json_fenced() -> None:
+    # (a) A ```json ... ``` fence is stripped and the object parses correctly.
+    fenced = '```json\n{"name": "apple", "calories": 95}\n```'
+    result = _parse_object(fenced)
+    assert result == {"name": "apple", "calories": 95}
+
+
+def test_parse_object_plain_fence() -> None:
+    # ``` without a language tag is also stripped.
+    fenced = '```\n{"name": "apple", "calories": 95}\n```'
+    result = _parse_object(fenced)
+    assert result == {"name": "apple", "calories": 95}
+
+
+def test_parse_object_prose_prefix() -> None:
+    # (b) A leading prose line before the object parses correctly.
+    with_prose = 'Here is the JSON:\n{"name": "apple", "calories": 95}'
+    result = _parse_object(with_prose)
+    assert result == {"name": "apple", "calories": 95}
+
+
+def test_parse_object_trailing_junk_rejected() -> None:
+    # (c) Non-whitespace trailing the object is rejected.
+    with_junk = '{"name": "apple", "calories": 95}\nsome trailing text'
+    with pytest.raises(LLMResponseError):
+        _parse_object(with_junk)
+
+
+def test_parse_object_trailing_whitespace_accepted() -> None:
+    # Trailing whitespace only (newlines/spaces) after the object is fine.
+    result = _parse_object('{"name": "apple", "calories": 95}\n  \n')
+    assert result == {"name": "apple", "calories": 95}
+
+
+def test_parse_object_non_json_is_response_error() -> None:
+    # (e) Non-JSON output raises LLMResponseError.
+    with pytest.raises(LLMResponseError):
+        _parse_object("not json at all")
+
+
+def test_parse_object_non_object_json_is_response_error() -> None:
+    # (e) A JSON array raises LLMResponseError (no top-level object).
+    with pytest.raises(LLMResponseError):
+        _parse_object("[1, 2, 3]")
+
+
+def test_parse_object_extraction_does_not_echo_content() -> None:
+    # The error message must never echo the stdout content (which may carry
+    # untrusted food-log text).
+    sensitive = "SENSITIVE_FOOD_LOG_CONTENT"
+    with pytest.raises(LLMResponseError) as exc_info:
+        _parse_object(f"not json — {sensitive}")
+    assert sensitive not in str(exc_info.value)
 
 
 def test_nothing_sensitive_is_logged_or_surfaced(
