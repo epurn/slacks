@@ -17,6 +17,11 @@ interface WeightEntryInputProps {
   submitError: string | null;
   /** Called with the entered weight in the user's display units. */
   onSubmit: (weight: number) => void;
+  /**
+   * Optional seed value in display units. Used by WeightLogSheet (FTY-101) to
+   * pre-fill the input with the user's last logged weight.
+   */
+  initialValue?: number;
 }
 
 /**
@@ -32,8 +37,11 @@ export function WeightEntryInput({
   submitting,
   submitError,
   onSubmit,
+  initialValue,
 }: WeightEntryInputProps) {
-  const [weightText, setWeightText] = useState("");
+  const [weightText, setWeightText] = useState(
+    initialValue != null ? String(initialValue) : "",
+  );
   const unitLabel = weightUnitLabel(unitsPreference);
   const parsed = parseWeightInput(weightText);
   const canSubmit = parsed !== null && !submitting;
