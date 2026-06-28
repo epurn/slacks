@@ -88,6 +88,15 @@ def test_compute_persists_owned_daily_target(session: Session) -> None:
     assert record.rmr_kcal == 1780.0
     assert record.tdee_kcal == 2136.0
     assert record.clamped is False
+    # Derived macros are now persisted on the row (FTY-094 derivation, FTY-095
+    # persistence) so a reset can restore them without re-running the calculator.
+    assert record.protein_target_g == 128
+    assert record.fat_target_g == 64
+    assert record.carbs_target_g == 148
+    assert record.macros_clamped is False
+    # A freshly derived target carries no override.
+    assert record.override_calorie_target_kcal is None
+    assert record.override_set_at is None
     # Object-level ownership keys are persisted.
     assert record.user_id == user.id
     assert record.goal_id == goal.id

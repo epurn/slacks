@@ -18,6 +18,8 @@ from datetime import date
 
 from pydantic import BaseModel, ConfigDict
 
+from app.schemas.targets import TargetReadModel
+
 
 class DailySummaryIntakeDTO(BaseModel):
     """Summed intake for the day from finalized food items.
@@ -34,20 +36,6 @@ class DailySummaryIntakeDTO(BaseModel):
     fat_g: float
 
 
-class DailySummaryTargetDTO(BaseModel):
-    """Daily calorie target for the day from the FTY-022 target calculator.
-
-    Present only when the user has an active goal with a stored ``daily_targets``
-    row for the requested day. ``None`` otherwise — no active goal, or the day
-    predates the goal. Macro targets are not part of the FTY-022 contract.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    #: ``daily_calorie_target_kcal`` from the stored ``daily_targets`` row.
-    calories: int
-
-
 class DailySummaryExerciseDTO(BaseModel):
     """Summed exercise burn for the day from finalized exercise items.
 
@@ -61,16 +49,18 @@ class DailySummaryExerciseDTO(BaseModel):
 
 
 class DailySummaryDTO(BaseModel):
-    """Daily summary response DTO (FTY-071).
+    """Daily summary response DTO (FTY-071; target read-model FTY-094/FTY-095).
 
     Exposes separated intake, target, and exercise components for the requested
-    day in the user's profile timezone. ``target`` is ``None`` when no active
-    goal or no stored target exists for the day.
+    day in the user's profile timezone. ``target`` is the calorie + macro
+    read-model — each target carrying its effective value, derived value, and
+    ``derived | user`` provenance (FTY-095) — or ``None`` when no active goal or no
+    stored target exists for the day.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     date: date
     intake: DailySummaryIntakeDTO
-    target: DailySummaryTargetDTO | None
+    target: TargetReadModel | None
     exercise: DailySummaryExerciseDTO

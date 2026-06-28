@@ -585,7 +585,12 @@ function summary(overrides: Partial<DailySummaryDTO> = {}): DailySummaryDTO {
   return {
     date: "2026-06-27",
     intake: { calories: 1234, protein_g: 70, carbs_g: 120, fat_g: 40 },
-    target: { calories: 2000 },
+    target: {
+      calories: { effective: 2000, derived: 2000, source: "derived" },
+      protein_g: { effective: 128, derived: 128, source: "derived" },
+      carbs_g: { effective: 148, derived: 148, source: "derived" },
+      fat_g: { effective: 64, derived: 64, source: "derived" },
+    },
     exercise: { active_calories: 0 },
     ...overrides,
   };

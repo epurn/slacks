@@ -18,6 +18,18 @@ Retention defaults should minimize stored personal data while preserving user va
 - Cached source facts (`products`): global trusted-source nutrition facts (USDA FDC generic foods; Open Food Facts packaged products by barcode, FTY-060) with **no** user-specific data — the per-100g facts for a generic food or a given barcode are the same for everyone. Keyed by `(source, query_key)` with a dedicated indexed `barcode` column for the Open Food Facts source. Cached to avoid repeat external lookups (a repeat barcode scan makes no external call) and retained as global source facts (nothing user-specific to delete); the `evidence_sources` link to a product is `ON DELETE SET NULL`, so clearing the cache never removes user-owned evidence. The barcode sent to Open Food Facts carries no personal context, and no raw OFF response is stored.
 - Saved foods (`saved_foods`) and aliases (`food_aliases`) (FTY-052): user-owned data created only by a deliberate, user-initiated save. `saved_foods` holds a corrected per-serving nutrition snapshot (calories, optional macros, default serving size + unit), a canonical name, a normalized name for matching, and a provenance `source`; `food_aliases` holds the free-text phrase the user originally typed (plus a normalized form) mapped to a saved food. Both are user-owned with `ON DELETE CASCADE` from the user, and `food_aliases` also cascades from its `saved_foods` parent, so a user's saved foods and aliases are removed on user/account deletion (and a saved food's aliases on its deletion). Retained until the owning saved food (aliases), user, or account is deleted. The typed alias text and the typeahead query text are sensitive free text and are never logged.
 - Corrections (`corrections`) and derived-item estimated/original snapshot columns (FTY-051): user-owned audit data. Each `corrections` row records a single user override of a derived food/exercise item field (the changed field, old/new value in canonical units, and source); the `*_estimated` columns on `derived_food_items` / `derived_exercise_items` hold the immutable original estimate alongside the editable current value. The table is **append-only** — the application never updates or deletes a correction (an immutability guard rejects both) — but rows are still removed on user/account deletion through `ON DELETE CASCADE` from the user and the owning derived item. Retained until the owning derived item, log event, user, or account is deleted. Old/new values are never logged.
+- Derived daily targets (`daily_targets`, FTY-022/FTY-094) and the manual target
+  override fields (FTY-095): user-owned sensitive derived body data. Each row holds
+  the deterministic calorie + macro derivation (with the `inputs`/`assumptions`
+  snapshot) and, when the user manually overrides a target, the nullable
+  `override_*_target_*` value(s) plus an `override_set_at` timestamp (a bare time
+  stamp, no PII). An override persists across derived recomputes and is cleared
+  only by an explicit reset or by deletion/replacement of the owning goal. Both
+  tables are `ON DELETE CASCADE` from the user, and `daily_targets` also cascades
+  from `goal_id`, so a user's targets and overrides are removed on goal, user, or
+  account deletion. Retained until the owning goal is edited/replaced or the user/
+  account is deleted. Target numbers are never logged (diagnostics use user/goal
+  ids).
 - Logs: short operational retention; no secrets or unnecessary personal data.
 
 ## Deletion Requirements

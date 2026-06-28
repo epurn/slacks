@@ -48,8 +48,9 @@ from app.schemas.daily_summary import (
     DailySummaryDTO,
     DailySummaryExerciseDTO,
     DailySummaryIntakeDTO,
-    DailySummaryTargetDTO,
 )
+from app.schemas.targets import TargetReadModel
+from app.services.targets import build_target_read_model
 
 #: Rounding precision for summed totals — matches FTY-043/044 serving-math (0.1).
 _ROUND_DECIMALS = 1
@@ -200,12 +201,14 @@ def _resolve_target(
     session: Session,
     owner_id: uuid.UUID,
     day: date,
-) -> DailySummaryTargetDTO | None:
-    """Return the daily calorie target for ``owner_id`` on ``day``, or ``None``.
+) -> TargetReadModel | None:
+    """Return the calorie + macro target read-model for ``owner_id`` on ``day``.
 
-    Looks up the ``daily_targets`` row for the user's active goal on ``day``.
-    Returns ``None`` when no active goal exists or no target row has been stored
-    for the requested day — explicit null, not zero, to distinguish the two states.
+    Looks up the ``daily_targets`` row for the user's active goal on ``day`` and
+    projects it to the read-model (effective / derived / ``derived | user`` source
+    per target, FTY-095). Returns ``None`` when no active goal exists or no target
+    row has been stored for the requested day — explicit null, not zero, to
+    distinguish the two states.
     """
 
     target = session.scalars(
@@ -221,4 +224,4 @@ def _resolve_target(
 
     if target is None:
         return None
-    return DailySummaryTargetDTO(calories=target.daily_calorie_target_kcal)
+    return build_target_read_model(target)

@@ -24,6 +24,7 @@ from app.routers import (
     profile,
     re_match,
     saved_foods,
+    targets,
     weight_entries,
 )
 from app.settings import Settings, load_settings
@@ -68,6 +69,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
     app.include_router(saved_foods.router)
     app.include_router(daily_summary.router)
     app.include_router(weight_entries.router)
+    app.include_router(targets.router)
 
     # No secrets/personal data here: only the non-sensitive environment label.
     logger.info("backend application initialized", extra={"environment": settings.environment})

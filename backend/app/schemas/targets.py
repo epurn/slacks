@@ -18,7 +18,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.enums import GoalDirection, MetabolicFormula
+from app.enums import GoalDirection, MetabolicFormula, OverridableTarget, TargetSource
 
 #: Supported age range for the Mifflin-St Jeor equation (years). The equation was
 #: validated on adults; ages outside this band are rejected at the boundary.
@@ -132,6 +132,93 @@ class DailyTargetDTO(BaseModel):
     tdee_kcal: float
     daily_calorie_target_kcal: int
     clamped: bool
+    protein_target_g: int
+    carbs_target_g: int
+    fat_target_g: int
+    macros_clamped: bool
+    override_calorie_target_kcal: int | None
+    override_protein_target_g: int | None
+    override_carbs_target_g: int | None
+    override_fat_target_g: int | None
+    override_set_at: datetime | None
     inputs: dict[str, Any]
     assumptions: dict[str, Any]
     created_at: datetime
+
+
+class TargetComponent(BaseModel):
+    """One target value (calorie or a macro) with explicit provenance (FTY-095).
+
+    ``effective`` is the number the app uses (the override when set, else the
+    derived value); ``derived`` is always the current deterministic derivation —
+    what a reset would restore; ``source`` says which of the two ``effective`` came
+    from. All values are whole numbers in canonical units (kcal for calories, grams
+    for macros).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    effective: int
+    derived: int
+    source: TargetSource
+
+
+class TargetReadModel(BaseModel):
+    """A day's calorie + macro targets, each with derived-vs-overridden provenance.
+
+    The shape both the daily-summary ``target`` component and the Profile target
+    endpoint surface (FTY-095). Per target the consumer sees the effective value,
+    the derived value, and the ``derived | user`` source flag, so the UI can render
+    the "✎ set by you" badge and a ``[Reset]`` that restores the derived number.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    calories: TargetComponent
+    protein_g: TargetComponent
+    carbs_g: TargetComponent
+    fat_g: TargetComponent
+
+
+class TargetOverrideRequest(BaseModel):
+    """Set one or more manual target overrides (FTY-095).
+
+    Every field is optional so the calorie target and each macro can be overridden
+    independently, in any combination; at least one must be present (an empty body
+    is rejected). Values are whole numbers in canonical units. Structural bounds
+    are enforced here (calorie ``>= 1``, macros ``>= 0``); the documented
+    safety-band check (reject out-of-band ``422``) lives in the service, which
+    reads the exact band from the target's assumptions snapshot.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    calorie_target_kcal: int | None = Field(default=None, ge=1)
+    protein_target_g: int | None = Field(default=None, ge=0)
+    carbs_target_g: int | None = Field(default=None, ge=0)
+    fat_target_g: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _at_least_one(self) -> TargetOverrideRequest:
+        if (
+            self.calorie_target_kcal is None
+            and self.protein_target_g is None
+            and self.carbs_target_g is None
+            and self.fat_target_g is None
+        ):
+            raise ValueError("at least one target override must be provided")
+        return self
+
+
+class TargetResetRequest(BaseModel):
+    """Reset (clear) one or more manual target overrides (FTY-095).
+
+    ``targets`` names the override columns to clear back to ``NULL`` so their
+    effective value falls back to the derived value. ``None`` or an empty list
+    resets **all** in-force overrides on the target. Resetting a target that is
+    already derived is a no-op (idempotent).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    targets: list[OverridableTarget] | None = None
