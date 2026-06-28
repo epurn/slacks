@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
+
+import app.services.auth as _auth_module
 
 
 def test_register_returns_user_and_token(client: TestClient) -> None:
@@ -84,3 +87,31 @@ def test_login_unknown_email_is_unauthorized(client: TestClient) -> None:
 
     # Same generic 401 as a wrong password: no account-existence oracle.
     assert resp.status_code == 401
+
+
+def test_concurrent_register_race_returns_409(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Concurrent same-email registrations must yield 409, not 500.
+
+    Simulates the race: the first request commits successfully, then the
+    existence check is patched to return None so the second request bypasses
+    the sequential-duplicate guard and reaches the commit, where the unique
+    index (uq_auth_provider_identifier) fires.  The IntegrityError must be
+    caught, rolled back, and surfaced as 409 Conflict.
+    """
+
+    r1 = client.post(
+        "/api/auth/register",
+        json={"email": "race@example.com", "password": "first-password"},
+    )
+    assert r1.status_code == 201
+
+    # Bypass the sequential check: both concurrent callers see no existing row.
+    monkeypatch.setattr(_auth_module, "_find_local_identity", lambda *_: None)
+
+    r2 = client.post(
+        "/api/auth/register",
+        json={"email": "race@example.com", "password": "second-password"},
+    )
+    assert r2.status_code == 409

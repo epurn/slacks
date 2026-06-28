@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.enums import AuthProvider
@@ -76,7 +77,16 @@ def register_user(
     )
     profile = UserProfile(user=user)
     session.add_all([user, identity, profile])
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        # Two concurrent registrations of the same email both passed the
+        # existence check; the loser hits uq_auth_provider_identifier. Mirror
+        # the pattern in log_events.py: rollback and surface the same conflict
+        # the sequential duplicate path already raises so the router maps it to
+        # 409 without leaking internal detail.
+        session.rollback()
+        raise AuthError("conflict", "email already registered") from None
     session.refresh(user)
 
     return user, _issue_token(user.id, settings)

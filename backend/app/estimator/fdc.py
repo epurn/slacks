@@ -30,7 +30,15 @@ from dataclasses import dataclass
 from typing import Any, Final, Protocol, runtime_checkable
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from app.estimator.evidence_utils import _content_hash
 from app.estimator.food_serving import NutritionFacts
@@ -198,10 +206,23 @@ class FdcFood(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     fdcId: int  # noqa: N815 — FDC wire field name
-    description: str = Field(default="", max_length=_MAX_DESCRIPTION_LEN)
+    description: str = Field(default="")
     foodNutrients: list[FdcNutrient] = Field(default_factory=list)  # noqa: N815
     servingSize: float | None = None  # noqa: N815 — FDC wire field name
     servingSizeUnit: str | None = Field(default=None, max_length=32)  # noqa: N815
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _truncate_description(cls, value: Any) -> Any:
+        """Truncate (not reject) an over-long description from the untrusted FDC payload.
+
+        A long product name is cosmetic; rejecting an otherwise-usable energy-bearing
+        row over a display string needlessly drops a real match. Non-string values fall
+        through to normal validation, which fails closed into FdcResponseError.
+        """
+        if isinstance(value, str):
+            return value[:_MAX_DESCRIPTION_LEN]
+        return value
 
 
 class FdcSearchResponse(BaseModel):
@@ -277,41 +298,10 @@ class FdcClient:
         to :class:`FdcTransientError` / :class:`FdcResponseError`.
         """
 
-        if not self.enabled:
+        response = self._search(query)
+        if response is None:
             return None
-
-        normalized = normalize_query(query)
-        if not normalized:
-            return None
-
-        payload = {
-            "query": normalized,
-            "dataType": list(_FDC_DATA_TYPES),
-            "pageSize": self._settings.max_results,
-        }
-        # The key rides in the header, never the URL/query string, so it cannot leak
-        # through a logged request line. ``enabled`` guarantees it is present.
-        api_key = self._settings.api_key
-        if api_key is None:
-            return None
-        headers = {"X-Api-Key": api_key.get_secret_value()}
-
-        try:
-            raw = self._transport(
-                self._settings.search_url,
-                headers=headers,
-                payload=payload,
-                timeout_seconds=self._settings.timeout_seconds,
-                allowed_hosts=self._settings.allowed_hosts,
-                resolver=self._resolver,
-            )
-        except FetchTransientError as exc:
-            raise FdcTransientError("fdc_transient_error") from exc
-        except (FetchResponseError, FetchPolicyError) as exc:
-            raise FdcResponseError("fdc_response_error") from exc
-
-        response = FdcSearchResponse.model_validate(raw)
-        return self._first_match(normalized, response)
+        return self._first_match(normalize_query(query), response)
 
     def list_matches(self, query: str) -> list[ProductFacts]:
         """Search FDC for ``query`` and return **every** energy-bearing match.
@@ -326,21 +316,43 @@ class FdcClient:
         :class:`FdcResponseError`, exactly like :meth:`lookup`.
         """
 
-        if not self.enabled:
+        response = self._search(query)
+        if response is None:
             return []
+        normalized = normalize_query(query)
+        return [
+            facts
+            for food in response.foods
+            if (facts := _food_to_facts(normalized, food)) is not None
+        ]
+
+    def _search(self, query: str) -> FdcSearchResponse | None:
+        """Issue and validate a /foods/search request for ``query``.
+
+        Returns ``None`` when the source is disabled or the query normalizes to empty.
+        Raises :class:`FdcTransientError` / :class:`FdcResponseError` on transport or
+        validation failures — ``ValidationError`` is mapped to :class:`FdcResponseError`
+        so a malformed body never escapes as an uncaught exception.
+        """
+
+        if not self.enabled:
+            return None
 
         normalized = normalize_query(query)
         if not normalized:
-            return []
+            return None
+
+        # The key rides in the header, never the URL/query string, so it cannot leak
+        # through a logged request line. ``enabled`` guarantees it is present.
+        api_key = self._settings.api_key
+        if api_key is None:
+            return None
 
         payload = {
             "query": normalized,
             "dataType": list(_FDC_DATA_TYPES),
             "pageSize": self._settings.max_results,
         }
-        api_key = self._settings.api_key
-        if api_key is None:
-            return []
         headers = {"X-Api-Key": api_key.get_secret_value()}
 
         try:
@@ -357,12 +369,10 @@ class FdcClient:
         except (FetchResponseError, FetchPolicyError) as exc:
             raise FdcResponseError("fdc_response_error") from exc
 
-        response = FdcSearchResponse.model_validate(raw)
-        return [
-            facts
-            for food in response.foods
-            if (facts := _food_to_facts(normalized, food)) is not None
-        ]
+        try:
+            return FdcSearchResponse.model_validate(raw)
+        except ValidationError as exc:
+            raise FdcResponseError("fdc_response_error") from exc
 
     @staticmethod
     def _first_match(query_key: str, response: FdcSearchResponse) -> ProductFacts | None:

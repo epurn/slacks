@@ -9,8 +9,9 @@ received so tests can assert on call behavior without inspecting logs.
 
 from __future__ import annotations
 
+import time
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from pydantic import BaseModel
@@ -31,6 +32,9 @@ class FakeProvider(Provider):
         supports_vision: declares the fake as vision-capable so image input is
             accepted rather than rejected — used to stand in for a vision model
             in tests without any network call.
+        sleep: injectable sleep seam forwarded to the base class. Pass a fake
+            (e.g. ``sleeps.append``) to assert on backoff delays without any
+            real wall-clock wait.
     """
 
     name = "fake"
@@ -42,11 +46,13 @@ class FakeProvider(Provider):
         timeout_seconds: float = 1.0,
         max_retries: int = 0,
         supports_vision: bool = False,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         super().__init__(
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,
             supports_vision=supports_vision,
+            sleep=sleep,
         )
         self._responses: deque[dict[str, Any] | LLMError] = deque(responses or [])
         #: Prompts received, in order — for test assertions.
