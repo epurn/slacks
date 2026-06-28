@@ -21,6 +21,7 @@ logs the prompt, the model output, or any credential.
 from __future__ import annotations
 
 import json
+import re
 import subprocess  # noqa: S404 — invocation is fixed argv, tools disabled, no shell
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -256,15 +257,80 @@ def _looks_like_auth_failure(result: ClaudeCodeResult) -> bool:
     return any(marker in haystack for marker in _AUTH_FAILURE_MARKERS)
 
 
+#: Matches a leading ```json or ``` fence opener (with optional trailing whitespace/newline).
+_FENCE_START_RE = re.compile(r"^```(?:json)?\s*\n?", re.IGNORECASE)
+#: Matches a trailing ``` fence closer (with optional preceding newline).
+_FENCE_END_RE = re.compile(r"\n?```\s*$")
+
+
+def _extract_first_json_object(text: str) -> tuple[str, str] | None:
+    """Find the first balanced top-level ``{...}`` object in ``text``.
+
+    Returns ``(object_text, remainder)`` where ``remainder`` is everything after
+    the closing brace, or ``None`` if no balanced object is found. Correctly
+    skips ``{`` / ``}`` inside JSON strings (respecting backslash escapes).
+    """
+
+    start = -1
+    depth = 0
+    in_string = False
+    escape = False
+
+    for i, ch in enumerate(text):
+        if escape:
+            escape = False
+            continue
+        if in_string:
+            if ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}" and depth > 0:
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1], text[i + 1 :]
+
+    return None
+
+
 def _parse_object(stdout: str) -> dict[str, Any]:
     """Parse Claude Code stdout into the raw structured object.
 
-    Non-JSON or non-object output is unusable and maps to ``LLMResponseError``;
-    the offending text is never echoed into the message.
+    Tolerates a leading/trailing code fence (```json or ```) and a prose line
+    preceding the object, then extracts the first balanced top-level ``{...}``
+    object.  Trailing non-whitespace after the object is rejected to catch
+    garbled/double emissions.  Non-JSON, non-object, or trailing-junk output
+    maps to ``LLMResponseError``; the offending text is never echoed.
     """
 
+    text = stdout.strip()
+
+    # Strip code fence wrapper if present before extracting the object.
+    if text.startswith("```"):
+        text = _FENCE_START_RE.sub("", text, count=1)
+        text = _FENCE_END_RE.sub("", text)
+        text = text.strip()
+
+    extracted = _extract_first_json_object(text)
+    if extracted is None:
+        raise LLMResponseError("claude code returned a non-JSON body") from None
+
+    json_text, remainder = extracted
+
+    # Reject trailing non-whitespace — signals a garbled/double emission.
+    if remainder.strip():
+        raise LLMResponseError("claude code returned trailing content after JSON object") from None
+
     try:
-        parsed: Any = json.loads(stdout)
+        parsed: Any = json.loads(json_text)
     except json.JSONDecodeError:
         raise LLMResponseError("claude code returned a non-JSON body") from None
     if not isinstance(parsed, dict):

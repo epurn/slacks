@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+from app.estimator.hardened_fetch import DEFAULT_MAX_BYTES
 from app.llm import transport
 from app.llm.errors import LLMConfigurationError, LLMResponseError, LLMTransientError
 
@@ -38,7 +39,9 @@ class _FakeResponse:
     ) -> None:
         return None
 
-    def read(self) -> bytes:
+    def read(self, n: int = -1) -> bytes:
+        # Return the full body regardless of the size hint; the transport checks
+        # the returned length itself (mirroring hardened_fetch._open_json).
         return self._body
 
 
@@ -165,3 +168,48 @@ def test_json_array_body_is_response_error(monkeypatch: pytest.MonkeyPatch) -> N
 
     with pytest.raises(LLMResponseError):
         _post()
+
+
+# --- Size-cap tests (transport parity with hardened_fetch) ---
+
+
+def test_over_cap_body_raises_response_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A body one byte over the cap must raise LLMResponseError without OOM-ing.
+    oversized = b"x" * (DEFAULT_MAX_BYTES + 1)
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResponse(oversized))
+
+    with pytest.raises(LLMResponseError):
+        _post()
+
+
+def test_over_cap_error_message_contains_no_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The error message must never include the body (even a snippet of it).
+    body_marker = b"BODY_MARKER_MUST_NOT_LEAK"
+    oversized = body_marker + b"x" * DEFAULT_MAX_BYTES
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResponse(oversized))
+
+    with pytest.raises(LLMResponseError) as exc_info:
+        _post()
+
+    assert body_marker.decode() not in str(exc_info.value)
+    assert "BODY_MARKER" not in str(exc_info.value)
+
+
+def test_at_cap_body_parses_correctly(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A body exactly at the cap (a valid JSON object) must parse without error.
+    prefix = b'{"ok": true, "pad": "'
+    suffix = b'"}'
+    padding = b"a" * (DEFAULT_MAX_BYTES - len(prefix) - len(suffix))
+    padded = prefix + padding + suffix
+    assert len(padded) == DEFAULT_MAX_BYTES
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResponse(padded))
+
+    result = _post()
+    assert result["ok"] is True
+
+
+def test_under_cap_body_parses_correctly(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A normal-sized response must pass through unchanged.
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResponse(b'{"ok": true}'))
+
+    assert _post() == {"ok": True}

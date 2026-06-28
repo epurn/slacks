@@ -21,6 +21,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from app.estimator.hardened_fetch import DEFAULT_MAX_BYTES
 from app.llm.errors import LLMConfigurationError, LLMResponseError, LLMTransientError
 
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
@@ -59,7 +60,7 @@ def post_json(
         with urllib.request.urlopen(  # noqa: S310 — scheme validated above
             request, timeout=timeout_seconds
         ) as response:
-            raw = response.read()
+            raw = response.read(DEFAULT_MAX_BYTES + 1)
     except urllib.error.HTTPError as exc:
         status = exc.code
         # Drain so the connection can be reused, but never surface the body.
@@ -77,6 +78,9 @@ def post_json(
         # socket timeout. The original is suppressed so its args (which can echo
         # the URL) never leak into logs.
         raise LLMTransientError("provider request failed") from None
+
+    if len(raw) > DEFAULT_MAX_BYTES:
+        raise LLMResponseError("provider returned an oversized body") from None
 
     try:
         parsed: Any = json.loads(raw)
