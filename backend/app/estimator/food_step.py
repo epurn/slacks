@@ -52,6 +52,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.estimator.evidence_utils import _record_source_ref
 from app.estimator.fdc import (
     FDC_SOURCE,
     FDC_SOURCE_TYPE,
@@ -402,13 +403,6 @@ class FoodResolveStep:
             carbs_per_100g=product.carbs_per_100g,
             fat_per_100g=product.fat_per_100g,
         )
-
-
-def _record_source_ref(context: EstimationContext, source: str) -> None:
-    """Record a source system as run evidence (content-free metadata only)."""
-
-    if source not in context.source_refs:
-        context.source_refs.append(source)
 
 
 def _source_type(source: str) -> str:

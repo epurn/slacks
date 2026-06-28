@@ -22,7 +22,6 @@ canonical per-100g facts through a hardened, allowlisted HTTPS client:
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import socket
@@ -33,6 +32,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
+from app.estimator.evidence_utils import _content_hash
 from app.estimator.food_serving import NutritionFacts
 from app.estimator.hardened_fetch import (
     FetchPolicyError,
@@ -124,13 +124,6 @@ def normalize_query(name: str) -> str:
     """Lower-case and collapse whitespace to a stable cache/query key."""
 
     return _WHITESPACE_RE.sub(" ", name.strip().lower())
-
-
-def _content_hash(source_ref: str, facts: NutritionFacts) -> str:
-    """A reproducible fingerprint of the canonical facts (no user data)."""
-
-    canonical = f"{source_ref}|{facts.calories}|{facts.protein_g}|{facts.carbs_g}|{facts.fat_g}"
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class FdcSettings(BaseModel):

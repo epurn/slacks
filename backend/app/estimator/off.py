@@ -31,7 +31,6 @@ and treats anything else as a non-match. These thresholds are documented tunable
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import socket
@@ -41,6 +40,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.estimator.evidence_utils import _content_hash
 from app.estimator.fdc import ProductFacts
 from app.estimator.food_serving import NutritionFacts
 from app.estimator.hardened_fetch import (
@@ -102,13 +102,6 @@ def normalize_barcode(barcode: str | None) -> str | None:
     if len(digits) not in _VALID_BARCODE_LENGTHS:
         return None
     return digits
-
-
-def _content_hash(source_ref: str, facts: NutritionFacts) -> str:
-    """A reproducible fingerprint of the canonical facts (no user data)."""
-
-    canonical = f"{source_ref}|{facts.calories}|{facts.protein_g}|{facts.carbs_g}|{facts.fat_g}"
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 @runtime_checkable

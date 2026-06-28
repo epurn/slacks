@@ -36,11 +36,11 @@ recomputed by the calculators; raw pages are never stored.
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from app.estimator.evidence_utils import _content_hash, _record_source_ref
 from app.estimator.food_serving import (
     NutritionFacts,
     per_serving_to_per_100g,
@@ -448,17 +448,3 @@ def _to_per_100g(facts: EstimatedFacts) -> tuple[NutritionFacts, float | None] |
     if serving_g is None:
         return None
     return per_serving_to_per_100g(raw, serving_g), serving_g
-
-
-def _content_hash(hash_key: str, facts: NutritionFacts) -> str:
-    """A reproducible fingerprint of the canonical facts (no user data, no raw page)."""
-
-    canonical = f"{hash_key}|{facts.calories}|{facts.protein_g}|{facts.carbs_g}|{facts.fat_g}"
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def _record_source_ref(context: EstimationContext, source: str) -> None:
-    """Record a consulted source system as run evidence (content-free metadata)."""
-
-    if source not in context.source_refs:
-        context.source_refs.append(source)
