@@ -81,7 +81,7 @@ configured v1 provider sits:
 | 5 | `model_prior` | `model_prior` | last-resort fallback only (see **Fallback Rule**) |
 
 Ingredient-based recipe calculation and similar-dish reference estimates
-(system-overview ranks 4–5) are deferred; this contract reserves room for them
+(system-overview ranks 6–7) are deferred; this contract reserves room for them
 without defining their records yet. A source type is **applicable** only when an
 input of that kind exists (e.g. `user_label` requires a label/barcode;
 `official_source` requires a named restaurant/manufacturer item).
