@@ -480,9 +480,10 @@ fallback; and no direct egress. `tests/test_food_migration.py` applies/rolls bac
 
 The backend exposes three health-check endpoints, all returning structured JSON with no external calls:
 
-- **`GET /healthz`** — liveness probe. Returns `{"status": "ok"}` (200) when the API is
-  running and the database is reachable. Used by health checks and orchestration
-  (Kubernetes, Docker Compose, monitoring).
+- **`GET /healthz`** — liveness probe. Returns `{"status": "ok"}` (200) whenever the
+  API process is running and able to serve requests; it performs no readiness checks
+  (no database or queue probe). Used by health checks and orchestration (Kubernetes,
+  Docker Compose, monitoring).
 - **`GET /healthz/sources`** — evidence source capability descriptor. Returns each
   configured source's `id`, `source_type`, `kinds` (e.g. `["generic_food"]`,
   `["barcode"]`), `enabled`, and `available` (matches the configuration and any
