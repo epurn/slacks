@@ -1018,3 +1018,106 @@ def test_range_missing_token_returns_401(client: TestClient) -> None:
         params={"from": "2026-06-01", "to": "2026-06-02"},
     )
     assert resp.status_code == 401
+
+
+def test_range_malformed_date_params_return_422(client: TestClient) -> None:
+    """Malformed ``from`` or ``to`` date strings are rejected with 422."""
+
+    user_id, auth = _register(client, "range-malformed@example.com")
+
+    for bad in ("not-a-date", "2025-13-01", "20260101", "2026/01/01"):
+        resp = client.get(
+            f"/api/users/{user_id}/daily-summary/range",
+            headers={"Authorization": auth},
+            params={"from": bad, "to": "2026-01-31"},
+        )
+        assert resp.status_code == 422, f"expected 422 for from={bad!r}, got {resp.status_code}"
+
+        resp = client.get(
+            f"/api/users/{user_id}/daily-summary/range",
+            headers={"Authorization": auth},
+            params={"from": "2026-01-01", "to": bad},
+        )
+        assert resp.status_code == 422, f"expected 422 for to={bad!r}, got {resp.status_code}"
+
+
+def test_range_missing_required_params_return_422(client: TestClient) -> None:
+    """Missing ``from`` or ``to`` query parameters are rejected with 422."""
+
+    user_id, auth = _register(client, "range-missing-params@example.com")
+
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary/range",
+        headers={"Authorization": auth},
+        params={"from": "2026-01-01"},
+    )
+    assert resp.status_code == 422
+
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary/range",
+        headers={"Authorization": auth},
+        params={"to": "2026-01-31"},
+    )
+    assert resp.status_code == 422
+
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary/range",
+        headers={"Authorization": auth},
+    )
+    assert resp.status_code == 422
+
+
+def test_range_timezone_boundary_attribution(client: TestClient, db_engine: Engine) -> None:
+    """Items near local midnight land in the correct calendar day within the range.
+
+    Scenario: user timezone is "America/New_York" (UTC-5 standard time).
+    - Event A: UTC 2026-02-10 04:59 → local 2026-02-09 23:59 → NY day 2026-02-09
+    - Event B: UTC 2026-02-10 05:00 → local 2026-02-10 00:00 → NY day 2026-02-10
+
+    A range request for NY days 2026-02-08 through 2026-02-11 must bucket event A's
+    item into 2026-02-09 and event B's item into 2026-02-10 — identical attribution to
+    the single-day endpoint for the same days.
+    """
+
+    user_id, auth = _register(client, "range-tz-boundary@example.com")
+    _set_timezone(client, user_id, auth, "America/New_York")
+
+    event_a_id = _seed_completed_event(
+        db_engine, user_id, created_at=datetime(2026, 2, 10, 4, 59, 0, tzinfo=UTC)
+    )
+    event_b_id = _seed_completed_event(
+        db_engine, user_id, created_at=datetime(2026, 2, 10, 5, 0, 0, tzinfo=UTC)
+    )
+    _seed_food_item(db_engine, user_id, event_a_id, calories=111.0)
+    _seed_food_item(db_engine, user_id, event_b_id, calories=222.0)
+
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary/range",
+        headers={"Authorization": auth},
+        params={"from": "2026-02-08", "to": "2026-02-11"},
+    )
+
+    assert resp.status_code == 200
+    by_date = {row["date"]: row for row in resp.json()}
+
+    # Event A (04:59 UTC = 23:59 EST) → NY day 2026-02-09
+    assert by_date["2026-02-09"]["intake"]["calories"] == 111.0
+    # Event B (05:00 UTC = 00:00 EST) → NY day 2026-02-10
+    assert by_date["2026-02-10"]["intake"]["calories"] == 222.0
+    # Surrounding empty days are present and zeroed
+    assert by_date["2026-02-08"]["intake"]["calories"] == 0.0
+    assert by_date["2026-02-11"]["intake"]["calories"] == 0.0
+
+    # Verify attribution is consistent with the single-day endpoint for the same days
+    single_09 = client.get(
+        f"/api/users/{user_id}/daily-summary",
+        headers={"Authorization": auth},
+        params={"day": "2026-02-09"},
+    )
+    single_10 = client.get(
+        f"/api/users/{user_id}/daily-summary",
+        headers={"Authorization": auth},
+        params={"day": "2026-02-10"},
+    )
+    assert single_09.json()["intake"]["calories"] == by_date["2026-02-09"]["intake"]["calories"]
+    assert single_10.json()["intake"]["calories"] == by_date["2026-02-10"]["intake"]["calories"]

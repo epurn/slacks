@@ -40,7 +40,7 @@ serializer that derives them).
 
 ## Version
 
-2 (FTY-071; target read-model added jointly by FTY-094/FTY-095). FTY-092 adds the
+3 (FTY-071; target read-model added jointly by FTY-094/FTY-095). FTY-092 adds the
 **per-item provenance read shape** (`source` descriptor + `is_edited`) to the
 Today/daily item read-model below; it does not change the aggregate totals math.
 FTY-094/FTY-095 replace the single-integer `target` component with the **target
@@ -49,6 +49,9 @@ value, and a `derived | user` provenance flag (see `target-calculator.md`).
 FTY-101 adds the boolean **`has_intake`** flag (finalized-food-item presence) so a
 range consumer can tell an unlogged day from a genuine zero-kcal day; it does not
 change any existing component.
+FTY-123 adds the **range/list read** (`GET .../daily-summary/range?from&to`) — the
+server-side read-model for multi-day series that replaces per-day fan-out; see the
+range-read section under Inputs.
 
 ## Inputs
 
@@ -64,7 +67,7 @@ Authorization: Bearer <token>
   Defaults to the current day in that timezone when omitted. A malformed `day`
   is rejected as `422`.
 
-### HTTP request — range read (FTY-101)
+### HTTP request — range read (FTY-123)
 
 ```
 GET /api/users/{user_id}/daily-summary/range?from=YYYY-MM-DD&to=YYYY-MM-DD
@@ -261,7 +264,7 @@ current values are summed first, then the sum is rounded. This rule applies to
 | --- | --- |
 | `401` | Missing/invalid/expired bearer token. |
 | `404` | `{user_id}` does not belong to the authenticated user (fail closed). |
-| `422` | Malformed `day` parameter (not a valid `YYYY-MM-DD` date). |
+| `422` | **Single-day read:** malformed `day` parameter (not a valid `YYYY-MM-DD` date). **Range read:** malformed or missing `from`/`to` (not a valid `YYYY-MM-DD`), `from` after `to`, or span exceeding 366 days. |
 
 ## Examples
 
@@ -278,6 +281,21 @@ curl -s ':8000/api/users/<uid>/daily-summary?day=2026-06-26' \
 
 # Malformed day
 curl -s ':8000/api/users/<uid>/daily-summary?day=not-a-date' \
+  -H 'authorization: Bearer <t>'
+# → 422
+
+# Range read: 5-day window (oldest-first dense array)
+curl -s ':8000/api/users/<uid>/daily-summary/range?from=2026-06-01&to=2026-06-05' \
+  -H 'authorization: Bearer <t>'
+# → 200 [{"date":"2026-06-01",...}, {"date":"2026-06-02",...}, ...]
+
+# Range validation: inverted range
+curl -s ':8000/api/users/<uid>/daily-summary/range?from=2026-06-05&to=2026-06-01' \
+  -H 'authorization: Bearer <t>'
+# → 422
+
+# Range validation: span exceeds 366-day cap
+curl -s ':8000/api/users/<uid>/daily-summary/range?from=2025-01-01&to=2026-06-01' \
   -H 'authorization: Bearer <t>'
 # → 422
 ```
