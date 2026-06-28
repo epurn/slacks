@@ -158,6 +158,14 @@ without making any estimation calls. The `claude_code` entry specifically shows
 whether the CLI is installed and the session is valid — both must be `true` for
 the provider to work.
 
+## Container User
+
+The backend image runs all three services (`migrate`, `api`, `worker`) as a
+dedicated non-root user — `fatty` (UID/GID 10001) — rather than root (FTY-116).
+This limits the blast radius of an in-container exploit to an unprivileged
+account. The `claude-config` volume mountpoint is created owned by this user so
+`claude login` and subsequent session writes succeed without elevated privileges.
+
 ## Out of Scope
 
 TLS / reverse proxy / HTTPS termination, production hardening, resource limits,
