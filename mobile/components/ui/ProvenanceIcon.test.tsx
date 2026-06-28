@@ -3,27 +3,30 @@ import { act, create } from 'react-test-renderer';
 import { useColorScheme } from 'react-native';
 import { ThemeProvider } from '@/theme';
 import { ProvenanceIcon, provenancePresentation } from '@/components/ui';
-import type { ProvenanceSource } from '@/components/ui';
+import type { ItemSourceDTO } from '@/api/derivedItems';
 
 // jest-expo's preset already mocks useColorScheme as a jest.fn() returning 'light'.
 const mockUseColorScheme = useColorScheme as jest.MockedFunction<typeof useColorScheme>;
 
 // ---------------------------------------------------------------------------
-// Expected provenance data
+// Fixtures
 // ---------------------------------------------------------------------------
 
-const PROVENANCE_CASES: Array<{
-  source: ProvenanceSource;
-  accessibilityLabel: string;
-}> = [
-  { source: 'nl_search', accessibilityLabel: 'Source: database search' },
-  { source: 'barcode', accessibilityLabel: 'Source: barcode scan' },
-  { source: 'label_scan', accessibilityLabel: 'Source: nutrition label capture' },
-  { source: 'edited', accessibilityLabel: 'Source: edited by you' },
-  { source: 'saved_food', accessibilityLabel: 'Source: saved food' },
-  { source: 'rough_estimate', accessibilityLabel: 'Source: rough estimate' },
-  { source: 'offline_pending', accessibilityLabel: 'Source: offline — pending sync' },
-];
+const SOURCE_LABELS: Record<ItemSourceDTO['source_type'], string> = {
+  trusted_nutrition_database: 'USDA',
+  product_database: 'Open Food Facts',
+  official_source: 'example.com',
+  user_label: 'Label scan',
+  model_prior: 'Rough estimate',
+};
+
+function sourceOf(source_type: ItemSourceDTO['source_type']): ItemSourceDTO {
+  return {
+    source_type,
+    label: SOURCE_LABELS[source_type],
+    ref: `${source_type}:123`,
+  };
+}
 
 function mount(element: React.ReactElement) {
   let tree: ReturnType<typeof create> | null = null;
@@ -35,6 +38,11 @@ function mount(element: React.ReactElement) {
   return tree!;
 }
 
+function firstA11yLabel(tree: ReturnType<typeof create>): string {
+  return tree.root.find((n) => !!n.props.accessibilityLabel).props
+    .accessibilityLabel as string;
+}
+
 // ---------------------------------------------------------------------------
 // ProvenanceIcon component tests
 // ---------------------------------------------------------------------------
@@ -44,26 +52,74 @@ describe('ProvenanceIcon', () => {
     mockUseColorScheme.mockReturnValue('light');
   });
 
-  describe.each(PROVENANCE_CASES)('source: $source', ({ source, accessibilityLabel }) => {
-    it(`renders with accessibilityLabel="${accessibilityLabel}"`, () => {
+  describe('source types', () => {
+    it.each<[ItemSourceDTO['source_type'], string]>([
+      ['trusted_nutrition_database', 'USDA'],
+      ['product_database', 'Open Food Facts'],
+      ['user_label', 'Label scan'],
+      ['official_source', 'example.com'],
+    ])('%s: a11y label includes the source label', (sourceType, expectedLabel) => {
       const tree = mount(
-        React.createElement(ProvenanceIcon, { source }),
+        React.createElement(ProvenanceIcon, { source: sourceOf(sourceType) }),
       );
-      const node = tree.root.find(
-        (n) => n.props.accessibilityLabel === accessibilityLabel,
-      );
-      expect(node).toBeTruthy();
+      expect(firstA11yLabel(tree)).toContain(expectedLabel);
     });
 
-    it('has accessibilityRole="image"', () => {
+    it("model_prior: a11y label says 'Rough estimate'", () => {
       const tree = mount(
-        React.createElement(ProvenanceIcon, { source }),
+        React.createElement(ProvenanceIcon, { source: sourceOf('model_prior') }),
       );
-      const node = tree.root.find(
-        (n) => n.props.accessibilityRole === 'image',
-      );
-      expect(node).toBeTruthy();
+      expect(firstA11yLabel(tree)).toBe('Rough estimate');
     });
+
+    it('null source: renders without crash with a truthy a11y label', () => {
+      const tree = mount(React.createElement(ProvenanceIcon, { source: null }));
+      expect(firstA11yLabel(tree)).toBeTruthy();
+    });
+
+    it('undefined source: renders without crash', () => {
+      const tree = mount(React.createElement(ProvenanceIcon, {}));
+      expect(firstA11yLabel(tree)).toBeTruthy();
+    });
+  });
+
+  describe('is_edited flag', () => {
+    it("is_edited overrides the source type with an 'Edited by you' label", () => {
+      const tree = mount(
+        React.createElement(ProvenanceIcon, {
+          source: sourceOf('trusted_nutrition_database'),
+          is_edited: true,
+        }),
+      );
+      expect(firstA11yLabel(tree)).toBe('Edited by you');
+    });
+
+    it('is_edited=false shows the normal source label', () => {
+      const tree = mount(
+        React.createElement(ProvenanceIcon, {
+          source: sourceOf('trusted_nutrition_database'),
+          is_edited: false,
+        }),
+      );
+      expect(firstA11yLabel(tree)).toContain('USDA');
+    });
+
+    it('is_edited with a null source still shows the edited label', () => {
+      const tree = mount(
+        React.createElement(ProvenanceIcon, { source: null, is_edited: true }),
+      );
+      expect(firstA11yLabel(tree)).toBe('Edited by you');
+    });
+  });
+
+  it('has accessibilityRole="image"', () => {
+    const tree = mount(
+      React.createElement(ProvenanceIcon, {
+        source: sourceOf('product_database'),
+      }),
+    );
+    const node = tree.root.find((n) => n.props.accessibilityRole === 'image');
+    expect(node).toBeTruthy();
   });
 });
 
@@ -72,18 +128,17 @@ describe('ProvenanceIcon', () => {
 // ---------------------------------------------------------------------------
 
 describe('provenancePresentation()', () => {
-  it.each(PROVENANCE_CASES)(
-    'returns correct accessibilityLabel for "$source"',
-    ({ source, accessibilityLabel }) => {
-      const result = provenancePresentation(source);
-      expect(result.accessibilityLabel).toBe(accessibilityLabel);
-    },
-  );
-
-  it('returns a non-empty glyph for every source', () => {
-    for (const { source } of PROVENANCE_CASES) {
-      const result = provenancePresentation(source);
-      expect(result.glyph.length).toBeGreaterThan(0);
+  it('returns a non-empty glyph for every source type, null, and edited', () => {
+    const sourceTypes = Object.keys(SOURCE_LABELS) as ItemSourceDTO['source_type'][];
+    for (const sourceType of sourceTypes) {
+      expect(provenancePresentation(sourceOf(sourceType)).glyph.length).toBeGreaterThan(0);
     }
+    expect(provenancePresentation(null).glyph.length).toBeGreaterThan(0);
+    expect(provenancePresentation(sourceOf('user_label'), true).glyph.length).toBeGreaterThan(0);
+  });
+
+  it('is_edited takes precedence over the source type', () => {
+    const result = provenancePresentation(sourceOf('trusted_nutrition_database'), true);
+    expect(result.accessibilityLabel).toBe('Edited by you');
   });
 });

@@ -1,4 +1,5 @@
 import {
+  clusterByTime,
   isOptimisticId,
   optimisticLogEvent,
   reconcileEvents,
@@ -141,5 +142,61 @@ describe("optimisticLogEvent", () => {
       created_at: "2026-06-26T10:00:00Z",
       updated_at: "2026-06-26T10:00:00Z",
     });
+  });
+});
+
+describe("clusterByTime", () => {
+  const WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+
+  it("returns empty when no events", () => {
+    expect(clusterByTime([])).toEqual([]);
+  });
+
+  it("groups events within the grace window into one cluster, newest first", () => {
+    const a = event({ id: "a", created_at: "2026-06-27T08:00:00Z" });
+    const b = event({ id: "b", created_at: "2026-06-27T08:05:00Z" });
+    const c = event({ id: "c", created_at: "2026-06-27T08:09:00Z" });
+    const clusters = clusterByTime([a, b, c], WINDOW_MS);
+    expect(clusters).toHaveLength(1);
+    // Events within a cluster are newest-first (same as the overall sort)
+    expect(clusters[0].events.map((e) => e.id)).toEqual(["c", "b", "a"]);
+  });
+
+  it("splits events outside the window into separate clusters", () => {
+    const a = event({ id: "a", created_at: "2026-06-27T08:00:00Z" });
+    const b = event({ id: "b", created_at: "2026-06-27T07:45:00Z" }); // 15 min earlier
+    const clusters = clusterByTime([a, b], WINDOW_MS);
+    expect(clusters).toHaveLength(2);
+    expect(clusters[0].events[0].id).toBe("a"); // newest cluster first
+    expect(clusters[1].events[0].id).toBe("b");
+  });
+
+  it("clusters are ordered newest first (anchor is newest event)", () => {
+    const a = event({ id: "a", created_at: "2026-06-27T08:00:00Z" });
+    const b = event({ id: "b", created_at: "2026-06-27T07:00:00Z" });
+    const clusters = clusterByTime([a, b], WINDOW_MS);
+    expect(clusters[0].anchorTime).toBe("2026-06-27T08:00:00Z");
+    expect(clusters[1].anchorTime).toBe("2026-06-27T07:00:00Z");
+  });
+
+  it("a single event forms its own cluster", () => {
+    const a = event({ id: "a", created_at: "2026-06-27T08:00:00Z" });
+    const clusters = clusterByTime([a], WINDOW_MS);
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0].events).toHaveLength(1);
+  });
+
+  it("exactly-at-window-boundary event joins the cluster", () => {
+    const a = event({ id: "a", created_at: "2026-06-27T08:10:00Z" });
+    const b = event({ id: "b", created_at: "2026-06-27T08:00:00Z" }); // exactly 10 min earlier
+    const clusters = clusterByTime([a, b], WINDOW_MS);
+    expect(clusters).toHaveLength(1);
+  });
+
+  it("event 1ms past the window starts a new cluster", () => {
+    const a = event({ id: "a", created_at: "2026-06-27T08:10:00.001Z" });
+    const b = event({ id: "b", created_at: "2026-06-27T08:00:00Z" }); // 10min+1ms earlier
+    const clusters = clusterByTime([a, b], WINDOW_MS);
+    expect(clusters).toHaveLength(2);
   });
 });

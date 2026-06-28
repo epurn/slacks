@@ -142,14 +142,14 @@ describe("TodayScreen", () => {
     expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
   });
 
-  it("shows a nonjudgmental empty state when there are no events", async () => {
+  it("shows a calm empty state invite when there are no events", async () => {
     const load = jest.fn().mockResolvedValue([]);
     const tree = mount(
       <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
     );
     await act(async () => {});
 
-    expect(textContent(tree)).toContain("Nothing logged yet");
+    expect(textContent(tree)).toContain("Log your first thing");
   });
 
   it("surfaces a load error with a retry affordance", async () => {
@@ -234,7 +234,7 @@ describe("TodayScreen", () => {
 
       expect(textContent(tree)).toContain("That entry couldn't be saved.");
       // Optimistic entry rolled back to the empty state.
-      expect(textContent(tree)).toContain("Nothing logged yet");
+      expect(textContent(tree)).toContain("Log your first thing");
     } finally {
       jest.useRealTimers();
     }
@@ -270,7 +270,7 @@ function foodItem(
 }
 
 describe("TodayScreen derived items", () => {
-  it("renders editable item controls beneath an event that has derived items", async () => {
+  it("renders item rows (name · kcal) for a completed event with derived items", async () => {
     const load = jest
       .fn()
       .mockResolvedValue([event({ id: "a", raw_text: "Greek yogurt", status: "completed" })]);
@@ -284,44 +284,28 @@ describe("TodayScreen derived items", () => {
     );
     await act(async () => {});
 
-    expect(hasA11yLabel(tree, "Edit Calories")).toBe(true);
+    // The new design shows item rows (name · kcal · source icon) for completed events
     expect(textContent(tree)).toContain("Greek yogurt");
+    expect(textContent(tree)).toContain("150 kcal");
   });
 
-  it("reconciles a confirmed edit into the timeline", async () => {
+  it("shows a pending placeholder row for an event without derived items yet", async () => {
     const load = jest
       .fn()
-      .mockResolvedValue([event({ id: "a", raw_text: "Greek yogurt", status: "completed" })]);
-    const editItem = jest
-      .fn()
-      .mockResolvedValue(foodItem({ calories: 200, calories_estimated: 150 }));
+      .mockResolvedValue([event({ id: "b", raw_text: "Cold brew", status: "pending" })]);
     const tree = mount(
       <TodayScreen
         session={SESSION}
         load={load}
-        editItem={editItem}
-        items={{ a: [foodItem()] }}
+        items={{}}
         useActive={INACTIVE}
       />,
     );
     await act(async () => {});
 
-    press(tree, "Edit Calories");
-    typeInto(tree, "Calories value", "200");
-    await act(async () => {
-      press(tree, "Save Calories");
-    });
-
-    expect(editItem).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: SESSION!.userId }),
-      "food",
-      "item-1",
-      "calories",
-      200,
-    );
-    const content = textContent(tree);
-    expect(content).toContain("Edited");
-    expect(content).toContain("was 150");
+    // Pending events without items show a status placeholder (raw_text + status icon)
+    expect(textContent(tree)).toContain("Cold brew");
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
   });
 });
 
@@ -501,7 +485,7 @@ describe("TodayScreen barcode scanning", () => {
 
     // Optimistic entry rolled back; error surfaced.
     expect(textContent(tree)).toContain("That entry couldn't be saved.");
-    expect(textContent(tree)).toContain("Nothing logged yet");
+    expect(textContent(tree)).toContain("Log your first thing");
   });
 });
 
@@ -626,9 +610,11 @@ describe("TodayScreen daily summary", () => {
     expect(getDailySummary).toHaveBeenCalledWith(
       expect.objectContaining({ userId: SESSION!.userId }),
     );
-    // Figures render as numeric children; assert via the paired a11y labels.
-    expect(hasA11yLabel(tree, "Intake: 1234 calories")).toBe(true);
-    expect(hasA11yLabel(tree, "Target: 2000 calories")).toBe(true);
+    // Hero combined label includes consumed and target.
+    const labels = tree.root
+      .findAll((n) => !!n.props.accessibilityLabel)
+      .map((n) => n.props.accessibilityLabel as string);
+    expect(labels.some((l) => l.includes("1,234 of 2,000 kcal"))).toBe(true);
   });
 
   it("surfaces a summary error string when the fetch fails", async () => {
@@ -666,11 +652,14 @@ describe("TodayScreen daily summary", () => {
     );
     await act(async () => {});
 
-    // The empty-state message and the summary header coexist: the zeroed intake
-    // and the target are visible before the first entry is logged.
-    expect(textContent(tree)).toContain("Nothing logged yet");
-    expect(hasA11yLabel(tree, "Intake: 0 calories")).toBe(true);
-    expect(hasA11yLabel(tree, "Target: 2000 calories")).toBe(true);
+    // The empty-state invite and the hero coexist: full budget is visible
+    // before the first entry is logged.
+    expect(textContent(tree)).toContain("Log your first thing");
+    const labels = tree.root
+      .findAll((n) => !!n.props.accessibilityLabel)
+      .map((n) => n.props.accessibilityLabel as string);
+    expect(labels.some((l) => l.includes("0 of 2,000 kcal"))).toBe(true);
+    expect(labels.some((l) => l.includes("2,000 remaining"))).toBe(true);
   });
 
   describe("with polling", () => {
@@ -706,7 +695,11 @@ describe("TodayScreen daily summary", () => {
       await act(async () => {});
 
       expect(textContent(tree)).not.toContain("We couldn't load your summary");
-      expect(hasA11yLabel(tree, "Intake: 1500 calories")).toBe(true); // recovered figure
+      // Hero label now includes the recovered intake figure
+      const labels = tree.root
+        .findAll((n) => !!n.props.accessibilityLabel)
+        .map((n) => n.props.accessibilityLabel as string);
+      expect(labels.some((l) => l.includes("1,500"))).toBe(true); // recovered figure
     });
   });
 });
@@ -889,6 +882,6 @@ describe("TodayScreen typeahead suggestion bar", () => {
 
     // Entry and synthetic item rolled back; error surfaced.
     expect(textContent(tree)).toContain("That entry couldn't be saved.");
-    expect(textContent(tree)).toContain("Nothing logged yet");
+    expect(textContent(tree)).toContain("Log your first thing");
   });
 });

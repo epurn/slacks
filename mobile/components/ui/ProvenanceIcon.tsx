@@ -1,70 +1,65 @@
 import { Text, StyleSheet } from 'react-native';
+
+import type { ItemSourceDTO } from '@/api/derivedItems';
 import { useTheme } from '@/theme';
 
 /**
- * The set of source / provenance types for a food item's nutritional data.
- * Each key maps to a compact glyph and a VoiceOver label so screen-reader
- * users receive the same provenance signal as sighted users.
+ * Compact glyph + VoiceOver label for a value's provenance, so screen-reader
+ * users receive the same source signal as sighted users.
  */
-export type ProvenanceSource =
-  | 'nl_search'       // Natural-language / USDA database search
-  | 'barcode'         // Barcode scan
-  | 'label_scan'      // Nutrition label OCR capture
-  | 'edited'          // User manually edited
-  | 'saved_food'      // Saved food (typeahead selection)
-  | 'rough_estimate'  // Rough estimate (low-confidence)
-  | 'offline_pending'; // Captured offline; pending resolution
-
-interface ProvenancePresentation {
+export interface ProvenancePresentation {
   readonly glyph: string;
   readonly accessibilityLabel: string;
 }
 
-const PROVENANCE_MAP: Record<ProvenanceSource, ProvenancePresentation> = {
-  nl_search: {
-    glyph: '🔍',
-    accessibilityLabel: 'Source: database search',
-  },
-  barcode: {
-    glyph: '▦',
-    accessibilityLabel: 'Source: barcode scan',
-  },
-  label_scan: {
-    glyph: '📷',
-    accessibilityLabel: 'Source: nutrition label capture',
-  },
-  edited: {
-    glyph: '✎',
-    accessibilityLabel: 'Source: edited by you',
-  },
-  saved_food: {
-    glyph: '🔖',
-    accessibilityLabel: 'Source: saved food',
-  },
-  rough_estimate: {
-    glyph: '≈',
-    accessibilityLabel: 'Source: rough estimate',
-  },
-  offline_pending: {
-    glyph: '⏳',
-    accessibilityLabel: 'Source: offline — pending sync',
-  },
-};
-
-/** Returns the provenance presentation for a given source key. */
-export function provenancePresentation(source: ProvenanceSource): ProvenancePresentation {
-  return PROVENANCE_MAP[source];
+/**
+ * Resolves the provenance presentation for a server item source descriptor
+ * (FTY-092 `ItemSourceDTO`, the evidence-hierarchy `source_type`). A direct
+ * user edit (`is_edited`) is treated as just another provenance and takes
+ * precedence over the underlying source type per the UX spec; a missing source
+ * falls back to an "unknown" glyph rather than crashing.
+ */
+export function provenancePresentation(
+  source: ItemSourceDTO | null | undefined,
+  is_edited = false,
+): ProvenancePresentation {
+  if (is_edited) {
+    return { glyph: '✎', accessibilityLabel: 'Edited by you' };
+  }
+  if (!source) {
+    return { glyph: '·', accessibilityLabel: 'Source unknown' };
+  }
+  switch (source.source_type) {
+    case 'trusted_nutrition_database':
+      return { glyph: '🔍', accessibilityLabel: `Source: ${source.label}` };
+    case 'product_database':
+      return { glyph: '📊', accessibilityLabel: `Source: ${source.label}` };
+    case 'user_label':
+      return { glyph: '📷', accessibilityLabel: `Source: ${source.label}` };
+    case 'official_source':
+      return { glyph: '🌐', accessibilityLabel: `Source: ${source.label}` };
+    case 'model_prior':
+      return { glyph: '≈', accessibilityLabel: 'Rough estimate' };
+  }
 }
 
 /**
- * Compact provenance icon for a food item. Shows a small always-on glyph
- * indicating where the nutritional data came from, with a built-in VoiceOver
- * label. Quiet by default — icon only; detail is one tap away (handled by
- * the parent sheet or item row).
+ * The single, always-on provenance icon for a food item's nutritional data,
+ * keyed off the real server `ItemSourceDTO` (FTY-092). Shows a small glyph for
+ * the source type with a built-in VoiceOver label. Quiet by default — icon
+ * only; the full evidence is one tap away (handled by the parent sheet or item
+ * row). When `is_edited` is true it renders the edited glyph regardless of the
+ * underlying source type.
  */
-export function ProvenanceIcon({ source }: { source: ProvenanceSource }) {
+export function ProvenanceIcon({
+  source,
+  is_edited = false,
+}: {
+  source?: ItemSourceDTO | null;
+  is_edited?: boolean;
+}) {
   const { colors } = useTheme();
-  const { glyph, accessibilityLabel } = PROVENANCE_MAP[source];
+  const { glyph, accessibilityLabel } = provenancePresentation(source, is_edited);
 
   return (
     <Text
