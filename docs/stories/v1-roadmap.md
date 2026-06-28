@@ -225,14 +225,30 @@ serialize back-to-back rather than simultaneously.
 
 | ID | State | Lane | Story | Acceptance |
 | --- | --- | --- | --- | --- |
-| FTY-108 | ready | governance | [Expand Dependabot to app deps](FTY-108-dependabot-app-dependencies.md) | Dependabot covers the backend `uv`/pip, mobile `npm`, and Docker base-image ecosystems (not just github-actions); config-only, no dep bumps in the PR. |
-| FTY-109 | ready_with_notes | infra | [Compose network / ops hardening](FTY-109-compose-network-hardening.md) | Postgres/Redis host ports no longer published (unauth Redis off the LAN); worker gains a healthcheck; long-lived services get a restart policy. Redis auth is a noted follow-up. |
+| FTY-108 | merged | governance | [Expand Dependabot to app deps](FTY-108-dependabot-app-dependencies.md) | Dependabot covers the backend `uv`/pip, mobile `npm`, and Docker base-image ecosystems (not just github-actions); config-only, no dep bumps in the PR. |
+| FTY-109 | merged | infra | [Compose network / ops hardening](FTY-109-compose-network-hardening.md) | Postgres/Redis host ports no longer published (unauth Redis off the LAN); worker gains a healthcheck; long-lived services get a restart policy. Redis auth is a noted follow-up. |
 | FTY-110 | ready_with_notes | estimator | [Evidence clients fail closed](FTY-110-evidence-client-fail-closed.md) | A malformed FDC/OFF payload maps to a clean non-retryable ResponseError → non-match/clarify (not a worker-crashing `ValidationError`); over-long fields truncate; `FdcClient.lookup`/`list_matches` dedup so both inherit the guard. |
 | FTY-111 | ready | backend-core | [Fail closed at profile + registration boundary](FTY-111-backend-input-boundary-fail-closed.md) | Explicit-null on a non-nullable profile field → 422 (was 500); the register check-then-insert race returns 409 on the unique-index loser (was 500). No migration, no contract change. |
 | FTY-112 | ready_with_notes | backend-core | [Baseline security headers + prod docs gating](FTY-112-security-headers-prod-docs.md) | Responses carry nosniff / frame / referrer headers; interactive `/docs`/`/redoc`/`/openapi.json` disabled when `environment == production`. Serializes on backend-core after FTY-111. |
 
-**Audit runners-up (not yet queued — quick but a notch more scope or a small decision):**
-nutrition plausibility bound for kJ/kcal confusion (estimator, S/M); retry LLM 429s with backoff (estimator, M); rate-limit auth endpoints (security-privacy, M); non-root backend container (backend-core `Dockerfile`, S); `/readyz` DB probe (backend-core, S); bound weight-entry `effective_date` (backend-core, S); the timezone-window / active-target / `FdcClient` pure-refactor dedups. The known **activity-level gap** (calculator fixed at 1.2 sedentary vs the Profile design) is confirmed real but M+ (estimator + profile schema + migration) — leave as already-planned, not a quick win.
+**Second wave (queued 2026-06-28 — depth in the two lanes with the most audit findings).**
+These serialize *within* their lane (estimator runs them after FTY-110; backend-core
+after FTY-111/112), but the whole batch runs in parallel with the mobile-core queue.
+
+| ID | State | Lane | Story | Acceptance |
+| --- | --- | --- | --- | --- |
+| FTY-113 | ready_with_notes | estimator | [LLM rate-limit retry + backoff](FTY-113-llm-rate-limit-retry-backoff.md) | 429/408/425 reclassify as transient and retry with jittered backoff (injectable sleep); persistent rate-limit still fails closed; non-retryable 4xx unchanged. |
+| FTY-114 | ready_with_notes | estimator | [LLM provider output hardening](FTY-114-llm-provider-output-hardening.md) | Transport response read is size-capped (parity with `hardened_fetch`); Claude Code stdout tolerates a prose line / ```json fences but rejects trailing junk. |
+| FTY-115 | ready_with_notes | estimator | [Nutrition plausibility bound](FTY-115-nutrition-plausibility-bound.md) | Impossible per-100g facts (energy > ~900 kcal, negative macros — the OFF kJ-as-kcal case) fall through to non-match/clarify, not a stored absurd total. Coordinates with FTY-110 (same FDC/OFF mapping). |
+| FTY-116 | ready | backend-core | [Non-root backend container](FTY-116-non-root-backend-container.md) | `backend/Dockerfile` runs api/worker/migrate as a non-root user (chowned app + venv); build + compose-up stay healthy. |
+| FTY-117 | ready | backend-core | [`/readyz` DB readiness probe](FTY-117-readyz-db-readiness-probe.md) | New `/readyz` runs `SELECT 1` → 200 ready / 503 when the DB is down (no 500, no detail leak); `/healthz` liveness unchanged; queue check deferred. |
+| FTY-118 | ready_with_notes | backend-core | [Auth endpoint rate-limit](FTY-118-auth-endpoint-rate-limit.md) | `/login` + `/register` per-IP (and per-account) Redis-backed throttle → 429 + Retry-After; tuned not to break the mobile retry/reconnect path. |
+
+**Still-unqueued runners-up (lowest urgency):** bound weight-entry `effective_date` against typos
+(backend-core, S); the timezone-window / active-target / `FdcClient` pure-refactor dedups
+(backend-core + estimator, S each — drift-reduction, no behaviour change). The known
+**activity-level gap** (calculator fixed at 1.2 sedentary vs the Profile design) is confirmed
+real but M+ (estimator + profile schema + migration) — leave as already-planned, not a quick win.
 
 ## Story Promotion Rule
 
