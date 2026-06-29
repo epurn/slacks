@@ -26,7 +26,7 @@ sensitive derived body data and are never logged — only ids appear in diagnost
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import NamedTuple
 
 from sqlalchemy import select
@@ -49,7 +49,7 @@ from app.services.targets import (
     build_calculator_input,
     compute_daily_target,
 )
-from app.timeutils import user_timezone
+from app.timeutils import current_day
 
 #: Fixed planning horizon, in weeks, over which a pace (a rate) is projected into a
 #: destination weight and date. Onboarding captures pace but not a goal weight, so
@@ -180,8 +180,7 @@ def create_goal_with_target(
             "no start weight: the profile has no stored weight and none was provided"
         )
 
-    tz = user_timezone(session, owner_id)
-    today = datetime.now(tz).date()
+    today = current_day(session, owner_id)
     start_date = request.start_date if request.start_date is not None else today
 
     trajectory = derive_trajectory(request.direction, request.pace, start_weight_kg, start_date)

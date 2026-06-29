@@ -45,7 +45,7 @@ from app.schemas.targets import (
     TargetOverrideRequest,
     TargetReadModel,
 )
-from app.timeutils import user_timezone
+from app.timeutils import current_day
 
 
 class GoalForbidden(Exception):
@@ -340,11 +340,10 @@ def _resolve_day(session: Session, owner_id: uuid.UUID, for_date: date | None) -
 
     if for_date is not None:
         return for_date
-    tz = user_timezone(session, owner_id)
-    return datetime.now(tz).date()
+    return current_day(session, owner_id)
 
 
-def _resolve_active_target_row(
+def resolve_active_target_row(
     session: Session, owner_id: uuid.UUID, for_date: date
 ) -> DailyTarget | None:
     """Load the active goal's target row for ``owner_id`` on ``for_date``, or None.
@@ -378,7 +377,7 @@ def _resolve_active_target(session: Session, owner_id: uuid.UUID, for_date: date
     instead.
     """
 
-    target = _resolve_active_target_row(session, owner_id, for_date)
+    target = resolve_active_target_row(session, owner_id, for_date)
     if target is None:
         raise TargetNotFound("no active target for this user and day")
     return target
@@ -418,7 +417,7 @@ def _resolve_or_materialise_target(
     (``404``), indistinguishable from a cross-user attempt — no existence oracle.
     """
 
-    target = _resolve_active_target_row(session, owner_id, for_date)
+    target = resolve_active_target_row(session, owner_id, for_date)
     if target is not None:
         return target
     goal = _active_goal_covering(session, owner_id, for_date)

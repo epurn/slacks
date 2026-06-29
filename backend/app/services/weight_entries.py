@@ -19,8 +19,7 @@ This module owns two contracts:
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import date, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -28,6 +27,7 @@ from sqlalchemy.orm import Session
 from app.enums import UnitsPreference
 from app.models.identity import User, UserProfile
 from app.models.weight_entries import WeightEntry
+from app.timeutils import current_day
 
 #: Canonical NIST conversion factor: 1 international avoirdupois pound in kg.
 _LB_TO_KG: float = 0.45359237
@@ -103,8 +103,7 @@ def create_entry(
     """
 
     _authorize(owner_id, current_user)
-    tz = _user_timezone(session, owner_id)
-    today = datetime.now(tz).date()
+    today = current_day(session, owner_id)
     if effective_date < _DATE_FLOOR:
         raise InvalidWeightDate(
             f"effective_date must be on or after {_DATE_FLOOR}; got {effective_date}"
@@ -193,17 +192,3 @@ def _user_units_preference(session: Session, owner_id: uuid.UUID) -> str:
         select(UserProfile.units_preference).where(UserProfile.user_id == owner_id)
     ).one_or_none()
     return pref or UnitsPreference.METRIC
-
-
-def _user_timezone(session: Session, owner_id: uuid.UUID) -> ZoneInfo:
-    """Resolve the owner's profile timezone, falling back to UTC.
-
-    Mirrors the same resolver used by daily_summary and targets so "today" is
-    always interpreted in the user's local calendar. The UTC fallback keeps
-    creates robust if a profile is somehow absent.
-    """
-
-    tz_name = session.scalars(
-        select(UserProfile.timezone).where(UserProfile.user_id == owner_id)
-    ).one_or_none()
-    return ZoneInfo(tz_name or "UTC")

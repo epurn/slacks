@@ -50,3 +50,16 @@ def next_day(day: date) -> date:
     """Return the calendar day after ``day``."""
 
     return date.fromordinal(day.toordinal() + 1)
+
+
+def current_day(session: Session, owner_id: uuid.UUID) -> date:
+    """Return today in the owner's profile timezone, falling back to UTC.
+
+    This is the shared resolver for the "what day is it in the user's calendar"
+    concept, used across weight entries, goals, targets, daily summaries, and
+    log events. The timezone is resolved once and used to compute the current
+    date in that zone.
+    """
+
+    tz = user_timezone(session, owner_id)
+    return datetime.now(tz).date()

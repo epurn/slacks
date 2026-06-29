@@ -22,7 +22,7 @@ This module owns two contracts:
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 from app.enums import LogEventStatus
 from app.models.identity import User
 from app.models.log_events import LogEvent
-from app.timeutils import day_bounds_utc, user_timezone
+from app.timeutils import current_day, day_bounds_utc, user_timezone
 
 #: The log-event status state machine: each status maps to the set of statuses
 #: it may legally transition to. Terminal statuses map to an empty set. This is
@@ -157,9 +157,9 @@ def list_events_for_day(
     """
 
     _authorize(owner_id, current_user)
-    tz = user_timezone(session, owner_id)
     if day is None:
-        day = datetime.now(tz).date()
+        day = current_day(session, owner_id)
+    tz = user_timezone(session, owner_id)
     start_utc, end_utc = day_bounds_utc(day, tz)
 
     return list(
