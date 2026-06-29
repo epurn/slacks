@@ -20,9 +20,13 @@ This module owns three contracts:
    log event's ``created_at`` — the field ``log-events.md`` already indexes and
    resolves by day for the Today timeline.
 
-4. **No-target representation.** When the user has no active goal or no stored
-   ``daily_targets`` row for the requested day, ``target`` is ``None`` (explicit
-   null) rather than a zero — a zero target and no target are distinct.
+4. **No-target representation.** The active-goal target is carried forward within
+   the goal's horizon (a day inside the horizon reads the most recent stored row,
+   since the daily target is constant across the horizon — see
+   ``targets.resolve_carried_target_row``). ``target`` is ``None`` (explicit null,
+   never a zero — a zero target and no target are distinct) only when the user has
+   no active goal, the day predates the goal's first stored row, or the day is past
+   the goal's ``target_date``.
 
 5. **Rounding.** Final sums are rounded to 0.1 (one decimal place) in canonical
    units (kcal, grams), matching the FTY-043/FTY-044 serving-math precision.
@@ -51,7 +55,7 @@ from app.schemas.daily_summary import (
     DailySummaryIntakeDTO,
 )
 from app.schemas.targets import TargetReadModel
-from app.services.targets import _resolve_active_target_row, build_target_read_model
+from app.services.targets import build_target_read_model, resolve_carried_target_row
 from app.timeutils import day_bounds_utc, next_day, user_timezone
 
 #: Rounding precision for summed totals — matches FTY-043/044 serving-math (0.1).
@@ -340,14 +344,17 @@ def _resolve_target(
 ) -> TargetReadModel | None:
     """Return the calorie + macro target read-model for ``owner_id`` on ``day``.
 
-    Looks up the ``daily_targets`` row for the user's active goal on ``day`` and
-    projects it to the read-model (effective / derived / ``derived | user`` source
-    per target, FTY-095). Returns ``None`` when no active goal exists or no target
-    row has been stored for the requested day — explicit null, not zero, to
+    Resolves the user's active-goal target for ``day``, **carried forward** within
+    the goal's horizon (the daily target is constant across the horizon but a row is
+    only stored on goal-creation day, so any in-horizon day reads the most recent
+    stored row — see :func:`resolve_carried_target_row`), and projects it to the
+    read-model (effective / derived / ``derived | user`` source per target,
+    FTY-095). Returns ``None`` when there is no active goal, the day predates the
+    goal's first row, or the day is past the horizon — explicit null, not zero, to
     distinguish the two states.
     """
 
-    target = _resolve_active_target_row(session, owner_id, day)
+    target = resolve_carried_target_row(session, owner_id, day)
     if target is None:
         return None
     return build_target_read_model(target)
@@ -361,21 +368,44 @@ def _resolve_targets_by_day(
 ) -> dict[date, TargetReadModel]:
     """Map ``for_date`` → target read-model for the active goal across a range.
 
-    One query for every ``daily_targets`` row in ``[start, end]``; days without a
-    stored row are simply absent (the caller renders them as ``None``), preserving
-    the no-target-is-not-zero distinction the single-day path makes.
+    The active-goal target is **carried forward** within the goal's horizon, so a
+    day inside ``[start, end]`` takes the most recent stored row at or before it
+    (the daily target is constant across the horizon but a row is only stored on
+    goal-creation day). Implemented as one query (every active-goal row with
+    ``for_date <= end``, plus the goal's ``target_date`` for the horizon bound) and
+    an in-Python forward-fill — no per-day round trips, matching the FTY-123
+    performance contract. Days before the goal's first stored row and days past the
+    horizon are simply absent (the caller renders them ``None``), preserving the
+    no-target-is-not-zero distinction the single-day path makes.
     """
 
-    targets = session.scalars(
-        select(DailyTarget)
+    rows = session.execute(
+        select(DailyTarget, Goal.target_date)
         .join(Goal, DailyTarget.goal_id == Goal.id)
         .where(
             DailyTarget.user_id == owner_id,
             Goal.user_id == owner_id,
             Goal.is_active.is_(True),
-            DailyTarget.for_date >= start,
             DailyTarget.for_date <= end,
         )
+        .order_by(DailyTarget.for_date.asc())
     ).all()
+    if not rows:
+        return {}
 
-    return {target.for_date: build_target_read_model(target) for target in targets}
+    horizon_end = max(target_date for _, target_date in rows)
+    targets = [target for target, _ in rows]
+
+    result: dict[date, TargetReadModel] = {}
+    carried: TargetReadModel | None = None
+    idx = 0
+    day = start
+    while day <= end:
+        # Advance over every stored row at or before this day; the last one carries.
+        while idx < len(targets) and targets[idx].for_date <= day:
+            carried = build_target_read_model(targets[idx])
+            idx += 1
+        if carried is not None and day <= horizon_end:
+            result[day] = carried
+        day = next_day(day)
+    return result

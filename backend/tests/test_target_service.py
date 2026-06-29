@@ -22,8 +22,10 @@ from app.models.targets import DailyTarget, Goal
 from app.services.targets import (
     GoalForbidden,
     IncompleteProfileError,
+    TargetNotFound,
     compute_daily_target,
     derive_age_years,
+    get_active_target,
 )
 
 
@@ -148,3 +150,58 @@ def test_incomplete_profile_is_rejected(session: Session) -> None:
     goal = _make_goal(session, user)
     with pytest.raises(IncompleteProfileError):
         compute_daily_target(session, user.id, goal.id, user, for_date=date(2026, 1, 1))
+
+
+# ---------------------------------------------------------------------------
+# Carry-forward reads (FTY-127): a target materialised only on goal-creation day
+# must still resolve for every later in-horizon day — otherwise GET /target 404s
+# the day after onboarding and the mobile gate re-onboards the returning user
+# (FTY-103). The daily target is constant across the horizon, so the most recent
+# stored row carries forward.
+# ---------------------------------------------------------------------------
+
+
+def test_get_active_target_carries_forward_to_a_later_in_horizon_day(session: Session) -> None:
+    """A row stored on creation day resolves for a later in-horizon day (the
+    returning-user case): GET /target no longer 404s the day after onboarding."""
+
+    user = _make_user_with_profile(session)
+    goal = _make_goal(session, user)  # horizon 2026-01-01 → 2026-04-01
+    created = compute_daily_target(session, user.id, goal.id, user, for_date=date(2026, 1, 1))
+
+    # No row was ever stored for 2026-02-01, but it is inside the horizon.
+    carried = get_active_target(session, user.id, user, for_date=date(2026, 2, 1))
+
+    assert carried.id == created.id
+    assert carried.daily_calorie_target_kcal == created.daily_calorie_target_kcal
+
+
+def test_get_active_target_before_first_row_is_not_found(session: Session) -> None:
+    """A day earlier than the first stored row carries nothing → fail-closed 404."""
+
+    user = _make_user_with_profile(session)
+    goal = _make_goal(session, user)
+    compute_daily_target(session, user.id, goal.id, user, for_date=date(2026, 2, 1))
+
+    with pytest.raises(TargetNotFound):
+        get_active_target(session, user.id, user, for_date=date(2026, 1, 15))
+
+
+def test_get_active_target_past_horizon_is_not_found(session: Session) -> None:
+    """A day past the goal's target_date is not carried — the trajectory is done,
+    so the user is steered to a new goal rather than shown a stale deficit (404)."""
+
+    user = _make_user_with_profile(session)
+    goal = _make_goal(session, user)  # target_date 2026-04-01
+    compute_daily_target(session, user.id, goal.id, user, for_date=date(2026, 1, 1))
+
+    with pytest.raises(TargetNotFound):
+        get_active_target(session, user.id, user, for_date=date(2026, 4, 2))
+
+
+def test_get_active_target_no_goal_is_not_found(session: Session) -> None:
+    """No active goal → fail-closed 404 (indistinguishable from cross-user)."""
+
+    user = _make_user_with_profile(session)  # no goal/target seeded
+    with pytest.raises(TargetNotFound):
+        get_active_target(session, user.id, user, for_date=date(2026, 2, 1))

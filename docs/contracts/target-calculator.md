@@ -28,8 +28,9 @@ estimator / contracts / backend-core lane (`backend/app/estimator/`,
 
 ## Version
 
-3 (introduced in FTY-022; macro targets added in FTY-094; manual calorie/macro
-override + reset with derived-vs-overridden provenance added in FTY-095).
+4 (introduced in FTY-022; macro targets added in FTY-094; manual calorie/macro
+override + reset with derived-vs-overridden provenance added in FTY-095;
+read-path carry-forward within the goal horizon added in FTY-127/FTY-103).
 
 ## Inputs
 
@@ -208,6 +209,35 @@ target **read-model** exposes, per target (calorie and each macro):
 
 This read-model is the shape `daily-summary.md`'s `target` component and the
 owner-scoped target endpoint surface.
+
+### Target resolution: carry-forward reads vs exact-date writes (FTY-127/FTY-103)
+
+A `daily_targets` row is materialised only on **goal-creation day** (and, going
+forward, whenever an override write materialises one). The daily target is
+**constant across a goal's horizon** — the calculator derives it from the goal's
+fixed `(start_weight, target_weight, start_date, target_date)` snapshot and
+`for_date` enters only through whole-year age — so the stored value is valid for
+every day in the horizon. Resolution therefore differs between reads and writes:
+
+- **Reads carry forward.** `GET /api/users/{id}/target` (and `daily-summary.md`'s
+  `target` component, single and range) resolve the **most recent stored row at or
+  before the requested day**, while that day is on or before the goal's
+  `target_date`. So the target is present for **every in-horizon day**, not just the
+  creation day — this is what keeps a returning user's target (and the onboarding
+  completeness probe that reads this endpoint) from vanishing the day after
+  onboarding. The endpoint returns `404` (and daily-summary returns `null`) only
+  when there is no active goal, the day predates the goal's first stored row, or the
+  day is **past** `target_date` (the planned trajectory is complete; the user is
+  steered to set a new goal rather than shown a stale deficit). Cross-user access is
+  the same `404` — no existence oracle.
+- **Override writes resolve by exact date.** `set`/`reset` (below) operate on the
+  concrete `daily_targets` row for the requested day, because an override must be
+  persisted on a real row. **Known limitation (tracked in FTY-127):** since rows are
+  only materialised on creation day, an override write on a *non-creation* in-horizon
+  day currently returns `404` (`TargetNotFound`) — there is no row to land on. The
+  residual FTY-127 work materialises the row on demand (via the calculator,
+  carrying any in-force override forward) so override-on-a-later-day succeeds. The
+  read carry-forward above is unaffected.
 
 ### Set / reset semantics
 
