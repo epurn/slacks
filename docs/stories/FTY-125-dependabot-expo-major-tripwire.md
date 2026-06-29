@@ -1,6 +1,6 @@
 ---
 id: FTY-125
-state: ready
+state: merged
 primary_lane: governance
 touched_lanes: []
 risk: low

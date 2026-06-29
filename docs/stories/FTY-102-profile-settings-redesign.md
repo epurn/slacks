@@ -1,6 +1,6 @@
 ---
 id: FTY-102
-state: ready
+state: merged
 primary_lane: mobile-core
 touched_lanes: []
 risk: medium

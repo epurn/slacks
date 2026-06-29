@@ -1,6 +1,6 @@
 ---
 id: FTY-119
-state: ready_with_notes
+state: merged
 primary_lane: backend-core
 touched_lanes:
   - contracts

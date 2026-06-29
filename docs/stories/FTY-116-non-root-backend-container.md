@@ -1,6 +1,6 @@
 ---
 id: FTY-116
-state: ready
+state: merged
 primary_lane: backend-core
 touched_lanes:
   - security-privacy

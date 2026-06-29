@@ -1,6 +1,6 @@
 ---
 id: FTY-107
-state: ready_with_notes
+state: merged
 primary_lane: mobile-core
 touched_lanes:
   - security-privacy

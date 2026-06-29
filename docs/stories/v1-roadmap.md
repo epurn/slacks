@@ -149,7 +149,12 @@ prep) already merged; note its CHANGELOG/README will need a follow-up touch to
 cover the provider-access features (FTY-088 includes the docs/CHANGELOG update).
 **The v1 tag now ALSO gates on Milestone 10 — the UX redesign tranche
 (FTY-090–107)** — per a user decision (2026-06-28): v1 ships already designed, not
-as scaffolding. The tag/release/deploy itself is a human step.
+as scaffolding. **And it ALSO gates on the run-2 release-audit fixes (2026-06-29):
+the blocker FTY-127 + the Tier-A release-readiness stories FTY-128/129/130, with
+the Tier-B/C hardening + cleanup (FTY-131–142) pulled in by the clean-break
+decision — see "Release Audit Fixes — Run 2" below.** FTY-103 (onboarding) is the
+last Milestone-10 story still open, held as draft pending FTY-127. The
+tag/release/deploy itself is a human step.
 
 | ID | State | Lane | Story | Acceptance |
 | --- | --- | --- | --- | --- |
@@ -177,7 +182,7 @@ Evidence-backed by default) are auto-enforced.
 | FTY-095 | merged | backend-core | [Target manual override](FTY-095-target-manual-override.md) | Calorie/macro override + reset + provenance on `daily_targets`. Dep FTY-094 (serialize the migration). |
 | FTY-105 | merged | backend-core | [Macro targets in daily-summary](FTY-105-macro-targets-daily-summary.md) | Surface macro targets + provenance through the read-model. Dep FTY-094 + FTY-095. |
 | FTY-096 | merged | backend-core | [Offline submit + pending-unparsed](FTY-096-offline-submit-pending-unparsed.md) | Client idempotency-key dedup on log-event create. |
-| FTY-106 | ready_with_notes | backend-core | [Goals + target-reveal endpoint](FTY-106-goals-target-reveal-endpoint.md) | New HTTP route: goal from direction+pace → computed target + provenance (FTY-022 had no route). |
+| FTY-106 | merged | backend-core | [Goals + target-reveal endpoint](FTY-106-goals-target-reveal-endpoint.md) | New HTTP route: goal from direction+pace → computed target + provenance (FTY-022 had no route). |
 | FTY-097 | merged | mobile-core | [Mobile design system](FTY-097-mobile-design-system.md) | Tokens, light/dark charcoal, display+SF type, materials, motion/haptics, 3-tab shell. Every screen depends on this. |
 
 **Mobile screen rebuilds (depend on FTY-097 + their backend foundations):**
@@ -188,17 +193,17 @@ Evidence-backed by default) are auto-enforced.
 | FTY-099 | merged | mobile-core | [Log page redesign](FTY-099-log-page-redesign.md) | Keyboard-up composer, typeahead, capture affordances, in-place skeleton. Dep FTY-097. |
 | FTY-100 | merged | mobile-core | [Correction sheet](FTY-100-correction-sheet.md) | Portion + change-match + override + clarify + evidence. Dep FTY-097 + FTY-092 + FTY-093. |
 | FTY-101 | merged | mobile-core | [Trends + weigh-ins](FTY-101-trends-redesign-weighin-reminders.md) | Smoothed weight trend + adherence; weekly due-only reminder. Dep FTY-097. |
-| FTY-102 | ready | mobile-core | [Profile / Settings](FTY-102-profile-settings-redesign.md) | Control panel; target/macro provenance + override. Dep FTY-097 + FTY-094 + FTY-095 (+ FTY-105). |
+| FTY-102 | merged | mobile-core | [Profile / Settings](FTY-102-profile-settings-redesign.md) | Control panel; target/macro provenance + override. Dep FTY-097 + FTY-094 + FTY-095 (+ FTY-105). |
 | FTY-103 | ready_with_notes | mobile-core | [Onboarding redesign](FTY-103-onboarding-redesign.md) | Goal-led 3-step + target reveal. Dep FTY-097 + FTY-091 + FTY-106. |
-| FTY-104 | ready | mobile-core | [Offline-queue logging](FTY-104-offline-queue-logging-mobile.md) | Local outbox + connection banner + reconnect sync. Dep FTY-096 + FTY-097 + FTY-099. |
+| FTY-104 | merged | mobile-core | [Offline-queue logging](FTY-104-offline-queue-logging-mobile.md) | Local outbox + connection banner + reconnect sync. Dep FTY-096 + FTY-097 + FTY-099. |
 
 **Self-host sign-in & connection (mobile):**
 
 | ID | State | Lane | Story | Notes |
 | --- | --- | --- | --- | --- |
-| FTY-090 | ready | mobile-core | [Session token store](FTY-090-mobile-session-token-store.md) | Persist/hydrate/clear `{serverUrl, token, userId}`; replaces the dogfood shim. |
-| FTY-107 | ready_with_notes | mobile-core | [Connect to your server](FTY-107-mobile-connect-to-server.md) | Server-URL entry + QR (URL only) + reachability probe. Dep FTY-097. |
-| FTY-091 | ready_with_notes | mobile-core | [Sign-in / create-account](FTY-091-mobile-signin-create-account.md) | Self-host-first auth + signed-out gating. Dep FTY-090 + FTY-107 + FTY-097. |
+| FTY-090 | merged | mobile-core | [Session token store](FTY-090-mobile-session-token-store.md) | Persist/hydrate/clear `{serverUrl, token, userId}`; replaces the dogfood shim. |
+| FTY-107 | merged | mobile-core | [Connect to your server](FTY-107-mobile-connect-to-server.md) | Server-URL entry + QR (URL only) + reachability probe. Dep FTY-097. |
+| FTY-091 | merged | mobile-core | [Sign-in / create-account](FTY-091-mobile-signin-create-account.md) | Self-host-first auth + signed-out gating. Dep FTY-090 + FTY-107 + FTY-097. |
 
 **Open reconciliation notes (non-blocking, resolve when the stories are touched):**
 
@@ -238,19 +243,19 @@ after FTY-111/112), but the whole batch runs in parallel with the mobile-core qu
 | ID | State | Lane | Story | Acceptance |
 | --- | --- | --- | --- | --- |
 | FTY-113 | merged | estimator | [LLM rate-limit retry + backoff](FTY-113-llm-rate-limit-retry-backoff.md) | 429/408/425 reclassify as transient and retry with jittered backoff (injectable sleep); persistent rate-limit still fails closed; non-retryable 4xx unchanged. |
-| FTY-114 | ready_with_notes | estimator | [LLM provider output hardening](FTY-114-llm-provider-output-hardening.md) | Transport response read is size-capped (parity with `hardened_fetch`); Claude Code stdout tolerates a prose line / ```json fences but rejects trailing junk. |
-| FTY-115 | ready_with_notes | estimator | [Nutrition plausibility bound](FTY-115-nutrition-plausibility-bound.md) | Impossible per-100g facts (energy > ~900 kcal, negative macros — the OFF kJ-as-kcal case) fall through to non-match/clarify, not a stored absurd total. Coordinates with FTY-110 (same FDC/OFF mapping). |
-| FTY-116 | ready | backend-core | [Non-root backend container](FTY-116-non-root-backend-container.md) | `backend/Dockerfile` runs api/worker/migrate as a non-root user (chowned app + venv); build + compose-up stay healthy. |
-| FTY-117 | ready | backend-core | [`/readyz` DB readiness probe](FTY-117-readyz-db-readiness-probe.md) | New `/readyz` runs `SELECT 1` → 200 ready / 503 when the DB is down (no 500, no detail leak); `/healthz` liveness unchanged; queue check deferred. |
-| FTY-118 | ready_with_notes | backend-core | [Auth endpoint rate-limit](FTY-118-auth-endpoint-rate-limit.md) | `/login` + `/register` per-IP (and per-account) Redis-backed throttle → 429 + Retry-After; tuned not to break the mobile retry/reconnect path. |
+| FTY-114 | merged | estimator | [LLM provider output hardening](FTY-114-llm-provider-output-hardening.md) | Transport response read is size-capped (parity with `hardened_fetch`); Claude Code stdout tolerates a prose line / ```json fences but rejects trailing junk. |
+| FTY-115 | merged | estimator | [Nutrition plausibility bound](FTY-115-nutrition-plausibility-bound.md) | Impossible per-100g facts (energy > ~900 kcal, negative macros — the OFF kJ-as-kcal case) fall through to non-match/clarify, not a stored absurd total. Coordinates with FTY-110 (same FDC/OFF mapping). |
+| FTY-116 | merged | backend-core | [Non-root backend container](FTY-116-non-root-backend-container.md) | `backend/Dockerfile` runs api/worker/migrate as a non-root user (chowned app + venv); build + compose-up stay healthy. |
+| FTY-117 | merged | backend-core | [`/readyz` DB readiness probe](FTY-117-readyz-db-readiness-probe.md) | New `/readyz` runs `SELECT 1` → 200 ready / 503 when the DB is down (no 500, no detail leak); `/healthz` liveness unchanged; queue check deferred. |
+| FTY-118 | merged | backend-core | [Auth endpoint rate-limit](FTY-118-auth-endpoint-rate-limit.md) | `/login` + `/register` per-IP (and per-account) Redis-backed throttle → 429 + Retry-After; tuned not to break the mobile retry/reconnect path. |
 
 **Third wave (queued 2026-06-28 — the remaining backend-core runners-up; empties the
 audit's quick-win backlog).** Both backend-core, serialize behind the earlier backend-core stories.
 
 | ID | State | Lane | Story | Acceptance |
 | --- | --- | --- | --- | --- |
-| FTY-119 | ready_with_notes | backend-core | [Weight-entry date bound](FTY-119-weight-entry-date-bound.md) | A future-dated (and absurdly-old) `effective_date` is rejected 422 instead of stored and skewing the FTY-074 trend chart; tz-aware "today" with a small slack. |
-| FTY-120 | ready | backend-core | [Consolidate day-window + active-target helpers](FTY-120-consolidate-day-window-target-helpers.md) | Pure refactor: one `timeutils` home for the day/tz-window helpers (3 copies → 1) and one active-target resolver; existing service tests pass unchanged. **Preserves an intentional divergence** the author found between the two active-target copies — not a blind merge. |
+| FTY-119 | merged | backend-core | [Weight-entry date bound](FTY-119-weight-entry-date-bound.md) | A future-dated (and absurdly-old) `effective_date` is rejected 422 instead of stored and skewing the FTY-074 trend chart; tz-aware "today" with a small slack. |
+| FTY-120 | merged | backend-core | [Consolidate day-window + active-target helpers](FTY-120-consolidate-day-window-target-helpers.md) | Pure refactor: one `timeutils` home for the day/tz-window helpers (3 copies → 1) and one active-target resolver; existing service tests pass unchanged. **Preserves an intentional divergence** the author found between the two active-target copies — not a blind merge. |
 
 **Not a quick win (left as already-planned):** the **activity-level gap** — the calculator is
 fixed at 1.2 sedentary while the Profile design assumes an activity level — is confirmed real but
@@ -278,10 +283,10 @@ joined by that contract).
 | ID | State | Lane | Story | Acceptance |
 | --- | --- | --- | --- | --- |
 | FTY-121 | merged | governance | [Dependabot ignores SDK-governed mobile deps](FTY-121-dependabot-expo-sdk-ignores.md) | The `/mobile` npm entry ignores SDK-pinned packages (expo/react/react-native/jest/jest-expo/@types/jest, all updates) and major bumps of eslint/eslint-plugin-*/@typescript-eslint/*, so Dependabot stops opening doomed PRs; config-only, no dep bumps. |
-| FTY-123 | ready | backend-core | [Daily-summary range read endpoint](FTY-123-daily-summary-range-endpoint.md) | New `GET …/daily-summaries?start&end` returns a dense ascending array of the existing `DailySummaryDTO` (one per day) in one call; reuses FTY-071 per-day math; bounded span (422 over max/bad range); owner-scoped fail-closed 404; contract updated; no migration. |
-| FTY-124 | ready | mobile-core | [Trends adherence consumes the range read](FTY-124-mobile-trends-range-read.md) | Trends adherence strip fetches the range in one request via FTY-123 instead of N per-day calls (fixes PR #71's fan-out); adherence math + null-target exclusion unchanged. Dep FTY-123. |
+| FTY-123 | merged | backend-core | [Daily-summary range read endpoint](FTY-123-daily-summary-range-endpoint.md) | New `GET …/daily-summaries?start&end` returns a dense ascending array of the existing `DailySummaryDTO` (one per day) in one call; reuses FTY-071 per-day math; bounded span (422 over max/bad range); owner-scoped fail-closed 404; contract updated; no migration. |
+| FTY-124 | merged | mobile-core | [Trends adherence consumes the range read](FTY-124-mobile-trends-range-read.md) | Trends adherence strip fetches the range in one request via FTY-123 instead of N per-day calls (fixes PR #71's fan-out); adherence math + null-target exclusion unchanged. Dep FTY-123. |
 | FTY-125 | merged | governance | [Dependabot surfaces a new Expo SDK as the upgrade tripwire](FTY-125-dependabot-expo-major-tripwire.md) | Narrows FTY-121's `expo` ignore to patch/minor only, so a **major** `expo` bump (= new SDK release) surfaces as one PR — the deliberate "go upgrade" signal — while in-SDK churn stays quiet. Config-only. |
-| FTY-126 | ready | governance | [Dependabot ignores the Expo-managed surface by wildcard](FTY-126-dependabot-expo-managed-wildcards.md) | Replaces the leak-prone enumerated ignores with prefix wildcards (`expo-*`, `@expo/*`, `@react-native/*`, `react-native-*`, `@types/react*`, `eslint-config-expo`) so current + future SDK-pinned packages stop opening doomed PRs (the #83 `@react-native/jest-preset` gap); keeps the `expo` tripwire and `typescript` flowing. Config-only. |
+| FTY-126 | merged | governance | [Dependabot ignores the Expo-managed surface by wildcard](FTY-126-dependabot-expo-managed-wildcards.md) | Replaces the leak-prone enumerated ignores with prefix wildcards (`expo-*`, `@expo/*`, `@react-native/*`, `react-native-*`, `@types/react*`, `eslint-config-expo`) so current + future SDK-pinned packages stop opening doomed PRs (the #83 `@react-native/jest-preset` gap); keeps the `expo` tripwire and `typescript` flowing. Config-only. |
 
 > **Backlog note — Expo SDK upgrade (not a tracked story).** The coordinated SDK
 > upgrade was scoped as FTY-122 and **dropped on 2026-06-28**: the app is already
@@ -294,6 +299,75 @@ joined by that contract).
 > a clean `mobile/package-lock.json` (no ERESOLVE), apply the minimal forced
 > migrations, and get mobile lint + jest + typecheck green. Promote to a real
 > story at that point if the work warrants tracking.
+
+## Release Audit Fixes — Run 2 (Runbook Phase 1, 2026-06-29)
+
+The **second** full-system audit (the first was 2026-06-27; a *lot* merged since —
+Milestone 10 UX, provider access FTY-087/088/089, and the FTY-108–126 hardening +
+queue-health tranches). Six read-only dimension sweeps (correctness / security-
+privacy / contracts / reuse / tests / docs). Headline: the tree is in strong shape
+— **security 0-blocking, tests 0-blocking** with excellent adversarial coverage.
+One real functional **release blocker** (FTY-127) plus release-notes/contract/doc
+accuracy gaps; everything else is hardening/polish. Per a user decision
+(clean-break, no pre-v1 debt) **all** findings were decomposed into stories, not
+just the blockers. All are single-boundary, `approved_dependencies: []` unless
+noted, and drain through the steward in parallel by lane.
+
+**Tier A — release-readiness (gate the v1 tag):**
+
+| ID | State | Lane | Story | Acceptance |
+| --- | --- | --- | --- | --- |
+| FTY-127 | ready_with_notes | backend-core | [Daily target materialization](FTY-127-daily-target-materialization.md) | **The blocker.** Target resolves (carry-forward on reads, materialise on override writes) for every day in the active goal's horizon — not just creation day; override/reset work on a later day; 3 contracts updated; fail-closed preserved. Unblocks FTY-103. |
+| FTY-128 | ready | governance | [CHANGELOG to v1.0.0 current](FTY-128-changelog-v1-current.md) | CHANGELOG covers the hardening tranche, goals/target-reveal, daily-summary range, and all of Milestone 10. Owns `CHANGELOG.md`. |
+| FTY-129 | ready | contracts | [target-calculator HTTP route block](FTY-129-target-calculator-http-routes-contract.md) | Documents the 3 target endpoints (GET target, PUT/POST override+reset). Shares `target-calculator.md` with FTY-127 → rebase. |
+| FTY-130 | ready | governance | [Threat model: claude_code subprocess](FTY-130-threat-model-claude-code-subprocess.md) | Adds the worker→`claude` CLI subprocess trust boundary + the claude-config OAuth asset + its no-tools/no-shell mitigation. Owns `threat-model.md`. |
+
+**Tier B — hardening (security / data-integrity):**
+
+| ID | State | Lane | Story | Acceptance |
+| --- | --- | --- | --- | --- |
+| FTY-131 | ready | estimator | [claude_code provider hardening](FTY-131-claude-code-provider-hardening.md) | Curated subprocess `env=` allowlist (honor the no-token-leak guarantee), stdout size cap (transport parity), transient-exit retry + tightened auth markers. |
+| FTY-132 | ready | estimator | [Official-source plausibility gate](FTY-132-official-source-plausibility-gate.md) | Apply the FTY-115 `nutrition_facts_plausible` gate to official-source/model-prior per-100g facts (the kJ-as-kcal case) — the least-trusted source is no longer the least guarded. |
+| FTY-133 | ready_with_notes | mobile-core | [Dark-mode theme tokens](FTY-133-mobile-dark-mode-theme-tokens.md) | 7 components routed off hardcoded light hex onto `useTheme()` tokens — fixes a latent dark-mode bug. Owns `mobile/components/*`. |
+
+**Tier C — quality / cleanup (pulled into v1 by the clean-break decision):**
+
+| ID | State | Lane | Story | Acceptance |
+| --- | --- | --- | --- | --- |
+| FTY-134 | ready | backend-core | [Consolidate remaining tz helpers](FTY-134-consolidate-remaining-tz-helpers.md) | FTY-120 misses: `weight_entries` dup tz resolver, a `current_day` helper for 5 inline call sites, public-rename `resolve_active_target_row`. Shares files with FTY-127 → rebase. |
+| FTY-135 | ready | estimator | [source_refs recording consistency](FTY-135-estimator-source-refs-consistency.md) | `exercise_step`/`label_step` route through `evidence_utils._record_source_ref` instead of inline append. |
+| FTY-136 | ready_with_notes | mobile-core | [Shared mobile api client](FTY-136-mobile-shared-api-client.md) | One `mobile/api/client.ts` (ApiSession/authHeaders/ApiError/request); migrate 7 straggler modules. Behaviour-preserving (was a post-v1 deferral, now pulled in). Owns `mobile/api/*`. |
+| FTY-137 | ready_with_notes | estimator | [hardened_fetch DNS-rebind pin](FTY-137-hardened-fetch-dns-rebind-pin.md) | Pin the vetted IP for the actual connection (resolve-once) so the connected address is the one that passed the SSRF check. |
+| FTY-138 | ready | backend-core | [Auth rate-limit fail-closed](FTY-138-auth-rate-limit-fail-closed.md) | Configurable fail-closed (prod) for the auth limiter so a Redis outage no longer silently disables brute-force protection. |
+| FTY-139 | ready | backend-core | [Log redaction value-patterns](FTY-139-log-redaction-value-patterns.md) | Token-shaped value redaction over rendered messages + exc_info (not just field-name). |
+| FTY-140 | ready | backend-core | [daily-summary range exception type](FTY-140-daily-summary-range-exception-type.md) | Distinct `DailySummaryInvalidRange` for the ordering error (still 422). Shares `daily_summary.py` with FTY-127 → rebase. |
+| FTY-141 | ready | backend-core | [OpenAPI contract snapshot test](FTY-141-openapi-contract-snapshot-test.md) | Snapshot test asserts `app.openapi()` against a checked-in JSON, failing on unreviewed drift. |
+| FTY-142 | ready | governance | [Release docs polish](FTY-142-release-docs-polish.md) | README `/readyz` + claude-login step order; contracts/README index; system-overview endpoint/provider list. Owns `README.md`, `contracts/README.md`, `system-overview.md`. |
+
+**Accepted-as-is (not turned into stories):** DNS-rebind was *included* (FTY-137);
+the rate-limiter fail-open was *included* (FTY-138). No findings were deferred this
+run (clean-break). Prior-audit deferrals that remain valid: token-revocation +
+field-encryption are documented threat-model deferrals (unchanged).
+
+**Coordination notes (cross-lane same-file — the steward serializes by path only
+*within* a lane):**
+
+- `docs/contracts/target-calculator.md`: **FTY-127** (materialisation note) +
+  **FTY-129** (route block) — different sections, rebase the second.
+- `app/services/daily_summary.py`: **FTY-127** (carry-forward reads) + **FTY-140**
+  (range exception) + **FTY-134** (helper consolidation) — different functions,
+  rebase order within backend-core.
+- **FTY-103 is held as draft (PR #101)** pending **FTY-127**. The run-2 reviewer
+  confirmed the onboarding gate's day-scoped `getTarget` probe re-onboards returning
+  users (trajectory corruption); there is no goal-existence endpoint, so the gate
+  can only be fixed once FTY-127 makes `GET /target` carry forward. After FTY-127
+  merges, re-open #101; its remaining work is the returning-user-on-a-later-day test.
+
+**Command-centre tooling fixes made during this audit (not fatty stories):** the
+reviewer's stale `MultiEdit` entry in `--disallowedTools` (aborted every review →
+28× fix loop on PR #101) and the author's fix-pr title-stacking were fixed in
+`fatty-reviewer-agent` / `fatty-author-agent`. See the [reviewer stale-tool deny
+wedge] memory.
 
 ## Story Promotion Rule
 
