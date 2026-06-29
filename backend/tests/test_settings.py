@@ -80,3 +80,41 @@ def test_out_of_range_port_fails() -> None:
 def test_unknown_field_is_rejected() -> None:
     with pytest.raises(ValidationError):
         Settings(unexpected="value")  # type: ignore[call-arg]
+
+
+# ---------------------------------------------------------------------------
+# rate_limit_fail_open computed property (FTY-138)
+# ---------------------------------------------------------------------------
+
+
+def test_rate_limit_fail_open_default_development() -> None:
+    settings = Settings(environment="development")
+    assert settings.rate_limit_fail_open is True
+
+
+def test_rate_limit_fail_open_default_test() -> None:
+    settings = Settings(environment="test")
+    assert settings.rate_limit_fail_open is True
+
+
+def test_rate_limit_fail_open_default_production() -> None:
+    settings = load_settings(
+        {"FATTY_ENVIRONMENT": "production", "FATTY_AUTH_SECRET": "real-secret"}
+    )
+    assert settings.rate_limit_fail_open is False
+
+
+def test_rate_limit_fail_open_override_forces_open_in_production() -> None:
+    settings = load_settings(
+        {
+            "FATTY_ENVIRONMENT": "production",
+            "FATTY_AUTH_SECRET": "real-secret",
+            "FATTY_RATE_LIMIT_FAIL_OPEN_OVERRIDE": "true",
+        }
+    )
+    assert settings.rate_limit_fail_open is True
+
+
+def test_rate_limit_fail_open_override_forces_closed_in_development() -> None:
+    settings = load_settings({"FATTY_RATE_LIMIT_FAIL_OPEN_OVERRIDE": "false"})
+    assert settings.rate_limit_fail_open is False

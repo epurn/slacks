@@ -62,12 +62,22 @@ This project uses the following as design references:
   existing Redis so the limit holds across worker processes. Thresholds are
   configurable via `FATTY_RATE_LIMIT_*` env vars. The limiter runs before the
   credential check so a throttled request pays no hash/DB cost and equalized timing
-  is preserved. Fails open — a Redis blip allows the request rather than locking
-  users out — and emits a warn-level log. Per-account keys use sha256(email) so no
-  raw PII is stored in Redis. The source IP is the real TCP peer by default;
-  `X-Forwarded-For` is trusted only behind exactly one known proxy
-  (`FATTY_RATE_LIMIT_TRUSTED_PROXY=true`) and then read rightmost so a
-  client-spoofed hop cannot bypass the per-IP limit. FTY-118.)*
+  is preserved. Per-account keys use sha256(email) so no raw PII is stored in Redis.
+  The source IP is the real TCP peer by default; `X-Forwarded-For` is trusted only
+  behind exactly one known proxy (`FATTY_RATE_LIMIT_TRUSTED_PROXY=true`) and then
+  read rightmost so a client-spoofed hop cannot bypass the per-IP limit. FTY-118.)*
+  *(Fail-mode — FTY-138: when the limiter raises (e.g. Redis unavailable) the
+  effective fail-mode is environment-defaulted: **fail-open** (allow + warn log) in
+  `development` and `test`, **fail-closed** (deny with `503 Service Unavailable` +
+  `Retry-After` + warn log) in `production`. Fail-closed is the correct default for
+  production: a Redis outage silently disabling the only online brute-force
+  protection is a worse outcome than briefly rejecting auth requests until Redis
+  recovers. The `503` response is intentionally transient so the mobile
+  reconnect/retry path backs off and retries rather than treating it as a
+  credential failure. The fail-mode can be forced in either direction via
+  `FATTY_RATE_LIMIT_FAIL_OPEN_OVERRIDE=true|false`, independent of environment
+  (e.g. a production self-host that prefers availability can opt back into
+  fail-open). No new PII is added to logs in either branch.)*
 - Enforce object-level authorization on every user-owned record. *(v1: every
   user-owned service authorizes the owner and scopes the query to the owner, failing
   closed as `404`; proven by the FTY-073 `tests/security/test_authz_fail_closed.py`
@@ -86,9 +96,9 @@ This project uses the following as design references:
 
 ## Logging and Telemetry
 
-- Logs must not contain secrets, auth tokens, raw sensitive prompts, full food histories, or unnecessary body data. *(v1: structured single-line JSON logs with a `RedactionFilter` that scrubs secret/header-shaped fields; the LLM layer logs only provider/attempt/error-count — never the prompt, key, image, or raw response. Proven by `tests/security/test_secret_no_disclosure.py`.)*
+- Logs must not contain secrets, auth tokens, raw sensitive prompts, full food histories, or unnecessary body data. *(v1: structured single-line JSON logs with a `RedactionFilter` that scrubs secret/header-shaped **fields** by name; a second pass via `_redact_values` scrubs token-shaped **values** — Bearer tokens, JWTs, provider API keys (`sk-…`, `gh…_…`, Slack `xox…`, AWS `AKIA…`), and inline `key=value` / `key: value` forms — from rendered messages and serialised exception traces. The inline form absorbs the HTTP auth *scheme* label (Bearer/Basic/Digest/token/…), so an `Authorization`/`Proxy-Authorization` header redacts the credential itself — including opaque, non-token-shaped values like base64 Basic creds — not just the scheme word. The LLM layer logs only provider/attempt/error-count — never the prompt, key, image, or raw response. Proven by `tests/security/test_secret_no_disclosure.py`.)*
 - Use request IDs and event IDs instead of personal values where possible.
-- Redact sensitive fields in errors and provider traces. *(v1: transport and fetch errors are content-free — no URL, headers, request body, or response body.)*
+- Redact sensitive fields in errors and provider traces. *(v1: transport and fetch errors are content-free — no URL, headers, request body, or response body; exception traces carrying token-shaped secrets are also scrubbed by `_redact_values` before serialisation.)*
 - Telemetry must be opt-in or clearly documented before public launch. *(v1 ships no product telemetry.)*
 
 ## HTTP Security Headers

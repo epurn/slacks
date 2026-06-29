@@ -438,3 +438,191 @@ def test_low_confidence_extraction_falls_through_to_model_prior(
     # The page was fetched and extracted, but the low-confidence reply was not trusted.
     assert fetcher.fetched == [_BIG_MAC_URL]
     assert evidence.source_type == MODEL_PRIOR_SOURCE_TYPE
+
+
+# --- Plausibility-gate tests (FTY-132) ------------------------------------------
+
+
+def test_page_kj_mislabelled_as_kcal_falls_through_to_model_prior(
+    client: TestClient, session: Session
+) -> None:
+    # A page reporting ~3700 kcal/100g (kJ value mislabelled as kcal, comfortably under
+    # the 10,000 schema ceiling) fails the physical-plausibility gate in _to_per_100g;
+    # the resolver falls through to model-prior and commits nothing for the bad page.
+    user_id, event_id = _seed_event(client, "official-inflated@example.com", "a Big Mac")
+    search = FakeSearchProvider(_success_result())
+    fetcher = RecordingFetcher()
+    parse_provider = FakeProvider(
+        responses=[{"disposition": "parsed", "confidence": 0.95, "items": [_branded_item()]}]
+    )
+    inflated_facts = {
+        "basis": "per_100g",
+        "calories": 3700.0,  # kJ mislabelled as kcal; under 10,000 but > 900 kcal/100g
+        "protein_g": 10.0,
+        "carbs_g": 30.0,
+        "fat_g": 9.0,
+        "serving_size_amount": 219.0,
+        "serving_size_unit": "g",
+    }
+    # First call: page extraction (implausible, gate returns None → falls through).
+    # Second call: model-prior estimate (plausible, resolves).
+    official_provider = FakeProvider(
+        responses=[
+            {"disposition": "resolved", "confidence": 0.9, "facts": inflated_facts},
+            {
+                "disposition": "resolved",
+                "confidence": 0.7,
+                "facts": _PAGE_FACTS,
+                "assumptions": ["estimated from model prior"],
+            },
+        ]
+    )
+    resolver = FoodResolver(session=session, source=FakeFoodSource({}))
+    official_step = OfficialSourceResolveStep(
+        provider=official_provider,
+        search_provider=search,
+        fetch_settings=_fetch_settings(),
+        fetch_fn=fetcher,
+    )
+    pipeline = Pipeline([ParseStep(parse_provider), FoodResolveStep(resolver), official_step])
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.event_status is LogEventStatus.COMPLETED
+    foods = _foods(session, event_id)
+    assert len(foods) == 1
+    # The resolved item uses model-prior facts (plausible 250 kcal/100g × 219g = 547.5),
+    # not the inflated page facts.
+    assert foods[0].calories == 547.5
+    evidence = session.scalars(
+        select(EvidenceSource).where(EvidenceSource.log_event_id == event_id)
+    ).one()
+    assert evidence.source_type == MODEL_PRIOR_SOURCE_TYPE
+    # The page was fetched but its inflated facts were rejected; model-prior was used.
+    assert fetcher.fetched == [_BIG_MAC_URL]
+
+
+def test_implausible_model_prior_routes_to_needs_clarification(
+    client: TestClient, session: Session
+) -> None:
+    # When the model-prior estimate itself has implausible per-100g facts, the resolver
+    # has no fallback and routes to needs_clarification rather than storing an absurd total.
+    user_id, event_id = _seed_event(client, "official-mpimplaus@example.com", "a Big Mac")
+    implausible_facts = {
+        "basis": "per_100g",
+        "calories": 3700.0,  # implausible; gate rejects → _build_item returns None
+        "protein_g": 10.0,
+        "carbs_g": 30.0,
+        "fat_g": 9.0,
+        "serving_size_amount": 219.0,
+        "serving_size_unit": "g",
+    }
+    parse_provider = FakeProvider(
+        responses=[{"disposition": "parsed", "confidence": 0.95, "items": [_branded_item()]}]
+    )
+    official_provider = FakeProvider(
+        responses=[{"disposition": "resolved", "confidence": 0.7, "facts": implausible_facts}]
+    )
+    resolver = FoodResolver(session=session, source=FakeFoodSource({}))
+    official_step = OfficialSourceResolveStep(
+        provider=official_provider,
+        # Search disabled → falls directly to model-prior.
+        search_provider=FakeSearchProvider(_success_result(), enabled=False),
+        fetch_settings=_fetch_settings(),
+        fetch_fn=RecordingFetcher(),
+    )
+    pipeline = Pipeline([ParseStep(parse_provider), FoodResolveStep(resolver), official_step])
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.job_status is EstimationJobStatus.NEEDS_CLARIFICATION
+    assert _foods(session, event_id) == []
+
+
+def test_per_serving_implausible_per_100g_falls_through_to_model_prior(
+    client: TestClient, session: Session
+) -> None:
+    # A page reporting per-serving facts that are plausible per serving but yield an
+    # implausible per-100g after conversion fails the gate (gate is in canonical space).
+    # Example: 95 kcal per 10 g serving → 950 kcal/100g, above the 900 kcal/100g ceiling.
+    user_id, event_id = _seed_event(client, "official-persvg@example.com", "a Big Mac")
+    search = FakeSearchProvider(_success_result())
+    fetcher = RecordingFetcher()
+    parse_provider = FakeProvider(
+        responses=[{"disposition": "parsed", "confidence": 0.95, "items": [_branded_item()]}]
+    )
+    implausible_per_serving_facts = {
+        "basis": "per_serving",
+        "calories": 95.0,  # plausible per-serving, but 10 g → 950 kcal/100g (implausible)
+        "protein_g": 1.0,
+        "carbs_g": 2.0,
+        "fat_g": 0.5,
+        "serving_size_amount": 10.0,
+        "serving_size_unit": "g",
+    }
+    # First call: page extraction (implausible per-100g → falls through).
+    # Second call: model-prior estimate (plausible, resolves).
+    official_provider = FakeProvider(
+        responses=[
+            {"disposition": "resolved", "confidence": 0.9, "facts": implausible_per_serving_facts},
+            {
+                "disposition": "resolved",
+                "confidence": 0.7,
+                "facts": _PAGE_FACTS,
+                "assumptions": ["estimated from model prior"],
+            },
+        ]
+    )
+    resolver = FoodResolver(session=session, source=FakeFoodSource({}))
+    official_step = OfficialSourceResolveStep(
+        provider=official_provider,
+        search_provider=search,
+        fetch_settings=_fetch_settings(),
+        fetch_fn=fetcher,
+    )
+    pipeline = Pipeline([ParseStep(parse_provider), FoodResolveStep(resolver), official_step])
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.event_status is LogEventStatus.COMPLETED
+    evidence = session.scalars(
+        select(EvidenceSource).where(EvidenceSource.log_event_id == event_id)
+    ).one()
+    # Per-serving page facts were rejected after per-100g conversion; model-prior was used.
+    assert evidence.source_type == MODEL_PRIOR_SOURCE_TYPE
+    assert fetcher.fetched == [_BIG_MAC_URL]
+
+
+def test_zero_calorie_food_resolves_successfully(client: TestClient, session: Session) -> None:
+    # A genuine zero-calorie food (e.g. black coffee) must not be blocked by the gate:
+    # energy = 0 is valid and nutrition_facts_plausible allows it explicitly.
+    user_id, event_id = _seed_event(client, "official-zerocal@example.com", "a Big Mac")
+    zero_cal_facts = {
+        "basis": "per_100g",
+        "product_name": "Zero Cal Food",
+        "calories": 0.0,
+        "protein_g": 0.0,
+        "carbs_g": 0.0,
+        "fat_g": 0.0,
+        "serving_size_amount": 219.0,
+        "serving_size_unit": "g",
+    }
+    pipeline = _pipeline(
+        session,
+        food_source=FakeFoodSource({}),
+        parsed_item=_branded_item(),
+        search_provider=FakeSearchProvider(_success_result()),
+        fetcher=RecordingFetcher(),
+        estimate={"disposition": "resolved", "confidence": 0.9, "facts": zero_cal_facts},
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.event_status is LogEventStatus.COMPLETED
+    foods = _foods(session, event_id)
+    assert len(foods) == 1
+    assert foods[0].calories == 0.0
+    evidence = session.scalars(
+        select(EvidenceSource).where(EvidenceSource.log_event_id == event_id)
+    ).one()
+    assert evidence.source_type == OFFICIAL_SOURCE_TYPE

@@ -11,6 +11,12 @@ through this module, which enforces the evidence-retrieval security boundary
   must be a public, globally-routable address — loopback, private, link-local
   (incl. the cloud metadata service ``169.254.169.254``), multicast, reserved, and
   unspecified addresses are refused, so a DNS entry that points inward cannot be used.
+- **Vetted-IP pinning (no DNS-rebinding TOCTOU, FTY-137).** The connection targets
+  the exact IP the policy vetted rather than re-resolving the name at connect time,
+  so a host that returns a public IP during the check and a private IP at connect
+  cannot reach an internal target. The original hostname is still carried in the
+  ``Host`` header and the TLS SNI (``server_hostname``) so virtual-hosting and
+  certificate validation are unaffected.
 - **No redirects.** A 3xx is refused rather than followed, so a redirect cannot
   bounce an allowlisted request to an internal target.
 - **Bounded time and size.** A per-request timeout and a response-size cap apply.
@@ -28,10 +34,12 @@ response body, so a failed fetch is always safe to log.
 from __future__ import annotations
 
 import html.parser
+import http.client
 import ipaddress
 import json
 import re
 import socket
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -101,12 +109,20 @@ class FetchResponseError(Exception):
 
 def assert_url_allowed(
     url: str, *, allowed_hosts: frozenset[str], resolver: Resolver = socket.getaddrinfo
-) -> None:
-    """Raise :class:`FetchPolicyError` unless ``url`` satisfies the fetch policy.
+) -> str:
+    """Vet ``url`` against the fetch policy and return the vetted public IP.
 
     Enforces: ``https`` scheme, host in ``allowed_hosts`` (compared lower-cased),
     and every resolved IP for that host globally routable (no loopback/private/
     link-local/reserved targets). Pure except for the (injectable) DNS lookup.
+
+    Returns the single vetted IP the connection must pin to — the first resolved
+    address (every resolved address has already been required public, so any of
+    them is a valid target; the first is chosen deterministically). Returning the
+    address is additive to the raise-or-pass contract: a policy violation still
+    raises :class:`FetchPolicyError` before any address is returned. Callers pin
+    this IP at connect time so the address that passed the check is provably the
+    address connected to (closing the DNS-rebinding TOCTOU, FTY-137).
     """
 
     parts = urllib.parse.urlsplit(url)
@@ -129,8 +145,12 @@ def assert_url_allowed(
     if not addresses:
         raise FetchPolicyError("host_resolution_failed")
     for address in addresses:
+        # Every resolved address must be public — no relaxation, no short-circuit
+        # before the full set is checked (a mix of public + private still fails).
         if not _is_public_address(address):
             raise FetchPolicyError("private_address_blocked")
+    # All addresses vetted public; pin the first one deterministically.
+    return str(addresses[0])
 
 
 def _is_public_address(address: str) -> bool:
@@ -161,10 +181,65 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         raise FetchPolicyError("redirect_blocked")
 
 
-def _build_opener() -> urllib.request.OpenerDirector:
-    """An opener that blocks redirects and uses no proxy/auth handlers."""
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """An ``HTTPSConnection`` that connects to a fixed, pre-vetted IP.
 
-    return urllib.request.build_opener(_NoRedirectHandler())
+    The socket is opened to ``pinned_ip`` instead of re-resolving ``host``, so the
+    address that passed :func:`assert_url_allowed` is provably the address connected
+    to (no connect-time DNS re-resolution → no DNS-rebinding TOCTOU). The original
+    hostname is preserved for both the TLS SNI / certificate check
+    (``server_hostname``) and the ``Host`` header (set by ``urllib`` from the
+    request host, which is left unchanged), so virtual-hosting and certificate
+    validation behave exactly as a name-based connection would.
+    """
+
+    def __init__(
+        self, host: str, *, pinned_ip: str, context: ssl.SSLContext | None = None, **kwargs: Any
+    ) -> None:
+        # Build a default verifying context when none is supplied (the default
+        # opener path) so cert validation + hostname check stay on; keep our own
+        # reference so we never reach into the base class's private ``_context``.
+        if context is None:
+            context = ssl.create_default_context()
+        super().__init__(host, context=context, **kwargs)
+        self._pinned_ip = pinned_ip
+        self._pinned_context = context
+
+    def connect(self) -> None:
+        # Connect to the vetted IP, never re-resolving the name; present the
+        # original hostname for SNI + cert validation. The pinned IP is deliberately
+        # never logged or surfaced. No source address is ever bound (no proxy/bind is
+        # configured), so the connect uses the default.
+        self.sock = socket.create_connection((self._pinned_ip, self.port), self.timeout)
+        self.sock = self._pinned_context.wrap_socket(self.sock, server_hostname=self.host)
+
+
+class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+    """An ``HTTPSHandler`` that routes every connection through a pinned IP.
+
+    Subclassing the default ``HTTPSHandler`` means ``build_opener`` installs this in
+    place of the stock one, so ``https`` requests open against the vetted IP while
+    redirects stay refused by :class:`_NoRedirectHandler`.
+    """
+
+    def __init__(self, pinned_ip: str) -> None:
+        super().__init__()
+        self._pinned_ip = pinned_ip
+
+    def https_open(self, req: urllib.request.Request) -> http.client.HTTPResponse:
+        pinned_ip = self._pinned_ip
+
+        class _Conn(_PinnedHTTPSConnection):
+            def __init__(self, host: str, **kwargs: Any) -> None:
+                super().__init__(host, pinned_ip=pinned_ip, **kwargs)
+
+        return self.do_open(_Conn, req)
+
+
+def _build_opener(pinned_ip: str) -> urllib.request.OpenerDirector:
+    """An opener that blocks redirects and pins the connection to ``pinned_ip``."""
+
+    return urllib.request.build_opener(_NoRedirectHandler(), _PinnedHTTPSHandler(pinned_ip))
 
 
 def post_json(
@@ -190,7 +265,7 @@ def post_json(
         FetchResponseError: a ``4xx`` response, an oversized body, or a non-JSON body.
     """
 
-    assert_url_allowed(url, allowed_hosts=allowed_hosts, resolver=resolver)
+    vetted_ip = assert_url_allowed(url, allowed_hosts=allowed_hosts, resolver=resolver)
 
     body = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(  # noqa: S310 — scheme/host validated above
@@ -199,7 +274,13 @@ def post_json(
         headers={**headers, "Content-Type": "application/json", "Accept": "application/json"},
         method="POST",
     )
-    return _open_json(request, timeout_seconds=timeout_seconds, max_bytes=max_bytes, opener=opener)
+    return _open_json(
+        request,
+        timeout_seconds=timeout_seconds,
+        max_bytes=max_bytes,
+        opener=opener,
+        vetted_ip=vetted_ip,
+    )
 
 
 def get_json(
@@ -225,14 +306,20 @@ def get_json(
         FetchResponseError: a ``4xx`` response, an oversized body, or a non-JSON body.
     """
 
-    assert_url_allowed(url, allowed_hosts=allowed_hosts, resolver=resolver)
+    vetted_ip = assert_url_allowed(url, allowed_hosts=allowed_hosts, resolver=resolver)
 
     request = urllib.request.Request(  # noqa: S310 — scheme/host validated above
         url,
         headers={**(headers or {}), "Accept": "application/json"},
         method="GET",
     )
-    return _open_json(request, timeout_seconds=timeout_seconds, max_bytes=max_bytes, opener=opener)
+    return _open_json(
+        request,
+        timeout_seconds=timeout_seconds,
+        max_bytes=max_bytes,
+        opener=opener,
+        vetted_ip=vetted_ip,
+    )
 
 
 def _open_json(
@@ -241,15 +328,17 @@ def _open_json(
     timeout_seconds: float,
     max_bytes: int,
     opener: urllib.request.OpenerDirector | None,
+    vetted_ip: str,
 ) -> dict[str, Any]:
     """Open a pre-validated request, enforce the size/content-type/JSON limits.
 
     Shared by :func:`post_json` and :func:`get_json`; callers must have already run
-    :func:`assert_url_allowed` against the request URL. Error messages never echo the
+    :func:`assert_url_allowed` against the request URL and pass the ``vetted_ip`` it
+    returned so the connection pins to that address. Error messages never echo the
     URL, headers, request body, or response body.
     """
 
-    director = opener or _build_opener()
+    director = opener or _build_opener(vetted_ip)
     try:
         with director.open(request, timeout=timeout_seconds) as response:
             content_type = response.headers.get_content_type()
@@ -309,7 +398,7 @@ def fetch_text(
             content type.
     """
 
-    assert_url_allowed(url, allowed_hosts=allowed_hosts, resolver=resolver)
+    vetted_ip = assert_url_allowed(url, allowed_hosts=allowed_hosts, resolver=resolver)
 
     request = urllib.request.Request(  # noqa: S310 — scheme/host validated above
         url,
@@ -325,6 +414,7 @@ def fetch_text(
         max_bytes=max_bytes,
         allowed_content_types=allowed_content_types,
         opener=opener,
+        vetted_ip=vetted_ip,
     )
 
 
@@ -335,16 +425,18 @@ def _open_text(
     max_bytes: int,
     allowed_content_types: frozenset[str],
     opener: urllib.request.OpenerDirector | None,
+    vetted_ip: str,
 ) -> str:
     """Open a pre-validated request and return its body as stripped inert text.
 
-    Callers must have already run :func:`assert_url_allowed` against the request URL.
+    Callers must have already run :func:`assert_url_allowed` against the request URL
+    and pass the ``vetted_ip`` it returned so the connection pins to that address.
     Enforces the size and content-type limits, decodes the body using the response
     charset (replacing undecodable bytes), and strips active content. Error messages
     never echo the URL, headers, request body, or response body.
     """
 
-    director = opener or _build_opener()
+    director = opener or _build_opener(vetted_ip)
     try:
         with director.open(request, timeout=timeout_seconds) as response:
             content_type = response.headers.get_content_type()
