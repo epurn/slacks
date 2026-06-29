@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.estimator.evidence_utils import _record_source_ref
 from app.estimator.exercise import (
     NET_ACTIVE_FORMULA,
     InvalidDurationError,
@@ -115,9 +116,8 @@ class ExerciseCalculateStep:
         """
 
         version_ref = f"met_table:{MET_TABLE_VERSION}"
-        if version_ref not in context.source_refs:
-            context.source_refs.append(version_ref)
-            context.source_refs.append(MET_TABLE_SOURCE)
+        _record_source_ref(context, version_ref)
+        _record_source_ref(context, MET_TABLE_SOURCE)
         if NET_ACTIVE_FORMULA not in context.assumptions:
             context.assumptions.append(NET_ACTIVE_FORMULA)
             context.assumptions.append(f"met_table_version={MET_TABLE_VERSION}")
