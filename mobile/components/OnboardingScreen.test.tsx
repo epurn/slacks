@@ -43,7 +43,7 @@ jest.mock("expo-router", () => ({
 // eslint-disable-next-line import/first
 import { OnboardingScreen, type OnboardingScreenProps } from "./OnboardingScreen";
 // eslint-disable-next-line import/first
-import { ThemeProvider, lightPalette, darkPalette } from "@/theme";
+import { ThemeProvider } from "@/theme";
 // eslint-disable-next-line import/first
 import type { SessionRecord } from "@/state/session";
 // eslint-disable-next-line import/first
@@ -181,13 +181,6 @@ function radioGroup(tree: ReactTestRenderer, label: string) {
   );
 }
 
-function radioOptions(tree: ReactTestRenderer, groupLabel: string): string[] {
-  const group = radioGroup(tree, groupLabel);
-  return group
-    .findAll((n) => n.props.accessibilityRole === "radio")
-    .map((n) => n.props.accessibilityLabel as string);
-}
-
 function selectedRadio(tree: ReactTestRenderer, groupLabel: string): string | null {
   const group = radioGroup(tree, groupLabel);
   const selected = group.findAll(
@@ -201,15 +194,6 @@ function selectedRadio(tree: ReactTestRenderer, groupLabel: string): string | nu
 function pressRadio(tree: ReactTestRenderer, label: string): void {
   act(() => {
     byLabel(tree, label).props.onPress();
-  });
-}
-
-async function pressContinue(tree: ReactTestRenderer): Promise<void> {
-  const btn = byLabel(tree, "Continue to measurements") ??
-    byLabel(tree, "Continue to your target");
-  await act(async () => {
-    btn?.props.onPress();
-    await new Promise((r) => setTimeout(r, 0));
   });
 }
 
