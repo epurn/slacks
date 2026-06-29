@@ -44,6 +44,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from app.estimator.evidence_utils import _record_source_ref
 from app.estimator.food_serving import (
     NutritionFacts,
     per_serving_to_per_100g,
@@ -220,8 +221,7 @@ class LabelResolveStep:
 
         item = self._build_item(context, label, facts)
         # Record the consulted source system on the run (content-free metadata).
-        if USER_LABEL_SOURCE_TYPE not in context.source_refs:
-            context.source_refs.append(USER_LABEL_SOURCE_TYPE)
+        _record_source_ref(context, USER_LABEL_SOURCE_TYPE)
         context.resolved_label_items.append(item)
 
     @staticmethod
