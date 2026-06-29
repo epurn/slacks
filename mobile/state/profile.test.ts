@@ -3,6 +3,7 @@ import {
   cmToMeters,
   emptyProfileForm,
   feetInchesToMeters,
+  metersToFeetInches,
   kilograms,
   poundsToKilograms,
   validateProfileForm,
@@ -43,6 +44,18 @@ describe("unit conversions", () => {
 
   it("passes kilograms through with canonical rounding", () => {
     expect(kilograms(70.4567)).toBe(70.457);
+  });
+
+  it("splits metres into whole feet + inches", () => {
+    expect(metersToFeetInches(1.7526)).toEqual({ feet: 5, inches: 9 });
+    expect(metersToFeetInches(1.8288)).toEqual({ feet: 6, inches: 0 });
+  });
+
+  it("never yields a rounded-up '12 in' at a foot boundary", () => {
+    // ~71.6 in rounds to 72 in → 6 ft 0 in, never 5 ft 12 in.
+    const { feet, inches } = metersToFeetInches(1.8186);
+    expect(inches).toBeLessThan(12);
+    expect({ feet, inches }).toEqual({ feet: 6, inches: 0 });
   });
 });
 

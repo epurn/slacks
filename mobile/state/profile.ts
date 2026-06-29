@@ -91,6 +91,18 @@ export function feetInchesToMeters(feet: number, inches: number): number {
   return round(totalInches / INCH_PER_M, 4);
 }
 
+/**
+ * Metres → whole feet + inches for display. Total inches are rounded first, then
+ * split, so the inches part is always 0–11 (never a rounded-up "12 in").
+ */
+export function metersToFeetInches(meters: number): { feet: number; inches: number } {
+  const totalInches = Math.round(meters * INCH_PER_M);
+  return {
+    feet: Math.floor(totalInches / INCH_PER_FOOT),
+    inches: totalInches % INCH_PER_FOOT,
+  };
+}
+
 /** Pounds → kilograms. */
 export function poundsToKilograms(pounds: number): number {
   return round(pounds * KG_PER_LB, 3);

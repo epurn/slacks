@@ -41,6 +41,7 @@ import {
   createGoal,
   setTargetOverride,
   resetTargetOverride,
+  GoalsApiError,
   type GoalDirection,
   type GoalTargetRequest,
   type GoalTargetResponse,
@@ -48,7 +49,7 @@ import {
   type PacePreset,
   type TargetOverridePayload,
 } from '@/api/goals';
-import { getProfile, putProfile } from '@/api/profile';
+import { getProfile, putProfile, ProfileApiError } from '@/api/profile';
 import {
   CADENCE_OPTIONS,
   DEFAULT_CADENCE,
@@ -64,6 +65,7 @@ import {
   METABOLIC_FORMULA_OPTIONS,
   cmToMeters,
   feetInchesToMeters,
+  metersToFeetInches,
   kilograms,
   poundsToKilograms,
   type MetabolicFormula,
@@ -102,6 +104,21 @@ const APPEARANCE_OPTIONS: readonly { value: ColorSchemeOverride; label: string }
   { value: 'dark', label: 'Dark' },
   { value: 'system', label: 'System' },
 ];
+
+/** A client-side validation failure on body-metric input (carries display copy). */
+class InvalidBodyMetric extends Error {}
+
+/**
+ * A user-facing message for a failed save/reset. The API error classes already
+ * carry only non-sensitive, status-derived copy (never target numbers), so they
+ * are safe to surface; anything else falls back to a generic line.
+ */
+function actionErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof GoalsApiError || err instanceof ProfileApiError) {
+    return err.message;
+  }
+  return fallback;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
@@ -178,6 +195,9 @@ export function SettingsScreen({
     'weight' | 'height' | 'birthYear' | 'formula' | null
   >(null);
   const [bodyEditValue, setBodyEditValue] = useState('');
+  // Imperial height is captured as feet (bodyEditValue) + inches (this) so the
+  // editor matches the "ft + in" display and never silently drops the inches.
+  const [bodyEditInches, setBodyEditInches] = useState('');
   const [bodyEditFormula, setBodyEditFormula] = useState<MetabolicFormula | null>(null);
   const [bodySaving, setBodySaving] = useState(false);
 
@@ -188,8 +208,12 @@ export function SettingsScreen({
   const [overrideValue, setOverrideValue] = useState('');
   const [overrideSaving, setOverrideSaving] = useState(false);
 
+  // In-place feedback for a failed save/reset (status-derived, never sensitive).
+  const [actionError, setActionError] = useState<string | null>(null);
+
   // Mini target-reveal
   const [revealTarget, setRevealTarget] = useState<TargetReadModel | null>(null);
+  const [revealClamped, setRevealClamped] = useState(false);
   const [revealOpacity] = useState(() => new Animated.Value(0));
 
   // ── Load on mount ──────────────────────────────────────────────────────────
@@ -235,8 +259,9 @@ export function SettingsScreen({
   // ── Mini reveal animation ─────────────────────────────────────────────────
 
   const showReveal = useCallback(
-    (tgt: TargetReadModel) => {
+    (tgt: TargetReadModel, clamped = false) => {
       setRevealTarget(tgt);
+      setRevealClamped(clamped);
       revealOpacity.setValue(0);
       AccessibilityInfo.isReduceMotionEnabled().then((reduced) => {
         if (reduced) {
@@ -256,6 +281,7 @@ export function SettingsScreen({
   // ── Goal edit handlers ────────────────────────────────────────────────────
 
   const openGoalEdit = useCallback(() => {
+    setActionError(null);
     setEditDirection(goalDirection ?? 'loss');
     setEditPace(goalPace ?? 'steady');
     setEditingGoal(true);
@@ -264,6 +290,7 @@ export function SettingsScreen({
   const handleSaveGoal = useCallback(async () => {
     if (!session) return;
     setGoalSaving(true);
+    setActionError(null);
     const apiSession = toApiSession(session);
     const payload: GoalTargetRequest = {
       direction: editDirection,
@@ -278,9 +305,11 @@ export function SettingsScreen({
       const updatedTarget = await getTargetFn(apiSession);
       setTarget(updatedTarget);
       setNoTarget(false);
-      showReveal(updatedTarget);
-    } catch {
-      // Error is not logged (would expose sensitive context)
+      showReveal(updatedTarget, reveal.clamp.clamped);
+    } catch (err) {
+      // The error is never logged (would expose sensitive context); a friendly,
+      // status-derived line is surfaced in the open edit card instead.
+      setActionError(actionErrorMessage(err, 'Could not save your goal. Please try again.'));
     } finally {
       setGoalSaving(false);
     }
@@ -297,8 +326,10 @@ export function SettingsScreen({
 
   const openBodyEdit = useCallback(
     (metric: 'weight' | 'height' | 'birthYear' | 'formula') => {
+      setActionError(null);
       setEditingBodyMetric(metric);
       setBodyEditValue('');
+      setBodyEditInches('');
       if (profile && metric === 'formula') {
         setBodyEditFormula(
           (profile.metabolic_formula as MetabolicFormula | string) === 'mifflin_st_jeor_plus5'
@@ -315,6 +346,7 @@ export function SettingsScreen({
   const handleSaveBodyMetric = useCallback(async () => {
     if (!session || !profile) return;
     setBodySaving(true);
+    setActionError(null);
     const apiSession = toApiSession(session);
     const isMetric = profile.units_preference === 'metric';
 
@@ -328,15 +360,25 @@ export function SettingsScreen({
 
       if (editingBodyMetric === 'weight') {
         const raw = parseFloat(bodyEditValue);
-        if (!isFinite(raw)) throw new Error('invalid');
+        if (!isFinite(raw)) throw new InvalidBodyMetric('Enter a valid number.');
         updates.weight_kg = isMetric ? kilograms(raw) : poundsToKilograms(raw);
       } else if (editingBodyMetric === 'height') {
-        const raw = parseFloat(bodyEditValue);
-        if (!isFinite(raw)) throw new Error('invalid');
-        updates.height_m = isMetric ? cmToMeters(raw) : feetInchesToMeters(raw, 0);
+        if (isMetric) {
+          const cm = parseFloat(bodyEditValue);
+          if (!isFinite(cm)) throw new InvalidBodyMetric('Enter a valid number.');
+          updates.height_m = cmToMeters(cm);
+        } else {
+          // Imperial height is feet + inches; inches default to 0 when blank.
+          const feet = parseFloat(bodyEditValue);
+          const inches = bodyEditInches.trim() === '' ? 0 : parseFloat(bodyEditInches);
+          if (!isFinite(feet) || !isFinite(inches)) {
+            throw new InvalidBodyMetric('Enter a valid number.');
+          }
+          updates.height_m = feetInchesToMeters(feet, inches);
+        }
       } else if (editingBodyMetric === 'birthYear') {
         const year = parseInt(bodyEditValue, 10);
-        if (!isFinite(year)) throw new Error('invalid');
+        if (!isFinite(year)) throw new InvalidBodyMetric('Enter a valid year.');
         updates.birth_year = year;
       } else if (editingBodyMetric === 'formula' && bodyEditFormula) {
         updates.metabolic_formula = bodyEditFormula;
@@ -362,9 +404,15 @@ export function SettingsScreen({
         setNoTarget(false);
         showReveal(updatedTarget);
       }
-    } catch {
-      // Error not logged to avoid sensitive context
-      setEditingBodyMetric(null);
+    } catch (err) {
+      // Error not logged to avoid sensitive context. Keep the edit card open and
+      // explain in place — a validation message for bad input, else a friendly
+      // status-derived line — instead of silently closing.
+      setActionError(
+        err instanceof InvalidBodyMetric
+          ? err.message
+          : actionErrorMessage(err, 'Could not save. Please try again.'),
+      );
     } finally {
       setBodySaving(false);
     }
@@ -373,6 +421,7 @@ export function SettingsScreen({
     profile,
     editingBodyMetric,
     bodyEditValue,
+    bodyEditInches,
     bodyEditFormula,
     putProfileFn,
     getTargetFn,
@@ -384,9 +433,11 @@ export function SettingsScreen({
   const handleSaveOverride = useCallback(async () => {
     if (!session) return;
     setOverrideSaving(true);
+    setActionError(null);
     const apiSession = toApiSession(session);
     const val = parseInt(overrideValue, 10);
     if (!isFinite(val)) {
+      setActionError('Enter a valid number.');
       setOverrideSaving(false);
       return;
     }
@@ -404,8 +455,12 @@ export function SettingsScreen({
       setTarget(updatedTarget);
       setEditingCalorieOverride(false);
       setEditingMacroOverride(null);
-    } catch {
-      // Error not logged
+    } catch (err) {
+      // Error not logged. Keep the override card open and explain in place — the
+      // expected 422 (out-of-band value) and 404 paths now close the loop.
+      setActionError(
+        actionErrorMessage(err, 'Could not save your override. Please try again.'),
+      );
     } finally {
       setOverrideSaving(false);
     }
@@ -420,12 +475,16 @@ export function SettingsScreen({
   const handleReset = useCallback(
     async (targets: OverridableTargetKey[]) => {
       if (!session) return;
+      setActionError(null);
       const apiSession = toApiSession(session);
       try {
         const updatedTarget = await resetTargetOverrideFn(apiSession, targets);
         setTarget(updatedTarget);
-      } catch {
-        // Error not logged
+      } catch (err) {
+        // Error not logged; surfaced in place near the targets.
+        setActionError(
+          actionErrorMessage(err, 'Could not reset your target. Please try again.'),
+        );
       }
     },
     [session, resetTargetOverrideFn],
@@ -483,6 +542,28 @@ export function SettingsScreen({
   // ─────────────────────────────────────────────────────────────────────────
 
   const isMetric = profile?.units_preference === 'metric';
+
+  // The Goal row must never contradict the targets rendered right below it. A
+  // stored daily target only exists for an *active* goal, so a loaded target
+  // means a goal is in force even though this screen has no goal-read endpoint
+  // to recover its direction/pace on a fresh mount (see the inline edit, which
+  // captures them, and the follow-up read slice noted in the PR). We therefore
+  // show the known direction/pace when the goal was set this session, an honest
+  // "Active" when a target proves a goal exists but its details aren't loaded,
+  // and "Not set" only when there is genuinely no active goal.
+  const goalIsActive = !noTarget && target !== null;
+  const goalDetail =
+    goalDirection !== null
+      ? `${DIRECTION_LABELS[goalDirection]}${goalPace && goalDirection !== 'maintain' ? ` · ${PACE_LABELS[goalPace]}` : ''}`
+      : goalIsActive
+        ? 'Active'
+        : 'Not set';
+  const goalDetailA11y =
+    goalDirection !== null
+      ? `${DIRECTION_LABELS[goalDirection]}${goalPace && goalDirection !== 'maintain' ? `, ${PACE_LABELS[goalPace]}` : ''}`
+      : goalIsActive
+        ? 'Active'
+        : 'Not set';
 
   if (!session) {
     return (
@@ -556,17 +637,9 @@ export function SettingsScreen({
       <GroupedCard colors={colors}>
         <SettingsRow
           label="Goal"
-          value={
-            goalDirection
-              ? `${DIRECTION_LABELS[goalDirection]}${goalPace && goalDirection !== 'maintain' ? ` · ${PACE_LABELS[goalPace]}` : ''}`
-              : 'Not set'
-          }
+          value={goalDetail}
           onPress={openGoalEdit}
-          accessibilityLabel={`Goal: ${
-            goalDirection
-              ? `${DIRECTION_LABELS[goalDirection]}${goalPace && goalDirection !== 'maintain' ? `, ${PACE_LABELS[goalPace]}` : ''}`
-              : 'Not set'
-          }`}
+          accessibilityLabel={`Goal: ${goalDetailA11y}`}
           accessibilityHint="Double-tap to edit your goal"
           colors={colors}
         />
@@ -614,11 +687,17 @@ export function SettingsScreen({
               />
             </>
           )}
+          {actionError && (
+            <InlineError message={actionError} colors={colors} testID="goal-edit-error" />
+          )}
           <View style={styles.editActions}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Cancel goal edit"
-              onPress={() => setEditingGoal(false)}
+              onPress={() => {
+                setActionError(null);
+                setEditingGoal(false);
+              }}
               style={[styles.editButton, { backgroundColor: colors.controlBackground }]}
             >
               <Text style={[styles.editButtonLabel, { color: colors.textSecondary }]}>
@@ -662,6 +741,7 @@ export function SettingsScreen({
               unit="kcal"
               component={target.calories}
               onOverride={() => {
+                setActionError(null);
                 setEditingCalorieOverride(true);
                 setOverrideValue(String(target.calories.effective));
               }}
@@ -675,6 +755,7 @@ export function SettingsScreen({
               unit="g"
               component={target.protein_g}
               onOverride={() => {
+                setActionError(null);
                 setEditingMacroOverride('protein_g');
                 setOverrideValue(String(target.protein_g.effective));
               }}
@@ -688,6 +769,7 @@ export function SettingsScreen({
               unit="g"
               component={target.carbs_g}
               onOverride={() => {
+                setActionError(null);
                 setEditingMacroOverride('carbs_g');
                 setOverrideValue(String(target.carbs_g.effective));
               }}
@@ -701,6 +783,7 @@ export function SettingsScreen({
               unit="g"
               component={target.fat_g}
               onOverride={() => {
+                setActionError(null);
                 setEditingMacroOverride('fat_g');
                 setOverrideValue(String(target.fat_g.effective));
               }}
@@ -712,6 +795,20 @@ export function SettingsScreen({
         )}
       </GroupedCard>
 
+      {/* Action error not tied to an open editor (e.g. a failed reset) */}
+      {actionError &&
+        !editingGoal &&
+        !editingBodyMetric &&
+        !editingCalorieOverride &&
+        !editingMacroOverride && (
+          <InlineError
+            message={actionError}
+            colors={colors}
+            testID="target-action-error"
+            style={{ marginTop: spacing.xs }}
+          />
+        )}
+
       {/* Calorie override edit */}
       {editingCalorieOverride && (
         <OverrideEditCard
@@ -719,8 +816,12 @@ export function SettingsScreen({
           value={overrideValue}
           onChangeText={setOverrideValue}
           saving={overrideSaving}
+          error={actionError}
           onSave={() => void handleSaveOverride()}
-          onCancel={() => setEditingCalorieOverride(false)}
+          onCancel={() => {
+            setActionError(null);
+            setEditingCalorieOverride(false);
+          }}
           colors={colors}
           testID="calorie-override-edit"
         />
@@ -733,8 +834,12 @@ export function SettingsScreen({
           value={overrideValue}
           onChangeText={setOverrideValue}
           saving={overrideSaving}
+          error={actionError}
           onSave={() => void handleSaveOverride()}
-          onCancel={() => setEditingMacroOverride(null)}
+          onCancel={() => {
+            setActionError(null);
+            setEditingMacroOverride(null);
+          }}
           colors={colors}
           testID="macro-override-edit"
         />
@@ -751,7 +856,7 @@ export function SettingsScreen({
               opacity: revealOpacity,
             },
           ]}
-          accessibilityLabel={`Updated targets: ${revealTarget.calories.effective} kcal calories, ${revealTarget.protein_g.effective} g protein, ${revealTarget.carbs_g.effective} g carbs, ${revealTarget.fat_g.effective} g fat`}
+          accessibilityLabel={`Updated targets: ${revealTarget.calories.effective} kcal calories, ${revealTarget.protein_g.effective} g protein, ${revealTarget.carbs_g.effective} g carbs, ${revealTarget.fat_g.effective} g fat${revealClamped ? '. Adjusted to a safe limit' : ''}`}
           testID="mini-target-reveal"
         >
           <Text style={[styles.revealTitle, { color: colors.textSecondary }]}>
@@ -762,7 +867,7 @@ export function SettingsScreen({
               label="Cal"
               value={revealTarget.calories.effective}
               unit="kcal"
-              clamped={revealTarget.calories.source === 'derived' && false}
+              clamped={revealClamped}
               colors={colors}
             />
             <RevealItem
@@ -787,6 +892,14 @@ export function SettingsScreen({
               colors={colors}
             />
           </View>
+          {revealClamped && (
+            <Text
+              style={[styles.revealClampNote, { color: colors.textMuted }]}
+              testID="reveal-clamp-note"
+            >
+              * Adjusted to a safe limit
+            </Text>
+          )}
         </Animated.View>
       )}
 
@@ -814,12 +927,12 @@ export function SettingsScreen({
             profile?.height_m != null
               ? isMetric
                 ? `${Math.round(profile.height_m * 100)} cm`
-                : `${Math.floor(profile.height_m * 39.37 / 12)} ft ${Math.round(profile.height_m * 39.37 % 12)} in`
+                : `${metersToFeetInches(profile.height_m).feet} ft ${metersToFeetInches(profile.height_m).inches} in`
               : '—'
           }
           onPress={() => openBodyEdit('height')}
           colors={colors}
-          accessibilityLabel={`Height: ${profile?.height_m != null ? (isMetric ? `${Math.round(profile.height_m * 100)} centimetres` : `${Math.floor(profile.height_m * 39.37 / 12)} feet ${Math.round(profile.height_m * 39.37 % 12)} inches`) : 'not set'}`}
+          accessibilityLabel={`Height: ${profile?.height_m != null ? (isMetric ? `${Math.round(profile.height_m * 100)} centimetres` : `${metersToFeetInches(profile.height_m).feet} feet ${metersToFeetInches(profile.height_m).inches} inches`) : 'not set'}`}
           accessibilityHint="Double-tap to edit your height"
         />
         <Separator colors={colors} />
@@ -853,35 +966,64 @@ export function SettingsScreen({
             {editingBodyMetric === 'weight'
               ? `New weight (${isMetric ? 'kg' : 'lb'})`
               : editingBodyMetric === 'height'
-                ? `New height (${isMetric ? 'cm' : 'ft'})`
+                ? `New height (${isMetric ? 'cm' : 'ft + in'})`
                 : 'Birth year'}
           </Text>
-          <TextInput
-            accessibilityLabel={
-              editingBodyMetric === 'weight'
-                ? `New weight in ${isMetric ? 'kilograms' : 'pounds'}`
-                : editingBodyMetric === 'height'
-                  ? `New height in ${isMetric ? 'centimetres' : 'feet'}`
-                  : 'New birth year'
-            }
-            value={bodyEditValue}
-            onChangeText={setBodyEditValue}
-            keyboardType="numeric"
-            inputMode="numeric"
-            style={[
-              styles.overrideInput,
-              {
-                backgroundColor: colors.surface,
-                color: colors.text,
-                borderColor: colors.separator,
-              },
-            ]}
-          />
+          <View style={styles.bodyEditInputs}>
+            <TextInput
+              accessibilityLabel={
+                editingBodyMetric === 'weight'
+                  ? `New weight in ${isMetric ? 'kilograms' : 'pounds'}`
+                  : editingBodyMetric === 'height'
+                    ? `New height in ${isMetric ? 'centimetres' : 'feet'}`
+                    : 'New birth year'
+              }
+              value={bodyEditValue}
+              onChangeText={setBodyEditValue}
+              keyboardType="numeric"
+              inputMode="numeric"
+              style={[
+                styles.overrideInput,
+                styles.bodyEditInput,
+                {
+                  backgroundColor: colors.surface,
+                  color: colors.text,
+                  borderColor: colors.separator,
+                },
+              ]}
+            />
+            {editingBodyMetric === 'height' && !isMetric && (
+              <TextInput
+                accessibilityLabel="New height inches"
+                value={bodyEditInches}
+                onChangeText={setBodyEditInches}
+                keyboardType="numeric"
+                inputMode="numeric"
+                placeholder="in"
+                placeholderTextColor={colors.textMuted}
+                style={[
+                  styles.overrideInput,
+                  styles.bodyEditInput,
+                  {
+                    backgroundColor: colors.surface,
+                    color: colors.text,
+                    borderColor: colors.separator,
+                  },
+                ]}
+              />
+            )}
+          </View>
+          {actionError && (
+            <InlineError message={actionError} colors={colors} testID="body-edit-error" />
+          )}
           <View style={styles.editActions}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Cancel body metric edit"
-              onPress={() => setEditingBodyMetric(null)}
+              onPress={() => {
+                setActionError(null);
+                setEditingBodyMetric(null);
+              }}
               style={[styles.editButton, { backgroundColor: colors.controlBackground }]}
             >
               <Text style={[styles.editButtonLabel, { color: colors.textSecondary }]}>
@@ -940,11 +1082,17 @@ export function SettingsScreen({
               </Pressable>
             );
           })}
+          {actionError && (
+            <InlineError message={actionError} colors={colors} testID="formula-edit-error" />
+          )}
           <View style={styles.editActions}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Cancel formula edit"
-              onPress={() => setEditingBodyMetric(null)}
+              onPress={() => {
+                setActionError(null);
+                setEditingBodyMetric(null);
+              }}
               style={[styles.editButton, { backgroundColor: colors.controlBackground }]}
             >
               <Text style={[styles.editButtonLabel, { color: colors.textSecondary }]}>
@@ -1064,7 +1212,9 @@ export function SettingsScreen({
           label="Export data"
           onPress={() => {}}
           accessibilityLabel="Export data"
-          accessibilityHint="Opens data export flow"
+          accessibilityHint="Data export is not yet available"
+          note="Coming soon"
+          disabled
           colors={colors}
         />
         <Separator colors={colors} />
@@ -1072,7 +1222,9 @@ export function SettingsScreen({
           label="Delete account"
           onPress={() => {}}
           accessibilityLabel="Delete account"
-          accessibilityHint="Opens account deletion flow"
+          accessibilityHint="Account deletion is not yet available"
+          note="Coming soon"
+          disabled
           colors={colors}
           destructive
         />
@@ -1159,6 +1311,29 @@ function Separator({ colors }: { colors: ReturnType<typeof useTheme>['colors'] }
   );
 }
 
+/** A calm, in-place error line for a failed save/reset (no sensitive context). */
+function InlineError({
+  message,
+  colors,
+  testID,
+  style,
+}: {
+  message: string;
+  colors: ReturnType<typeof useTheme>['colors'];
+  testID?: string;
+  style?: object;
+}) {
+  return (
+    <Text
+      testID={testID}
+      accessibilityRole="alert"
+      style={[styles.inlineError, { color: colors.coral }, style]}
+    >
+      {message}
+    </Text>
+  );
+}
+
 function SettingsRow({
   label,
   value,
@@ -1230,6 +1405,8 @@ function DisclosureRow({
   accessibilityHint,
   colors,
   destructive = false,
+  note,
+  disabled = false,
 }: {
   label: string;
   onPress: () => void;
@@ -1237,12 +1414,17 @@ function DisclosureRow({
   accessibilityHint?: string;
   colors: ReturnType<typeof useTheme>['colors'];
   destructive?: boolean;
+  /** Trailing status text (e.g. "Coming soon") for a not-yet-wired row. */
+  note?: string;
+  disabled?: boolean;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       accessibilityHint={accessibilityHint}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
       onPress={onPress}
       style={styles.settingsRow}
     >
@@ -1254,7 +1436,11 @@ function DisclosureRow({
       >
         {label}
       </Text>
-      <Text style={[styles.rowChevron, { color: colors.textMuted }]}>›</Text>
+      {note ? (
+        <Text style={[styles.rowValue, { color: colors.textMuted }]}>{note}</Text>
+      ) : (
+        <Text style={[styles.rowChevron, { color: colors.textMuted }]}>›</Text>
+      )}
     </Pressable>
   );
 }
@@ -1332,6 +1518,7 @@ function OverrideEditCard({
   value,
   onChangeText,
   saving,
+  error,
   onSave,
   onCancel,
   colors,
@@ -1341,6 +1528,7 @@ function OverrideEditCard({
   value: string;
   onChangeText: (v: string) => void;
   saving: boolean;
+  error?: string | null;
   onSave: () => void;
   onCancel: () => void;
   colors: ReturnType<typeof useTheme>['colors'];
@@ -1364,6 +1552,9 @@ function OverrideEditCard({
           },
         ]}
       />
+      {error && (
+        <InlineError message={error} colors={colors} testID={`${testID}-error`} />
+      )}
       <View style={styles.editActions}>
         <Pressable
           accessibilityRole="button"
@@ -1399,6 +1590,7 @@ function RevealItem({
   label,
   value,
   unit,
+  clamped,
   colors,
 }: {
   label: string;
@@ -1407,10 +1599,12 @@ function RevealItem({
   clamped: boolean;
   colors: ReturnType<typeof useTheme>['colors'];
 }) {
+  // A clamped value is the safety boundary, not the requested plan — mark it with
+  // an asterisk that ties to the "Adjusted to a safe limit" note below the row.
   return (
     <View style={styles.revealItem}>
       <Text style={[styles.revealValue, { color: colors.text }]}>
-        {`${value}`}
+        {`${value}${clamped ? '*' : ''}`}
       </Text>
       <Text style={[styles.revealUnit, { color: colors.textMuted }]}>
         {`${unit} ${label}`}
@@ -1623,6 +1817,10 @@ const styles = StyleSheet.create({
     fontSize: typeScale.caption1,
     marginTop: 2,
   },
+  revealClampNote: {
+    fontSize: typeScale.caption1,
+    marginTop: spacing.sm,
+  },
   prefRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1718,6 +1916,17 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     fontSize: typeScale.body,
     minHeight: 44,
+  },
+  bodyEditInputs: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  bodyEditInput: {
+    flex: 1,
+  },
+  inlineError: {
+    fontSize: typeScale.footnote,
+    marginTop: spacing.sm,
   },
   formulaChoice: {
     borderWidth: 1,

@@ -20,7 +20,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ThemeProvider } from "@/theme";
 import { SettingsScreen } from "./SettingsScreen";
 import type { TargetReadModel } from "@/api/dailySummary";
-import type { GoalTargetResponse } from "@/api/goals";
+import { GoalsApiError, type GoalTargetResponse } from "@/api/goals";
 import type { ProfileDTO } from "@/api/profile";
 import type { Session } from "@/state/session";
 import type { AppSettingsStore } from "@/state/appSettings";
@@ -463,7 +463,7 @@ describe("Mini target-reveal", () => {
 
     // Open goal edit and save
     await act(async () => {
-      press(tree, "Goal: Not set");
+      press(tree, "Goal: Active");
     });
     await act(async () => {
       press(tree, "Save goal");
@@ -487,7 +487,7 @@ describe("Mini target-reveal", () => {
     await act(async () => {});
 
     await act(async () => {
-      press(tree, "Goal: Not set");
+      press(tree, "Goal: Active");
     });
     await act(async () => {
       press(tree, "Save goal");
@@ -833,5 +833,234 @@ describe("No sensitive values in logs", () => {
 
     consoleSpy.mockRestore();
     errorSpy.mockRestore();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests: Goal row honesty (never contradicts the rendered targets)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Goal row honesty", () => {
+  it("shows 'Active' (not 'Not set') when a target proves a goal exists", async () => {
+    const tree = renderSettings({
+      getTargetFn: jest.fn().mockResolvedValue(DERIVED_TARGET),
+    });
+    await act(async () => {});
+    // The row must be reachable by an honest "Active" label, and "Not set" must
+    // not appear above the rendered calorie/macro targets.
+    expect(() => findPressable(tree, "Goal: Active")).not.toThrow();
+    expect(textContent(tree)).not.toContain("Not set");
+  });
+
+  it("shows 'Not set' only when there is genuinely no active goal", async () => {
+    const tree = renderSettings({
+      getTargetFn: jest.fn().mockRejectedValue({ status: 404 }),
+    });
+    await act(async () => {});
+    expect(() => findPressable(tree, "Goal: Not set")).not.toThrow();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests: in-place save/reset error feedback (no sensitive context)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Save error feedback", () => {
+  it("shows the friendly 422 message in the override card on an out-of-band value", async () => {
+    const overrideFn = jest
+      .fn()
+      .mockRejectedValue(
+        new GoalsApiError(422, "That goal or override value is not valid."),
+      );
+    const tree = renderSettings({
+      getTargetFn: jest.fn().mockResolvedValue(DERIVED_TARGET),
+      setTargetOverrideFn: overrideFn,
+    });
+    await act(async () => {});
+
+    await act(async () => {
+      press(tree, "Calories: 1800 kcal. Derived from your goal and metrics");
+    });
+    await act(async () => {
+      press(tree, "Save override");
+    });
+    await act(async () => {});
+
+    const errorNode = tree.root.find(
+      (n) =>
+        n.props.testID === "calorie-override-edit-error" &&
+        typeof n.props.children === "string",
+    );
+    expect(errorNode.props.children).toContain("not valid");
+    // The edit card stays open so the user can correct the value.
+    expect(
+      tree.root.findAll((n) => n.props.testID === "calorie-override-edit").length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("does not surface raw target numbers in the error message", async () => {
+    const overrideFn = jest
+      .fn()
+      .mockRejectedValue(
+        new GoalsApiError(422, "That goal or override value is not valid."),
+      );
+    const tree = renderSettings({
+      getTargetFn: jest.fn().mockResolvedValue(DERIVED_TARGET),
+      setTargetOverrideFn: overrideFn,
+    });
+    await act(async () => {});
+    await act(async () => {
+      press(tree, "Calories: 1800 kcal. Derived from your goal and metrics");
+    });
+    await act(async () => {
+      press(tree, "Save override");
+    });
+    await act(async () => {});
+    const errorNode = tree.root.find(
+      (n) =>
+        n.props.testID === "calorie-override-edit-error" &&
+        typeof n.props.children === "string",
+    );
+    expect(String(errorNode.props.children)).not.toMatch(/\b(1800|2000)\b/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests: clamp note in the mini-reveal (FTY-106 reveal contract)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Mini-reveal clamp note", () => {
+  it("surfaces the safe-limit note when the goal target was clamped", async () => {
+    const clampedResponse: GoalTargetResponse = {
+      ...GOAL_TARGET_RESPONSE,
+      target: { ...GOAL_TARGET_RESPONSE.target, clamped: true },
+      clamp: { clamped: true, reason: "clamped_to_floor" },
+    };
+    const createGoalFn = jest.fn().mockResolvedValue(clampedResponse);
+    const getTargetFn = jest
+      .fn()
+      .mockResolvedValueOnce(DERIVED_TARGET)
+      .mockResolvedValueOnce(UPDATED_TARGET_AFTER_GOAL);
+
+    const tree = renderSettings({ createGoalFn, getTargetFn });
+    await act(async () => {});
+    await act(async () => {
+      press(tree, "Goal: Active");
+    });
+    await act(async () => {
+      press(tree, "Save goal");
+    });
+    await act(async () => {});
+
+    expect(
+      tree.root.findAll((n) => n.props.testID === "reveal-clamp-note").length,
+    ).toBeGreaterThan(0);
+    const reveal = tree.root.find(
+      (n) => n.props.testID === "mini-target-reveal",
+    );
+    expect(reveal.props.accessibilityLabel).toContain("safe limit");
+  });
+
+  it("omits the clamp note when the target was within the safe band", async () => {
+    const createGoalFn = jest.fn().mockResolvedValue(GOAL_TARGET_RESPONSE);
+    const getTargetFn = jest
+      .fn()
+      .mockResolvedValueOnce(DERIVED_TARGET)
+      .mockResolvedValueOnce(UPDATED_TARGET_AFTER_GOAL);
+
+    const tree = renderSettings({ createGoalFn, getTargetFn });
+    await act(async () => {});
+    await act(async () => {
+      press(tree, "Goal: Active");
+    });
+    await act(async () => {
+      press(tree, "Save goal");
+    });
+    await act(async () => {});
+
+    expect(
+      tree.root.findAll((n) => n.props.testID === "reveal-clamp-note").length,
+    ).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests: imperial height edit (feet + inches, never drops inches or shows 12 in)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const IMPERIAL_PROFILE: ProfileDTO = {
+  ...PROFILE,
+  units_preference: "imperial",
+};
+
+describe("Imperial height", () => {
+  it("never renders a rounded '12 in'", async () => {
+    // 1.8186 m is ~71.6 in — the old display rounded the inches part to 12.
+    const tree = renderSettings({
+      getProfileFn: jest
+        .fn()
+        .mockResolvedValue({ ...IMPERIAL_PROFILE, height_m: 1.8186 }),
+    });
+    await act(async () => {});
+    const text = textContent(tree);
+    expect(text).toContain("6 ft 0 in");
+    expect(text).not.toContain("12 in");
+  });
+
+  it("captures feet AND inches and sends the combined height", async () => {
+    const putProfileFn = jest.fn().mockResolvedValue(IMPERIAL_PROFILE);
+    const tree = renderSettings({
+      getProfileFn: jest.fn().mockResolvedValue(IMPERIAL_PROFILE),
+      putProfileFn,
+    });
+    await act(async () => {});
+
+    await act(async () => {
+      press(tree, "Height: 5 feet 9 inches");
+    });
+
+    const feet = tree.root.find(
+      (n) =>
+        n.props.accessibilityLabel === "New height in feet" &&
+        typeof n.props.onChangeText === "function",
+    );
+    const inches = tree.root.find(
+      (n) =>
+        n.props.accessibilityLabel === "New height inches" &&
+        typeof n.props.onChangeText === "function",
+    );
+    act(() => {
+      feet.props.onChangeText("5");
+    });
+    act(() => {
+      inches.props.onChangeText("10");
+    });
+
+    await act(async () => {
+      press(tree, "Save body metric");
+    });
+    await act(async () => {});
+
+    expect(putProfileFn).toHaveBeenCalledTimes(1);
+    const sent = putProfileFn.mock.calls[0][1] as { height_m: number };
+    // 5 ft 10 in = 70 in = 1.778 m — inches must NOT be dropped.
+    expect(sent.height_m).toBeCloseTo(1.778, 2);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests: Data & About stubs are honest (no flow is claimed to open)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Data & About stubs", () => {
+  it("marks export and deletion as Coming soon without claiming a flow opens", async () => {
+    const tree = renderSettings();
+    await act(async () => {});
+    expect(textContent(tree)).toContain("Coming soon");
+
+    const exportRow = findPressable(tree, "Export data");
+    expect(exportRow.props.accessibilityHint).not.toMatch(/opens/i);
+    const deleteRow = findPressable(tree, "Delete account");
+    expect(deleteRow.props.accessibilityHint).not.toMatch(/opens/i);
   });
 });
