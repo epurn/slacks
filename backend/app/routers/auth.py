@@ -70,24 +70,37 @@ def _client_ip(request: Request, settings: Settings) -> str:
     return request.client.host if request.client else "unknown"
 
 
+_FAIL_CLOSED_RETRY_AFTER = "5"
+
+
 def _enforce_rate_limit(
     limiter: RateLimiter,
     key: str,
     limit: int,
     window_seconds: int,
+    fail_open: bool,
 ) -> None:
-    """Enforce one rate-limit key; raise 429 if throttled. Fail open on error.
+    """Enforce one rate-limit key; raise 429 if throttled.
 
-    If the limiter raises (e.g. Redis unavailable) the request is allowed and a
-    warning is logged so the degraded window is visible without turning an infra
-    blip into an auth outage.
+    When the limiter raises (e.g. Redis unavailable):
+    - ``fail_open=True``: allow the request and emit a warn (dev/self-host default).
+    - ``fail_open=False``: deny with 503 + Retry-After and emit a warn (prod default).
+      The credential verify is never reached, so there is no hash/DB cost and no
+      account-existence oracle even in the fail-closed path.
     """
     decision: RateLimitDecision
     try:
         decision = limiter.check(key, limit, window_seconds)
     except Exception:
-        logger.warning("rate-limit check raised; allowing request (fail-open)")
-        return
+        if fail_open:
+            logger.warning("rate-limit check raised; allowing request (fail-open)")
+            return
+        logger.warning("rate-limit check raised; denying request (fail-closed)")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service temporarily unavailable. Please try again later.",
+            headers={"Retry-After": _FAIL_CLOSED_RETRY_AFTER},
+        ) from None
     if not decision.allowed:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -112,6 +125,7 @@ def register(
         ip_key(ip, "register"),
         settings.rate_limit_register_ip_max,
         settings.rate_limit_register_ip_window,
+        fail_open=settings.rate_limit_fail_open,
     )
 
     try:
@@ -143,6 +157,7 @@ def login(
         ip_key(ip, "login"),
         settings.rate_limit_login_ip_max,
         settings.rate_limit_login_ip_window,
+        fail_open=settings.rate_limit_fail_open,
     )
     # Per-account check blunts credential-stuffing that rotates IPs against one
     # account. Same 429 short-circuit for both known and unknown emails — no
@@ -152,6 +167,7 @@ def login(
         account_key(payload.email),
         settings.rate_limit_login_account_max,
         settings.rate_limit_login_account_window,
+        fail_open=settings.rate_limit_fail_open,
     )
 
     try:
