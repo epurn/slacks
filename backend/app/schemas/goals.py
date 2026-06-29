@@ -15,6 +15,8 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.enums import ClampReason, GoalDirection, PacePreset, TargetBasis, TargetSource
+
 
 class GoalCreateRequest(BaseModel):
     """Request to create a weight goal.
@@ -54,3 +56,98 @@ class GoalDTO(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+
+class GoalTargetRequest(BaseModel):
+    """Create/replace the active goal from a direction + pace preset (FTY-106).
+
+    Onboarding collects a *direction* and, for a directional goal, an
+    evidence-based *pace preset* — never a free-form numeric rate, so an unsafe
+    rate is structurally impossible at the boundary. This contract owns the
+    pace→trajectory derivation: direction + pace + start weight become the
+    ``(start_weight, target_weight, start_date, target_date)`` the calculator
+    consumes (see :mod:`app.services.goals`).
+
+    - ``pace`` is **required** for a ``loss``/``gain`` goal and **ignored** for a
+      ``maintain`` goal (maintenance has no rate). ``faster`` is a loss-only
+      preset; ``gain`` rejects it.
+    - ``start_weight_kg`` defaults to the profile's stored ``weight_kg`` when
+      omitted; if neither is available the request is refused.
+    - ``start_date`` defaults to today in the profile timezone when omitted.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    direction: GoalDirection
+    pace: PacePreset | None = None
+    start_weight_kg: float | None = Field(default=None, gt=0, le=1000.0)
+    start_date: date | None = None
+
+    @model_validator(mode="after")
+    def _require_pace_for_directional_goal(self) -> GoalTargetRequest:
+        if self.direction is not GoalDirection.MAINTAIN and self.pace is None:
+            raise ValueError("pace is required for a loss or gain goal")
+        return self
+
+
+class RevealedTarget(BaseModel):
+    """The computed daily target surfaced by the goal endpoint (FTY-106).
+
+    ``calories`` is the derived ``daily_calorie_target_kcal`` (on goal creation
+    there is no override, so the effective and derived values coincide). RMR/TDEE
+    and ``direction`` come straight from the computed row; ``clamped`` mirrors the
+    calculator's safety-clamp flag (the ``clamp`` object carries the reason).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    calories: int
+    rmr_kcal: float
+    tdee_kcal: float
+    direction: GoalDirection
+    clamped: bool
+
+
+class TargetProvenance(BaseModel):
+    """Where a revealed target came from (FTY-106).
+
+    ``source`` is the shared :class:`~app.enums.TargetSource` discriminator a
+    manual override (FTY-095) also uses — a freshly derived target is always
+    ``derived``. ``basis`` names what it was derived from. The human line ("from
+    your goal + your metrics") is the client's; the API carries the stable tokens.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: TargetSource
+    basis: TargetBasis
+
+
+class ClampStatus(BaseModel):
+    """Honest surfacing of the calculator's safety clamp (FTY-106).
+
+    When the derived plan was clamped to a safety boundary, ``clamped`` is true and
+    ``reason`` names the boundary so the reveal can show a calm note instead of
+    presenting the boundary value as the achievable plan. ``reason`` is ``null``
+    when the target was within the safe band.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    clamped: bool
+    reason: ClampReason | None
+
+
+class GoalTargetResponse(BaseModel):
+    """Combined goal + computed-target reveal (FTY-106).
+
+    The single response the target reveal and Profile render: the persisted active
+    ``goal``, the computed ``target``, its ``provenance``, and the ``clamp`` status.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    goal: GoalDTO
+    target: RevealedTarget
+    provenance: TargetProvenance
+    clamp: ClampStatus

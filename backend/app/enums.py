@@ -42,6 +42,62 @@ class GoalDirection(StrEnum):
     MAINTAIN = "maintain"
 
 
+class PacePreset(StrEnum):
+    """Evidence-based weight-change pace presets (FTY-106).
+
+    Onboarding collects a *direction* and a *pace preset*, never a free-form
+    numeric rate, so an unsafe rate is structurally impossible at the API
+    boundary. Each preset maps to a weekly rate expressed as a fraction of start
+    weight (see :data:`app.services.goals.PACE_WEEKLY_FRACTION`):
+
+    - :attr:`GENTLE` — the most conservative rate.
+    - :attr:`STEADY` — the recommended default (~0.5%/wk loss, ~0.25%/wk gain).
+    - :attr:`FASTER` — the loss-only cap (~1%/wk); never the default. Gain offers
+      no faster preset because lean-mass gain is intrinsically slow.
+
+    The evidence: a safe, lean-mass-sparing loss rate is ~0.5–1%/wk; above
+    ~1.5%/wk measurably increases lean-mass loss, so no preset exceeds ~1%/wk.
+    Lean gain is far slower (~0.125–0.25%/wk).
+    """
+
+    GENTLE = "gentle"
+    STEADY = "steady"
+    FASTER = "faster"
+
+
+class ClampReason(StrEnum):
+    """Why a derived daily calorie target was clamped to a safety boundary (FTY-106).
+
+    The calculator clamps a target that falls outside the documented safety band
+    to the nearest boundary and flags it. This token lets the target-reveal say
+    *which* boundary was hit, so the client can show a calm note rather than
+    presenting a clamped number as the achievable plan.
+
+    - :attr:`CLAMPED_TO_FLOOR` — the derived target fell below the safety floor
+      (the plan is more aggressive than is safe) and was raised to the floor.
+    - :attr:`CLAMPED_TO_CEILING` — the derived target rose above the safety
+      ceiling and was lowered to the ceiling.
+    """
+
+    CLAMPED_TO_FLOOR = "clamped_to_floor"
+    CLAMPED_TO_CEILING = "clamped_to_ceiling"
+
+
+class TargetBasis(StrEnum):
+    """The stable basis token for a target's provenance (FTY-106).
+
+    Paired with :class:`TargetSource` in the target-reveal ``provenance`` object:
+    ``source`` says *how* the value was produced (derived vs. a user override),
+    ``basis`` names *what it was derived from*. The human line ("from your goal +
+    your metrics") is the client's; the API carries this stable token.
+
+    - :attr:`GOAL_AND_METRICS` — the value was computed from the user's goal
+      trajectory and profile body metrics.
+    """
+
+    GOAL_AND_METRICS = "goal_and_metrics"
+
+
 class TargetSource(StrEnum):
     """Provenance of an effective target value (FTY-095).
 
