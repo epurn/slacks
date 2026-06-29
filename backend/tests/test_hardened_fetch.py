@@ -24,6 +24,7 @@ from app.estimator.hardened_fetch import (
     FetchResponseError,
     FetchTransientError,
     _NoRedirectHandler,
+    _PinnedHTTPSConnection,
     assert_url_allowed,
     fetch_text,
     get_json,
@@ -354,6 +355,118 @@ def test_default_text_content_types_are_inert_only() -> None:
     assert DEFAULT_TEXT_CONTENT_TYPES == frozenset(
         {"text/html", "application/xhtml+xml", "text/plain"}
     )
+
+
+# --- FTY-137: vetted-IP pinning (close the DNS-rebinding TOCTOU) -------------------
+
+
+def test_assert_url_allowed_returns_the_vetted_public_ip() -> None:
+    # The check now returns the address it approved so the connect step can pin it.
+    vetted = assert_url_allowed(
+        "https://api.nal.usda.gov/fdc/v1/foods/search",
+        allowed_hosts=ALLOWED,
+        resolver=_resolver_returning("23.1.2.3"),
+    )
+    assert vetted == "23.1.2.3"
+
+
+def test_assert_url_allowed_returns_first_ip_when_host_has_several_public_records() -> None:
+    # When a host resolves to several (all-public) addresses, the first is pinned
+    # deterministically; every address is still required public before returning.
+    def _multi(host: str, port: int, *args: Any, **kwargs: Any) -> list[Any]:
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("23.1.2.3", port)),
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("8.8.8.8", port)),
+        ]
+
+    vetted = assert_url_allowed(
+        "https://api.nal.usda.gov/fdc/v1/foods/search", allowed_hosts=ALLOWED, resolver=_multi
+    )
+    assert vetted == "23.1.2.3"
+
+
+def test_dns_rebind_connects_only_to_the_vetted_ip(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Adversarial DNS rebind: the host vets to a public IP at check time but would
+    # resolve to a private IP if asked again at connect time. With pinning the name
+    # is resolved exactly once and the socket only ever targets the vetted public IP.
+    resolver_calls = {"n": 0}
+
+    def _rebinding_resolver(host: str, port: int, *args: Any, **kwargs: Any) -> list[Any]:
+        resolver_calls["n"] += 1
+        ip = "23.1.2.3" if resolver_calls["n"] == 1 else "10.0.0.5"
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port))]
+
+    connect_targets: list[Any] = []
+
+    def _fake_create_connection(address: Any, *args: Any, **kwargs: Any) -> Any:
+        connect_targets.append(address)
+        raise OSError("no real network in tests")
+
+    monkeypatch.setattr(socket, "create_connection", _fake_create_connection)
+
+    # No opener override here: this exercises the real pinned-IP opener end to end.
+    with pytest.raises(FetchTransientError):
+        post_json(
+            "https://api.nal.usda.gov/fdc/v1/foods/search",
+            headers={"X-Api-Key": "secret"},
+            payload={"query": "rice"},
+            timeout_seconds=1.0,
+            allowed_hosts=ALLOWED,
+            resolver=_rebinding_resolver,
+        )
+
+    assert resolver_calls["n"] == 1  # resolved once, at check time — no connect-time re-resolution
+    assert connect_targets == [("23.1.2.3", 443)]  # only the vetted public IP
+    assert ("10.0.0.5", 443) not in connect_targets  # the rebound private IP is never reached
+
+
+def test_pinned_connection_targets_vetted_ip_with_original_host_and_sni(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The pinned connection opens the socket to the vetted IP while presenting the
+    # original hostname for both the TLS SNI (server_hostname) and the Host header.
+    captured: dict[str, Any] = {}
+    sent = bytearray()
+
+    class _RecordingSSLSock:
+        def sendall(self, data: bytes) -> None:
+            sent.extend(data)
+
+        def makefile(self, *args: Any, **kwargs: Any) -> Any:
+            return io.BytesIO(b"HTTP/1.1 204 No Content\r\n\r\n")
+
+        def settimeout(self, *args: Any) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class _FakeContext:
+        def wrap_socket(self, sock: Any, server_hostname: str | None = None, **kwargs: Any) -> Any:
+            captured["server_hostname"] = server_hostname
+            return _RecordingSSLSock()
+
+    def _fake_create_connection(address: Any, *args: Any, **kwargs: Any) -> Any:
+        captured["connect_address"] = address
+        return object()
+
+    monkeypatch.setattr(socket, "create_connection", _fake_create_connection)
+
+    conn = _PinnedHTTPSConnection(
+        "www.example-restaurant.com",
+        pinned_ip="23.1.2.3",
+        context=_FakeContext(),  # type: ignore[arg-type]
+    )
+    conn.request("GET", "/menu/nutrition", headers={"Accept": "application/json"})
+
+    # Socket opened to the vetted IP, not by re-resolving the hostname.
+    assert captured["connect_address"] == ("23.1.2.3", 443)
+    # SNI / certificate validation use the original hostname.
+    assert captured["server_hostname"] == "www.example-restaurant.com"
+    # Host header carries the original hostname; the pinned IP never appears on the wire.
+    wire = bytes(sent)
+    assert b"Host: www.example-restaurant.com\r\n" in wire
+    assert b"23.1.2.3" not in wire
 
 
 def test_strip_active_content_drops_scripts_styles_and_attributes() -> None:
