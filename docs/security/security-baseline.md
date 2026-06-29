@@ -27,6 +27,15 @@ This project uses the following as design references:
   analytics, drains over the same authenticated/TLS log-events endpoint, and is
   purged for that user on sign-out so a queued entry never leaks to another user
   of the device.)*
+- On-device persistence of a *credential* must use the OS keychain/keystore, be
+  written atomically, never be logged, and be cleared on sign-out. *(v1: the
+  FTY-090 mobile session store persists the signed-in user's bearer token — the
+  `{serverUrl, token, userId}` record — as one atomic JSON value under a single
+  key in the iOS keychain via `expo-secure-store` (`mobile/state/sessionStore.ts`).
+  The token never touches `AsyncStorage`, plain files, or logs; a missing, corrupt,
+  or partial record fails closed to no session rather than a half-hydrated one; and
+  the record is deleted on sign-out. The signature is never trusted client-side —
+  the server stays authoritative.)*
 
 ## Encryption and Secrets
 

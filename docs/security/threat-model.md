@@ -10,7 +10,10 @@ weight data. Update it when architecture, data flows, or providers change.
 ## Assets
 
 - Account identifiers and bearer tokens (v1 auth is stateless HMAC tokens; see
-  Open Questions for the revocation gap).
+  Open Questions for the revocation gap). The mobile client persists the
+  signed-in user's token at rest in the iOS keychain via `expo-secure-store`
+  (FTY-090) — written atomically, never logged, and cleared on sign-out; see
+  `security-baseline.md` for the on-device-credential-persistence control.
 - Body profile data: height, weight, age, formula setting, goals, units.
 - Food and exercise logs and their derived (parsed/resolved) items.
 - Body-weight time series (canonical-kg entries).

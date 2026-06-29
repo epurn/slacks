@@ -44,6 +44,7 @@ jest.mock("expo-linking", () => ({
 }));
 
 const SESSION: Session = {
+  serverUrl: "https://api.example.test",
   token: "test-token",
   userId: "22222222-2222-2222-2222-222222222222",
 };
