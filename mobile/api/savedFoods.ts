@@ -17,6 +17,14 @@
  * errors carry only the HTTP status and the attempted action.
  */
 
+import {
+  ApiError,
+  authHeaders,
+  request,
+  userScopedUrl,
+} from "@/api/client";
+import type { ApiSession } from "@/api/client";
+
 /** Per-serving nutrition crossing the save boundary (mirrors FTY-052 backend). */
 export interface NutritionSnapshot {
   readonly calories: number;
@@ -61,47 +69,26 @@ export interface SavedFoodSearchResponse {
 }
 
 /** Authenticated session needed to address the owner's saved foods. */
-export interface SavedFoodSession {
-  readonly baseUrl: string;
-  readonly token: string;
-  readonly userId: string;
-}
+export type SavedFoodSession = ApiSession;
 
 /** Raised when the saved-food API returns a non-2xx status. */
-export class SavedFoodApiError extends Error {
-  readonly status: number;
+export class SavedFoodApiError extends ApiError {
   constructor(status: number, message: string) {
-    super(message);
+    super(status, message);
     this.name = "SavedFoodApiError";
-    this.status = status;
   }
 }
 
-function authHeaders(session: SavedFoodSession): Record<string, string> {
-  return {
-    Authorization: `Bearer ${session.token}`,
-    "Content-Type": "application/json",
-    Accept: "application/json",
-  };
-}
-
-function savedFoodsUrl(session: SavedFoodSession): string {
-  return `${session.baseUrl}/api/users/${encodeURIComponent(session.userId)}/saved-foods`;
-}
-
-async function readError(
-  response: Response,
-  action: string,
-): Promise<SavedFoodApiError> {
+function savedFoodError(status: number, action: string): SavedFoodApiError {
   const message =
-    response.status === 401
+    status === 401
       ? "Your session has expired. Sign in again to keep saving."
-      : response.status === 404
+      : status === 404
         ? "We couldn't find that saved food."
-        : response.status === 422
+        : status === 422
           ? "That food couldn't be saved. Check the values and try again."
-          : `Could not ${action} (status ${response.status}).`;
-  return new SavedFoodApiError(response.status, message);
+          : `Could not ${action} (status ${status}).`;
+  return new SavedFoodApiError(status, message);
 }
 
 /**
@@ -111,18 +98,17 @@ async function readError(
  */
 export async function saveFood(
   session: SavedFoodSession,
-  request: SaveFoodRequest,
+  payload: SaveFoodRequest,
   fetchImpl: typeof fetch = fetch,
 ): Promise<SavedFoodDTO> {
-  const response = await fetchImpl(savedFoodsUrl(session), {
+  return request<SavedFoodDTO>(userScopedUrl(session, "saved-foods"), {
     method: "POST",
     headers: authHeaders(session),
-    body: JSON.stringify(request),
+    body: JSON.stringify(payload),
+    action: "save your food",
+    onError: savedFoodError,
+    fetchImpl,
   });
-  if (!response.ok) {
-    throw await readError(response, "save your food");
-  }
-  return (await response.json()) as SavedFoodDTO;
 }
 
 /**
@@ -135,13 +121,12 @@ export async function searchSavedFoods(
   query: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<SavedFoodSearchResponse> {
-  const url = `${savedFoodsUrl(session)}?q=${encodeURIComponent(query)}`;
-  const response = await fetchImpl(url, {
+  const url = `${userScopedUrl(session, "saved-foods")}?q=${encodeURIComponent(query)}`;
+  return request<SavedFoodSearchResponse>(url, {
     method: "GET",
     headers: authHeaders(session),
+    action: "search your saved foods",
+    onError: savedFoodError,
+    fetchImpl,
   });
-  if (!response.ok) {
-    throw await readError(response, "search your saved foods");
-  }
-  return (await response.json()) as SavedFoodSearchResponse;
 }

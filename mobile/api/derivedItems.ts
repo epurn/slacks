@@ -15,6 +15,14 @@
  * attempted action — never the request body or any value.
  */
 
+import {
+  ApiError,
+  authHeaders,
+  request,
+  userScopedUrl,
+} from "@/api/client";
+import type { ApiSession } from "@/api/client";
+
 /** Resolution status of a derived item (mirrors the backend `DerivedItemStatus`). */
 export type DerivedItemStatus = "unresolved" | "resolved";
 
@@ -105,57 +113,33 @@ export interface DerivedExerciseItemDTO {
 export type DerivedItem = DerivedFoodItemDTO | DerivedExerciseItemDTO;
 
 /** Authenticated session needed to address the owner's derived items. */
-export interface DerivedItemSession {
-  readonly baseUrl: string;
-  readonly token: string;
-  readonly userId: string;
-}
+export type DerivedItemSession = ApiSession;
 
 /** Raised when the derived-item edit API returns a non-2xx status. */
-export class DerivedItemApiError extends Error {
-  readonly status: number;
+export class DerivedItemApiError extends ApiError {
   constructor(status: number, message: string) {
-    super(message);
+    super(status, message);
     this.name = "DerivedItemApiError";
-    this.status = status;
   }
 }
 
-function authHeaders(session: DerivedItemSession): Record<string, string> {
-  return {
-    Authorization: `Bearer ${session.token}`,
-    "Content-Type": "application/json",
-    Accept: "application/json",
-  };
-}
-
-function editUrl(
-  session: DerivedItemSession,
-  itemType: DerivedItemType,
-  itemId: string,
-): string {
-  return `${session.baseUrl}/api/users/${encodeURIComponent(
-    session.userId,
-  )}/derived-items/${itemType}/${encodeURIComponent(itemId)}`;
-}
-
-async function readError(
-  response: Response,
+function derivedItemError(
+  status: number,
   action: string,
-): Promise<DerivedItemApiError> {
+): DerivedItemApiError {
   // Map the documented status codes to plain, nonjudgmental messages. A 422 from
   // the edit endpoint carries a machine code (`unknown_field`, `out_of_range`,
   // …) but never echoes the value; the message here stays generic and never
   // reflects any value the user typed back at them.
   const message =
-    response.status === 401
+    status === 401
       ? "Your session has expired. Sign in again to keep editing."
-      : response.status === 404
+      : status === 404
         ? "We couldn't find that item."
-        : response.status === 422
+        : status === 422
           ? "That value couldn't be saved. Check it and try again."
-          : `Could not ${action} (status ${response.status}).`;
-  return new DerivedItemApiError(response.status, message);
+          : `Could not ${action} (status ${status}).`;
+  return new DerivedItemApiError(status, message);
 }
 
 /**
@@ -173,13 +157,18 @@ export async function editDerivedItem(
   value: number,
   fetchImpl: typeof fetch = fetch,
 ): Promise<DerivedItem> {
-  const response = await fetchImpl(editUrl(session, itemType, itemId), {
-    method: "PATCH",
-    headers: authHeaders(session),
-    body: JSON.stringify({ field, value }),
-  });
-  if (!response.ok) {
-    throw await readError(response, "save your correction");
-  }
-  return (await response.json()) as DerivedItem;
+  return request<DerivedItem>(
+    userScopedUrl(
+      session,
+      `derived-items/${itemType}/${encodeURIComponent(itemId)}`,
+    ),
+    {
+      method: "PATCH",
+      headers: authHeaders(session),
+      body: JSON.stringify({ field, value }),
+      action: "save your correction",
+      onError: derivedItemError,
+      fetchImpl,
+    },
+  );
 }

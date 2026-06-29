@@ -17,15 +17,14 @@
  * no-account-existence-oracle property.
  */
 
+import { ApiError } from "@/api/client";
 import type { SessionRecord } from "@/state/session";
 
 /** Raised when an auth call returns a non-2xx status (or a malformed body). */
-export class AuthApiError extends Error {
-  readonly status: number;
+export class AuthApiError extends ApiError {
   constructor(status: number, message: string) {
-    super(message);
+    super(status, message);
     this.name = "AuthApiError";
-    this.status = status;
   }
 }
 
