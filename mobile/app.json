@@ -13,6 +13,10 @@
         "NSCameraUsageDescription": "Fatty uses the camera to scan product barcodes so you can log packaged foods quickly."
       }
     },
-    "plugins": ["expo-router", "expo-camera"]
+    "plugins": [
+      "expo-router",
+      "expo-camera",
+      "expo-secure-store"
+    ]
   }
 }

@@ -16,6 +16,7 @@ import type { CadenceStore, NotificationsAdapter, WeighInCadence } from "@/state
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SESSION: Session = {
+  serverUrl: "https://api.example.test",
   token: "test-token",
   userId: "11111111-1111-1111-1111-111111111111",
 };
