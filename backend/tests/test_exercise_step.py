@@ -128,3 +128,22 @@ def test_multiple_candidates_all_resolve() -> None:
     assert ctx.resolved_exercise_items[0].active_calories == 210.0
     # walking MET 3.5, 70 kg, 60 min: (3.5 - 1) * 70 * 1.0 = 175.0
     assert ctx.resolved_exercise_items[1].active_calories == 175.0
+
+
+def test_source_refs_idempotent_no_duplicates_on_repeat() -> None:
+    """Running the step twice does not duplicate source refs (de-duplication works)."""
+
+    ctx = _context(exercise=[_run("run", "30 min", "min", 30.0)])
+
+    # First resolution
+    ExerciseCalculateStep().run(ctx)
+    first_refs = list(ctx.source_refs)
+
+    # Second resolution (simulating the step running again)
+    ExerciseCalculateStep().run(ctx)
+    second_refs = list(ctx.source_refs)
+
+    # Source refs should be identical: no duplicates added
+    assert first_refs == second_refs
+    assert first_refs.count(f"met_table:{MET_TABLE_VERSION}") == 1
+    assert first_refs.count(MET_TABLE_SOURCE) == 1

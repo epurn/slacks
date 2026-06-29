@@ -387,3 +387,39 @@ def test_transient_provider_error_is_retryable(client: TestClient, session: Sess
 
     assert result.should_retry is True
     assert result.job_status is EstimationJobStatus.RUNNING
+
+
+def test_label_source_refs_idempotent_no_duplicates_on_repeat() -> None:
+    """Running the label step twice does not duplicate source refs (de-duplication works)."""
+
+    import uuid
+
+    from app.estimator.pipeline import EstimationContext
+    from app.llm.providers.fake import FakeProvider
+
+    ctx = EstimationContext(
+        log_event_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        raw_text="label test",
+        label_input=_label(),
+    )
+
+    # Provide two responses: one for each call to the step
+    provider = FakeProvider(responses=[dict(_PANEL), dict(_PANEL)], supports_vision=True)
+    step = LabelResolveStep(provider)
+
+    # First resolution
+    step.run(ctx)
+    first_refs = list(ctx.source_refs)
+
+    # Second resolution (simulating the step running again on the same context)
+    # This simulates the idempotent behavior: calling the step twice should not duplicate
+    step.run(ctx)
+    second_refs = list(ctx.source_refs)
+
+    # Source refs should contain USER_LABEL_SOURCE_TYPE exactly once
+    assert first_refs.count(USER_LABEL_SOURCE_TYPE) == 1
+    # Running again should not add duplicates
+    assert second_refs.count(USER_LABEL_SOURCE_TYPE) == 1
+    # And the refs should be the same
+    assert first_refs == second_refs
