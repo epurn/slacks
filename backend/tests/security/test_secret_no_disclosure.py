@@ -197,12 +197,26 @@ def test_bearer_token_label_preserved_after_redaction() -> None:
     assert "sk-super-long-secret-key-1234567890" not in result
 
 
-def test_authorization_header_fully_redacted() -> None:
+@pytest.mark.parametrize(
+    "raw",
+    [
+        # sk- token behind the header (also caught by the standalone sk- arm)
+        "Authorization: Bearer sk-super-long-secret-key-1234567890",
+        # Opaque OAuth bearer token — NOT sk-/JWT shaped, so only the inline
+        # Authorization arm can catch it.  This is the common leak shape.
+        "Authorization: Bearer abc123opaquerandomtoken",
+        # Lower-cased / "=" separator variant
+        "auth=Bearer abc123opaquerandomtoken",
+    ],
+)
+def test_authorization_header_fully_redacted(raw: str) -> None:
     # When Authorization: Bearer … appears, the inline key=value arm fires first
-    # (Authorization is a sensitive key), so the entire header value is redacted.
-    result = _redact_values("Authorization: Bearer sk-super-long-secret-key-1234567890")
+    # (Authorization is a sensitive key) and its value absorbs the "Bearer "
+    # label, so the credential is redacted even when it is an opaque token.
+    result = _redact_values(raw)
     assert REDACTED in result
     assert "sk-super-long-secret-key-1234567890" not in result
+    assert "abc123opaquerandomtoken" not in result
 
 
 def test_exc_info_with_secret_is_redacted() -> None:

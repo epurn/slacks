@@ -49,9 +49,11 @@ _SENSITIVE_VALUE = re.compile(
     # AWS access key IDs
     r"|AKIA[0-9A-Z]{16}"
     # Inline key=value / key: value where the key name is sensitive;
-    # keep the key prefix, redact the value
+    # keep the key prefix, redact the value.  The value also absorbs an
+    # optional "Bearer " label so e.g. ``Authorization: Bearer <token>``
+    # redacts the credential, not just the literal word "Bearer".
     r"|((?:secret|token|password|passwd|api[_-]?key|access[_-]?key"
-    r"|authorization|auth|cookie|key)\s*[:=]\s*)\S+",
+    r"|authorization|auth|cookie|key)\s*[:=]\s*)(?:Bearer\s+)?\S+",
     re.IGNORECASE,
 )
 
