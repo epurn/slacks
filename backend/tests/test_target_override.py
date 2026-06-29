@@ -22,6 +22,7 @@ from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -32,8 +33,10 @@ from app.models.targets import DailyTarget, Goal
 from app.schemas.targets import TargetOverrideRequest
 from app.services.targets import (
     GoalForbidden,
+    IncompleteProfileError,
     OverrideOutOfBand,
     TargetNotFound,
+    _resolve_active_target_row,
     build_target_read_model,
     compute_daily_target,
     get_active_target,
@@ -245,6 +248,148 @@ def test_recompute_for_new_date_carries_override_forward(session: Session) -> No
 
 
 # ---------------------------------------------------------------------------
+# Override on a later in-horizon day: materialise the row on demand (FTY-127)
+# ---------------------------------------------------------------------------
+
+
+def test_set_override_on_later_in_horizon_day_materialises_row(session: Session) -> None:
+    """An override on a day with no stored row materialises it, then succeeds."""
+
+    user = _make_user_with_profile(session)
+    _seed_target(session, user)  # only the _FOR_DATE row exists; goal runs to 2026-04-01
+    later = date(2026, 1, 6)  # D+5, in horizon
+    assert _resolve_active_target_row(session, user.id, later) is None
+
+    updated = set_target_override(
+        session,
+        user.id,
+        user,
+        TargetOverrideRequest(calorie_target_kcal=1800, protein_target_g=170),
+        for_date=later,
+    )
+
+    # The row was materialised on the requested day and carries the override.
+    assert updated.for_date == later
+    rm = build_target_read_model(updated)
+    assert rm.calories.effective == 1800
+    assert rm.calories.source == "user"
+    assert rm.protein_g.effective == 170
+    assert rm.protein_g.source == "user"
+
+    # The read surface reports the override for that day.
+    via_get = get_active_target(session, user.id, user, for_date=later)
+    assert via_get.effective_calorie_target_kcal == 1800
+    assert via_get.calorie_source == "user"
+
+    # Reset on the (now concrete) later-day row falls back to derived.
+    after_reset = reset_target_override(session, user.id, user, None, for_date=later)
+    assert after_reset.calorie_source == "derived"
+    assert after_reset.protein_source == "derived"
+
+
+def test_set_override_on_later_day_carries_prior_override_forward(session: Session) -> None:
+    """Materialising a later-day row carries the goal's in-force override forward."""
+
+    user = _make_user_with_profile(session)
+    _seed_target(session, user)
+    set_target_override(
+        session,
+        user.id,
+        user,
+        TargetOverrideRequest(calorie_target_kcal=1750),
+        for_date=_FOR_DATE,
+    )
+
+    later = date(2026, 1, 6)
+    # Set a *protein* override on the later day; the calorie override carries forward.
+    updated = set_target_override(
+        session,
+        user.id,
+        user,
+        TargetOverrideRequest(protein_target_g=170),
+        for_date=later,
+    )
+
+    assert updated.for_date == later
+    assert updated.override_calorie_target_kcal == 1750  # carried forward
+    assert updated.override_protein_target_g == 170
+    rm = build_target_read_model(updated)
+    assert rm.calories.source == "user"
+    assert rm.protein_g.source == "user"
+
+
+def test_reset_on_later_day_materialises_and_carries_override(session: Session) -> None:
+    """Reset on a later day materialises the row (carrying the override) then clears it."""
+
+    user = _make_user_with_profile(session)
+    _seed_target(session, user)
+    set_target_override(
+        session,
+        user.id,
+        user,
+        TargetOverrideRequest(calorie_target_kcal=1750),
+        for_date=_FOR_DATE,
+    )
+
+    later = date(2026, 1, 6)
+    # Reset only the protein override: nothing to clear, but the calorie override
+    # carried onto the materialised row survives.
+    updated = reset_target_override(
+        session, user.id, user, [OverridableTarget.PROTEIN], for_date=later
+    )
+
+    assert updated.for_date == later
+    assert build_target_read_model(updated).calories.source == "user"
+    assert updated.override_calorie_target_kcal == 1750
+
+
+def test_override_past_horizon_fails_closed(session: Session) -> None:
+    """A day past ``target_date`` has no active goal covering it → 404 (no oracle)."""
+
+    user = _make_user_with_profile(session)
+    _seed_target(session, user)  # target_date 2026-04-01
+    past_horizon = date(2026, 4, 2)
+
+    with pytest.raises(TargetNotFound):
+        set_target_override(
+            session,
+            user.id,
+            user,
+            TargetOverrideRequest(calorie_target_kcal=1800),
+            for_date=past_horizon,
+        )
+    with pytest.raises(TargetNotFound):
+        reset_target_override(session, user.id, user, None, for_date=past_horizon)
+
+
+def test_override_materialise_with_incomplete_profile_raises(session: Session) -> None:
+    """If materialising a later-day row needs the calculator but the profile has gone
+    incomplete, the write surfaces ``IncompleteProfileError`` (→ ``409``), not a 500."""
+
+    user = _make_user_with_profile(session)
+    _seed_target(session, user)  # complete profile lets goal-creation-day row compute
+    # The profile-update DTO allows nulling body metrics after goal creation.
+    profile = session.scalars(select(UserProfile).where(UserProfile.user_id == user.id)).one()
+    profile.height_m = None
+    session.commit()
+
+    later = date(2026, 1, 6)  # in horizon, no stored row → must materialise
+    assert _resolve_active_target_row(session, user.id, later) is None
+
+    with pytest.raises(IncompleteProfileError):
+        set_target_override(
+            session,
+            user.id,
+            user,
+            TargetOverrideRequest(calorie_target_kcal=1800),
+            for_date=later,
+        )
+    session.rollback()
+    with pytest.raises(IncompleteProfileError):
+        reset_target_override(session, user.id, user, None, for_date=later)
+
+
+# ---------------------------------------------------------------------------
 # Out-of-band validation: reject, do not clamp
 # ---------------------------------------------------------------------------
 
@@ -434,6 +579,95 @@ def test_api_set_get_and_reset_round_trip(client: TestClient, db_engine: Engine)
         "derived": 1678,
         "source": "derived",
     }
+
+
+def test_api_set_override_on_later_in_horizon_day_materialises(
+    client: TestClient, db_engine: Engine
+) -> None:
+    """Over HTTP, an override on a later in-horizon day materialises the row + succeeds."""
+
+    user_id, auth = _register(client, "target-later@example.com")
+    # The materialise-on-write path recomputes via the calculator, so the user needs a
+    # complete profile. Registration creates a bare profile row; fill in the body
+    # metrics the calculator requires.
+    factory = create_session_factory(db_engine)
+    with factory() as session:
+        profile = session.scalars(
+            select(UserProfile).where(UserProfile.user_id == uuid.UUID(user_id))
+        ).one()
+        profile.height_m = 1.80
+        profile.weight_kg = 80.0
+        profile.birth_year = 1996
+        profile.metabolic_formula = MetabolicFormula.MIFFLIN_ST_JEOR_PLUS_5
+        session.commit()
+    _seed_api_target(db_engine, user_id)
+    headers = {"Authorization": auth}
+    later = date(2026, 2, 1)  # in horizon (goal runs to 2026-04-01), no stored row
+
+    resp = client.put(
+        f"/api/users/{user_id}/target/override",
+        headers=headers,
+        params={"day": str(later)},
+        json={"calorie_target_kcal": 1800},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["calories"]["source"] == "user"
+
+    # The carried override is visible on the read surface for that day.
+    resp = client.get(f"/api/users/{user_id}/target", headers=headers, params={"day": str(later)})
+    assert resp.status_code == 200
+    assert resp.json()["calories"] == {
+        "effective": 1800,
+        "derived": 1678,
+        "source": "user",
+    }
+
+
+def test_api_override_materialise_with_incomplete_profile_returns_409(
+    client: TestClient, db_engine: Engine
+) -> None:
+    """Over HTTP, an in-horizon override that must materialise but whose profile has
+    gone incomplete returns ``409`` (complete the profile first), never an uncaught 500."""
+
+    user_id, auth = _register(client, "target-incomplete@example.com")
+    # Complete the profile so the goal-creation-day row computes, seed the target,
+    # then null a body metric the calculator needs (the profile update DTO allows it).
+    factory = create_session_factory(db_engine)
+    with factory() as session:
+        profile = session.scalars(
+            select(UserProfile).where(UserProfile.user_id == uuid.UUID(user_id))
+        ).one()
+        profile.height_m = 1.80
+        profile.weight_kg = 80.0
+        profile.birth_year = 1996
+        profile.metabolic_formula = MetabolicFormula.MIFFLIN_ST_JEOR_PLUS_5
+        session.commit()
+    _seed_api_target(db_engine, user_id)
+    with factory() as session:
+        profile = session.scalars(
+            select(UserProfile).where(UserProfile.user_id == uuid.UUID(user_id))
+        ).one()
+        profile.height_m = None
+        session.commit()
+
+    headers = {"Authorization": auth}
+    later = date(2026, 2, 1)  # in horizon, no stored row → must materialise
+
+    resp = client.put(
+        f"/api/users/{user_id}/target/override",
+        headers=headers,
+        params={"day": str(later)},
+        json={"calorie_target_kcal": 1800},
+    )
+    assert resp.status_code == 409
+
+    resp = client.post(
+        f"/api/users/{user_id}/target/override/reset",
+        headers=headers,
+        params={"day": str(later)},
+        json={},
+    )
+    assert resp.status_code == 409
 
 
 def test_api_out_of_band_override_returns_422(client: TestClient, db_engine: Engine) -> None:

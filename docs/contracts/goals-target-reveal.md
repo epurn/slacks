@@ -105,8 +105,11 @@ inputs → identical persisted goal and target.
   transaction** with the target write.
 - Today's `daily_targets` row is computed via `compute_daily_target` and
   persisted, so `GET daily-summary` for that day returns a non-`null` target
-  equal to the revealed value. (Future days are unaffected — `daily-summary`
-  keeps returning `null` for days without a stored row, per its contract.)
+  equal to the revealed value. Later in-horizon days need no stored row: the
+  daily-summary and target reads **carry this value forward** to every day up to
+  `target_date` (the daily target is constant across the horizon), so a returning
+  user keeps a target every day — see `target-calculator.md` (Target resolution)
+  and `daily-summary.md`. Days past `target_date` stay `null`.
 
 ## Validation
 

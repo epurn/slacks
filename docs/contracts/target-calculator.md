@@ -30,7 +30,8 @@ estimator / contracts / backend-core lane (`backend/app/estimator/`,
 
 4 (introduced in FTY-022; macro targets added in FTY-094; manual calorie/macro
 override + reset with derived-vs-overridden provenance added in FTY-095;
-read-path carry-forward within the goal horizon added in FTY-127/FTY-103).
+read-path carry-forward within the goal horizon added in FTY-127/FTY-103;
+override-write on-demand row materialisation within the horizon added in FTY-127).
 
 ## Inputs
 
@@ -236,14 +237,23 @@ every read. Resolution therefore differs between reads and writes:
   day is **past** `target_date` (the planned trajectory is complete; the user is
   steered to set a new goal rather than shown a stale deficit). Cross-user access is
   the same `404` — no existence oracle.
-- **Override writes resolve by exact date.** `set`/`reset` (below) operate on the
-  concrete `daily_targets` row for the requested day, because an override must be
-  persisted on a real row. **Known limitation (tracked in FTY-127):** since rows are
-  only materialised on creation day, an override write on a *non-creation* in-horizon
-  day currently returns `404` (`TargetNotFound`) — there is no row to land on. The
-  residual FTY-127 work materialises the row on demand (via the calculator,
-  carrying any in-force override forward) so override-on-a-later-day succeeds. The
-  read carry-forward above is unaffected.
+- **Override writes materialise the exact-date row on demand.** `set`/`reset`
+  (below) must operate on the **concrete** `daily_targets` row for the requested day,
+  because an override has to be persisted on a real row (never on a carried-forward
+  earlier row). Since a row is only stored on goal-creation day, a later in-horizon
+  day has none yet — so the write path **materialises it on demand**: when the owner
+  has an active goal whose horizon (`[start_date, target_date]`) covers the day, the
+  row is created via `compute_daily_target` (which runs the calculator and carries any
+  in-force override forward onto the new date), then the override/reset is applied to
+  it. Thus override-on-a-later-day **succeeds** for every in-horizon day. The write
+  fails closed with `404` (`TargetNotFound`) only when there is **no active goal
+  covering the day** (no goal, or the day is outside `[start_date, target_date]`).
+  Cross-user access is the same `404` — no existence oracle. Because materialisation
+  runs the calculator, a profile that has since gone incomplete (height/birth year
+  nulled after goal creation, which the profile update DTO allows, or the formula on
+  the unspecified default) raises `IncompleteProfileError` → `409` (complete the
+  profile first), the same mapping goal creation uses — never an uncaught `500`. The
+  read carry-forward above is unchanged.
 
 ### Set / reset semantics
 
@@ -291,6 +301,111 @@ the user sees their value refused, not quietly altered. (The derived path's
   safety ceiling and Atwater factors as a sanity bound rather than introducing a
   new number.
 
+## HTTP routes
+
+Three owner-scoped routes surface the target calculator and manual override/reset
+surface. All three resolve the `day` query parameter (calendar day in the user's
+profile timezone; defaults to today; malformed `day` → `422`). All three fail
+closed as `404` on cross-user access or when no active target exists for the day
+(the `GoalForbidden` / `TargetNotFound` discipline — no existence oracle). All
+three require authentication (missing/invalid bearer token → `401`). Target
+numbers are sensitive derived body data and are never logged.
+
+### GET — read the derived-vs-overridden target
+
+```
+GET /api/users/{user_id}/target?day=YYYY-MM-DD
+Authorization: Bearer <token>
+```
+
+Return the caller's active-goal target for the day with provenance. Each target
+(calorie + macros) carries its effective value, the derived value, and a
+`derived | user` source flag (see the read-model description under "Effective
+value and the read-model" above).
+
+**Request:** no body.
+
+**Response:** `200 OK`
+
+```json
+{
+  "calories": { "effective": 1800, "derived": 1678, "source": "user" },
+  "protein_g": { "effective": 128, "derived": 128, "source": "derived" },
+  "carbs_g": { "effective": 148, "derived": 148, "source": "derived" },
+  "fat_g": { "effective": 64, "derived": 64, "source": "derived" }
+}
+```
+
+### PUT — set a calorie and/or macro override
+
+```
+PUT /api/users/{user_id}/target/override?day=YYYY-MM-DD
+Authorization: Bearer <token>
+```
+
+Set a manual calorie and/or macro override on the caller's target for the day.
+Calorie and macro overrides can be set independently; at least one must be
+provided (empty request body → `422`). An out-of-band value is rejected `422`
+with nothing persisted (the user's explicit value is refused, not silently
+clamped). Idempotent within the safety band.
+
+**Request:** `TargetOverrideRequest`
+
+```json
+{
+  "calorie_target_kcal": 1900,
+  "protein_target_g": null,
+  "carbs_target_g": 150,
+  "fat_target_g": null
+}
+```
+
+All fields are optional. Constraints:
+- `calorie_target_kcal`: int ≥ 1 (if provided)
+- `protein_target_g` / `carbs_target_g` / `fat_target_g`: int ≥ 0 (if provided)
+- At least one field must be present; `extra="forbid"` (unknown fields rejected)
+- Values outside the safety band documented under "Override validation" return
+  `422` (the `OverrideOutOfBand` error); the band is read from the target's
+  `assumptions` snapshot, which varies by metabolic formula.
+
+**Response:** `200 OK`, same shape as GET above with `source: user` for the
+overridden targets.
+
+### POST — reset override(s) back to derived
+
+```
+POST /api/users/{user_id}/target/override/reset?day=YYYY-MM-DD
+Authorization: Bearer <token>
+```
+
+Reset (clear) one or more manual target overrides on the caller's target for the
+day, so their effective value falls back to the derived value. Idempotent; a
+reset on a non-overridden target is a no-op.
+
+**Request:** `TargetResetRequest`
+
+```json
+{
+  "targets": ["calories", "protein"]
+}
+```
+
+Fields:
+- `targets`: optional list of target names to reset (`"calories"`, `"protein"`,
+  `"carbs"`, `"fat"`); `None` or empty list resets **all** in-force overrides.
+
+**Response:** `200 OK`, same shape as GET above with `source: derived` for the
+reset targets.
+
+## Errors and status codes
+
+| Status | Condition |
+| --- | --- |
+| `200` | Request succeeded. |
+| `401` | Missing, invalid, or expired bearer token. |
+| `404` | Cross-user access (user does not own the goal) or no active goal / no stored target for the day (`GoalForbidden` / `TargetNotFound` — fail closed, no existence oracle). |
+| `422` | Malformed `day` parameter; an **out-of-band override** (value outside the safety band, `PUT` only); an **empty override body** (no field provided in `TargetOverrideRequest`). |
+
 ## Validation
 
 - `height_m` ∈ (0, 3]; `age_years` ∈ [13, 120]; `start_weight_kg`,
@@ -312,9 +427,10 @@ for **their own** goal. The service fails closed (`GoalForbidden`) on any
 cross-user access, and an unowned or missing goal is indistinguishable (no
 existence oracle). `user_id` on both tables is the ownership key. The override
 set/reset endpoints are owner-scoped: cross-user access and a caller with no active
-goal / no stored target for the day both fail closed as `404` (the same
-`GoalForbidden` / `TargetNotFound` → `404` discipline, no existence oracle), proven
-by negative authorization tests.
+goal covering the day both fail closed as `404` (the same `GoalForbidden` /
+`TargetNotFound` → `404` discipline, no existence oracle), proven by negative
+authorization tests. (An active goal with no stored row for an in-horizon day no
+longer 404s — the write materialises the row on demand; see Target resolution.)
 
 ## Privacy and Retention
 
@@ -339,7 +455,8 @@ by negative authorization tests.
 | `target_date` ≤ `start_date`, out-of-range metric, unknown field | `ValidationError` at the boundary. |
 | Profile missing height/birth year, or formula on the unspecified default | `IncompleteProfileError`. |
 | Cross-user, unowned, or missing goal | `GoalForbidden` (fail closed). |
-| Override set/reset with no active goal or stored target for the day | `TargetNotFound` → `404` (fail closed, no oracle). |
+| Override set/reset with **no active goal covering the day** (no goal, or day outside `[start_date, target_date]`) | `TargetNotFound` → `404` (fail closed, no oracle). An active goal with no stored row yet materialises the row and succeeds. |
+| Override set/reset has to **materialise** the day's row but the profile is incomplete (height/birth year nulled, or formula on the unspecified default) | `IncompleteProfileError` → `409` (complete the profile first), the same mapping goal creation uses. |
 | Raw **derived** target outside the safety band | Clamped to floor/ceiling, `clamped = true`. |
 | Manual **override** outside the safety band (or a macro outside its bound) | Rejected `422`, nothing persisted (no clamp). |
 | Empty override request (no calorie or macro provided) | Rejected `422` at the boundary. |

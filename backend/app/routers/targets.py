@@ -10,7 +10,9 @@ The ``{user_id}`` path is explicit so object-level ownership is checked on every
 access; a cross-user request and a user with no active goal / no stored target for
 the day are indistinguishable and both fail closed as ``404`` (no existence
 oracle). An out-of-band manual override is refused ``422`` — the user's explicit
-value is rejected, never silently clamped. Target numbers are sensitive derived
+value is rejected, never silently clamped. When an override write has to materialise
+the day's row but the profile is incomplete, it fails ``409`` (complete the profile
+first), the same mapping goal creation uses. Target numbers are sensitive derived
 body data and are never logged.
 """
 
@@ -31,11 +33,21 @@ from app.schemas.targets import (
     TargetResetRequest,
 )
 from app.services import targets as target_service
-from app.services.targets import GoalForbidden, OverrideOutOfBand, TargetNotFound
+from app.services.targets import (
+    GoalForbidden,
+    IncompleteProfileError,
+    OverrideOutOfBand,
+    TargetNotFound,
+)
 
 router = APIRouter(prefix="/api/users", tags=["targets"])
 
 _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="target not found")
+
+_INCOMPLETE_PROFILE = HTTPException(
+    status_code=status.HTTP_409_CONFLICT,
+    detail="profile must be completed before a target can be computed",
+)
 
 _DAY_QUERY = Query(
     description=(
@@ -79,7 +91,9 @@ def set_override(
 
     Calorie and macro overrides can be set independently. An out-of-band value is
     refused ``422`` with nothing persisted; cross-user access or no active target
-    fails closed ``404``. ``day`` defaults to today in the user's profile timezone.
+    fails closed ``404``. When materialising the day's row needs the calculator but
+    the profile is incomplete, returns ``409`` (complete the profile first), matching
+    goal creation. ``day`` defaults to today in the user's profile timezone.
     """
 
     try:
@@ -88,6 +102,8 @@ def set_override(
         )
     except (GoalForbidden, TargetNotFound) as exc:
         raise _NOT_FOUND from exc
+    except IncompleteProfileError as exc:
+        raise _INCOMPLETE_PROFILE from exc
     except OverrideOutOfBand as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
@@ -107,7 +123,9 @@ def reset_override(
 
     ``targets`` names which overrides to clear; omitting it clears all in-force
     overrides. Idempotent. Cross-user access or no active target fails closed
-    ``404``. ``day`` defaults to today in the user's profile timezone.
+    ``404``. When materialising the day's row needs the calculator but the profile is
+    incomplete, returns ``409`` (complete the profile first), matching goal creation.
+    ``day`` defaults to today in the user's profile timezone.
     """
 
     try:
@@ -116,4 +134,6 @@ def reset_override(
         )
     except (GoalForbidden, TargetNotFound) as exc:
         raise _NOT_FOUND from exc
+    except IncompleteProfileError as exc:
+        raise _INCOMPLETE_PROFILE from exc
     return target_service.build_target_read_model(target)

@@ -214,8 +214,13 @@ def set_target_override(
     """Record a calorie and/or macro override on the active goal's target.
 
     Object-level authorized (fail closed); ``for_date`` defaults to today in the
-    owner's profile timezone. Each provided value is validated against its
-    documented safety band and an out-of-band value raises
+    owner's profile timezone. When no exact-date row exists yet but the owner has an
+    active goal covering the day, the row is **materialised on demand** (via
+    :func:`compute_daily_target`, carrying any in-force override forward) so an
+    override succeeds on any in-horizon day, not just goal-creation day. Because that
+    materialisation runs the calculator, a profile that has gone incomplete raises
+    :class:`IncompleteProfileError` (``409``). Each provided value is validated against
+    its documented safety band and an out-of-band value raises
     :class:`OverrideOutOfBand` (``422``) with nothing persisted. On success the
     targeted override columns are set, ``override_set_at`` is stamped, and the
     updated row is returned with the overridden targets reporting ``source: user``.
@@ -223,7 +228,7 @@ def set_target_override(
 
     _authorize(owner_id, current_user)
     day = _resolve_day(session, owner_id, for_date)
-    target = _resolve_active_target(session, owner_id, day)
+    target = _resolve_or_materialise_target(session, owner_id, current_user, day)
 
     _validate_override(target, request)
 
@@ -253,16 +258,21 @@ def reset_target_override(
     """Clear the targeted override column(s) back to ``NULL`` (reset to derived).
 
     Object-level authorized (fail closed); ``for_date`` defaults to today in the
-    owner's profile timezone. ``targets`` names which overrides to clear; ``None``
-    or an empty list clears **all** in-force overrides. Resetting a target that is
-    already derived is a no-op. After the last in-force override is cleared,
-    ``override_set_at`` is cleared too. The cleared targets fall back to the derived
-    value with ``source: derived``.
+    owner's profile timezone. When no exact-date row exists yet but the owner has an
+    active goal covering the day, the row is **materialised on demand** (via
+    :func:`compute_daily_target`, carrying any in-force override forward), then the
+    reset is applied to it — so a reset succeeds on any in-horizon day. Because that
+    materialisation runs the calculator, a profile that has gone incomplete raises
+    :class:`IncompleteProfileError` (``409``). ``targets``
+    names which overrides to clear; ``None`` or an empty list clears **all** in-force
+    overrides. Resetting a target that is already derived is a no-op. After the last
+    in-force override is cleared, ``override_set_at`` is cleared too. The cleared
+    targets fall back to the derived value with ``source: derived``.
     """
 
     _authorize(owner_id, current_user)
     day = _resolve_day(session, owner_id, for_date)
-    target = _resolve_active_target(session, owner_id, day)
+    target = _resolve_or_materialise_target(session, owner_id, current_user, day)
 
     to_clear = set(targets) if targets else set(OverridableTarget)
     if OverridableTarget.CALORIES in to_clear:
@@ -362,15 +372,59 @@ def _resolve_active_target(session: Session, owner_id: uuid.UUID, for_date: date
 
     Raises :class:`TargetNotFound` when the user has no active goal or no stored
     target row for *that exact day* — the same fail-closed signal as a cross-user
-    attempt. This is the resolver the **override write** paths use: an override must
-    land on a concrete row for the requested day, never on a carried-forward earlier
-    row. The read paths use :func:`resolve_carried_target_row` instead.
+    attempt. The override write paths layer on this via
+    :func:`_resolve_or_materialise_target`, which materialises the exact-date row when
+    it is missing but in horizon; the read paths use :func:`resolve_carried_target_row`
+    instead.
     """
 
     target = _resolve_active_target_row(session, owner_id, for_date)
     if target is None:
         raise TargetNotFound("no active target for this user and day")
     return target
+
+
+def _active_goal_covering(session: Session, owner_id: uuid.UUID, for_date: date) -> Goal | None:
+    """The owner's active goal whose planned horizon covers ``for_date``, or None.
+
+    A goal covers ``for_date`` when ``start_date <= for_date <= target_date`` — the
+    same ``[start_date, target_date]`` horizon the read carry-forward bounds against.
+    Returns ``None`` when there is no active goal or the day falls outside its
+    horizon, so the write path can fail closed without an existence oracle.
+    """
+
+    return session.scalars(
+        select(Goal).where(
+            Goal.user_id == owner_id,
+            Goal.is_active.is_(True),
+            Goal.start_date <= for_date,
+            Goal.target_date >= for_date,
+        )
+    ).one_or_none()
+
+
+def _resolve_or_materialise_target(
+    session: Session, owner_id: uuid.UUID, current_user: User, for_date: date
+) -> DailyTarget:
+    """Resolve the exact-date target row for an override write, materialising on demand.
+
+    An override must land on a **concrete** row for the requested day, never on a
+    carried-forward earlier row. A ``daily_targets`` row is only stored on
+    goal-creation day (and on a prior override write), so a later in-horizon day has
+    no row yet: when the owner has an active goal whose horizon covers ``for_date`` we
+    materialise the row via :func:`compute_daily_target` (which creates it, carries any
+    in-force override forward, and applies the fresh derived columns), then return it.
+    With no active goal covering the day we fail closed with :class:`TargetNotFound`
+    (``404``), indistinguishable from a cross-user attempt — no existence oracle.
+    """
+
+    target = _resolve_active_target_row(session, owner_id, for_date)
+    if target is not None:
+        return target
+    goal = _active_goal_covering(session, owner_id, for_date)
+    if goal is None:
+        raise TargetNotFound("no active target for this user and day")
+    return compute_daily_target(session, owner_id, goal.id, current_user, for_date=for_date)
 
 
 def resolve_carried_target_row(
