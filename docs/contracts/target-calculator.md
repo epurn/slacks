@@ -30,7 +30,8 @@ estimator / contracts / backend-core lane (`backend/app/estimator/`,
 
 4 (introduced in FTY-022; macro targets added in FTY-094; manual calorie/macro
 override + reset with derived-vs-overridden provenance added in FTY-095;
-read-path carry-forward within the goal horizon added in FTY-127/FTY-103).
+read-path carry-forward within the goal horizon added in FTY-127/FTY-103;
+override-write on-demand row materialisation within the horizon added in FTY-127).
 
 ## Inputs
 
@@ -236,14 +237,19 @@ every read. Resolution therefore differs between reads and writes:
   day is **past** `target_date` (the planned trajectory is complete; the user is
   steered to set a new goal rather than shown a stale deficit). Cross-user access is
   the same `404` — no existence oracle.
-- **Override writes resolve by exact date.** `set`/`reset` (below) operate on the
-  concrete `daily_targets` row for the requested day, because an override must be
-  persisted on a real row. **Known limitation (tracked in FTY-127):** since rows are
-  only materialised on creation day, an override write on a *non-creation* in-horizon
-  day currently returns `404` (`TargetNotFound`) — there is no row to land on. The
-  residual FTY-127 work materialises the row on demand (via the calculator,
-  carrying any in-force override forward) so override-on-a-later-day succeeds. The
-  read carry-forward above is unaffected.
+- **Override writes materialise the exact-date row on demand.** `set`/`reset`
+  (below) must operate on the **concrete** `daily_targets` row for the requested day,
+  because an override has to be persisted on a real row (never on a carried-forward
+  earlier row). Since a row is only stored on goal-creation day, a later in-horizon
+  day has none yet — so the write path **materialises it on demand**: when the owner
+  has an active goal whose horizon (`[start_date, target_date]`) covers the day, the
+  row is created via `compute_daily_target` (which runs the calculator and carries any
+  in-force override forward onto the new date), then the override/reset is applied to
+  it. Thus override-on-a-later-day **succeeds** for every in-horizon day. The write
+  fails closed with `404` (`TargetNotFound`) only when there is **no active goal
+  covering the day** (no goal, or the day is outside `[start_date, target_date]`).
+  Cross-user access is the same `404` — no existence oracle. The read carry-forward
+  above is unchanged.
 
 ### Set / reset semantics
 
@@ -312,9 +318,10 @@ for **their own** goal. The service fails closed (`GoalForbidden`) on any
 cross-user access, and an unowned or missing goal is indistinguishable (no
 existence oracle). `user_id` on both tables is the ownership key. The override
 set/reset endpoints are owner-scoped: cross-user access and a caller with no active
-goal / no stored target for the day both fail closed as `404` (the same
-`GoalForbidden` / `TargetNotFound` → `404` discipline, no existence oracle), proven
-by negative authorization tests.
+goal covering the day both fail closed as `404` (the same `GoalForbidden` /
+`TargetNotFound` → `404` discipline, no existence oracle), proven by negative
+authorization tests. (An active goal with no stored row for an in-horizon day no
+longer 404s — the write materialises the row on demand; see Target resolution.)
 
 ## Privacy and Retention
 
@@ -339,7 +346,7 @@ by negative authorization tests.
 | `target_date` ≤ `start_date`, out-of-range metric, unknown field | `ValidationError` at the boundary. |
 | Profile missing height/birth year, or formula on the unspecified default | `IncompleteProfileError`. |
 | Cross-user, unowned, or missing goal | `GoalForbidden` (fail closed). |
-| Override set/reset with no active goal or stored target for the day | `TargetNotFound` → `404` (fail closed, no oracle). |
+| Override set/reset with **no active goal covering the day** (no goal, or day outside `[start_date, target_date]`) | `TargetNotFound` → `404` (fail closed, no oracle). An active goal with no stored row yet materialises the row and succeeds. |
 | Raw **derived** target outside the safety band | Clamped to floor/ceiling, `clamped = true`. |
 | Manual **override** outside the safety band (or a macro outside its bound) | Rejected `422`, nothing persisted (no clamp). |
 | Empty override request (no calorie or macro provided) | Rejected `422` at the boundary. |
