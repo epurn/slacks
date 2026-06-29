@@ -6,6 +6,7 @@ import {
   WeightApiError,
   type WeightEntryDTO,
 } from "@/api/weightEntries";
+import { DailySummaryApiError } from "@/api/dailySummary";
 import type { DailySummaryDTO, TargetReadModel } from "@/api/dailySummary";
 import type { Session } from "@/state/session";
 import type { CadenceStore, NotificationsAdapter, WeighInCadence } from "@/state/reminderScheduler";
@@ -589,6 +590,187 @@ describe("TrendsScreen — cadence picker", () => {
 
     // Exactly one notification scheduled
     expect(notifications.scheduled).toHaveLength(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fan-out removal — the core correctness property (FTY-124)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("TrendsScreen — adherence fan-out removal", () => {
+  it("issues exactly one range request for a multi-day range (not one per day)", async () => {
+    const getSum = jest.fn().mockResolvedValue([]);
+    mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={getSum}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+    // 1M default = 30 days; exactly one range call — not 30 per-day calls
+    expect(getSum).toHaveBeenCalledTimes(1);
+  });
+
+  it("range switch issues exactly one new range request, not one per day", async () => {
+    const getSum = jest.fn().mockResolvedValue([]);
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={getSum}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+    expect(getSum).toHaveBeenCalledTimes(1); // initial 1M load
+
+    const btn3m = tree.root.find((n) => n.props.testID === "range-btn-3M");
+    act(() => btn3m.props.onPress());
+    await act(async () => {});
+
+    // One more call for the 3M range — not 90 per-day calls
+    expect(getSum).toHaveBeenCalledTimes(2);
+  });
+
+  it("range switch passes the updated from/to to getDailySummaryRange", async () => {
+    const getSum = jest.fn().mockResolvedValue([]);
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={getSum}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+
+    const btn3m = tree.root.find((n) => n.props.testID === "range-btn-3M");
+    act(() => btn3m.props.onPress());
+    await act(async () => {});
+
+    const lastCall = getSum.mock.calls[getSum.mock.calls.length - 1] as [
+      unknown,
+      string,
+      string,
+    ];
+    expect(lastCall[1]).toBe("2026-03-29"); // 90 days before June 27
+    expect(lastCall[2]).toBe("2026-06-27");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Adherence error / empty states (FTY-124)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("TrendsScreen — adherence error and empty states", () => {
+  it("failed range request shows an error surface with retry", async () => {
+    const getSum = jest.fn().mockRejectedValue(
+      new DailySummaryApiError(500, "Could not load your intake history. Please try again."),
+    );
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={getSum}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+
+    const alert = tree.root.find((n) => n.props.accessibilityRole === "alert");
+    expect(alert).toBeTruthy();
+
+    const retry = tree.root.findAll(
+      (n) => n.props.accessibilityLabel === "Try again",
+    );
+    expect(retry.length).toBeGreaterThan(0);
+  });
+
+  it("failed range request does not block the weight panel", async () => {
+    const getSum = jest.fn().mockRejectedValue(
+      new DailySummaryApiError(500, "error"),
+    );
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([makeEntry("1", 70, "2026-06-27")])}
+        getDailySummaryRange={getSum}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+
+    // Log weight button from the weight panel must still be present
+    const logBtn = tree.root.find(
+      (n) => n.props.accessibilityLabel === "Log weight",
+    );
+    expect(logBtn).toBeTruthy();
+  });
+
+  it("retry button re-fetches the range after an adherence error", async () => {
+    let calls = 0;
+    const getSum = jest.fn().mockImplementation(() => {
+      calls++;
+      if (calls === 1) {
+        return Promise.reject(new DailySummaryApiError(500, "error"));
+      }
+      return Promise.resolve([makeSummary("2026-06-27", 2000, 2000)]);
+    });
+
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={getSum}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+    expect(getSum).toHaveBeenCalledTimes(1);
+
+    const retry = tree.root.find(
+      (n) =>
+        n.props.accessibilityLabel === "Try again" &&
+        typeof n.props.onPress === "function",
+    );
+    await act(async () => retry.props.onPress());
+
+    expect(getSum).toHaveBeenCalledTimes(2);
+  });
+
+  it("empty range (no summaries returned) shows the empty invite", async () => {
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={jest.fn().mockResolvedValue([])}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+    expect(textContent(tree)).toContain("No intake data for this range");
+  });
+
+  it("422 from range maps to the DailySummaryApiError message (no personal data leaked)", async () => {
+    const getSum = jest.fn().mockRejectedValue(
+      new DailySummaryApiError(422, "Invalid date format."),
+    );
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={getSum}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+
+    const content = textContent(tree);
+    expect(content).toContain("Invalid date format.");
+    // No numeric nutrition data in the error
+    expect(content).not.toMatch(/\d{4}\s*kcal/);
   });
 });
 
