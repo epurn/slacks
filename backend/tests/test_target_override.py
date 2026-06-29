@@ -36,11 +36,11 @@ from app.services.targets import (
     IncompleteProfileError,
     OverrideOutOfBand,
     TargetNotFound,
-    _resolve_active_target_row,
     build_target_read_model,
     compute_daily_target,
     get_active_target,
     reset_target_override,
+    resolve_active_target_row,
     set_target_override,
 )
 
@@ -258,7 +258,7 @@ def test_set_override_on_later_in_horizon_day_materialises_row(session: Session)
     user = _make_user_with_profile(session)
     _seed_target(session, user)  # only the _FOR_DATE row exists; goal runs to 2026-04-01
     later = date(2026, 1, 6)  # D+5, in horizon
-    assert _resolve_active_target_row(session, user.id, later) is None
+    assert resolve_active_target_row(session, user.id, later) is None
 
     updated = set_target_override(
         session,
@@ -374,7 +374,7 @@ def test_override_materialise_with_incomplete_profile_raises(session: Session) -
     session.commit()
 
     later = date(2026, 1, 6)  # in horizon, no stored row → must materialise
-    assert _resolve_active_target_row(session, user.id, later) is None
+    assert resolve_active_target_row(session, user.id, later) is None
 
     with pytest.raises(IncompleteProfileError):
         set_target_override(

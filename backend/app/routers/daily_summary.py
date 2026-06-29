@@ -25,6 +25,7 @@ from app.services import daily_summary as daily_summary_service
 from app.services.daily_summary import (
     MAX_RANGE_DAYS,
     DailySummaryForbidden,
+    DailySummaryInvalidRange,
     DailySummaryRangeTooLarge,
 )
 
@@ -107,7 +108,7 @@ def get_daily_summary_range(
         )
     except DailySummaryForbidden as exc:
         raise _NOT_FOUND from exc
-    except DailySummaryRangeTooLarge as exc:
+    except (DailySummaryInvalidRange, DailySummaryRangeTooLarge) as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc

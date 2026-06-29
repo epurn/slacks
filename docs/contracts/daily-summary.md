@@ -279,7 +279,7 @@ current values are summed first, then the sum is rounded. This rule applies to
 | --- | --- |
 | `401` | Missing/invalid/expired bearer token. |
 | `404` | `{user_id}` does not belong to the authenticated user (fail closed). |
-| `422` | **Single-day read:** malformed `day` parameter (not a valid `YYYY-MM-DD` date). **Range read:** malformed or missing `from`/`to` (not a valid `YYYY-MM-DD`), `from` after `to`, or span exceeding 366 days. |
+| `422` | **Single-day read:** malformed `day` parameter (not a valid `YYYY-MM-DD` date). **Range read:** malformed or missing `from`/`to` (not a valid `YYYY-MM-DD`), `from` is after `to` (ordering error), or span exceeds 366 days (span error). |
 
 ## Examples
 

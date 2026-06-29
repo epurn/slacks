@@ -56,7 +56,7 @@ from app.schemas.daily_summary import (
 )
 from app.schemas.targets import TargetReadModel
 from app.services.targets import build_target_read_model, resolve_carried_target_row
-from app.timeutils import day_bounds_utc, next_day, user_timezone
+from app.timeutils import current_day, day_bounds_utc, next_day, user_timezone
 
 #: Rounding precision for summed totals — matches FTY-043/044 serving-math (0.1).
 _ROUND_DECIMALS = 1
@@ -72,6 +72,10 @@ _UTC = ZoneInfo("UTC")
 
 class DailySummaryForbidden(Exception):
     """Raised when a caller tries to access another user's daily summary."""
+
+
+class DailySummaryInvalidRange(Exception):
+    """Raised when a range's start date is after its end date (ordering error)."""
 
 
 class DailySummaryRangeTooLarge(Exception):
@@ -91,9 +95,9 @@ def get_daily_summary(
     """
 
     _authorize(owner_id, current_user)
-    tz = user_timezone(session, owner_id)
     if day is None:
-        day = datetime.now(tz).date()
+        day = current_day(session, owner_id)
+    tz = user_timezone(session, owner_id)
     start_utc, end_utc = day_bounds_utc(day, tz)
 
     intake, has_intake = _aggregate_intake(session, owner_id, start_utc, end_utc)
@@ -134,7 +138,7 @@ def get_daily_summaries(
 
     _authorize(owner_id, current_user)
     if start > end:
-        raise DailySummaryRangeTooLarge("'from' must be on or before 'to'")
+        raise DailySummaryInvalidRange("'from' must be on or before 'to'")
     if (end.toordinal() - start.toordinal()) + 1 > MAX_RANGE_DAYS:
         raise DailySummaryRangeTooLarge(f"range may not exceed {MAX_RANGE_DAYS} days")
 

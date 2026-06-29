@@ -21,8 +21,8 @@ from app.models.targets import Goal
 from app.services.targets import (
     TargetNotFound,
     _resolve_active_target,
-    _resolve_active_target_row,
     compute_daily_target,
+    resolve_active_target_row,
 )
 
 
@@ -99,7 +99,7 @@ class TestResolveActiveTargetRow:
         target = compute_daily_target(session, user.id, goal.id, user, for_date=target_day)
 
         # Query should find it.
-        result = _resolve_active_target_row(session, user.id, target_day)
+        result = resolve_active_target_row(session, user.id, target_day)
         assert result is not None
         assert result.id == target.id
         assert result.goal_id == goal.id
@@ -110,7 +110,7 @@ class TestResolveActiveTargetRow:
         user = _make_user_with_profile(session)
         # User has no goal at all, so no active goal.
 
-        result = _resolve_active_target_row(session, user.id, date(2026, 2, 1))
+        result = resolve_active_target_row(session, user.id, date(2026, 2, 1))
         assert result is None
 
     def test_returns_none_when_goal_is_inactive(self, session: Session) -> None:
@@ -122,7 +122,7 @@ class TestResolveActiveTargetRow:
         compute_daily_target(session, user.id, goal.id, user, for_date=target_day)
 
         # Goal is inactive, so query should not find the row.
-        result = _resolve_active_target_row(session, user.id, target_day)
+        result = resolve_active_target_row(session, user.id, target_day)
         assert result is None
 
     def test_returns_none_when_no_row_for_day(self, session: Session) -> None:
@@ -134,7 +134,7 @@ class TestResolveActiveTargetRow:
         compute_daily_target(session, user.id, goal.id, user, for_date=date(2026, 2, 1))
 
         # Query for a different day—no row exists.
-        result = _resolve_active_target_row(session, user.id, date(2026, 3, 1))
+        result = resolve_active_target_row(session, user.id, date(2026, 3, 1))
         assert result is None
 
     def test_returns_none_when_querying_another_user(self, session: Session) -> None:
@@ -148,7 +148,7 @@ class TestResolveActiveTargetRow:
         other = _make_user_with_profile(session)
 
         # Other user queries for owner's data—should get None, not cross-user leakage.
-        result = _resolve_active_target_row(session, other.id, target_day)
+        result = resolve_active_target_row(session, other.id, target_day)
         assert result is None
 
 
