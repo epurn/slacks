@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -18,10 +19,13 @@ from app.llm.errors import (
     StructuredOutputValidationError,
 )
 from app.llm.providers.claude_code import (
+    _ENV_ALLOWLIST,
+    MAX_STDOUT_BYTES,
     ClaudeCodeProvider,
     ClaudeCodeResult,
     Invocation,
     _parse_object,
+    run_claude_code,
 )
 from tests.llm.conftest import Candidate, sample_image
 
@@ -262,3 +266,257 @@ def test_nothing_sensitive_is_logged_or_surfaced(
     log_text = caplog.text
     assert SENSITIVE_PROMPT not in log_text
     assert "secret-leak-value" not in log_text
+
+
+# ---------------------------------------------------------------------------
+# FTY-131: Env allowlist — subprocess receives only the allowed keys
+# ---------------------------------------------------------------------------
+
+
+def _capture_subprocess_env() -> tuple[dict[str, str], MagicMock]:
+    """Return (captured_env_dict, fake_subprocess_run) for env-allowlist tests.
+
+    The fake ``subprocess.run`` records the ``env=`` kwarg into ``captured_env``
+    and returns a zero-returncode completed-process mock.
+    """
+    captured: dict[str, str] = {}
+
+    fake_completed = MagicMock()
+    fake_completed.returncode = 0
+    fake_completed.stdout = ""
+    fake_completed.stderr = ""
+
+    def fake_run(
+        *args: object,
+        env: dict[str, str] | None = None,
+        **kwargs: object,
+    ) -> MagicMock:
+        if env is not None:
+            captured.update(env)
+        return fake_completed
+
+    return captured, fake_run  # type: ignore[return-value]
+
+
+def test_env_allowlist_excludes_fatty_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Inject known secrets into the process environment, then verify none reach
+    # the subprocess via the env= argument that run_claude_code builds.
+    secret_vars = {
+        "FATTY_AUTH_SECRET": "hmac-key-must-not-leak",
+        "POSTGRES_PASSWORD": "db-pw-must-not-leak",
+        "FATTY_FDC_API_KEY": "fdc-key-must-not-leak",
+        "FATTY_SEARCH_API_KEY": "search-key-must-not-leak",
+    }
+    for k, v in secret_vars.items():
+        monkeypatch.setenv(k, v)
+
+    captured_env, fake_run = _capture_subprocess_env()
+    invocation = Invocation(argv=("claude", "--print"), stdin="test")
+
+    with patch("app.llm.providers.claude_code.subprocess.run", side_effect=fake_run):
+        run_claude_code(invocation, timeout_seconds=5.0)
+
+    for key in secret_vars:
+        assert key not in captured_env, f"Secret {key!r} must not reach the subprocess"
+
+
+def test_env_allowlist_forwards_required_vars(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Required vars present in the parent environment must reach the child.
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setenv("HOME", "/home/fattyuser")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/claude-config")
+    monkeypatch.setenv("LANG", "en_US.UTF-8")
+
+    captured_env, fake_run = _capture_subprocess_env()
+    invocation = Invocation(argv=("claude", "--print"), stdin="test")
+
+    with patch("app.llm.providers.claude_code.subprocess.run", side_effect=fake_run):
+        run_claude_code(invocation, timeout_seconds=5.0)
+
+    assert captured_env.get("PATH") == "/usr/bin:/bin"
+    assert captured_env.get("HOME") == "/home/fattyuser"
+    assert captured_env.get("CLAUDE_CONFIG_DIR") == "/claude-config"
+    assert captured_env.get("LANG") == "en_US.UTF-8"
+
+
+def test_env_allowlist_omits_absent_vars(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A var in the allowlist that is absent from the parent must not be invented.
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("TMPDIR", raising=False)
+
+    captured_env, fake_run = _capture_subprocess_env()
+    invocation = Invocation(argv=("claude", "--print"), stdin="test")
+
+    with patch("app.llm.providers.claude_code.subprocess.run", side_effect=fake_run):
+        run_claude_code(invocation, timeout_seconds=5.0)
+
+    assert "CLAUDE_CONFIG_DIR" not in captured_env
+    assert "TMPDIR" not in captured_env
+
+
+def test_env_allowlist_contains_no_fatty_or_postgres_keys() -> None:
+    # Sanity-check the constant itself: it must never contain FATTY_ or POSTGRES_.
+    for key in _ENV_ALLOWLIST:
+        assert not key.startswith("FATTY_"), f"{key!r} is a Fatty secret key"
+        assert not key.startswith("POSTGRES_"), f"{key!r} is a Postgres secret key"
+
+
+# ---------------------------------------------------------------------------
+# FTY-131: Stdout size cap
+# ---------------------------------------------------------------------------
+
+
+def test_oversized_stdout_raises_response_error() -> None:
+    # A stdout exceeding MAX_STDOUT_BYTES must raise a non-retryable error.
+    oversized = "x" * (MAX_STDOUT_BYTES + 1)
+
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> ClaudeCodeResult:
+        return _result(returncode=0, stdout=oversized)
+
+    with pytest.raises(LLMResponseError):
+        _provider(runner).structured_completion("an apple", Candidate)
+
+
+def test_oversized_stdout_error_is_content_free() -> None:
+    # The error message must never echo the oversized (potentially hostile) content.
+    oversized = "HOSTILE_CONTENT_" * (MAX_STDOUT_BYTES // len("HOSTILE_CONTENT_") + 1)
+
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> ClaudeCodeResult:
+        return _result(returncode=0, stdout=oversized)
+
+    with pytest.raises(LLMResponseError) as exc_info:
+        _provider(runner).structured_completion("an apple", Candidate)
+
+    assert "HOSTILE_CONTENT_" not in str(exc_info.value)
+
+
+def test_at_cap_stdout_parses_successfully() -> None:
+    # A stdout exactly at the cap (valid JSON) must parse without error.
+    valid_json = '{"name": "apple", "calories": 95}'
+    # Pad to exactly MAX_STDOUT_BYTES with trailing whitespace (accepted by _parse_object).
+    padded = valid_json + " " * (MAX_STDOUT_BYTES - len(valid_json))
+    assert len(padded) == MAX_STDOUT_BYTES
+
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> ClaudeCodeResult:
+        return _result(returncode=0, stdout=padded)
+
+    result = _provider(runner).structured_completion("an apple", Candidate)
+    assert result == Candidate(name="apple", calories=95)
+
+
+# ---------------------------------------------------------------------------
+# FTY-131: Transient exit classification
+# ---------------------------------------------------------------------------
+
+
+def test_rate_limited_exit_is_transient() -> None:
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> ClaudeCodeResult:
+        return _result(returncode=1, stderr="Error: rate limited, please wait")
+
+    with pytest.raises(LLMTransientError):
+        _provider(runner).structured_completion("an apple", Candidate)
+
+
+def test_overloaded_exit_is_transient() -> None:
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> ClaudeCodeResult:
+        return _result(returncode=1, stderr="API error: overloaded")
+
+    with pytest.raises(LLMTransientError):
+        _provider(runner).structured_completion("an apple", Candidate)
+
+
+def test_temporarily_unavailable_exit_is_transient() -> None:
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> ClaudeCodeResult:
+        return _result(returncode=1, stderr="Service is temporarily unavailable")
+
+    with pytest.raises(LLMTransientError):
+        _provider(runner).structured_completion("an apple", Candidate)
+
+
+def test_generic_nonzero_exit_is_response_error() -> None:
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> ClaudeCodeResult:
+        return _result(returncode=1, stderr="some internal error occurred")
+
+    with pytest.raises(LLMResponseError):
+        _provider(runner).structured_completion("an apple", Candidate)
+
+
+def test_transient_is_retried_to_the_bound() -> None:
+    calls = {"n": 0}
+
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> ClaudeCodeResult:
+        calls["n"] += 1
+        return _result(returncode=1, stderr="rate limited")
+
+    with pytest.raises(LLMTransientError):
+        _provider(runner, max_retries=2).structured_completion("an apple", Candidate)
+
+    assert calls["n"] == 3  # first attempt + 2 retries
+
+
+def test_transient_error_message_does_not_echo_stderr() -> None:
+    sensitive_stderr = "SENSITIVE_RATE_LIMIT_DETAIL"
+
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> ClaudeCodeResult:
+        return _result(returncode=1, stderr=f"rate limited: {sensitive_stderr}")
+
+    with pytest.raises(LLMTransientError) as exc_info:
+        _provider(runner).structured_completion("an apple", Candidate)
+
+    assert sensitive_stderr not in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# FTY-131: Auth marker anchoring — no false positives from bare "login"
+# ---------------------------------------------------------------------------
+
+
+def test_unrelated_login_word_in_stderr_is_not_auth_failure() -> None:
+    # Bare "login" inside an unrelated word/sentence must NOT trigger auth classification.
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> ClaudeCodeResult:
+        # Contains "login" as part of an unrelated error, not a Claude auth message.
+        return _result(returncode=1, stderr="Failed to contact loginservice.example.com")
+
+    with pytest.raises(LLMResponseError):
+        _provider(runner).structured_completion("an apple", Candidate)
+
+
+def test_unrelated_log_in_phrase_is_not_auth_failure() -> None:
+    # "log in" in a generic, unrelated context must NOT trigger auth classification.
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> ClaudeCodeResult:
+        return _result(returncode=1, stderr="Users must log in to the wiki to edit pages")
+
+    # "Users must log in" does NOT contain "please log in" → falls through to response error.
+    with pytest.raises((LLMResponseError, LLMTransientError)):
+        _provider(runner).structured_completion("an apple", Candidate)
+
+
+def test_not_logged_in_is_auth_classified() -> None:
+    # "not logged in" (actual Claude Code auth error) must trigger auth classification.
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> ClaudeCodeResult:
+        return _result(returncode=1, stderr="Not logged in · Please run /login")
+
+    with pytest.raises(LLMConfigurationError):
+        _provider(runner).structured_completion("an apple", Candidate)
+
+
+def test_please_run_login_is_auth_classified() -> None:
+    # "please run /login" (Claude Code CLI instruction) must trigger auth classification.
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> ClaudeCodeResult:
+        return _result(returncode=1, stderr="Error: please run /login to authenticate")
+
+    with pytest.raises(LLMConfigurationError):
+        _provider(runner).structured_completion("an apple", Candidate)
+
+
+def test_auth_error_message_does_not_echo_stderr() -> None:
+    # The auth error message must be content-free (no stderr echoed).
+    sensitive_stderr = "SENSITIVE_SESSION_DETAIL"
+
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> ClaudeCodeResult:
+        return _result(returncode=1, stderr=f"not logged in: {sensitive_stderr}")
+
+    with pytest.raises(LLMConfigurationError) as exc_info:
+        _provider(runner).structured_completion("an apple", Candidate)
+
+    assert sensitive_stderr not in str(exc_info.value)
