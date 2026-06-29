@@ -96,9 +96,9 @@ This project uses the following as design references:
 
 ## Logging and Telemetry
 
-- Logs must not contain secrets, auth tokens, raw sensitive prompts, full food histories, or unnecessary body data. *(v1: structured single-line JSON logs with a `RedactionFilter` that scrubs secret/header-shaped fields; the LLM layer logs only provider/attempt/error-count — never the prompt, key, image, or raw response. Proven by `tests/security/test_secret_no_disclosure.py`.)*
+- Logs must not contain secrets, auth tokens, raw sensitive prompts, full food histories, or unnecessary body data. *(v1: structured single-line JSON logs with a `RedactionFilter` that scrubs secret/header-shaped **fields** by name; a second pass via `_redact_values` scrubs token-shaped **values** — Bearer tokens, JWTs, provider API keys (`sk-…`, `gh…_…`, Slack `xox…`, AWS `AKIA…`), and inline `key=value` / `key: value` forms — from rendered messages and serialised exception traces. The LLM layer logs only provider/attempt/error-count — never the prompt, key, image, or raw response. Proven by `tests/security/test_secret_no_disclosure.py`.)*
 - Use request IDs and event IDs instead of personal values where possible.
-- Redact sensitive fields in errors and provider traces. *(v1: transport and fetch errors are content-free — no URL, headers, request body, or response body.)*
+- Redact sensitive fields in errors and provider traces. *(v1: transport and fetch errors are content-free — no URL, headers, request body, or response body; exception traces carrying token-shaped secrets are also scrubbed by `_redact_values` before serialisation.)*
 - Telemetry must be opt-in or clearly documented before public launch. *(v1 ships no product telemetry.)*
 
 ## HTTP Security Headers
