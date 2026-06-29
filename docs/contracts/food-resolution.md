@@ -124,8 +124,10 @@ rejected. The same
 bound governs **both trusted-database lookups** — FDC here and OFF (below) — in the
 canonical per-100g space, applied *after* any per-serving → per-100g conversion; an
 implausible row is a non-match (`None`), so resolution falls through rather than
-committing an impossible calorie total. (The official-source and label-extraction paths
-produce per-100g facts too but are out of FTY-115's scope; they remain gated only by the
+committing an impossible calorie total. The same bound also gates the
+**official-source and model-prior path** in canonical per-100g space (FTY-132),
+applied *after* any per-serving → per-100g conversion. (The label-extraction path
+produces per-100g facts too but is out of FTY-115's scope; it remains gated only by the
 looser `MAX_ENERGY_KCAL` abuse bound.) Default
 serving grams come from `servingSize` only when `servingSizeUnit` is `g` (or `ml`,
 treated 1 ml ≈ 1 g); otherwise unknown.
@@ -447,7 +449,12 @@ injected adapters (the step itself opens no socket):
 4. **Recompute** canonical calories/macros from the validated facts with the FTY-044
    serving math (per-serving facts are canonicalised to per-100g via the page's gram
    serving size, then scaled to the consumed quantity) — the model never supplies the
-   stored numbers.
+   stored numbers. The canonical per-100g facts must clear the **FTY-115 plausibility
+   bound** (`≤ 900` kcal/100g, non-negative, finite — the same gate FDC/OFF enforce),
+   applied after any per-serving → per-100g conversion. An implausible result (e.g. a
+   kJ value mislabelled as kcal) is a **non-match**: the official page falls through to
+   model-prior, and an implausible *model-prior* estimate routes to
+   `needs_clarification` rather than committing an absurd total (FTY-132).
 
 ### Model-prior fallback (with status, never a silent guess)
 
@@ -484,7 +491,9 @@ the run `source_refs`, and the assumptions on the run `assumptions`.
 | Condition | Pipeline signal | Persisted | Event transition |
 | --- | --- | --- | --- |
 | Branded candidate, USDA/OFF miss, official page resolves | _(completes)_ | food `resolved` (`official_source`) + `evidence_sources` (`official_source:<url>`, no `product_id`) | `processing → completed` |
+| Official page resolves but per-100g facts fail the FTY-115 plausibility bound | _(non-match; falls through)_ | nothing for the official page | `→ model-prior, then completed` / `needs_clarification` |
 | Search disabled / unavailable / no confident match → model-prior | _(completes)_ | food `resolved` (`model_prior`) + `evidence_sources` (`model_prior`, assumptions) | `processing → completed` |
+| Model-prior estimate fails the FTY-115 plausibility bound | `NeedsClarification` | clarification question | `processing → needs_clarification` |
 | Branded candidate USDA/OFF **resolves** | _(as FTY-044/060)_ | official source not consulted | `processing → completed` |
 | Generic candidate USDA miss | `NeedsClarification` | clarification question | `processing → needs_clarification` |
 | Usable facts but unresolvable quantity, or model cannot estimate | `NeedsClarification` | clarification question | `processing → needs_clarification` |
