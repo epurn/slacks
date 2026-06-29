@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -360,6 +360,138 @@ def test_fail_open_register_on_limiter_error(low_limit_db: Engine) -> None:
     # Fail-open: 201 Created, never 500 or 429
     assert resp.status_code == 201
     assert any("fail-open" in str(w) for w in warned)
+
+
+# ---------------------------------------------------------------------------
+# Fail-closed: limiter seam raises → 503 + Retry-After, no credential check
+# (FTY-138)
+# ---------------------------------------------------------------------------
+
+_FAIL_CLOSED_SETTINGS = Settings(
+    environment="test",
+    log_level="WARNING",
+    rate_limit_login_ip_max=10,
+    rate_limit_login_ip_window=60,
+    rate_limit_login_account_max=10,
+    rate_limit_login_account_window=60,
+    rate_limit_register_ip_max=10,
+    rate_limit_register_ip_window=60,
+    rate_limit_fail_open_override=False,  # force fail-closed regardless of environment
+)
+
+
+def test_fail_closed_login_on_limiter_error(low_limit_db: Engine) -> None:
+    """When the limiter raises in fail-closed mode, /login returns 503 + Retry-After."""
+    warned: list[Any] = []
+    authenticate_spy = MagicMock(side_effect=AssertionError("authenticate must not be called"))
+
+    with (
+        patch("app.routers.auth.logger") as mock_log,
+        patch("app.routers.auth.auth_service.authenticate", authenticate_spy),
+    ):
+        mock_log.warning.side_effect = lambda *a, **kw: warned.append(a[0])
+        client = _make_client(low_limit_db, _FAIL_CLOSED_SETTINGS, _ErrorRateLimiter())
+        resp = client.post(
+            "/api/auth/login",
+            json={"email": "x@example.com", "password": _PW},
+        )
+
+    assert resp.status_code == 503
+    assert "Retry-After" in resp.headers
+    assert int(resp.headers["Retry-After"]) > 0
+    # credential service must not have been invoked
+    authenticate_spy.assert_not_called()
+    assert any("fail-closed" in str(w) for w in warned)
+
+
+def test_fail_closed_register_on_limiter_error(low_limit_db: Engine) -> None:
+    """When the limiter raises in fail-closed mode, /register returns 503 + Retry-After."""
+    warned: list[Any] = []
+    register_spy = MagicMock(side_effect=AssertionError("register_user must not be called"))
+
+    with (
+        patch("app.routers.auth.logger") as mock_log,
+        patch("app.routers.auth.auth_service.register_user", register_spy),
+    ):
+        mock_log.warning.side_effect = lambda *a, **kw: warned.append(a[0])
+        client = _make_client(low_limit_db, _FAIL_CLOSED_SETTINGS, _ErrorRateLimiter())
+        resp = client.post(
+            "/api/auth/register",
+            json={"email": "new@example.com", "password": "password-ok-1"},
+        )
+
+    assert resp.status_code == 503
+    assert "Retry-After" in resp.headers
+    assert int(resp.headers["Retry-After"]) > 0
+    # credential service must not have been invoked
+    register_spy.assert_not_called()
+    assert any("fail-closed" in str(w) for w in warned)
+
+
+def test_fail_closed_normal_allowed_login_unaffected(low_limit_db: Engine) -> None:
+    """In fail-closed mode, a working limiter still allows normal login attempts."""
+    client = _make_client(low_limit_db, _FAIL_CLOSED_SETTINGS)
+    client.post(
+        "/api/auth/register",
+        json={"email": "legit@example.com", "password": "password-ok-1"},
+    )
+    resp = client.post(
+        "/api/auth/login",
+        json={"email": "legit@example.com", "password": "password-ok-1"},
+    )
+    assert resp.status_code == 200
+
+
+def test_fail_closed_normal_throttle_login_still_429(low_limit_db: Engine) -> None:
+    """In fail-closed mode, a genuine over-limit request still returns 429."""
+    client = _make_client(
+        low_limit_db,
+        Settings(
+            environment="test",
+            log_level="WARNING",
+            rate_limit_login_ip_max=2,
+            rate_limit_login_ip_window=60,
+            rate_limit_login_account_max=2,
+            rate_limit_login_account_window=60,
+            rate_limit_register_ip_max=2,
+            rate_limit_register_ip_window=60,
+            rate_limit_fail_open_override=False,
+        ),
+    )
+    for _ in range(2):
+        client.post("/api/auth/login", json={"email": "x@example.com", "password": _PW})
+    resp = client.post("/api/auth/login", json={"email": "x@example.com", "password": _PW})
+    assert resp.status_code == 429
+    assert "Retry-After" in resp.headers
+
+
+def test_fail_closed_normal_throttle_register_still_429(low_limit_db: Engine) -> None:
+    """In fail-closed mode, a genuine over-limit register request still returns 429."""
+    client = _make_client(
+        low_limit_db,
+        Settings(
+            environment="test",
+            log_level="WARNING",
+            rate_limit_login_ip_max=10,
+            rate_limit_login_ip_window=60,
+            rate_limit_login_account_max=10,
+            rate_limit_login_account_window=60,
+            rate_limit_register_ip_max=2,
+            rate_limit_register_ip_window=60,
+            rate_limit_fail_open_override=False,
+        ),
+    )
+    for i in range(2):
+        client.post(
+            "/api/auth/register",
+            json={"email": f"u{i}@example.com", "password": "password-ok-1"},
+        )
+    resp = client.post(
+        "/api/auth/register",
+        json={"email": "u3@example.com", "password": "password-ok-1"},
+    )
+    assert resp.status_code == 429
+    assert "Retry-After" in resp.headers
 
 
 # ---------------------------------------------------------------------------

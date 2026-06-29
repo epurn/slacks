@@ -12,7 +12,7 @@ import os
 from collections.abc import Mapping
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, computed_field, model_validator
 
 #: Environment variables are read with this prefix, e.g. ``FATTY_LOG_LEVEL``.
 ENV_PREFIX = "FATTY_"
@@ -75,6 +75,23 @@ class Settings(BaseModel):
     # writes X-Forwarded-For; the limiter then keys on the rightmost (proxy-
     # appended) hop so a client-spoofed leftmost value cannot mint fresh keys.
     rate_limit_trusted_proxy: bool = False
+    # Fail-mode override for the auth rate-limiter (FTY-138).  When the limiter
+    # raises (e.g. Redis is unavailable) the effective fail-mode decides whether
+    # to allow (fail-open) or deny (fail-closed, 503) the request.
+    # Default: fail-open when environment != "production", fail-closed in
+    # production — closing the silent-bypass window without breaking dev/self-host
+    # ergonomics.  Set FATTY_RATE_LIMIT_FAIL_OPEN_OVERRIDE=true to force
+    # fail-open regardless of environment (e.g. a production self-host that
+    # prefers availability) or =false to force fail-closed in non-production.
+    rate_limit_fail_open_override: bool | None = Field(default=None)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def rate_limit_fail_open(self) -> bool:
+        """Effective fail-mode: True = fail-open (allow), False = fail-closed (503)."""
+        if self.rate_limit_fail_open_override is not None:
+            return self.rate_limit_fail_open_override
+        return self.environment != "production"
 
     @model_validator(mode="after")
     def _require_real_secret_in_production(self) -> Settings:
