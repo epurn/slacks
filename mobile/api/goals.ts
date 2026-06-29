@@ -12,6 +12,13 @@
  * data. Errors carry only the HTTP status and the action, never target numbers.
  */
 
+import {
+  ApiError,
+  authHeaders,
+  request,
+  userScopedUrl,
+} from '@/api/client';
+import type { ApiSession } from '@/api/client';
 import type { TargetReadModel } from '@/api/dailySummary';
 
 /** Direction of a weight goal. */
@@ -74,49 +81,28 @@ export interface TargetOverridePayload {
 }
 
 /** Authenticated session needed to reach these endpoints. */
-export interface GoalsSession {
-  readonly baseUrl: string;
-  readonly token: string;
-  readonly userId: string;
-}
+export type GoalsSession = ApiSession;
 
 /** Raised when a goal or target endpoint returns a non-2xx status. */
-export class GoalsApiError extends Error {
-  readonly status: number;
+export class GoalsApiError extends ApiError {
   constructor(status: number, message: string) {
-    super(message);
+    super(status, message);
     this.name = 'GoalsApiError';
-    this.status = status;
   }
 }
 
-function goalsBaseUrl(session: GoalsSession): string {
-  return `${session.baseUrl}/api/users/${encodeURIComponent(session.userId)}`;
-}
-
-function authHeaders(session: GoalsSession): Record<string, string> {
-  return {
-    Authorization: `Bearer ${session.token}`,
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-  };
-}
-
-async function readGoalsError(
-  response: Response,
-  action: string,
-): Promise<GoalsApiError> {
+function goalsError(status: number, action: string): GoalsApiError {
   const message =
-    response.status === 401
+    status === 401
       ? 'Your session has expired. Sign in again to manage your goal.'
-      : response.status === 404
+      : status === 404
         ? 'No active goal or target found.'
-        : response.status === 409
+        : status === 409
           ? 'Complete your profile before setting a goal.'
-          : response.status === 422
+          : status === 422
             ? 'That goal or override value is not valid.'
-            : `Could not ${action} (status ${response.status}).`;
-  return new GoalsApiError(response.status, message);
+            : `Could not ${action} (status ${status}).`;
+  return new GoalsApiError(status, message);
 }
 
 /**
@@ -129,15 +115,17 @@ export async function createGoal(
   payload: GoalTargetRequest,
   fetchImpl: typeof fetch = fetch,
 ): Promise<GoalTargetResponse> {
-  const response = await fetchImpl(`${goalsBaseUrl(session)}/goal`, {
-    method: 'POST',
-    headers: authHeaders(session),
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) {
-    throw await readGoalsError(response, 'create your goal');
-  }
-  return (await response.json()) as GoalTargetResponse;
+  return request<GoalTargetResponse>(
+    userScopedUrl(session, 'goal'),
+    {
+      method: 'POST',
+      headers: authHeaders(session),
+      body: JSON.stringify(payload),
+      action: 'create your goal',
+      onError: goalsError,
+      fetchImpl,
+    },
+  );
 }
 
 /**
@@ -149,14 +137,16 @@ export async function getTarget(
   session: GoalsSession,
   fetchImpl: typeof fetch = fetch,
 ): Promise<TargetReadModel> {
-  const response = await fetchImpl(`${goalsBaseUrl(session)}/target`, {
-    method: 'GET',
-    headers: authHeaders(session),
-  });
-  if (!response.ok) {
-    throw await readGoalsError(response, 'load your target');
-  }
-  return (await response.json()) as TargetReadModel;
+  return request<TargetReadModel>(
+    userScopedUrl(session, 'target'),
+    {
+      method: 'GET',
+      headers: authHeaders(session),
+      action: 'load your target',
+      onError: goalsError,
+      fetchImpl,
+    },
+  );
 }
 
 /**
@@ -170,15 +160,17 @@ export async function setTargetOverride(
   payload: TargetOverridePayload,
   fetchImpl: typeof fetch = fetch,
 ): Promise<TargetReadModel> {
-  const response = await fetchImpl(`${goalsBaseUrl(session)}/target/override`, {
-    method: 'PUT',
-    headers: authHeaders(session),
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) {
-    throw await readGoalsError(response, 'save your target override');
-  }
-  return (await response.json()) as TargetReadModel;
+  return request<TargetReadModel>(
+    userScopedUrl(session, 'target/override'),
+    {
+      method: 'PUT',
+      headers: authHeaders(session),
+      body: JSON.stringify(payload),
+      action: 'save your target override',
+      onError: goalsError,
+      fetchImpl,
+    },
+  );
 }
 
 /**
@@ -192,16 +184,15 @@ export async function resetTargetOverride(
   fetchImpl: typeof fetch = fetch,
 ): Promise<TargetReadModel> {
   const body = targets ? JSON.stringify({ targets }) : JSON.stringify({});
-  const response = await fetchImpl(
-    `${goalsBaseUrl(session)}/target/override/reset`,
+  return request<TargetReadModel>(
+    userScopedUrl(session, 'target/override/reset'),
     {
       method: 'POST',
       headers: authHeaders(session),
       body,
+      action: 'reset your target',
+      onError: goalsError,
+      fetchImpl,
     },
   );
-  if (!response.ok) {
-    throw await readGoalsError(response, 'reset your target');
-  }
-  return (await response.json()) as TargetReadModel;
 }

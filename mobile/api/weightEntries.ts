@@ -9,6 +9,14 @@
  * status and the attempted action — never the submitted weight value.
  */
 
+import {
+  ApiError,
+  authHeaders,
+  request,
+  userScopedUrl,
+} from "@/api/client";
+import type { ApiSession } from "@/api/client";
+
 export interface WeightEntryDTO {
   readonly id: string;
   readonly user_id: string;
@@ -19,44 +27,26 @@ export interface WeightEntryDTO {
 }
 
 /** Authenticated session needed to address the owner's weight entries. */
-export interface WeightSession {
-  readonly baseUrl: string;
-  readonly token: string;
-  readonly userId: string;
-}
+export type WeightSession = ApiSession;
 
 /** Raised when the weight-entry API returns a non-2xx status. */
-export class WeightApiError extends Error {
-  readonly status: number;
+export class WeightApiError extends ApiError {
   constructor(status: number, message: string) {
-    super(message);
+    super(status, message);
     this.name = "WeightApiError";
-    this.status = status;
   }
 }
 
-function weightBaseUrl(session: WeightSession): string {
-  return `${session.baseUrl}/api/users/${encodeURIComponent(session.userId)}/weight-entries`;
-}
-
-function authHeaders(session: WeightSession): Record<string, string> {
-  return {
-    Authorization: `Bearer ${session.token}`,
-    "Content-Type": "application/json",
-    Accept: "application/json",
-  };
-}
-
-async function readError(response: Response, action: string): Promise<WeightApiError> {
+function weightError(status: number, action: string): WeightApiError {
   const message =
-    response.status === 401
+    status === 401
       ? "Your session has expired. Sign in again."
-      : response.status === 404
+      : status === 404
         ? "We couldn't find your weight log."
-        : response.status === 422
+        : status === 422
           ? "That entry couldn't be saved. Check the value and try again."
-          : `Could not ${action} (status ${response.status}).`;
-  return new WeightApiError(response.status, message);
+          : `Could not ${action} (status ${status}).`;
+  return new WeightApiError(status, message);
 }
 
 /**
@@ -70,15 +60,14 @@ export async function createWeightEntry(
   effectiveDate: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<WeightEntryDTO> {
-  const response = await fetchImpl(weightBaseUrl(session), {
+  return request<WeightEntryDTO>(userScopedUrl(session, "weight-entries"), {
     method: "POST",
     headers: authHeaders(session),
     body: JSON.stringify({ weight, effective_date: effectiveDate }),
+    action: "save your weight",
+    onError: weightError,
+    fetchImpl,
   });
-  if (!response.ok) {
-    throw await readError(response, "save your weight");
-  }
-  return (await response.json()) as WeightEntryDTO;
 }
 
 /**
@@ -97,12 +86,12 @@ export async function listWeightEntries(
   if (from) parts.push(`from=${encodeURIComponent(from)}`);
   if (to) parts.push(`to=${encodeURIComponent(to)}`);
   const query = parts.length > 0 ? `?${parts.join("&")}` : "";
-  const response = await fetchImpl(`${weightBaseUrl(session)}${query}`, {
+  const url = `${userScopedUrl(session, "weight-entries")}${query}`;
+  return request<WeightEntryDTO[]>(url, {
     method: "GET",
     headers: authHeaders(session),
+    action: "load your weight log",
+    onError: weightError,
+    fetchImpl,
   });
-  if (!response.ok) {
-    throw await readError(response, "load your weight log");
-  }
-  return (await response.json()) as WeightEntryDTO[];
 }

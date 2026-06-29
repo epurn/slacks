@@ -17,8 +17,14 @@
  * HTTP status + action label.
  */
 
+import {
+  ApiError,
+  authHeaders,
+  request,
+  userScopedUrl,
+} from "@/api/client";
+import type { ApiSession } from "@/api/client";
 import type { DerivedFoodItemDTO } from "@/api/derivedItems";
-import type { ApiSession } from "@/state/session";
 
 /**
  * A single alternative source match surfaced by the list-candidates operation.
@@ -45,42 +51,28 @@ export interface SourceCandidate {
 }
 
 /** Raised when a corrections API call returns a non-2xx status. */
-export class CorrectionsApiError extends Error {
-  readonly status: number;
+export class CorrectionsApiError extends ApiError {
   constructor(status: number, message: string) {
-    super(message);
+    super(status, message);
     this.name = "CorrectionsApiError";
-    this.status = status;
   }
 }
 
-function authHeaders(session: ApiSession): Record<string, string> {
-  return {
-    Authorization: `Bearer ${session.token}`,
-    "Content-Type": "application/json",
-    Accept: "application/json",
-  };
-}
-
-function itemBaseUrl(session: ApiSession, itemId: string): string {
-  return `${session.baseUrl}/api/users/${encodeURIComponent(session.userId)}/derived-items/food/${encodeURIComponent(itemId)}`;
-}
-
-async function readError(
-  response: Response,
+function correctionsError(
+  status: number,
   action: string,
-): Promise<CorrectionsApiError> {
+): CorrectionsApiError {
   const message =
-    response.status === 401
+    status === 401
       ? "Your session has expired. Sign in again to continue."
-      : response.status === 404
+      : status === 404
         ? "We couldn't find that item."
-        : response.status === 422
+        : status === 422
           ? "That correction couldn't be applied. Check the value and try again."
-          : response.status === 503
+          : status === 503
             ? "Alternatives are temporarily unavailable. Try again in a moment."
-            : `Could not ${action} (status ${response.status}).`;
-  return new CorrectionsApiError(response.status, message);
+            : `Could not ${action} (status ${status}).`;
+  return new CorrectionsApiError(status, message);
 }
 
 /**
@@ -99,15 +91,20 @@ export async function listSourceCandidates(
   fetchImpl: typeof fetch = fetch,
 ): Promise<readonly SourceCandidate[]> {
   const body = query ? JSON.stringify({ query }) : "{}";
-  const response = await fetchImpl(`${itemBaseUrl(session, itemId)}/source-candidates`, {
-    method: "POST",
-    headers: authHeaders(session),
-    body,
-  });
-  if (!response.ok) {
-    throw await readError(response, "list alternatives");
-  }
-  const data = (await response.json()) as { candidates: SourceCandidate[] };
+  const data = await request<{ candidates: SourceCandidate[] }>(
+    userScopedUrl(
+      session,
+      `derived-items/food/${encodeURIComponent(itemId)}/source-candidates`,
+    ),
+    {
+      method: "POST",
+      headers: authHeaders(session),
+      body,
+      action: "list alternatives",
+      onError: correctionsError,
+      fetchImpl,
+    },
+  );
   return data.candidates;
 }
 
@@ -126,13 +123,18 @@ export async function reResolveItem(
   sourceRef: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<DerivedFoodItemDTO> {
-  const response = await fetchImpl(`${itemBaseUrl(session, itemId)}/re-resolve`, {
-    method: "POST",
-    headers: authHeaders(session),
-    body: JSON.stringify({ source_ref: sourceRef }),
-  });
-  if (!response.ok) {
-    throw await readError(response, "apply that match");
-  }
-  return (await response.json()) as DerivedFoodItemDTO;
+  return request<DerivedFoodItemDTO>(
+    userScopedUrl(
+      session,
+      `derived-items/food/${encodeURIComponent(itemId)}/re-resolve`,
+    ),
+    {
+      method: "POST",
+      headers: authHeaders(session),
+      body: JSON.stringify({ source_ref: sourceRef }),
+      action: "apply that match",
+      onError: correctionsError,
+      fetchImpl,
+    },
+  );
 }

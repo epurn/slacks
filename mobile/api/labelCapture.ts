@@ -13,7 +13,8 @@
  * never image bytes, file paths, URIs, or extracted content. Nothing is logged.
  */
 
-import type { ApiSession } from "@/state/session";
+import { ApiError } from "@/api/client";
+import type { ApiSession } from "@/api/client";
 import type { LogEventDTO } from "@/api/logEvents";
 
 /** Maximum accepted upload size in bytes (10 MiB). Mirrors backend MAX_ATTACHMENT_BYTES. */
@@ -27,12 +28,10 @@ export const ALLOWED_CONTENT_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /** Raised when the backend label endpoint returns a non-2xx status. */
-export class LabelUploadApiError extends Error {
-  readonly status: number;
+export class LabelUploadApiError extends ApiError {
   constructor(status: number, message: string) {
-    super(message);
+    super(status, message);
     this.name = "LabelUploadApiError";
-    this.status = status;
   }
 }
 
