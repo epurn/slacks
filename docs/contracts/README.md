@@ -43,6 +43,28 @@ Use contracts for:
 ## Migration / Compatibility
 ```
 
+## Contracts Index
+
+| Contract | Purpose |
+|----------|---------|
+| [corrections.md](corrections.md) | User-initiated corrections and edits to derived food and exercise items |
+| [daily-summary.md](daily-summary.md) | Read-only daily-summary endpoint for fetching a user's daily totals and entries |
+| [estimation-jobs.md](estimation-jobs.md) | Async estimation engine that turns pending log events into resolved food and exercise items |
+| [evidence-retrieval.md](evidence-retrieval.md) | Source-backed estimation contracts defining the evidence hierarchy and lookup rules |
+| [exercise-burn.md](exercise-burn.md) | Deterministic MET-based exercise burn calculation |
+| [food-resolution.md](food-resolution.md) | Deterministic generic-food resolution step using USDA and external sources |
+| [goals-target-reveal.md](goals-target-reveal.md) | Goal direction input and target-calculation step turning user goals into calorie targets |
+| [identity-and-profile.md](identity-and-profile.md) | User identity, profile data model, and minimal local-mode profile defaults |
+| [label-extraction.md](label-extraction.md) | Nutrition label extraction step from uploaded photos |
+| [label-upload.md](label-upload.md) | HTTP upload boundary for capturing and transmitting nutrition label photos |
+| [llm-provider.md](llm-provider.md) | Provider-agnostic LLM adapter configuration supporting OpenAI, Anthropic, Claude Code, and local models |
+| [log-attachments.md](log-attachments.md) | Log attachments table, retention policy, and discard-by-default behavior |
+| [log-events.md](log-events.md) | Log-event data model, status state machine, and create/list/edit API |
+| [parse-candidates.md](parse-candidates.md) | Structured parse step producing candidate food and exercise items with clarification questions |
+| [saved-foods.md](saved-foods.md) | Saved foods, aliases, and typeahead data model and API |
+| [target-calculator.md](target-calculator.md) | Deterministic daily calorie target calculation from profile and weight goal |
+| [weight-entries.md](weight-entries.md) | Weight-entry data model and create/list-by-range/delete API |
+
 ## Current Contract Principles
 
 - Store canonical units: kcal, grams, milliliters, seconds, meters, kilograms.
