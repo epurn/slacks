@@ -8,6 +8,8 @@ import {
   listWeightEntries as listWeightEntriesApi,
   type WeightEntryDTO,
 } from "@/api/weightEntries";
+import { useTheme } from "@/theme/ThemeContext";
+import type { ColorPalette } from "@/theme/colors";
 import { WeightEntryInput } from "@/components/WeightEntryInput";
 import { WeightTrendChart } from "@/components/WeightTrendChart";
 import type { UnitsPreference } from "@/state/profile";
@@ -50,6 +52,8 @@ export function WeightScreen({
   load?: typeof listWeightEntriesApi;
   now?: Date;
 } = {}) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const liveSession = useSession();
   const session = sessionOverride !== undefined ? sessionOverride : liveSession;
   const apiSession = useMemo(
@@ -116,7 +120,7 @@ export function WeightScreen({
   );
 
   if (!session) {
-    return <SignInRequired insetTop={insets.top + 24} />;
+    return <SignInRequired insetTop={insets.top + 24} colors={colors} />;
   }
 
   return (
@@ -161,7 +165,8 @@ export function WeightScreen({
   );
 }
 
-function SignInRequired({ insetTop }: { insetTop: number }) {
+function SignInRequired({ insetTop, colors }: { insetTop: number; colors: ColorPalette }) {
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={[styles.center, { paddingTop: insetTop }]}>
       <Text style={styles.centerTitle} accessibilityRole="header">
@@ -175,49 +180,51 @@ function SignInRequired({ insetTop }: { insetTop: number }) {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: "#F2F2F7",
-  },
-  content: {
-    paddingHorizontal: 16,
-    gap: 16,
-  },
-  title: {
-    fontSize: 34,
-    fontWeight: "700",
-    color: "#1C1C1E",
-  },
-  card: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 12,
-    padding: 16,
-    gap: 12,
-  },
-  sectionLabel: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#8E8E93",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  center: {
-    flex: 1,
-    backgroundColor: "#F2F2F7",
-    paddingHorizontal: 24,
-    alignItems: "center",
-  },
-  centerTitle: {
-    fontSize: 24,
-    fontWeight: "700",
-    color: "#1C1C1E",
-    textAlign: "center",
-  },
-  centerBody: {
-    fontSize: 15,
-    color: "#8E8E93",
-    textAlign: "center",
-    marginTop: 12,
-  },
-});
+function makeStyles(colors: ColorPalette) {
+  return StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.surface,
+    },
+    content: {
+      paddingHorizontal: 16,
+      gap: 16,
+    },
+    title: {
+      fontSize: 34,
+      fontWeight: "700",
+      color: colors.text,
+    },
+    card: {
+      backgroundColor: colors.surfaceRaised,
+      borderRadius: 12,
+      padding: 16,
+      gap: 12,
+    },
+    sectionLabel: {
+      fontSize: 13,
+      fontWeight: "600",
+      color: colors.textMuted,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+    },
+    center: {
+      flex: 1,
+      backgroundColor: colors.surface,
+      paddingHorizontal: 24,
+      alignItems: "center",
+    },
+    centerTitle: {
+      fontSize: 24,
+      fontWeight: "700",
+      color: colors.text,
+      textAlign: "center",
+    },
+    centerBody: {
+      fontSize: 15,
+      color: colors.textMuted,
+      textAlign: "center",
+      marginTop: 12,
+    },
+  });
+}

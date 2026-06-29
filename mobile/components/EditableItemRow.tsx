@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Pressable,
   StyleSheet,
@@ -13,6 +13,8 @@ import {
   type DerivedItem,
   type DerivedFoodItemDTO,
 } from "@/api/derivedItems";
+import { useTheme } from "@/theme/ThemeContext";
+import type { ColorPalette } from "@/theme/colors";
 import {
   saveFood as saveFoodApi,
   type SavedFoodDTO,
@@ -83,6 +85,8 @@ export function EditableItemRow({
   /** Called with the saved food after a successful save. */
   onSaved?: (saved: SavedFoodDTO) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [item, setItem] = useState<DerivedItem>(initialItem);
   const [editingField, setEditingField] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -213,6 +217,7 @@ export function EditableItemRow({
           onBegin={() => beginEdit(field)}
           onSubmit={() => void submitEdit(field)}
           onCancel={cancelEdit}
+          colors={colors}
         />
       ))}
 
@@ -273,6 +278,7 @@ function FieldRow({
   onBegin,
   onSubmit,
   onCancel,
+  colors,
 }: {
   item: DerivedItem;
   field: EditableField;
@@ -283,7 +289,9 @@ function FieldRow({
   onBegin: () => void;
   onSubmit: () => void;
   onCancel: () => void;
+  colors: ColorPalette;
 }) {
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const current = fieldCurrentValue(item, field);
   const estimated = fieldEstimatedValue(item, field);
   const edited = isFieldEdited(item, field);
@@ -369,146 +377,148 @@ function FieldRow({
   );
 }
 
-const styles = StyleSheet.create({
-  item: {
-    paddingTop: 8,
-    paddingLeft: 36,
-    paddingRight: 16,
-    paddingBottom: 4,
-  },
-  name: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#1C1C1E",
-  },
-  quantityText: {
-    fontSize: 13,
-    color: "#8E8E93",
-    marginTop: 1,
-    marginBottom: 4,
-  },
-  fieldRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    minHeight: 36,
-    gap: 8,
-  },
-  fieldLabel: {
-    fontSize: 14,
-    color: "#3A3A3C",
-    width: 76,
-  },
-  valueGroup: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    gap: 10,
-  },
-  valueColumn: {
-    alignItems: "flex-end",
-  },
-  value: {
-    fontSize: 15,
-    color: "#1C1C1E",
-    fontVariant: ["tabular-nums"],
-  },
-  valueEdited: {
-    fontWeight: "700",
-  },
-  editedRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginTop: 1,
-  },
-  editedBadge: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#0A7E3A",
-  },
-  wasNote: {
-    fontSize: 11,
-    color: "#8E8E93",
-  },
-  editGroup: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    gap: 8,
-  },
-  input: {
-    minWidth: 72,
-    minHeight: 36,
-    backgroundColor: "#FFFFFF",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#C7C7CC",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    fontSize: 15,
-    color: "#1C1C1E",
-    textAlign: "right",
-  },
-  saveButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: "#0A84FF",
-    minHeight: 36,
-    justifyContent: "center",
-  },
-  saveLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#FFFFFF",
-  },
-  cancelButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    minHeight: 36,
-    justifyContent: "center",
-  },
-  cancelLabel: {
-    fontSize: 14,
-    color: "#0A84FF",
-  },
-  editButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    minHeight: 36,
-    justifyContent: "center",
-  },
-  editLabel: {
-    fontSize: 14,
-    color: "#0A84FF",
-    fontWeight: "500",
-  },
-  error: {
-    fontSize: 13,
-    color: "#C0392B",
-    marginTop: 4,
-  },
-  saveFoodRow: {
-    marginTop: 8,
-    marginBottom: 4,
-    gap: 6,
-  },
-  saveFoodButton: {
-    alignSelf: "flex-start",
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    backgroundColor: "#E4E4EA",
-  },
-  saveFoodButtonSaved: {
-    backgroundColor: "#D1F0E0",
-  },
-  saveFoodLabel: {
-    fontSize: 13,
-    fontWeight: "500",
-    color: "#3A3A3C",
-  },
-});
+function makeStyles(colors: ColorPalette) {
+  return StyleSheet.create({
+    item: {
+      paddingTop: 8,
+      paddingLeft: 36,
+      paddingRight: 16,
+      paddingBottom: 4,
+    },
+    name: {
+      fontSize: 15,
+      fontWeight: "600",
+      color: colors.text,
+    },
+    quantityText: {
+      fontSize: 13,
+      color: colors.textMuted,
+      marginTop: 1,
+      marginBottom: 4,
+    },
+    fieldRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      minHeight: 36,
+      gap: 8,
+    },
+    fieldLabel: {
+      fontSize: 14,
+      color: colors.textSecondary,
+      width: 76,
+    },
+    valueGroup: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-end",
+      gap: 10,
+    },
+    valueColumn: {
+      alignItems: "flex-end",
+    },
+    value: {
+      fontSize: 15,
+      color: colors.text,
+      fontVariant: ["tabular-nums"],
+    },
+    valueEdited: {
+      fontWeight: "700",
+    },
+    editedRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      marginTop: 1,
+    },
+    editedBadge: {
+      fontSize: 11,
+      fontWeight: "700",
+      color: colors.accentText,
+    },
+    wasNote: {
+      fontSize: 11,
+      color: colors.textMuted,
+    },
+    editGroup: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-end",
+      gap: 8,
+    },
+    input: {
+      minWidth: 72,
+      minHeight: 36,
+      backgroundColor: colors.surfaceRaised,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      fontSize: 15,
+      color: colors.text,
+      textAlign: "right",
+    },
+    saveButton: {
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: 8,
+      backgroundColor: colors.accent,
+      minHeight: 36,
+      justifyContent: "center",
+    },
+    saveLabel: {
+      fontSize: 14,
+      fontWeight: "600",
+      color: colors.accentForeground,
+    },
+    cancelButton: {
+      paddingVertical: 8,
+      paddingHorizontal: 8,
+      minHeight: 36,
+      justifyContent: "center",
+    },
+    cancelLabel: {
+      fontSize: 14,
+      color: colors.accent,
+    },
+    editButton: {
+      paddingVertical: 8,
+      paddingHorizontal: 10,
+      minHeight: 36,
+      justifyContent: "center",
+    },
+    editLabel: {
+      fontSize: 14,
+      color: colors.accent,
+      fontWeight: "500",
+    },
+    error: {
+      fontSize: 13,
+      color: colors.coral,
+      marginTop: 4,
+    },
+    saveFoodRow: {
+      marginTop: 8,
+      marginBottom: 4,
+      gap: 6,
+    },
+    saveFoodButton: {
+      alignSelf: "flex-start",
+      paddingVertical: 6,
+      paddingHorizontal: 14,
+      borderRadius: 8,
+      backgroundColor: colors.controlBackground,
+    },
+    saveFoodButtonSaved: {
+      backgroundColor: colors.controlBackground,
+    },
+    saveFoodLabel: {
+      fontSize: 13,
+      fontWeight: "500",
+      color: colors.textSecondary,
+    },
+  });
+}

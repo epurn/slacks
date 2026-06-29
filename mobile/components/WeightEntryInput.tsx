@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -10,6 +10,8 @@ import {
 
 import type { UnitsPreference } from "@/state/profile";
 import { parseWeightInput, weightUnitLabel } from "@/state/weightEntries";
+import { useTheme } from "@/theme/ThemeContext";
+import type { ColorPalette } from "@/theme/colors";
 
 interface WeightEntryInputProps {
   unitsPreference: UnitsPreference;
@@ -39,6 +41,8 @@ export function WeightEntryInput({
   onSubmit,
   initialValue,
 }: WeightEntryInputProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [weightText, setWeightText] = useState(
     initialValue != null ? String(initialValue) : "",
   );
@@ -52,7 +56,7 @@ export function WeightEntryInput({
         <TextInput
           accessibilityLabel={`Weight in ${unitLabel}`}
           placeholder="0.0"
-          placeholderTextColor="#A0A0A8"
+          placeholderTextColor={colors.textMuted}
           value={weightText}
           onChangeText={setWeightText}
           keyboardType="decimal-pad"
@@ -79,7 +83,7 @@ export function WeightEntryInput({
         style={[styles.button, !canSubmit && styles.buttonDisabled]}
       >
         {submitting ? (
-          <ActivityIndicator color="#FFFFFF" accessibilityLabel="Saving weight" />
+          <ActivityIndicator color={colors.accentForeground} accessibilityLabel="Saving weight" />
         ) : (
           <Text style={styles.buttonLabel}>Log weight</Text>
         )}
@@ -88,47 +92,49 @@ export function WeightEntryInput({
   );
 }
 
-const styles = StyleSheet.create({
-  container: { gap: 12 },
-  inputRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  input: {
-    flex: 1,
-    height: 44,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    fontSize: 17,
-    color: "#1C1C1E",
-  },
-  unit: {
-    fontSize: 17,
-    fontWeight: "500",
-    color: "#8E8E93",
-    minWidth: 24,
-  },
-  error: {
-    fontSize: 14,
-    color: "#C0392B",
-    marginLeft: 4,
-  },
-  button: {
-    backgroundColor: "#0A84FF",
-    borderRadius: 10,
-    paddingVertical: 13,
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 44,
-  },
-  buttonDisabled: {
-    backgroundColor: "#9DC9FF",
-  },
-  buttonLabel: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#FFFFFF",
-  },
-});
+function makeStyles(colors: ColorPalette) {
+  return StyleSheet.create({
+    container: { gap: 12 },
+    inputRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    input: {
+      flex: 1,
+      height: 44,
+      backgroundColor: colors.surfaceRaised,
+      borderRadius: 10,
+      paddingHorizontal: 14,
+      fontSize: 17,
+      color: colors.text,
+    },
+    unit: {
+      fontSize: 17,
+      fontWeight: "500",
+      color: colors.textMuted,
+      minWidth: 24,
+    },
+    error: {
+      fontSize: 14,
+      color: colors.coral,
+      marginLeft: 4,
+    },
+    button: {
+      backgroundColor: colors.accent,
+      borderRadius: 10,
+      paddingVertical: 13,
+      alignItems: "center",
+      justifyContent: "center",
+      minHeight: 44,
+    },
+    buttonDisabled: {
+      backgroundColor: colors.controlBackground,
+    },
+    buttonLabel: {
+      fontSize: 16,
+      fontWeight: "600",
+      color: colors.accentForeground,
+    },
+  });
+}

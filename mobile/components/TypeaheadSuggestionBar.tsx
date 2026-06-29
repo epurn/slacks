@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -11,6 +11,8 @@ import {
   type SavedFoodDTO,
   type SavedFoodSession,
 } from "@/api/savedFoods";
+import { useTheme } from "@/theme/ThemeContext";
+import type { ColorPalette } from "@/theme/colors";
 
 /** Debounce window in ms: avoids a network call per keystroke. */
 const DEBOUNCE_MS = 300;
@@ -44,6 +46,8 @@ export function TypeaheadSuggestionBar({
   /** Injectable search function for tests. */
   search?: typeof searchSavedFoodsApi;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [suggestions, setSuggestions] = useState<readonly SavedFoodDTO[]>([]);
   const trimmed = query.trim();
 
@@ -96,26 +100,28 @@ export function TypeaheadSuggestionBar({
   );
 }
 
-const styles = StyleSheet.create({
-  bar: {
-    flexGrow: 0,
-    marginTop: 6,
-  },
-  barContent: {
-    paddingRight: 4,
-  },
-  chip: {
-    backgroundColor: "#E4E4EA",
-    borderRadius: 18,
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    marginRight: 8,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  chipText: {
-    fontSize: 14,
-    color: "#1C1C1E",
-    fontWeight: "500",
-  },
-});
+function makeStyles(colors: ColorPalette) {
+  return StyleSheet.create({
+    bar: {
+      flexGrow: 0,
+      marginTop: 6,
+    },
+    barContent: {
+      paddingRight: 4,
+    },
+    chip: {
+      backgroundColor: colors.controlBackground,
+      borderRadius: 18,
+      paddingVertical: 6,
+      paddingHorizontal: 14,
+      marginRight: 8,
+      justifyContent: "center",
+      alignItems: "center",
+    },
+    chipText: {
+      fontSize: 14,
+      color: colors.text,
+      fontWeight: "500",
+    },
+  });
+}

@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
 import type { LogEventDTO } from "@/api/logEvents";
@@ -7,6 +8,8 @@ import { EditableItemRow } from "@/components/EditableItemRow";
 import { StatusIcon } from "@/components/StatusIcon";
 import type { ApiSession } from "@/state/session";
 import { statusPresentation } from "@/state/today";
+import { useTheme } from "@/theme/ThemeContext";
+import type { ColorPalette } from "@/theme/colors";
 
 /**
  * A single timeline row: a compact status icon, the natural-language text the
@@ -38,6 +41,8 @@ export function EntryRow({
   onItemChange?: (item: DerivedItem) => void;
   saveFoodFn?: typeof saveFood;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { label } = statusPresentation(event.status);
   return (
     <View style={styles.container}>
@@ -69,31 +74,33 @@ export function EntryRow({
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#E5E5EA",
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-  },
-  body: {
-    flex: 1,
-  },
-  text: {
-    fontSize: 16,
-    color: "#1C1C1E",
-  },
-  meta: {
-    fontSize: 13,
-    color: "#8E8E93",
-    marginTop: 2,
-  },
-  items: {
-    paddingBottom: 8,
-  },
-});
+function makeStyles(colors: ColorPalette) {
+  return StyleSheet.create({
+    container: {
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.separator,
+    },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+    },
+    body: {
+      flex: 1,
+    },
+    text: {
+      fontSize: 16,
+      color: colors.text,
+    },
+    meta: {
+      fontSize: 13,
+      color: colors.textMuted,
+      marginTop: 2,
+    },
+    items: {
+      paddingBottom: 8,
+    },
+  });
+}

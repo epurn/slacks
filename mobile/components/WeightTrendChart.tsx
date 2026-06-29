@@ -1,12 +1,14 @@
+import { useMemo } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { WeightEntryDTO } from "@/api/weightEntries";
 import type { UnitsPreference } from "@/state/profile";
 import { kgToDisplay, weightUnitLabel } from "@/state/weightEntries";
+import { useTheme } from "@/theme/ThemeContext";
+import type { ColorPalette } from "@/theme/colors";
 
 const CHART_H = 160;
 const PAD = { top: 16, bottom: 28, left: 48, right: 12 };
-const LINE_COLOR = "#0A84FF";
 const DOT_R = 4;
 
 interface WeightTrendChartProps {
@@ -43,6 +45,8 @@ export function WeightTrendChart({
   onRetry,
   width,
 }: WeightTrendChartProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const unit = weightUnitLabel(unitsPreference);
 
   if (loading) {
@@ -108,6 +112,7 @@ export function WeightTrendChart({
           displayValues={displayValues}
           width={width}
           unit={unit}
+          colors={colors}
         />
       ) : (
         // Placeholder until the parent measures its width via onLayout.
@@ -139,12 +144,15 @@ function ChartCanvas({
   displayValues,
   width,
   unit,
+  colors,
 }: {
   entries: readonly WeightEntryDTO[];
   displayValues: number[];
   width: number;
   unit: string;
+  colors: ColorPalette;
 }) {
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const plotW = width - PAD.left - PAD.right;
   const plotH = CHART_H - PAD.top - PAD.bottom;
   const n = entries.length;
@@ -194,7 +202,7 @@ function ChartCanvas({
               top: cy - 1,
               width: len,
               height: 2,
-              backgroundColor: LINE_COLOR,
+              backgroundColor: colors.accent,
               transform: [{ rotate: `${angle}deg` }],
             }}
           />
@@ -213,7 +221,7 @@ function ChartCanvas({
             width: DOT_R * 2,
             height: DOT_R * 2,
             borderRadius: DOT_R,
-            backgroundColor: LINE_COLOR,
+            backgroundColor: colors.accent,
           }}
         />
       ))}
@@ -235,41 +243,43 @@ function ChartCanvas({
   );
 }
 
-const styles = StyleSheet.create({
-  state: {
-    paddingVertical: 32,
-    alignItems: "center",
-    gap: 12,
-  },
-  stateText: {
-    fontSize: 15,
-    color: "#8E8E93",
-    textAlign: "center",
-    paddingHorizontal: 16,
-  },
-  singlePoint: {
-    fontSize: 22,
-    fontWeight: "700",
-    color: "#1C1C1E",
-  },
-  singleDate: {
-    fontSize: 14,
-    color: "#8E8E93",
-  },
-  retry: {
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 10,
-    backgroundColor: "#E4E4EA",
-  },
-  retryLabel: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#1C1C1E",
-  },
-  axisLabel: {
-    fontSize: 11,
-    color: "#8E8E93",
-    textAlign: "right",
-  },
-});
+function makeStyles(colors: ColorPalette) {
+  return StyleSheet.create({
+    state: {
+      paddingVertical: 32,
+      alignItems: "center",
+      gap: 12,
+    },
+    stateText: {
+      fontSize: 15,
+      color: colors.textMuted,
+      textAlign: "center",
+      paddingHorizontal: 16,
+    },
+    singlePoint: {
+      fontSize: 22,
+      fontWeight: "700",
+      color: colors.text,
+    },
+    singleDate: {
+      fontSize: 14,
+      color: colors.textMuted,
+    },
+    retry: {
+      paddingVertical: 10,
+      paddingHorizontal: 20,
+      borderRadius: 10,
+      backgroundColor: colors.controlBackground,
+    },
+    retryLabel: {
+      fontSize: 15,
+      fontWeight: "600",
+      color: colors.text,
+    },
+    axisLabel: {
+      fontSize: 11,
+      color: colors.textMuted,
+      textAlign: "right",
+    },
+  });
+}
