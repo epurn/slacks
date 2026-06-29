@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Stack,
   useRootNavigationState,
@@ -8,10 +8,21 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { getProfile } from '@/api/profile';
+import { getTarget, GoalsApiError } from '@/api/goals';
 import { AppearanceProvider } from '@/state/appearance';
-import { resolveAuthRedirect } from '@/state/authRouting';
+import { resolveAuthRedirect, type OnboardingStatus } from '@/state/authRouting';
 import { ConnectionProvider, useConnection } from '@/state/connection';
-import { SessionProvider, useSessionController } from '@/state/session';
+import {
+  clearOnboardingComplete,
+  isOnboardingCompleteForUser,
+} from '@/state/onboardingComplete';
+import { isProfileComplete } from '@/state/onboarding';
+import {
+  SessionProvider,
+  toApiSession,
+  useSessionController,
+} from '@/state/session';
 import { useTheme } from '@/theme';
 
 /** StatusBar style driven by the active theme. */
@@ -21,13 +32,17 @@ function ThemedStatusBar() {
 }
 
 /**
- * Signed-out routing gate (FTY-091, layered on FTY-107's connection seam). Once
- * both the connection (FTY-107) and the session (FTY-090) have hydrated, this
- * routes the three signed-out states from one place — no server → connect; no
- * session → sign-in; signed in but stranded on sign-in → Today — so there is no
- * reachable dead-end. A connected user is never forced off the connect screen,
- * so the "change server" affordance can open it intentionally. The decision
- * itself is the pure `resolveAuthRedirect` (unit-tested without a navigator).
+ * Signed-out + onboarding routing gate (FTY-091 + FTY-103). Once both the
+ * connection (FTY-107) and the session (FTY-090) have hydrated, and once the
+ * onboarding check has resolved, this routes from one place — no server →
+ * connect; no session → sign-in; signed-in incomplete → onboarding; signed-in
+ * complete → Today. The decision itself is the pure `resolveAuthRedirect`
+ * (unit-tested without a navigator).
+ *
+ * Onboarding status is checked once per session (when the userId changes).
+ * After the user completes onboarding in the current process, a module-level
+ * flag (`isOnboardingCompleteForUser`) prevents the gate from re-routing
+ * before the async API re-check can confirm the newly-written data.
  */
 function AuthGate() {
   const { status: connectionStatus, connection } = useConnection();
@@ -36,16 +51,86 @@ function AuthGate() {
   const router = useRouter();
   const navState = useRootNavigationState();
 
+  // Track which userId was last checked and what the result was. The derived
+  // onboardingStatus below avoids synchronous setState in effects.
+  const [checkedForUserId, setCheckedForUserId] = useState<string | null>(null);
+  const [checkedResult, setCheckedResult] = useState<'complete' | 'incomplete'>('incomplete');
+  const prevAtOnboardingRef = useRef(false);
+  const atOnboarding = segments[0] === 'onboarding';
+
+  // Derive onboarding status without synchronous setState in effects:
+  // — no userId → 'checking' (gate will route to sign-in anyway)
+  // — module-level completion flag set → 'complete' (immediate after wizard)
+  // — userId not yet checked → 'checking' (holds the gate)
+  // — otherwise use the last API result
+  const currentUserId = session?.userId ?? null;
+  const onboardingStatus: OnboardingStatus = (() => {
+    if (!currentUserId) return 'checking';
+    if (isOnboardingCompleteForUser(currentUserId)) return 'complete';
+    if (checkedForUserId !== currentUserId) return 'checking';
+    return checkedResult;
+  })();
+
+  const checkOnboarding = useCallback(
+    async (userId: string) => {
+      if (!session) return;
+      try {
+        const apiSession = toApiSession(session);
+        const [profile, target] = await Promise.all([
+          getProfile(apiSession).catch(() => null),
+          getTarget(apiSession).catch((e: unknown) => {
+            if (e instanceof GoalsApiError && e.status === 404) return null;
+            return null;
+          }),
+        ]);
+        const result = isProfileComplete(profile) && target !== null ? 'complete' : 'incomplete';
+        setCheckedForUserId(userId);
+        setCheckedResult(result);
+      } catch {
+        setCheckedForUserId(userId);
+        setCheckedResult('incomplete');
+      }
+    },
+    [session],
+  );
+
+  useEffect(() => {
+    const userId = session?.userId ?? null;
+
+    if (!userId) {
+      // Signed out: clear the module-level flag and reset the segment ref.
+      // No setState needed — onboardingStatus derives to 'checking' when userId is null.
+      clearOnboardingComplete();
+      prevAtOnboardingRef.current = false;
+      return;
+    }
+
+    // Module-level flag set by the wizard on completion — status derives as 'complete'.
+    if (isOnboardingCompleteForUser(userId)) return;
+
+    const justLeftOnboarding = prevAtOnboardingRef.current && !atOnboarding;
+    prevAtOnboardingRef.current = atOnboarding;
+
+    // Check when the userId hasn't been checked yet, OR when the user just
+    // left the onboarding screen (post-completion confirmation).
+    if (checkedForUserId !== userId || justLeftOnboarding) {
+      void checkOnboarding(userId);
+    }
+  }, [session?.userId, atOnboarding, checkOnboarding, checkedForUserId]);
+
   useEffect(() => {
     // Wait until the root navigator is mounted before navigating.
     if (!navState?.key) return;
+
     const target = resolveAuthRedirect({
       connectionStatus,
       connection,
       sessionStatus,
       session,
+      onboardingStatus,
       atConnect: segments[0] === 'connect',
       atSignin: segments[0] === 'signin',
+      atOnboarding,
     });
     if (target !== null) {
       router.replace(target);
@@ -56,7 +141,9 @@ function AuthGate() {
     connection,
     sessionStatus,
     session,
+    onboardingStatus,
     segments,
+    atOnboarding,
     router,
   ]);
 
@@ -66,12 +153,11 @@ function AuthGate() {
 /**
  * Root layout. Provides the design-system theme, the connected-server state, and
  * the authenticated-session context to every screen. The Stack hosts the tab
- * group plus the modal/standalone screens (connect, signin, profile, weight).
- * StatusBar
- * style is resolved from the active theme. `ConnectionProvider` hydrates the
- * persisted server connection on launch (and mirrors it into the synchronous
- * `resolveApiBaseUrl()` accessor); `SessionProvider` hydrates the persisted
- * session; `AppearanceProvider` hydrates the Light / Dark / System preference.
+ * group plus the modal/standalone screens (connect, signin, onboarding, profile,
+ * weight). StatusBar style is resolved from the active theme. `ConnectionProvider`
+ * hydrates the persisted server connection on launch; `SessionProvider` hydrates
+ * the persisted session; `AppearanceProvider` hydrates the Light / Dark / System
+ * preference.
  */
 export default function RootLayout() {
   return (
