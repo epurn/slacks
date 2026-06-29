@@ -336,12 +336,15 @@ function makeStyles(colors: ColorPalette) {
       justifyContent: "center",
     },
     shutterInner: {
+      // Inner disc of the shutter button over the live camera feed — fixed
+      // white to match the translucent-white ring (`shutterButton`), not a
+      // themed token (the camera feed is not a themed surface).
       width: 60,
       height: 60,
       borderRadius: 30,
-      backgroundColor: colors.surfaceRaised,
+      backgroundColor: "#FFFFFF",
       borderWidth: 2,
-      borderColor: colors.separator,
+      borderColor: "rgba(255,255,255,0.6)",
     },
     previewControls: {
       width: "100%",
@@ -350,10 +353,14 @@ function makeStyles(colors: ColorPalette) {
       alignItems: "center",
     },
     previewImage: {
+      // Placeholder behind the captured label image in the camera UI — fixed
+      // dark so the container stays a dark placeholder in both light and dark
+      // (a themed token like `colors.text`/`colors.surface` would flip to
+      // near-white in dark mode).
       width: "100%",
       height: 240,
       borderRadius: 12,
-      backgroundColor: colors.text,
+      backgroundColor: "#1C1C1E",
     },
     saveRow: {
       flexDirection: "row",

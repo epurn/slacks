@@ -513,7 +513,9 @@ function makeStyles(colors: ColorPalette) {
       backgroundColor: colors.controlBackground,
     },
     saveFoodButtonSaved: {
-      backgroundColor: colors.controlBackground,
+      // Distinct from the default control fill so the saved state reads as a
+      // subtle raised confirmation in both light and dark (not a no-op).
+      backgroundColor: colors.surfaceRaised,
     },
     saveFoodLabel: {
       fontSize: 13,
