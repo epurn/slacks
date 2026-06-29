@@ -74,6 +74,10 @@ class DailySummaryForbidden(Exception):
     """Raised when a caller tries to access another user's daily summary."""
 
 
+class DailySummaryInvalidRange(Exception):
+    """Raised when a range's start date is after its end date (ordering error)."""
+
+
 class DailySummaryRangeTooLarge(Exception):
     """Raised when a range read spans more than :data:`MAX_RANGE_DAYS` days."""
 
@@ -134,7 +138,7 @@ def get_daily_summaries(
 
     _authorize(owner_id, current_user)
     if start > end:
-        raise DailySummaryRangeTooLarge("'from' must be on or before 'to'")
+        raise DailySummaryInvalidRange("'from' must be on or before 'to'")
     if (end.toordinal() - start.toordinal()) + 1 > MAX_RANGE_DAYS:
         raise DailySummaryRangeTooLarge(f"range may not exceed {MAX_RANGE_DAYS} days")
 

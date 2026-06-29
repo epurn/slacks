@@ -988,8 +988,8 @@ def test_single_day_target_carries_forward_to_a_later_in_horizon_day(
     assert resp.json()["target"]["calories"]["effective"] == 2100
 
 
-def test_range_with_from_after_to_returns_422(client: TestClient) -> None:
-    """``from`` after ``to`` is rejected with 422."""
+def test_range_with_from_after_to_returns_422_with_ordering_message(client: TestClient) -> None:
+    """``from`` after ``to`` is rejected with 422 and an ordering-specific message."""
 
     user_id, auth = _register(client, "range-inverted@example.com")
     resp = client.get(
@@ -998,9 +998,11 @@ def test_range_with_from_after_to_returns_422(client: TestClient) -> None:
         params={"from": "2026-06-10", "to": "2026-06-01"},
     )
     assert resp.status_code == 422
+    # The message must reflect the ordering error, not the span error
+    assert "on or before" in resp.json()["detail"]
 
 
-def test_range_exceeding_max_span_returns_422(client: TestClient) -> None:
+def test_range_exceeding_max_span_returns_422_with_span_message(client: TestClient) -> None:
     """A range wider than the bounded maximum is rejected with 422 (no unbounded scan)."""
 
     user_id, auth = _register(client, "range-too-wide@example.com")
@@ -1011,6 +1013,8 @@ def test_range_exceeding_max_span_returns_422(client: TestClient) -> None:
         params={"from": "2025-01-01", "to": "2026-06-01"},
     )
     assert resp.status_code == 422
+    # The message must reflect the span error, not the ordering error
+    assert "may not exceed" in resp.json()["detail"]
 
 
 def test_range_cross_user_access_fails_closed(client: TestClient, db_engine: Engine) -> None:
