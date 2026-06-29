@@ -195,7 +195,7 @@ export function LabelCaptureScreen({
             {phase === "uploading" && (
               <View style={styles.uploadingContainer}>
                 <ActivityIndicator
-                  color={colors.accentForeground}
+                  color="#FFFFFF"
                   size="large"
                   accessibilityLabel="Uploading label"
                 />
@@ -275,7 +275,7 @@ function PreviewControls({
           value={savePhoto}
           onValueChange={onToggleSave}
           trackColor={{ false: colors.textSecondary, true: colors.accent }}
-          thumbColor={colors.accentForeground}
+          thumbColor="#FFFFFF"
         />
       </View>
       <View style={styles.previewActions}>
@@ -367,7 +367,10 @@ function makeStyles(colors: ColorPalette) {
       minHeight: 44,
     },
     saveLabel: {
-      color: colors.accentForeground,
+      // Sits in a dark scrim over the live camera feed, not on a themed
+      // surface — fixed white for contrast in both light and dark (matches
+      // CameraCapture's overlay text).
+      color: "#FFFFFF",
       fontSize: 16,
       fontWeight: "500",
     },
@@ -385,7 +388,9 @@ function makeStyles(colors: ColorPalette) {
       minHeight: 44,
     },
     secondaryButtonLabel: {
-      color: colors.accentForeground,
+      // Translucent-white button over the camera feed — fixed white, not a
+      // themed token (the camera feed is not a themed surface).
+      color: "#FFFFFF",
       fontSize: 16,
       fontWeight: "600",
     },
@@ -398,6 +403,8 @@ function makeStyles(colors: ColorPalette) {
       minHeight: 44,
     },
     primaryButtonLabel: {
+      // The only overlay label on the amber accent fill (`primaryButton`), so
+      // accentForeground is the correct on-accent token here.
       color: colors.accentForeground,
       fontSize: 16,
       fontWeight: "600",
@@ -407,7 +414,8 @@ function makeStyles(colors: ColorPalette) {
       gap: 12,
     },
     uploadingText: {
-      color: colors.accentForeground,
+      // Rendered directly on the live camera feed — fixed white for contrast.
+      color: "#FFFFFF",
       fontSize: 16,
       fontWeight: "500",
     },
