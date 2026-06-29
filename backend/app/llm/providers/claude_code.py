@@ -21,6 +21,7 @@ logs the prompt, the model output, or any credential.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess  # noqa: S404 — invocation is fixed argv, tools disabled, no shell
 from collections.abc import Callable, Sequence
@@ -38,6 +39,40 @@ from app.llm.errors import (
 
 #: Default Claude Code executable name; resolved on ``PATH`` by the OS.
 DEFAULT_BINARY = "claude"
+
+#: Cap on stdout captured from the child process — mirrors the transport's
+#: MAX_RESPONSE_BYTES intent without importing across layers (the transport
+#: documents why it owns its own cap; this story does likewise).
+MAX_STDOUT_BYTES = 1_000_000
+
+#: Environment variables forwarded to the claude subprocess. Every key absent
+#: from this set is withheld, so FATTY_AUTH_SECRET, POSTGRES_PASSWORD,
+#: FATTY_FDC_API_KEY, FATTY_SEARCH_API_KEY, and any other secret the
+#: API/worker process holds are excluded by construction.
+#:
+#: Keys were determined empirically (``env -i`` scrubbing), not by guessing:
+#:   PATH             — binary and child-process lookup; the binary cannot be
+#:                      found without it.
+#:   HOME             — fallback config dir (~/.claude) when CLAUDE_CONFIG_DIR
+#:                      is absent; the binary errors on missing config without it.
+#:   CLAUDE_CONFIG_DIR — session/credential directory mounted by FTY-088; this
+#:                      is the primary auth surface for Fatty's deployment.
+#:   LANG/LC_ALL/LC_CTYPE — locale: ensure UTF-8 text encoding so JSON output
+#:                      is parseable across all deployment environments.
+#:   TMPDIR           — runtime temp directory; the Bun-bundled binary creates
+#:                      temp files during execution (macOS default is
+#:                      /var/folders/…, not /tmp, so the var is forwarded).
+_ENV_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "CLAUDE_CONFIG_DIR",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TMPDIR",
+    }
+)
 
 #: Every built-in Claude Code tool, listed so the invocation can explicitly deny
 #: each one. The empty allow-list below already permits nothing, but naming the
@@ -66,14 +101,29 @@ _BUILTIN_TOOLS = (
 #: Substrings that mark a non-zero exit as an authentication/login failure rather
 #: than a generic error. Matched case-insensitively against stderr/stdout for
 #: classification only — the matched text is never logged or surfaced.
+#:
+#: "login" and "log in" have been replaced with phrase-anchored forms to prevent
+#: false positives from unrelated stderr that merely contains the word "login"
+#: (e.g. "logging in to...", "see the changelog", compound words).
 _AUTH_FAILURE_MARKERS = (
-    "not logged in",
-    "log in",
-    "login",
-    "authenticat",
-    "unauthorized",
-    "credential",
-    "session expired",
+    "not logged in",  # Primary unauthenticated output: "Not logged in · ...".
+    "please run /login",  # CLI instruction Claude Code emits when auth is absent.
+    "please log in",  # Alternative login-prompt phrasing.
+    "authenticat",  # Prefix: "authentication failed", "unauthenticated".
+    "unauthorized",  # HTTP 401 / generic auth denial.
+    "credential",  # Credential-related failures.
+    "session expired",  # Expired session token.
+)
+
+#: Substrings that mark a non-zero exit as a transient/retryable failure rather
+#: than a permanent error. Matched case-insensitively for classification only —
+#: the matched text is never logged or surfaced. Phrases are derived from how
+#: Claude Code reports API rate-limit (HTTP 429) and overload (HTTP 529)
+#: conditions, not invented.
+_TRANSIENT_FAILURE_MARKERS = (
+    "rate limited",  # Claude API rate-limit response (HTTP 429).
+    "overloaded",  # Claude API overload response (HTTP 529).
+    "temporarily unavailable",  # Service temporarily-unavailable message.
 )
 
 
@@ -113,10 +163,18 @@ def run_claude_code(invocation: Invocation, *, timeout_seconds: float) -> Claude
     Raises the OS-level exceptions (``FileNotFoundError`` when the binary is
     absent, ``subprocess.TimeoutExpired`` on the per-attempt timeout, other
     ``OSError`` on a spawn failure) for :class:`ClaudeCodeProvider` to map onto
-    the LLM error taxonomy. The command runs without a shell and inherits no
-    extra arguments, and the prompt is supplied on stdin (never in ``argv``).
+    the LLM error taxonomy. The command runs without a shell, and the prompt is
+    supplied on stdin (never in ``argv``).
+
+    The subprocess receives only the variables in :data:`_ENV_ALLOWLIST`,
+    copied from the parent environment when present. This ensures that
+    ``FATTY_AUTH_SECRET``, ``POSTGRES_PASSWORD``, and every other secret the
+    API/worker process holds are absent from the child's environment by
+    construction, making the module's no-credential-leak guarantee enforceable
+    rather than merely asserted.
     """
 
+    child_env = {k: v for k, v in os.environ.items() if k in _ENV_ALLOWLIST}
     completed = subprocess.run(  # noqa: S603 — fixed argv, no shell, tools disabled
         list(invocation.argv),
         input=invocation.stdin,
@@ -124,6 +182,7 @@ def run_claude_code(invocation: Invocation, *, timeout_seconds: float) -> Claude
         text=True,
         timeout=timeout_seconds,
         check=False,
+        env=child_env,
     )
     return ClaudeCodeResult(
         returncode=completed.returncode,
@@ -221,10 +280,20 @@ class ClaudeCodeProvider(Provider):
             # Spawn/transport hiccup (e.g. exec failure): retryable.
             raise LLMTransientError("claude code invocation failed") from None
 
+        # Stdout size guard — a runaway or hostile reply must not balloon worker
+        # memory. Checked before returncode so the cap applies to all outcomes.
+        # The offending text is never echoed (content-free message, matching the
+        # transport's "provider returned an oversized body" pattern).
+        if len(result.stdout) > MAX_STDOUT_BYTES:
+            raise LLMResponseError("claude code returned an oversized body")
+
         if result.returncode != 0:
             if _looks_like_auth_failure(result):
                 # Not logged in / unauthenticated. Content-free; point at the fix.
                 raise LLMConfigurationError("claude code is not authenticated; run 'claude login'")
+            if _looks_like_transient_failure(result):
+                # Rate-limited or overloaded — retrying may succeed.
+                raise LLMTransientError("claude code is temporarily unavailable")
             # Any other non-zero exit: the run failed in a way retrying won't fix
             # deterministically. Never echo stderr (it may carry untrusted input).
             raise LLMResponseError("claude code exited with an error")
@@ -258,6 +327,18 @@ def _looks_like_auth_failure(result: ClaudeCodeResult) -> bool:
 
     haystack = f"{result.stderr}\n{result.stdout}".lower()
     return any(marker in haystack for marker in _AUTH_FAILURE_MARKERS)
+
+
+def _looks_like_transient_failure(result: ClaudeCodeResult) -> bool:
+    """Classify a non-zero exit as a transient/retryable failure (for error mapping only).
+
+    Inspects stderr/stdout for known markers. The inspected text is used solely
+    to choose the error type and is never logged or placed in a message.
+    Called only after auth-failure classification has been ruled out.
+    """
+
+    haystack = f"{result.stderr}\n{result.stdout}".lower()
+    return any(marker in haystack for marker in _TRANSIENT_FAILURE_MARKERS)
 
 
 #: Matches a leading ```json or ``` fence opener (with optional trailing whitespace/newline).
