@@ -185,18 +185,22 @@ def get_active_target(
     *,
     for_date: date | None = None,
 ) -> DailyTarget:
-    """Return the active goal's target row for ``owner_id`` on ``for_date``.
+    """Return the active goal's target for ``owner_id`` on ``for_date``.
 
     ``for_date`` defaults to the current day in the owner's profile timezone
-    (resolved only after authorization, so a cross-user caller learns nothing).
-    Fails closed: cross-user access raises :class:`GoalForbidden`; no active goal
-    or no stored target row for the day raises :class:`TargetNotFound`. Both map to
-    the router's ``404`` so neither confirms another user's data nor a missing row.
+    (resolved only after authorization, so a cross-user caller learns nothing). The
+    target is **carried forward** within the goal's horizon: because the daily
+    target is constant across the horizon and a row is only stored on goal-creation
+    day, any in-horizon day reads the most recent stored row (see
+    :func:`resolve_carried_target_row`). Fails closed: cross-user access raises
+    :class:`GoalForbidden`; no active goal, a day before the goal's first row, or a
+    day past the horizon raises :class:`TargetNotFound`. Both map to the router's
+    ``404`` so neither confirms another user's data nor a missing row.
     """
 
     _authorize(owner_id, current_user)
     day = _resolve_day(session, owner_id, for_date)
-    return _resolve_active_target(session, owner_id, day)
+    return _resolve_carried_target(session, owner_id, day)
 
 
 def set_target_override(
@@ -354,13 +358,69 @@ def _resolve_active_target_row(
 
 
 def _resolve_active_target(session: Session, owner_id: uuid.UUID, for_date: date) -> DailyTarget:
-    """Load the active goal's target row for ``owner_id`` on ``for_date``.
+    """Load the active goal's **exact-date** target row for ``owner_id``.
 
     Raises :class:`TargetNotFound` when the user has no active goal or no stored
-    target row for the day — the same fail-closed signal as a cross-user attempt.
+    target row for *that exact day* — the same fail-closed signal as a cross-user
+    attempt. This is the resolver the **override write** paths use: an override must
+    land on a concrete row for the requested day, never on a carried-forward earlier
+    row. The read paths use :func:`resolve_carried_target_row` instead.
     """
 
     target = _resolve_active_target_row(session, owner_id, for_date)
+    if target is None:
+        raise TargetNotFound("no active target for this user and day")
+    return target
+
+
+def resolve_carried_target_row(
+    session: Session, owner_id: uuid.UUID, for_date: date
+) -> DailyTarget | None:
+    """Most-recent active-goal target row at or before ``for_date``, within horizon.
+
+    A ``daily_targets`` row is only materialised on goal-creation day (and on an
+    override write), so an exact-date lookup misses every later day — which wrongly
+    made the target (and, via the onboarding gate, the user's onboarded state)
+    vanish from the day after onboarding onward. But the dynamic-energy-balance
+    model yields a **constant daily intake across a goal's horizon**:
+    ``compute_daily_target`` derives from the goal's fixed ``(start_weight,
+    target_weight, start_date, target_date)`` snapshot and ``for_date`` enters only
+    through whole-year age, so for any in-horizon day the most recent stored row
+    carries the correct target forward.
+
+    Returns the newest active-goal :class:`DailyTarget` with ``for_date <=`` the
+    requested day while that day is on or before the goal's ``target_date`` (within
+    the planned horizon), else ``None`` — the caller fails closed (``404``) or
+    renders ``null``. Days before the first stored row, days past ``target_date``
+    (a completed trajectory; the user is steered to set a new goal rather than shown
+    a stale deficit), no active goal, and cross-user all resolve to ``None``.
+    """
+
+    return session.scalars(
+        select(DailyTarget)
+        .join(Goal, DailyTarget.goal_id == Goal.id)
+        .where(
+            DailyTarget.user_id == owner_id,
+            Goal.user_id == owner_id,
+            Goal.is_active.is_(True),
+            Goal.target_date >= for_date,
+            DailyTarget.for_date <= for_date,
+        )
+        .order_by(DailyTarget.for_date.desc())
+        .limit(1)
+    ).one_or_none()
+
+
+def _resolve_carried_target(session: Session, owner_id: uuid.UUID, for_date: date) -> DailyTarget:
+    """Carry-forward read resolver: like :func:`_resolve_active_target` but returns
+    the most recent in-horizon row (see :func:`resolve_carried_target_row`).
+
+    Raises :class:`TargetNotFound` (fail-closed ``404``) when there is no in-horizon
+    row to carry — no active goal, a day before the goal's first row, or a day past
+    the horizon — indistinguishable from a cross-user attempt (no existence oracle).
+    """
+
+    target = resolve_carried_target_row(session, owner_id, for_date)
     if target is None:
         raise TargetNotFound("no active target for this user and day")
     return target

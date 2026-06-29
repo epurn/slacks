@@ -86,9 +86,11 @@ read path.)
   timezone. `from` must be on or before `to`, and the span may not exceed
   **366 days**; either violation (or a malformed date) is rejected as `422`.
 - Every day in the inclusive range is present in the response, oldest-first.
-  Days with no finalized data carry zeroed `intake`/`exercise`, `has_intake:
-  false`, and a `null` `target` — exactly the DTO the single-day endpoint returns
-  for that day. The response is the JSON array `[DailySummaryDTO, …]`.
+  Days with no finalized data carry zeroed `intake`/`exercise` and `has_intake:
+  false`; their `target` follows the same **No-target representation** as the
+  single-day read (carried forward within the goal's horizon, `null` outside it) —
+  exactly the DTO the single-day endpoint returns for that day. The response is the
+  JSON array `[DailySummaryDTO, …]`.
 - Same finalized-state filtering, day/timezone resolution, no-target
   representation, rounding, authorization, and privacy rules as the single-day
   read — it is the same read-model computed over a window, not a new shape.
@@ -128,10 +130,13 @@ read path.)
   two; this flag does. A range/series consumer (FTY-101 Trends adherence) excludes
   `has_intake: false` days from its logged-intake average and on/off-target
   denominator rather than counting every unlogged day as a real 0-kcal day.
-- `target` — the **target read-model** for the stored `daily_targets` row of the
-  user's active goal on this day, or `null` (JSON `null`) when none exists (no
-  active goal, or the day predates the goal). See **No-target representation**
-  below. Each of `calories` (kcal, int) and the macro targets `protein_g` /
+- `target` — the **target read-model** for the user's active goal on this day,
+  **carried forward** within the goal's horizon (a `daily_targets` row is stored on
+  goal-creation day but the daily target is constant across the horizon, so any
+  in-horizon day reports the most recent stored row), or `null` (JSON `null`) when
+  none applies (no active goal, the day predates the goal's first stored row, or the
+  day is past the goal's `target_date`). See **No-target representation** below.
+  Each of `calories` (kcal, int) and the macro targets `protein_g` /
   `carbs_g` / `fat_g` (whole grams, int) is an object with `effective` (what the
   app uses: override ?? derived), `derived` (the calculator value a reset
   restores), and `source` (`derived | user`). The full override/reset semantics
@@ -170,11 +175,19 @@ this contract):
 
 ## No-target representation
 
-`target` is `null` (JSON `null`) when:
+The active-goal target is **carried forward** within the goal's horizon: a
+`daily_targets` row is stored on goal-creation day (and on an override write), but
+the daily target is constant across the horizon, so any day at or after the first
+stored row and on or before the goal's `target_date` reports that target (the most
+recent stored row). This is what keeps the calories-vs-target headline — and the
+onboarding-completeness probe — present for a returning user rather than vanishing
+the day after onboarding.
+
+`target` is `null` (JSON `null`) only when:
 - The user has no active goal (`goals.is_active = true`), or
-- The user has an active goal but no `daily_targets` row has been stored for the
-  requested day (e.g. the day predates the goal's start or the target was never
-  computed for that date).
+- The day predates the goal's **first stored** `daily_targets` row, or
+- The day is **past** the goal's `target_date` (the planned trajectory is complete;
+  the user is steered to set a new goal rather than shown a stale deficit).
 
 A `null` target is distinct from a zero-calorie target and must be rendered
 differently by the client (e.g. "no target set" vs. "target: 0 kcal"). When the

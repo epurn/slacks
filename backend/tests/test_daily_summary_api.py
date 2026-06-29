@@ -931,12 +931,16 @@ def test_range_matches_single_day_endpoint_per_day(client: TestClient, db_engine
     assert ranged.json() == [single.json()]
 
 
-def test_range_target_is_null_on_days_without_a_stored_target(
-    client: TestClient, db_engine: Engine
-) -> None:
-    """Days in range without a daily_targets row carry an explicit null target."""
+def test_range_target_carries_forward_within_horizon(client: TestClient, db_engine: Engine) -> None:
+    """The target carries forward across the range within the goal's horizon.
 
-    user_id, auth = _register(client, "range-null-target@example.com")
+    A row is stored only on goal-creation day, but the daily target is constant
+    across the goal horizon (start 2026-01-01 → target 2026-12-31 per the seed), so
+    every in-horizon day at or after the first stored row reports that target.
+    Days *before* the first stored row remain an explicit null (not zero).
+    """
+
+    user_id, auth = _register(client, "range-carry-target@example.com")
     _set_timezone(client, user_id, auth, "UTC")
     _seed_daily_target(
         db_engine, user_id, for_date=date(2026, 5, 2), daily_calorie_target_kcal=2100
@@ -945,14 +949,43 @@ def test_range_target_is_null_on_days_without_a_stored_target(
     resp = client.get(
         f"/api/users/{user_id}/daily-summary/range",
         headers={"Authorization": auth},
-        params={"from": "2026-05-01", "to": "2026-05-03"},
+        params={"from": "2026-05-01", "to": "2026-05-04"},
     )
 
     assert resp.status_code == 200
     by_date = {row["date"]: row for row in resp.json()}
-    assert by_date["2026-05-02"]["target"]["calories"]["effective"] == 2100
+    # Day before the first stored row: still an explicit null.
     assert by_date["2026-05-01"]["target"] is None
-    assert by_date["2026-05-03"]["target"] is None
+    # The stored day and every later in-horizon day carry the same target.
+    assert by_date["2026-05-02"]["target"]["calories"]["effective"] == 2100
+    assert by_date["2026-05-03"]["target"]["calories"]["effective"] == 2100
+    assert by_date["2026-05-04"]["target"]["calories"]["effective"] == 2100
+
+
+def test_single_day_target_carries_forward_to_a_later_in_horizon_day(
+    client: TestClient, db_engine: Engine
+) -> None:
+    """The Today daily-summary shows the carried target on a day after creation.
+
+    A target row is stored only on goal-creation day, but a later in-horizon day
+    must still report it (the constant-across-horizon daily target) — otherwise the
+    Today screen's calories-vs-target headline goes blank the day after onboarding.
+    """
+
+    user_id, auth = _register(client, "single-carry-target@example.com")
+    _set_timezone(client, user_id, auth, "UTC")
+    _seed_daily_target(
+        db_engine, user_id, for_date=date(2026, 5, 2), daily_calorie_target_kcal=2100
+    )
+
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary",
+        headers={"Authorization": auth},
+        params={"day": "2026-06-15"},  # weeks later, still within the seed's horizon
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["target"]["calories"]["effective"] == 2100
 
 
 def test_range_with_from_after_to_returns_422(client: TestClient) -> None:
