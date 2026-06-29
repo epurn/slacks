@@ -198,25 +198,44 @@ def test_bearer_token_label_preserved_after_redaction() -> None:
 
 
 @pytest.mark.parametrize(
-    "raw",
+    ("raw", "secret"),
     [
         # sk- token behind the header (also caught by the standalone sk- arm)
-        "Authorization: Bearer sk-super-long-secret-key-1234567890",
+        (
+            "Authorization: Bearer sk-super-long-secret-key-1234567890",
+            "sk-super-long-secret-key-1234567890",
+        ),
         # Opaque OAuth bearer token — NOT sk-/JWT shaped, so only the inline
         # Authorization arm can catch it.  This is the common leak shape.
-        "Authorization: Bearer abc123opaquerandomtoken",
+        ("Authorization: Bearer abc123opaquerandomtoken", "abc123opaquerandomtoken"),
         # Lower-cased / "=" separator variant
-        "auth=Bearer abc123opaquerandomtoken",
+        ("auth=Bearer abc123opaquerandomtoken", "abc123opaquerandomtoken"),
+        # HTTP Basic — base64(user:password); the most common credential header.
+        # The scheme word must be absorbed or the base64 blob leaks.
+        ("Authorization: Basic dXNlcjpwYXNzd29yZA==", "dXNlcjpwYXNzd29yZA=="),
+        # GitHub-style "token" scheme with an opaque PAT.
+        ("Authorization: token opaqueRandomTokenValue123", "opaqueRandomTokenValue123"),
+        # Proxy-Authorization header carries credentials too.
+        ("Proxy-Authorization: Basic dXNlcjpwYXNzd29yZA==", "dXNlcjpwYXNzd29yZA=="),
     ],
 )
-def test_authorization_header_fully_redacted(raw: str) -> None:
-    # When Authorization: Bearer … appears, the inline key=value arm fires first
-    # (Authorization is a sensitive key) and its value absorbs the "Bearer "
-    # label, so the credential is redacted even when it is an opaque token.
+def test_authorization_header_fully_redacted(raw: str, secret: str) -> None:
+    # When an Authorization header appears, the inline key=value arm fires first
+    # (authorization is a sensitive key) and its value absorbs the auth *scheme*
+    # label (Bearer/Basic/token/…), so the credential is redacted even when it
+    # is an opaque, non-token-shaped value.
     result = _redact_values(raw)
     assert REDACTED in result
-    assert "sk-super-long-secret-key-1234567890" not in result
-    assert "abc123opaquerandomtoken" not in result
+    assert secret not in result
+
+
+def test_scheme_absorber_does_not_swallow_trailing_word() -> None:
+    # The scheme absorber is an explicit allowlist, not a bare ``[A-Za-z]+``, so
+    # an ordinary word following the separator is not treated as a scheme and
+    # only the single value token is redacted — the rest of the line survives.
+    result = _redact_values("auth: connection refused after timeout")
+    assert REDACTED in result
+    assert "refused after timeout" in result
 
 
 def test_exc_info_with_secret_is_redacted() -> None:

@@ -50,10 +50,15 @@ _SENSITIVE_VALUE = re.compile(
     r"|AKIA[0-9A-Z]{16}"
     # Inline key=value / key: value where the key name is sensitive;
     # keep the key prefix, redact the value.  The value also absorbs an
-    # optional "Bearer " label so e.g. ``Authorization: Bearer <token>``
-    # redacts the credential, not just the literal word "Bearer".
+    # optional HTTP auth *scheme* label so e.g. ``Authorization: Bearer
+    # <token>`` / ``Authorization: Basic <creds>`` / ``Authorization: token
+    # <pat>`` redact the credential, not just the literal scheme word.  The
+    # scheme set is an explicit allowlist (not a bare ``[A-Za-z]+``) to keep
+    # the absorber from swallowing an ordinary word that follows the
+    # separator (e.g. ``auth: connection refused``).
     r"|((?:secret|token|password|passwd|api[_-]?key|access[_-]?key"
-    r"|authorization|auth|cookie|key)\s*[:=]\s*)(?:Bearer\s+)?\S+",
+    r"|authorization|auth|cookie|key)\s*[:=]\s*)"
+    r"(?:(?:Bearer|Basic|Digest|Negotiate|NTLM|OAuth|token)\s+)?\S+",
     re.IGNORECASE,
 )
 
