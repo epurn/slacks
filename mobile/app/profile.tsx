@@ -1,6 +1,6 @@
-import { ProfileScreen } from "@/components/ProfileScreen";
+import { SettingsScreen } from "@/components/SettingsScreen";
 
-/** The profile capture route (`/profile`). */
+/** The Profile / Settings route (`/profile`). Opens from the header gear. */
 export default function ProfileRoute() {
-  return <ProfileScreen />;
+  return <SettingsScreen />;
 }
