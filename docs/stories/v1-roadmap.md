@@ -326,8 +326,8 @@ noted, and drain through the steward in parallel by lane.
 
 | ID | State | Lane | Story | Acceptance |
 | --- | --- | --- | --- | --- |
-| FTY-131 | ready | estimator | [claude_code provider hardening](FTY-131-claude-code-provider-hardening.md) | Curated subprocess `env=` allowlist (honor the no-token-leak guarantee), stdout size cap (transport parity), transient-exit retry + tightened auth markers. |
-| FTY-132 | ready | estimator | [Official-source plausibility gate](FTY-132-official-source-plausibility-gate.md) | Apply the FTY-115 `nutrition_facts_plausible` gate to official-source/model-prior per-100g facts (the kJ-as-kcal case) — the least-trusted source is no longer the least guarded. |
+| FTY-131 | merged | estimator | [claude_code provider hardening](FTY-131-claude-code-provider-hardening.md) | Curated subprocess `env=` allowlist (honor the no-token-leak guarantee), stdout size cap (transport parity), transient-exit retry + tightened auth markers. |
+| FTY-132 | merged | estimator | [Official-source plausibility gate](FTY-132-official-source-plausibility-gate.md) | Apply the FTY-115 `nutrition_facts_plausible` gate to official-source/model-prior per-100g facts (the kJ-as-kcal case) — the least-trusted source is no longer the least guarded. |
 | FTY-133 | ready_with_notes | mobile-core | [Dark-mode theme tokens](FTY-133-mobile-dark-mode-theme-tokens.md) | 7 components routed off hardcoded light hex onto `useTheme()` tokens — fixes a latent dark-mode bug. Owns `mobile/components/*`. |
 
 **Tier C — quality / cleanup (pulled into v1 by the clean-break decision):**
@@ -335,11 +335,11 @@ noted, and drain through the steward in parallel by lane.
 | ID | State | Lane | Story | Acceptance |
 | --- | --- | --- | --- | --- |
 | FTY-134 | ready | backend-core | [Consolidate remaining tz helpers](FTY-134-consolidate-remaining-tz-helpers.md) | FTY-120 misses: `weight_entries` dup tz resolver, a `current_day` helper for 5 inline call sites, public-rename `resolve_active_target_row`. Shares files with FTY-127 → rebase. |
-| FTY-135 | ready | estimator | [source_refs recording consistency](FTY-135-estimator-source-refs-consistency.md) | `exercise_step`/`label_step` route through `evidence_utils._record_source_ref` instead of inline append. |
+| FTY-135 | merged | estimator | [source_refs recording consistency](FTY-135-estimator-source-refs-consistency.md) | `exercise_step`/`label_step` route through `evidence_utils._record_source_ref` instead of inline append. |
 | FTY-136 | ready_with_notes | mobile-core | [Shared mobile api client](FTY-136-mobile-shared-api-client.md) | One `mobile/api/client.ts` (ApiSession/authHeaders/ApiError/request); migrate 7 straggler modules. Behaviour-preserving (was a post-v1 deferral, now pulled in). Owns `mobile/api/*`. |
-| FTY-137 | ready_with_notes | estimator | [hardened_fetch DNS-rebind pin](FTY-137-hardened-fetch-dns-rebind-pin.md) | Pin the vetted IP for the actual connection (resolve-once) so the connected address is the one that passed the SSRF check. |
-| FTY-138 | ready | backend-core | [Auth rate-limit fail-closed](FTY-138-auth-rate-limit-fail-closed.md) | Configurable fail-closed (prod) for the auth limiter so a Redis outage no longer silently disables brute-force protection. |
-| FTY-139 | ready | backend-core | [Log redaction value-patterns](FTY-139-log-redaction-value-patterns.md) | Token-shaped value redaction over rendered messages + exc_info (not just field-name). |
+| FTY-137 | merged | estimator | [hardened_fetch DNS-rebind pin](FTY-137-hardened-fetch-dns-rebind-pin.md) | Pin the vetted IP for the actual connection (resolve-once) so the connected address is the one that passed the SSRF check. |
+| FTY-138 | merged | backend-core | [Auth rate-limit fail-closed](FTY-138-auth-rate-limit-fail-closed.md) | Configurable fail-closed (prod) for the auth limiter so a Redis outage no longer silently disables brute-force protection. |
+| FTY-139 | merged | backend-core | [Log redaction value-patterns](FTY-139-log-redaction-value-patterns.md) | Token-shaped value redaction over rendered messages + exc_info (not just field-name). |
 | FTY-140 | ready | backend-core | [daily-summary range exception type](FTY-140-daily-summary-range-exception-type.md) | Distinct `DailySummaryInvalidRange` for the ordering error (still 422). Shares `daily_summary.py` with FTY-127 → rebase. |
 | FTY-141 | ready | backend-core | [OpenAPI contract snapshot test](FTY-141-openapi-contract-snapshot-test.md) | Snapshot test asserts `app.openapi()` against a checked-in JSON, failing on unreviewed drift. |
 | FTY-142 | ready | governance | [Release docs polish](FTY-142-release-docs-polish.md) | README `/readyz` + claude-login step order; contracts/README index; system-overview endpoint/provider list. Owns `README.md`, `contracts/README.md`, `system-overview.md`. |
@@ -357,11 +357,17 @@ field-encryption are documented threat-model deferrals (unchanged).
 - `app/services/daily_summary.py`: **FTY-127** (carry-forward reads) + **FTY-140**
   (range exception) + **FTY-134** (helper consolidation) — different functions,
   rebase order within backend-core.
-- **FTY-103 is held as draft (PR #101)** pending **FTY-127**. The run-2 reviewer
-  confirmed the onboarding gate's day-scoped `getTarget` probe re-onboards returning
-  users (trajectory corruption); there is no goal-existence endpoint, so the gate
-  can only be fixed once FTY-127 makes `GET /target` carry forward. After FTY-127
-  merges, re-open #101; its remaining work is the returning-user-on-a-later-day test.
+- **FTY-103 (PR #101) — fixed and re-opened for review (2026-06-29).** The run-2
+  reviewer confirmed the onboarding gate's day-scoped `getTarget` probe re-onboarded
+  returning users (trajectory corruption); with no goal-existence endpoint the gate
+  could only be fixed server-side. The backend **carry-forward read** (FTY-127's
+  read path) was implemented directly on the #101 branch (`get_active_target` +
+  daily-summary single/range carry forward within the goal horizon; `daily-summary.md`
+  updated; carry-forward/boundary tests added) and verified locally (backend
+  `./verify.sh` 964 passed; mobile typecheck/lint/850 tests green). **FTY-127 is
+  thereby narrowed to its residual scope** — the override write-path materialisation
+  + `target-calculator.md`/`goals-target-reveal.md` wording (its read path is done;
+  see the banner in the FTY-127 story). PR #101 is now in the normal review/merge loop.
 
 **Command-centre tooling fixes made during this audit (not fatty stories):** the
 reviewer's stale `MultiEdit` entry in `--disallowedTools` (aborted every review →

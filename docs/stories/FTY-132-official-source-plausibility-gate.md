@@ -1,6 +1,6 @@
 ---
 id: FTY-132
-state: ready
+state: merged
 primary_lane: estimator
 touched_lanes: []
 review_focus:

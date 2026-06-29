@@ -1,6 +1,6 @@
 ---
 id: FTY-131
-state: ready
+state: merged
 primary_lane: estimator
 touched_lanes:
   - security-privacy

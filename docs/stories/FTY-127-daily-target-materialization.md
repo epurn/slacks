@@ -28,6 +28,18 @@ autonomous: true
 
 # FTY-127: Daily Target Materialization Beyond The Goal-Creation Day (backend)
 
+> **Partially landed in PR #101 (2026-06-29).** The **read-path carry-forward**
+> described below — `targets.resolve_carried_target_row`, `get_active_target`
+> (GET /target), and the daily-summary single + range reads, plus the
+> `daily-summary.md` contract wording and carry-forward/boundary tests — was
+> implemented directly to unblock FTY-103 (the onboarding gate could not work
+> without it). **Residual scope for this story:** (1) the **override write-path
+> materialisation** (`set_target_override` / `reset_target_override` should
+> materialise an in-horizon day's row via `compute_daily_target` instead of
+> 404ing on a later day), and (2) the **`target-calculator.md` + `goals-target-reveal.md`**
+> wording updates for that override behaviour. The read paths and `daily-summary.md`
+> are already done — do not re-implement them.
+
 ## State
 
 ready_with_notes

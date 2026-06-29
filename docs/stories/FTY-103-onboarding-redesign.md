@@ -53,19 +53,17 @@ mobile-core
 
 ## Dependencies
 
-- **FTY-127 (NEW, backend-core — release-audit blocker; must merge before this
-  re-opens for review):** the reviewer (run 2, 2026-06-29) found that the
-  completeness gate's `getTarget` probe is **day-scoped** — `GET /target` 404s on
-  any day after goal creation because a `daily_targets` row is only materialised
-  on creation day. The gate maps that 404 to "incomplete" and re-onboards a
-  fully-onboarded returning user, and re-completing the wizard resets
-  `start_weight`/`start_date` (trajectory corruption). There is **no goal-existence
-  / onboarding-status read endpoint** (the goals router is `POST /goal` only), so
-  this gate cannot be fixed standalone. FTY-127 makes `GET /target` return the
-  carried-forward target for **every in-horizon day**, so the returning-user probe
-  reads `present` and routes to Today. **PR #101 is held as draft until FTY-127
-  merges**; the FTY-103 fix then only needs the returning-user-on-a-later-day
-  integration test (the existing gate logic is correct once the backend is fixed).
+- **FTY-127 read-path (RESOLVED in PR #101, 2026-06-29):** the run-2 reviewer
+  found the completeness gate's `getTarget` probe was **day-scoped** — `GET /target`
+  404'd on any day after goal creation (a `daily_targets` row existed only for
+  creation day), so the gate re-onboarded a fully-onboarded returning user and
+  re-completing the wizard reset `start_weight`/`start_date` (trajectory
+  corruption). With **no goal-existence endpoint** (the goals router is `POST /goal`
+  only), this could not be fixed client-side. The backend **carry-forward read**
+  (FTY-127's read path) was implemented directly in PR #101 so `GET /target` returns
+  the target for every in-horizon day; the existing gate logic is correct given
+  that, with carry-forward/boundary tests added. Residual override-write
+  materialisation stays in FTY-127.
 - **FTY-106 (NEW, backend-core — must be created and merged first):** the
   **goals + target-reveal endpoint** this flow writes the goal to and reads the
   computed target from. FTY-022 (merged) provides the deterministic calculator
