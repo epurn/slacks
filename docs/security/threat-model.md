@@ -21,6 +21,9 @@ weight data. Update it when architecture, data flows, or providers change.
 - User-specific memories, recipes, saved foods, aliases, and the append-only
   corrections (edit) history.
 - Provider API keys (LLM, search, nutrition sources).
+- Claude Code OAuth-session credential: the operator's Claude Code login session
+  persisted in the `claude-config` Docker volume (a host secret, not baked into
+  the image), shared by `api` and `worker` containers.
 - Estimation prompts, evidence, and source metadata.
 
 ## Trust Boundaries
@@ -28,7 +31,9 @@ weight data. Update it when architecture, data flows, or providers change.
 - iOS app to backend API.
 - Backend API to database.
 - Backend API to Redis/Celery workers.
-- Workers to LLM providers.
+- Workers to LLM providers (HTTP API-key-authenticated).
+- Workers to local Claude Code subprocess (first-party CLI, operator's OAuth
+  session).
 - Workers to search, nutrition, OCR, barcode, and web sources.
 - Workers to object storage.
 - LLM output back into backend validators.
@@ -51,7 +56,9 @@ weight data. Update it when architecture, data flows, or providers change.
 - Object-level auth tests for user-owned resources.
 - Rate limiting on auth endpoints (per-IP and per-account on login; per-IP on
   register) to bound online brute-force and credential-stuffing (FTY-118).
-- Strict provider/tool allowlists.
+- Strict provider/tool allowlists (the `claude_code` subprocess provider enforces
+  this by disabling every built-in Claude Code tool and MCP servers, so
+  prompt-injection in untrusted input cannot trigger tool use or code execution).
 - SSRF-hardened fetcher.
 - Structured LLM output validation.
 - Sanitized search queries.
