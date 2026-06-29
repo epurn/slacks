@@ -35,7 +35,9 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 
+import { Button } from '@/components/ui/Button';
 import {
   getTarget,
   createGoal,
@@ -169,6 +171,7 @@ export function SettingsScreen({
   const sessionController = useSessionController();
   const session = sessionOverride !== undefined ? sessionOverride : liveSession;
 
+  const router = useRouter();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
@@ -591,6 +594,11 @@ export function SettingsScreen({
           Your profile and targets are stored privately. Sign in to view and
           edit them.
         </Text>
+        <Button
+          label="Sign in"
+          onPress={() => router.replace('/signin')}
+          style={styles.signInAction}
+        />
       </View>
     );
   }
@@ -1701,6 +1709,9 @@ const styles = StyleSheet.create({
     fontSize: typeScale.subhead,
     textAlign: 'center',
     marginTop: spacing.sm,
+  },
+  signInAction: {
+    marginTop: spacing.lg,
   },
   sectionHeader: {
     fontSize: typeScale.footnote,
