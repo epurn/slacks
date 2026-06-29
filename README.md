@@ -86,9 +86,9 @@ Open `.env` and configure any providers you want:
     ```
     FATTY_LLM_PROVIDER=claude_code
     # FATTY_LLM_MODEL is optional — Claude Code uses your plan's model by default
-    # No FATTY_LLM_API_KEY — auth is your 'claude login' session (see step 5a below)
+    # No FATTY_LLM_API_KEY — auth is your 'claude login' session (see step 7 below)
     ```
-    See **Claude Code session setup** (step 5a) to complete the one-time login.
+    See **Claude Code session setup** (step 7) to complete the one-time login.
   - **Zero-cost local model:** run [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), or [vLLM](https://github.com/vllm-project/vllm) locally, then set:
     ```
     FATTY_LLM_PROVIDER=openai_compatible
@@ -104,7 +104,17 @@ Open `.env` and configure any providers you want:
 
 See `.env.example` for all available options with documentation.
 
-**5a. (Required if using `claude_code` provider) One-time Claude Code login:**
+**6. Start the stack:**
+
+```sh
+docker compose up
+```
+
+Docker Compose builds the backend image, runs first-boot Alembic migrations
+automatically (the `migrate` service completes before the API starts), then
+brings up all four services.
+
+**7. (Required if using `claude_code` provider) One-time Claude Code login:**
 
 The `claude_code` provider authenticates through your own Claude Code session. The Claude Code CLI is pre-installed in the backend image; you only need to log in once. The session is stored in a named Docker volume (`claude-config`) and survives `docker compose down && up` without re-login.
 
@@ -126,29 +136,20 @@ curl -fsS http://localhost:8000/healthz/sources | python3 -m json.tool
 
 **Security note:** the `claude-config` Docker volume contains your OAuth session credentials. It is a host secret — never copy its contents into the image, never commit it to source control, and restrict its host-path permissions if you bind-mount it. The image itself contains only the Claude Code binary; no credentials are baked in.
 
-**6. Start the stack:**
-
-```sh
-docker compose up
-```
-
-Docker Compose builds the backend image, runs first-boot Alembic migrations
-automatically (the `migrate` service completes before the API starts), then
-brings up all four services.
-
-**7. Confirm health:**
+**8. Confirm health:**
 
 ```sh
 curl -fsS http://localhost:8000/healthz
 # {"status":"ok"}
 
+curl -fsS http://localhost:8000/readyz
+# {"status":"ready"}
+
 curl -fsS http://localhost:8000/healthz/sources
 # {"sources":[...]}  lists enabled/available evidence sources
 ```
 
-A 200 response from `/healthz` confirms the API is up. `/healthz/sources` shows
-which evidence sources are enabled and available — useful to verify your provider
-configuration without making any estimation calls.
+A 200 response from `/healthz` confirms the API is up. `/readyz` returns 200 when the database is ready, or 503 if it is unavailable — useful for orchestration and health checks. `/healthz/sources` shows which evidence sources are enabled and available — useful to verify your provider configuration without making any estimation calls.
 
 ### Provider Availability
 

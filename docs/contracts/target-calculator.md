@@ -301,6 +301,111 @@ the user sees their value refused, not quietly altered. (The derived path's
   safety ceiling and Atwater factors as a sanity bound rather than introducing a
   new number.
 
+## HTTP routes
+
+Three owner-scoped routes surface the target calculator and manual override/reset
+surface. All three resolve the `day` query parameter (calendar day in the user's
+profile timezone; defaults to today; malformed `day` → `422`). All three fail
+closed as `404` on cross-user access or when no active target exists for the day
+(the `GoalForbidden` / `TargetNotFound` discipline — no existence oracle). All
+three require authentication (missing/invalid bearer token → `401`). Target
+numbers are sensitive derived body data and are never logged.
+
+### GET — read the derived-vs-overridden target
+
+```
+GET /api/users/{user_id}/target?day=YYYY-MM-DD
+Authorization: Bearer <token>
+```
+
+Return the caller's active-goal target for the day with provenance. Each target
+(calorie + macros) carries its effective value, the derived value, and a
+`derived | user` source flag (see the read-model description under "Effective
+value and the read-model" above).
+
+**Request:** no body.
+
+**Response:** `200 OK`
+
+```json
+{
+  "calories": { "effective": 1800, "derived": 1678, "source": "user" },
+  "protein_g": { "effective": 128, "derived": 128, "source": "derived" },
+  "carbs_g": { "effective": 148, "derived": 148, "source": "derived" },
+  "fat_g": { "effective": 64, "derived": 64, "source": "derived" }
+}
+```
+
+### PUT — set a calorie and/or macro override
+
+```
+PUT /api/users/{user_id}/target/override?day=YYYY-MM-DD
+Authorization: Bearer <token>
+```
+
+Set a manual calorie and/or macro override on the caller's target for the day.
+Calorie and macro overrides can be set independently; at least one must be
+provided (empty request body → `422`). An out-of-band value is rejected `422`
+with nothing persisted (the user's explicit value is refused, not silently
+clamped). Idempotent within the safety band.
+
+**Request:** `TargetOverrideRequest`
+
+```json
+{
+  "calorie_target_kcal": 1900,
+  "protein_target_g": null,
+  "carbs_target_g": 150,
+  "fat_target_g": null
+}
+```
+
+All fields are optional. Constraints:
+- `calorie_target_kcal`: int ≥ 1 (if provided)
+- `protein_target_g` / `carbs_target_g` / `fat_target_g`: int ≥ 0 (if provided)
+- At least one field must be present; `extra="forbid"` (unknown fields rejected)
+- Values outside the safety band documented under "Override validation" return
+  `422` (the `OverrideOutOfBand` error); the band is read from the target's
+  `assumptions` snapshot, which varies by metabolic formula.
+
+**Response:** `200 OK`, same shape as GET above with `source: user` for the
+overridden targets.
+
+### POST — reset override(s) back to derived
+
+```
+POST /api/users/{user_id}/target/override/reset?day=YYYY-MM-DD
+Authorization: Bearer <token>
+```
+
+Reset (clear) one or more manual target overrides on the caller's target for the
+day, so their effective value falls back to the derived value. Idempotent; a
+reset on a non-overridden target is a no-op.
+
+**Request:** `TargetResetRequest`
+
+```json
+{
+  "targets": ["calories", "protein"]
+}
+```
+
+Fields:
+- `targets`: optional list of target names to reset (`"calories"`, `"protein"`,
+  `"carbs"`, `"fat"`); `None` or empty list resets **all** in-force overrides.
+
+**Response:** `200 OK`, same shape as GET above with `source: derived` for the
+reset targets.
+
+## Errors and status codes
+
+| Status | Condition |
+| --- | --- |
+| `200` | Request succeeded. |
+| `401` | Missing, invalid, or expired bearer token. |
+| `404` | Cross-user access (user does not own the goal) or no active goal / no stored target for the day (`GoalForbidden` / `TargetNotFound` — fail closed, no existence oracle). |
+| `422` | Malformed `day` parameter; an **out-of-band override** (value outside the safety band, `PUT` only); an **empty override body** (no field provided in `TargetOverrideRequest`). |
+
 ## Validation
 
 - `height_m` ∈ (0, 3]; `age_years` ∈ [13, 120]; `start_weight_kg`,
