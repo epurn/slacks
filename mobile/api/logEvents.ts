@@ -13,6 +13,14 @@
  * body.
  */
 
+import {
+  ApiError,
+  authHeaders,
+  request,
+  userScopedUrl,
+} from "@/api/client";
+import type { ApiSession } from "@/api/client";
+
 /** The FTY-030 event status state machine vocabulary (full v1 set). */
 export type LogEventStatus =
   | "pending"
@@ -32,52 +40,28 @@ export interface LogEventDTO {
 }
 
 /** Authenticated session needed to address the owner's events. */
-export interface LogEventSession {
-  readonly baseUrl: string;
-  readonly token: string;
-  readonly userId: string;
-}
+export type LogEventSession = ApiSession;
 
 /** Raised when the log-event API returns a non-2xx status. */
-export class LogEventApiError extends Error {
-  readonly status: number;
+export class LogEventApiError extends ApiError {
   constructor(status: number, message: string) {
-    super(message);
+    super(status, message);
     this.name = "LogEventApiError";
-    this.status = status;
   }
 }
 
-function logEventsUrl(session: LogEventSession, query?: string): string {
-  const base = `${session.baseUrl}/api/users/${encodeURIComponent(
-    session.userId,
-  )}/log-events`;
-  return query ? `${base}?${query}` : base;
-}
-
-function authHeaders(session: LogEventSession): Record<string, string> {
-  return {
-    Authorization: `Bearer ${session.token}`,
-    "Content-Type": "application/json",
-    Accept: "application/json",
-  };
-}
-
-async function readError(
-  response: Response,
-  action: string,
-): Promise<LogEventApiError> {
+function logEventError(status: number, action: string): LogEventApiError {
   // Map the documented status codes to plain, nonjudgmental messages without
   // echoing any request data (the user's raw text) back into the error.
   const message =
-    response.status === 401
+    status === 401
       ? "Your session has expired. Sign in again to keep logging."
-      : response.status === 404
+      : status === 404
         ? "We couldn't find your log."
-        : response.status === 422
+        : status === 422
           ? "That entry couldn't be saved. Try rephrasing it."
-          : `Could not ${action} (status ${response.status}).`;
-  return new LogEventApiError(response.status, message);
+          : `Could not ${action} (status ${status}).`;
+  return new LogEventApiError(status, message);
 }
 
 /**
@@ -91,14 +75,15 @@ export async function listTodayLogEvents(
   fetchImpl: typeof fetch = fetch,
 ): Promise<readonly LogEventDTO[]> {
   const query = day ? `day=${encodeURIComponent(day)}` : undefined;
-  const response = await fetchImpl(logEventsUrl(session, query), {
+  const base = userScopedUrl(session, "log-events");
+  const url = query ? `${base}?${query}` : base;
+  return request<LogEventDTO[]>(url, {
     method: "GET",
     headers: authHeaders(session),
+    action: "load your day",
+    onError: logEventError,
+    fetchImpl,
   });
-  if (!response.ok) {
-    throw await readError(response, "load your day");
-  }
-  return (await response.json()) as LogEventDTO[];
 }
 
 /**
@@ -127,13 +112,12 @@ export async function createLogEvent(
   if (idempotencyKey !== undefined) {
     body.idempotency_key = idempotencyKey;
   }
-  const response = await fetchImpl(logEventsUrl(session), {
+  return request<LogEventDTO>(userScopedUrl(session, "log-events"), {
     method: "POST",
     headers: authHeaders(session),
     body: JSON.stringify(body),
+    action: "save your entry",
+    onError: logEventError,
+    fetchImpl,
   });
-  if (!response.ok) {
-    throw await readError(response, "save your entry");
-  }
-  return (await response.json()) as LogEventDTO;
 }

@@ -10,6 +10,14 @@
  * only the HTTP status and action, never the raw numbers.
  */
 
+import {
+  ApiError,
+  authHeaders,
+  request,
+  userScopedUrl,
+} from "@/api/client";
+import type { ApiSession } from "@/api/client";
+
 /** Provenance of a target value: derived by the calculator vs. set by the user. */
 export type TargetSource = "derived" | "user";
 
@@ -62,53 +70,29 @@ export interface DailySummaryDTO {
 }
 
 /** Authenticated session needed to fetch the user's daily summary. */
-export interface DailySummarySession {
-  readonly baseUrl: string;
-  readonly token: string;
-  readonly userId: string;
-}
+export type DailySummarySession = ApiSession;
 
 /** Raised when the daily-summary API returns a non-2xx status. */
-export class DailySummaryApiError extends Error {
-  readonly status: number;
+export class DailySummaryApiError extends ApiError {
   constructor(status: number, message: string) {
-    super(message);
+    super(status, message);
     this.name = "DailySummaryApiError";
-    this.status = status;
   }
 }
 
-function dailySummaryUrl(
-  session: DailySummarySession,
-  query?: string,
-  subpath = "",
-): string {
-  const base = `${session.baseUrl}/api/users/${encodeURIComponent(
-    session.userId,
-  )}/daily-summary${subpath}`;
-  return query ? `${base}?${query}` : base;
-}
-
-function authHeaders(session: DailySummarySession): Record<string, string> {
-  return {
-    Authorization: `Bearer ${session.token}`,
-    Accept: "application/json",
-  };
-}
-
-async function readError(
-  response: Response,
+function dailySummaryError(
+  status: number,
   action: string,
-): Promise<DailySummaryApiError> {
+): DailySummaryApiError {
   const message =
-    response.status === 401
+    status === 401
       ? "Your session has expired. Sign in again to see your summary."
-      : response.status === 404
+      : status === 404
         ? "We couldn't find your summary."
-        : response.status === 422
+        : status === 422
           ? "Invalid date format."
-          : `Could not ${action} (status ${response.status}).`;
-  return new DailySummaryApiError(response.status, message);
+          : `Could not ${action} (status ${status}).`;
+  return new DailySummaryApiError(status, message);
 }
 
 /**
@@ -123,14 +107,15 @@ export async function getDailySummary(
   fetchImpl: typeof fetch = fetch,
 ): Promise<DailySummaryDTO> {
   const query = day ? `day=${encodeURIComponent(day)}` : undefined;
-  const response = await fetchImpl(dailySummaryUrl(session, query), {
+  const base = userScopedUrl(session, "daily-summary");
+  const url = query ? `${base}?${query}` : base;
+  return request<DailySummaryDTO>(url, {
     method: "GET",
     headers: authHeaders(session),
+    action: "load your summary",
+    onError: dailySummaryError,
+    fetchImpl,
   });
-  if (!response.ok) {
-    throw await readError(response, "load your summary");
-  }
-  return (await response.json()) as DailySummaryDTO;
 }
 
 /**
@@ -149,12 +134,12 @@ export async function getDailySummaryRange(
   fetchImpl: typeof fetch = fetch,
 ): Promise<DailySummaryDTO[]> {
   const query = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-  const response = await fetchImpl(dailySummaryUrl(session, query, "/range"), {
+  const url = `${userScopedUrl(session, "daily-summary/range")}?${query}`;
+  return request<DailySummaryDTO[]>(url, {
     method: "GET",
     headers: authHeaders(session),
+    action: "load your summary",
+    onError: dailySummaryError,
+    fetchImpl,
   });
-  if (!response.ok) {
-    throw await readError(response, "load your summary");
-  }
-  return (await response.json()) as DailySummaryDTO[];
 }

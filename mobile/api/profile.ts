@@ -12,6 +12,13 @@
  * HTTP status and the endpoint, not the request body.
  */
 
+import {
+  ApiError,
+  authHeaders,
+  request,
+  userScopedUrl,
+} from "@/api/client";
+import type { ApiSession } from "@/api/client";
 import type {
   MetabolicFormula,
   ProfileUpdatePayload,
@@ -31,51 +38,28 @@ export interface ProfileDTO {
 }
 
 /** Authenticated session needed to address the owner's profile. */
-export interface ProfileSession {
-  readonly baseUrl: string;
-  readonly token: string;
-  readonly userId: string;
-}
+export type ProfileSession = ApiSession;
 
 /** Raised when the profile API returns a non-2xx status. */
-export class ProfileApiError extends Error {
-  readonly status: number;
+export class ProfileApiError extends ApiError {
   constructor(status: number, message: string) {
-    super(message);
+    super(status, message);
     this.name = "ProfileApiError";
-    this.status = status;
   }
 }
 
-function profileUrl(session: ProfileSession): string {
-  return `${session.baseUrl}/api/users/${encodeURIComponent(
-    session.userId,
-  )}/profile`;
-}
-
-function authHeaders(session: ProfileSession): Record<string, string> {
-  return {
-    Authorization: `Bearer ${session.token}`,
-    "Content-Type": "application/json",
-    Accept: "application/json",
-  };
-}
-
-async function readError(
-  response: Response,
-  action: string,
-): Promise<ProfileApiError> {
+function profileError(status: number, action: string): ProfileApiError {
   // Map the documented status codes to plain, nonjudgmental messages without
   // echoing any request data back into the error.
   const message =
-    response.status === 401
+    status === 401
       ? "Your session has expired. Sign in again to save your profile."
-      : response.status === 404
+      : status === 404
         ? "We couldn't find your profile."
-        : response.status === 422
+        : status === 422
           ? "Some details couldn't be saved. Check your entries and try again."
-          : `Could not ${action} (status ${response.status}).`;
-  return new ProfileApiError(response.status, message);
+          : `Could not ${action} (status ${status}).`;
+  return new ProfileApiError(status, message);
 }
 
 /** Fetch the authenticated user's profile. */
@@ -83,14 +67,13 @@ export async function getProfile(
   session: ProfileSession,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ProfileDTO> {
-  const response = await fetchImpl(profileUrl(session), {
+  return request<ProfileDTO>(userScopedUrl(session, "profile"), {
     method: "GET",
     headers: authHeaders(session),
+    action: "load your profile",
+    onError: profileError,
+    fetchImpl,
   });
-  if (!response.ok) {
-    throw await readError(response, "load your profile");
-  }
-  return (await response.json()) as ProfileDTO;
 }
 
 /**
@@ -103,13 +86,12 @@ export async function putProfile(
   payload: ProfileUpdatePayload,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ProfileDTO> {
-  const response = await fetchImpl(profileUrl(session), {
+  return request<ProfileDTO>(userScopedUrl(session, "profile"), {
     method: "PUT",
     headers: authHeaders(session),
     body: JSON.stringify(payload),
+    action: "save your profile",
+    onError: profileError,
+    fetchImpl,
   });
-  if (!response.ok) {
-    throw await readError(response, "save your profile");
-  }
-  return (await response.json()) as ProfileDTO;
 }
