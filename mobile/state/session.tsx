@@ -11,11 +11,10 @@
  * `SessionProvider` hydrates the session from the secure store on launch and
  * exposes a controller (`signIn` / `createAccount` / `signOut`) that the
  * connect / sign-in screens (FTY-091) drive. `useSession()` returns the current
- * `{ serverUrl, token, userId }` or `null`. The existing
- * `ProfileScreen`/`profile.ts` consumer keeps working unchanged: once a session
- * exists, profile persistence works with no edit to the form (the seam was
- * built for exactly this in FTY-021), now addressing the bound server instead
- * of static config.
+ * `{ serverUrl, token, userId }` or `null`. The `SettingsScreen`/`profile.ts`
+ * consumer keeps working unchanged: once a session exists, profile persistence
+ * works with no edit (the seam was built for exactly this in FTY-021), now
+ * addressing the bound server instead of static config.
  */
 
 import {
@@ -194,7 +193,7 @@ export function useSessionController(): SessionContextValue {
  * base URL is sourced from the session (the server the token was minted by),
  * not from static config, so a token is never replayed against a different
  * self-hosted server by a config swap. The returned shape is unchanged, so
- * `profile.ts` and `ProfileScreen` consume it without edit.
+ * `profile.ts` and `SettingsScreen` consume it without edit.
  */
 export function toApiSession(session: SessionRecord): ApiSession {
   return {

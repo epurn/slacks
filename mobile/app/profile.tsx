@@ -1,6 +1,8 @@
-import { ProfileScreen } from "@/components/ProfileScreen";
+import { SettingsScreen } from "@/components/SettingsScreen";
+import { useAppearanceController } from "@/state/appearance";
 
-/** The profile capture route (`/profile`). */
+/** The Profile / Settings route (`/profile`). Opens from the header gear. */
 export default function ProfileRoute() {
-  return <ProfileScreen />;
+  const { setAppearance } = useAppearanceController();
+  return <SettingsScreen onAppearanceChange={setAppearance} />;
 }
