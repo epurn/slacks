@@ -132,7 +132,8 @@ read path.)
   denominator rather than counting every unlogged day as a real 0-kcal day.
 - `target` — the **target read-model** for the user's active goal on this day,
   **carried forward** within the goal's horizon (a `daily_targets` row is stored on
-  goal-creation day but the daily target is constant across the horizon, so any
+  goal-creation day but the daily target is effectively constant across the horizon
+  (a whole-year-age approximation; see `target-calculator.md`), so any
   in-horizon day reports the most recent stored row), or `null` (JSON `null`) when
   none applies (no active goal, the day predates the goal's first stored row, or the
   day is past the goal's `target_date`). See **No-target representation** below.
@@ -177,7 +178,8 @@ this contract):
 
 The active-goal target is **carried forward** within the goal's horizon: a
 `daily_targets` row is stored on goal-creation day (and on an override write), but
-the daily target is constant across the horizon, so any day at or after the first
+the daily target is effectively constant across the horizon (a whole-year-age
+approximation; see `target-calculator.md`), so any day at or after the first
 stored row and on or before the goal's `target_date` reports that target (the most
 recent stored row). This is what keeps the calories-vs-target headline — and the
 onboarding-completeness probe — present for a returning user rather than vanishing

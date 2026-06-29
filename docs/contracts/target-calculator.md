@@ -214,10 +214,16 @@ owner-scoped target endpoint surface.
 
 A `daily_targets` row is materialised only on **goal-creation day** (and, going
 forward, whenever an override write materialises one). The daily target is
-**constant across a goal's horizon** — the calculator derives it from the goal's
-fixed `(start_weight, target_weight, start_date, target_date)` snapshot and
-`for_date` enters only through whole-year age — so the stored value is valid for
-every day in the horizon. Resolution therefore differs between reads and writes:
+**effectively constant across a goal's horizon** — the calculator derives it from
+the goal's fixed `(start_weight, target_weight, start_date, target_date)` snapshot
+and `for_date` enters only through **whole-year age** — so the stored value is valid
+for every day in the horizon. *Caveat (intended approximation):* because age is
+whole-year, a horizon that crosses **Jan 1** ticks age up by one year, which shifts
+the derived target by ≈ −6 kcal/day (−5 kcal/yr RMR × 1.2 activity, ~0.3%); the
+carried row keeps the creation-day age until a newer row is stored, so post-Jan-1
+days read a target stale by that negligible amount. This is consistent with the
+already-documented whole-year-age approximation and is accepted over recomputing on
+every read. Resolution therefore differs between reads and writes:
 
 - **Reads carry forward.** `GET /api/users/{id}/target` (and `daily-summary.md`'s
   `target` component, single and range) resolve the **most recent stored row at or

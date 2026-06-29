@@ -47,7 +47,7 @@ import { ThemeProvider } from "@/theme";
 // eslint-disable-next-line import/first
 import type { SessionRecord } from "@/state/session";
 // eslint-disable-next-line import/first
-import type { GoalTargetResponse } from "@/api/goals";
+import { GoalsApiError, type GoalTargetResponse } from "@/api/goals";
 // eslint-disable-next-line import/first
 import type { ProfileDTO } from "@/api/profile";
 
@@ -765,5 +765,58 @@ describe("privacy", () => {
     } finally {
       spies.forEach((spy) => spy.mockRestore());
     }
+  });
+});
+
+describe("save error handling", () => {
+  it("surfaces the API error message when the goal save fails", async () => {
+    // createGoal rejects with a GoalsApiError → errorMessage() returns its
+    // message, which renders in the save-error alert. The user stays on step 2.
+    const putProfileFn = jest.fn(async () => PROFILE_RESPONSE);
+    const createGoalFn = jest.fn(async () => {
+      throw new GoalsApiError(409, "That goal conflicts with an existing one.");
+    });
+    const tree = await mount({ createGoalFn, putProfileFn });
+
+    await act(async () => {
+      byLabel(tree, "Continue to measurements").props.onPress();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await fillMetricMeasurements(tree);
+    await act(async () => {
+      byLabel(tree, "Continue to your target").props.onPress();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(createGoalFn).toHaveBeenCalled();
+    expect(byTestId(tree, "save-error").props.children).toBe(
+      "That goal conflicts with an existing one.",
+    );
+    // Stayed on step 2 (no reveal) — the failed save did not advance the flow.
+    expect(texts(tree)).not.toContain("Your daily target");
+  });
+
+  it("shows a generic fallback message for a non-API (network) failure", async () => {
+    // A plain Error (e.g. a network drop) → the generic, status-free fallback;
+    // never a stack/body leak.
+    const putProfileFn = jest.fn(async () => PROFILE_RESPONSE);
+    const createGoalFn = jest.fn(async () => {
+      throw new Error("network down");
+    });
+    const tree = await mount({ createGoalFn, putProfileFn });
+
+    await act(async () => {
+      byLabel(tree, "Continue to measurements").props.onPress();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await fillMetricMeasurements(tree);
+    await act(async () => {
+      byLabel(tree, "Continue to your target").props.onPress();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(byTestId(tree, "save-error").props.children).toBe(
+      "Could not save. Check your connection and try again.",
+    );
   });
 });
