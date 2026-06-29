@@ -43,6 +43,7 @@ from datetime import UTC, datetime
 from app.estimator.evidence_utils import _content_hash, _record_source_ref
 from app.estimator.food_serving import (
     NutritionFacts,
+    nutrition_facts_plausible,
     per_serving_to_per_100g,
     resolve_grams,
     scale_facts,
@@ -429,6 +430,12 @@ def _to_per_100g(facts: EstimatedFacts) -> tuple[NutritionFacts, float | None] |
     serving size that must resolve to grams (returns ``None`` otherwise, so the caller
     falls through). The returned serving grams, when known, enables count-unit
     serving math for the consumed quantity.
+
+    Returns ``None`` when the canonical per-100g facts fail
+    :func:`~app.estimator.food_serving.nutrition_facts_plausible`, so an implausible
+    LLM-transcribed or model-prior value (e.g. a kJ value mislabelled as kcal) falls
+    through to the non-match / clarify channel rather than becoming a stored absurd
+    total — the same gate the FDC and OFF paths already enforce (FTY-115, FTY-132).
     """
 
     raw = NutritionFacts(
@@ -442,9 +449,17 @@ def _to_per_100g(facts: EstimatedFacts) -> tuple[NutritionFacts, float | None] |
         serving_g = serving_size_grams(facts.serving_size_amount, facts.serving_size_unit)
 
     if facts.basis is FactBasis.PER_100G:
+        if not nutrition_facts_plausible(raw):
+            return None
         return raw, serving_g
 
-    # per_serving: a gram serving size is required to canonicalise.
+    # per_serving: a gram serving size is required to canonicalise; gate in
+    # canonical per-100g space so a plausible-per-serving / implausible-per-100g
+    # value (e.g. a tiny serving of a very dense food misread from a label) is
+    # also caught.
     if serving_g is None:
         return None
-    return per_serving_to_per_100g(raw, serving_g), serving_g
+    per_100g = per_serving_to_per_100g(raw, serving_g)
+    if not nutrition_facts_plausible(per_100g):
+        return None
+    return per_100g, serving_g
