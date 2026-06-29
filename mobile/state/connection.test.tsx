@@ -25,11 +25,7 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer";
 // eslint-disable-next-line import/first
 import { resolveApiBaseUrl, setConnectedBaseUrl } from "@/api/config";
 // eslint-disable-next-line import/first
-import {
-  ConnectionProvider,
-  shouldRedirectToConnect,
-  useConnection,
-} from "./connection";
+import { ConnectionProvider, useConnection } from "./connection";
 // eslint-disable-next-line import/first
 import type { ServerConnectionStore } from "./serverConnectionStore";
 
@@ -153,24 +149,5 @@ describe("connection controller", () => {
     } finally {
       spies.forEach((spy) => spy.mockRestore());
     }
-  });
-});
-
-describe("shouldRedirectToConnect — first-run routing", () => {
-  it("holds while hydrating (avoids flashing the connect screen)", () => {
-    expect(shouldRedirectToConnect("hydrating", null, false)).toBe(false);
-  });
-
-  it("redirects an unconnected launch that is not already on connect", () => {
-    expect(shouldRedirectToConnect("ready", null, false)).toBe(true);
-  });
-
-  it("does not redirect when already on the connect screen", () => {
-    expect(shouldRedirectToConnect("ready", null, true)).toBe(false);
-  });
-
-  it("does not force a connected user off the connect screen", () => {
-    expect(shouldRedirectToConnect("ready", URL_A, true)).toBe(false);
-    expect(shouldRedirectToConnect("ready", URL_A, false)).toBe(false);
   });
 });

@@ -125,25 +125,11 @@ export function ConnectionProvider({
  * The connected-server state + controller: the current `connection` base URL (or
  * `null`), the hydration `status`, and `connect` / `clear`. The connect screen
  * and the first-run routing consume this.
+ *
+ * The signed-out routing decision (connect → sign-in → app) lives in the unified
+ * `resolveAuthRedirect` (`state/authRouting`), which composes this connection
+ * status with the session status so all three states route from one place.
  */
 export function useConnection(): ConnectionContextValue {
   return useContext(ConnectionContext);
-}
-
-/**
- * First-run routing decision (pure, so it is unit-tested without a navigator).
- *
- * Until hydration finishes we hold (`false`): redirecting on a not-yet-known
- * connection would flash the connect screen for an already-connected user. Once
- * `ready`, a launch with **no connection** that is **not already on the connect
- * screen** is redirected there — the self-host-first first step. A connected
- * user is never forced off the connect screen, so the "change server" affordance
- * can route back to it intentionally.
- */
-export function shouldRedirectToConnect(
-  status: ConnectionStatus,
-  connection: string | null,
-  atConnectScreen: boolean,
-): boolean {
-  return status === "ready" && connection === null && !atConnectScreen;
 }

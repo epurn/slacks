@@ -34,7 +34,11 @@ import type {
 // Mock expo-router (navigation is tested separately)
 // ─────────────────────────────────────────────────────────────────────────────
 jest.mock("expo-router", () => ({
-  useRouter: jest.fn(() => ({ push: jest.fn(), back: jest.fn() })),
+  useRouter: jest.fn(() => ({
+    push: jest.fn(),
+    back: jest.fn(),
+    replace: jest.fn(),
+  })),
   useLocalSearchParams: jest.fn(() => ({})),
 }));
 
@@ -718,6 +722,31 @@ describe("Sign out", () => {
 
     const text = textContent(tree);
     expect(text).toContain("Sign in to access settings");
+  });
+
+  it("routes into the sign-in flow from the signed-out prompt (no dead-end)", async () => {
+    const replace = jest.fn();
+    const { useRouter } = jest.requireMock<typeof import("expo-router")>(
+      "expo-router",
+    );
+    (useRouter as jest.Mock).mockReturnValueOnce({
+      push: jest.fn(),
+      back: jest.fn(),
+      replace,
+    });
+
+    const tree = renderSettings({ session: null });
+    await act(async () => {});
+
+    const signIn = tree.root.find(
+      (n) =>
+        n.props.accessibilityLabel === "Sign in" &&
+        typeof n.props.onPress === "function",
+    );
+    act(() => {
+      signIn.props.onPress();
+    });
+    expect(replace).toHaveBeenCalledWith("/signin");
   });
 
   it("shows ACCOUNT & SERVER section with server URL when signed in", async () => {
