@@ -194,7 +194,7 @@ Evidence-backed by default) are auto-enforced.
 | FTY-100 | merged | mobile-core | [Correction sheet](FTY-100-correction-sheet.md) | Portion + change-match + override + clarify + evidence. Dep FTY-097 + FTY-092 + FTY-093. |
 | FTY-101 | merged | mobile-core | [Trends + weigh-ins](FTY-101-trends-redesign-weighin-reminders.md) | Smoothed weight trend + adherence; weekly due-only reminder. Dep FTY-097. |
 | FTY-102 | merged | mobile-core | [Profile / Settings](FTY-102-profile-settings-redesign.md) | Control panel; target/macro provenance + override. Dep FTY-097 + FTY-094 + FTY-095 (+ FTY-105). |
-| FTY-103 | ready_with_notes | mobile-core | [Onboarding redesign](FTY-103-onboarding-redesign.md) | Goal-led 3-step + target reveal. Dep FTY-097 + FTY-091 + FTY-106. |
+| FTY-103 | merged | mobile-core | [Onboarding redesign](FTY-103-onboarding-redesign.md) | Goal-led 3-step + target reveal. Dep FTY-097 + FTY-091 + FTY-106. |
 | FTY-104 | merged | mobile-core | [Offline-queue logging](FTY-104-offline-queue-logging-mobile.md) | Local outbox + connection banner + reconnect sync. Dep FTY-096 + FTY-097 + FTY-099. |
 
 **Self-host sign-in & connection (mobile):**
