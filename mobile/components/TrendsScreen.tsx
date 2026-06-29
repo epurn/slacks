@@ -36,6 +36,7 @@ import {
   type WeightEntryDTO,
 } from "@/api/weightEntries";
 import {
+  DailySummaryApiError,
   getDailySummaryRange as getDailySummaryRangeApi,
   type DailySummaryDTO,
   type DailySummarySession,
@@ -176,6 +177,7 @@ export function TrendsScreen({
 
   // ── Adherence summaries ──────────────────────────────────────────────────
   const [adherencePhase, setAdherencePhase] = useState<LoadPhase>("loading");
+  const [adherenceError, setAdherenceError] = useState<string | null>(null);
   const [rawSummaries, setRawSummaries] = useState<
     readonly (DailySummaryDTO | null)[]
   >([]);
@@ -183,6 +185,7 @@ export function TrendsScreen({
 
   const reloadAdherence = useCallback(() => {
     setAdherencePhase("loading");
+    setAdherenceError(null);
     setAdherenceReload((k) => k + 1);
   }, []);
 
@@ -201,12 +204,18 @@ export function TrendsScreen({
       .then((results) => {
         if (!active) return;
         setRawSummaries(results);
+        setAdherenceError(null);
         setAdherencePhase("ready");
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (!active) return;
         setRawSummaries([]);
-        setAdherencePhase("ready");
+        setAdherenceError(
+          err instanceof DailySummaryApiError
+            ? err.message
+            : "Could not load your intake history. Please try again.",
+        );
+        setAdherencePhase("error");
       });
 
     return () => {
@@ -385,6 +394,22 @@ export function TrendsScreen({
             <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
               Loading...
             </Text>
+          ) : adherencePhase === "error" ? (
+            <View accessibilityRole="alert" style={styles.errorBox}>
+              <Text style={[styles.errorText, { color: colors.textSecondary }]}>
+                {adherenceError ?? "Could not load your intake history. Please try again."}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Try again"
+                onPress={reloadAdherence}
+                style={[styles.retryBtn, { borderRadius: radius.md }]}
+              >
+                <Text style={[styles.retryLabel, { color: colors.accent }]}>
+                  Try again
+                </Text>
+              </Pressable>
+            </View>
           ) : (
             <>
               <AdherenceSummaryRow
@@ -650,6 +675,15 @@ const styles = StyleSheet.create({
 
   adherenceRow: { gap: spacing.xs },
   adherenceStat: { fontSize: typeScale.subhead },
+
+  errorBox: { gap: spacing.sm },
+  errorText: { fontSize: typeScale.body },
+  retryBtn: {
+    paddingVertical: spacing.sm,
+    alignItems: "center",
+    minHeight: 44,
+  },
+  retryLabel: { fontSize: typeScale.callout, fontWeight: "600" },
 
   cadenceList: { gap: 0 },
   cadenceOption: {
