@@ -27,13 +27,57 @@ export type AuthRedirectTarget = "/connect" | "/signin" | "/onboarding" | "/";
 /**
  * Onboarding status for the signed-in user.
  *
- * `checking`  — the gate is still determining whether onboarding is needed
- *               (async API call in progress). Hold: do not redirect yet.
- * `incomplete` — the user has no complete profile or no active goal; route
- *               to onboarding.
- * `complete`   — onboarding is done; proceed to Today.
+ * `checking`     — the gate is still determining whether onboarding is needed
+ *                  (async API call in progress). Hold: do not redirect yet.
+ * `undetermined` — the check ran but could not reach a verdict (a transient
+ *                  network failure or a 5xx, as opposed to a definitive 404).
+ *                  Hold exactly like `checking`: never route a possibly-onboarded
+ *                  returning user into onboarding just because the server was
+ *                  briefly unreachable.
+ * `incomplete`   — the user has no complete profile or no active goal; route
+ *                  to onboarding.
+ * `complete`     — onboarding is done; proceed to Today.
  */
-export type OnboardingStatus = 'checking' | 'incomplete' | 'complete';
+export type OnboardingStatus =
+  | 'checking'
+  | 'undetermined'
+  | 'incomplete'
+  | 'complete';
+
+/**
+ * Result of probing one onboarding data source (the profile, the target).
+ *
+ * `present` — the resource exists and is usable (profile complete; target found).
+ * `absent`  — the resource is definitively not set up: a 404, or a profile that
+ *             loaded but is incomplete. This is a real signal to onboard.
+ * `unknown` — the probe could not determine presence: a transient network
+ *             failure, a timeout, or a 5xx. Carries no signal either way.
+ */
+export type OnboardingProbe = 'present' | 'absent' | 'unknown';
+
+/**
+ * Classify the signed-in user's onboarding status from the two data-source
+ * probes. Pure, so the error-vs-not-found distinction the gate depends on is
+ * unit-testable without rendering or networking.
+ *
+ * The rule, in order:
+ * - If either probe is `unknown` (transient failure), we cannot tell → hold as
+ *   `undetermined` rather than risk routing a real, onboarded user into the
+ *   wizard (which would overwrite their active goal on re-completion).
+ * - Both probes resolved: `complete` only when the profile is present *and* the
+ *   target is present; otherwise `incomplete` (a definitive 404/absence).
+ */
+export function resolveOnboardingStatus(
+  profile: OnboardingProbe,
+  target: OnboardingProbe,
+): OnboardingStatus {
+  if (profile === 'unknown' || target === 'unknown') {
+    return 'undetermined';
+  }
+  return profile === 'present' && target === 'present'
+    ? 'complete'
+    : 'incomplete';
+}
 
 export interface AuthRouteInput {
   /** Whether the persisted connection has hydrated (FTY-107). */
@@ -62,7 +106,7 @@ export interface AuthRouteInput {
  *
  * - No server connected → the connect screen (unless already there).
  * - Server connected but signed out → the sign-in screen (unless already there).
- * - Signed in, onboarding status still being checked → hold (null).
+ * - Signed in, onboarding status still being checked or undetermined → hold (null).
  * - Signed in, onboarding incomplete → onboarding screen.
  * - Signed in, onboarding complete + on sign-in or onboarding screen → Today.
  * - Signed in, onboarding complete + on any other screen → stay (null).
@@ -103,8 +147,11 @@ export function resolveAuthRedirect(
     return atSignin ? null : "/signin";
   }
 
-  // Signed in: wait until the onboarding check has resolved.
-  if (onboardingStatus === "checking") {
+  // Signed in: wait until the onboarding check has resolved. `undetermined`
+  // (a transient/5xx probe failure, not a definitive 404) holds the same way —
+  // we never push a possibly-onboarded returning user into onboarding on a
+  // blip; they stay where they are until the next check resolves.
+  if (onboardingStatus === "checking" || onboardingStatus === "undetermined") {
     return null;
   }
 

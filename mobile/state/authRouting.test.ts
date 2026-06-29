@@ -7,7 +7,11 @@
  * user.
  */
 
-import { resolveAuthRedirect, type AuthRouteInput } from "./authRouting";
+import {
+  resolveAuthRedirect,
+  resolveOnboardingStatus,
+  type AuthRouteInput,
+} from "./authRouting";
 
 const URL = "https://home.example.net";
 
@@ -129,6 +133,35 @@ describe("resolveAuthRedirect — signed in, onboarding checking", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Signed in — onboarding undetermined (transient probe failure)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("resolveAuthRedirect — signed in, onboarding undetermined", () => {
+  it("holds when the onboarding check could not reach a verdict", () => {
+    expect(
+      resolveAuthRedirect(input({ onboardingStatus: "undetermined" })),
+    ).toBeNull();
+  });
+
+  it("does NOT route a returning user into onboarding on a transient failure", () => {
+    // The whole point of the undetermined state: a network blip must never
+    // shove a possibly-onboarded user into the wizard (which would overwrite
+    // their active goal on re-completion).
+    expect(
+      resolveAuthRedirect(input({ onboardingStatus: "undetermined" })),
+    ).not.toBe("/onboarding");
+  });
+
+  it("leaves a user already on the onboarding screen put (no flicker)", () => {
+    expect(
+      resolveAuthRedirect(
+        input({ onboardingStatus: "undetermined", atOnboarding: true }),
+      ),
+    ).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Signed in — onboarding incomplete
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -181,5 +214,48 @@ describe("resolveAuthRedirect — signed in, onboarding complete", () => {
 
   it("does not force a signed-in user off the connect screen (change server)", () => {
     expect(resolveAuthRedirect(input({ atConnect: true }))).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// resolveOnboardingStatus — classifying the two data-source probes
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("resolveOnboardingStatus", () => {
+  it("is complete only when both the profile and target are present", () => {
+    expect(resolveOnboardingStatus("present", "present")).toBe("complete");
+  });
+
+  it("is incomplete when the profile is present but the target is absent (no goal yet)", () => {
+    expect(resolveOnboardingStatus("present", "absent")).toBe("incomplete");
+  });
+
+  it("is incomplete when the target is present but the profile is absent/incomplete", () => {
+    expect(resolveOnboardingStatus("absent", "present")).toBe("incomplete");
+  });
+
+  it("is incomplete when both are absent (a fresh user — definitive 404s)", () => {
+    expect(resolveOnboardingStatus("absent", "absent")).toBe("incomplete");
+  });
+
+  it("is undetermined when the profile probe failed transiently", () => {
+    // The reviewer's #2: a 5xx/network failure on the profile must NOT collapse
+    // to 'incomplete' even though the target is genuinely set up.
+    expect(resolveOnboardingStatus("unknown", "present")).toBe("undetermined");
+  });
+
+  it("is undetermined when the target probe failed transiently", () => {
+    expect(resolveOnboardingStatus("present", "unknown")).toBe("undetermined");
+  });
+
+  it("is undetermined when both probes failed transiently", () => {
+    expect(resolveOnboardingStatus("unknown", "unknown")).toBe("undetermined");
+  });
+
+  it("prefers undetermined over incomplete when one probe is absent but the other is unknown", () => {
+    // A definitive 404 on one source plus an unknown on the other is still
+    // 'couldn't tell' overall — never route to onboarding on a partial failure.
+    expect(resolveOnboardingStatus("absent", "unknown")).toBe("undetermined");
+    expect(resolveOnboardingStatus("unknown", "absent")).toBe("undetermined");
   });
 });

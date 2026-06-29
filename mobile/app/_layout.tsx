@@ -8,10 +8,15 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { getProfile } from '@/api/profile';
+import { getProfile, ProfileApiError } from '@/api/profile';
 import { getTarget, GoalsApiError } from '@/api/goals';
 import { AppearanceProvider } from '@/state/appearance';
-import { resolveAuthRedirect, type OnboardingStatus } from '@/state/authRouting';
+import {
+  resolveAuthRedirect,
+  resolveOnboardingStatus,
+  type OnboardingProbe,
+  type OnboardingStatus,
+} from '@/state/authRouting';
 import { ConnectionProvider, useConnection } from '@/state/connection';
 import {
   clearOnboardingComplete,
@@ -74,22 +79,34 @@ function AuthGate() {
   const checkOnboarding = useCallback(
     async (userId: string) => {
       if (!session) return;
-      try {
-        const apiSession = toApiSession(session);
-        const [profile, target] = await Promise.all([
-          getProfile(apiSession).catch(() => null),
-          getTarget(apiSession).catch((e: unknown) => {
-            if (e instanceof GoalsApiError && e.status === 404) return null;
-            return null;
-          }),
-        ]);
-        const result = isProfileComplete(profile) && target !== null ? 'complete' : 'incomplete';
+      const apiSession = toApiSession(session);
+
+      // Probe each data source, distinguishing a definitive "not set up" (404,
+      // or a profile that loads but is incomplete) from "couldn't tell" (a
+      // transient network failure or 5xx). Only a definitive absence is a
+      // signal to onboard; an unknown holds the gate (see resolveOnboardingStatus).
+      const profileProbe: OnboardingProbe = await getProfile(apiSession)
+        .then((profile): OnboardingProbe =>
+          isProfileComplete(profile) ? 'present' : 'absent',
+        )
+        .catch((e: unknown): OnboardingProbe =>
+          e instanceof ProfileApiError && e.status === 404 ? 'absent' : 'unknown',
+        );
+      const targetProbe: OnboardingProbe = await getTarget(apiSession)
+        .then((): OnboardingProbe => 'present')
+        .catch((e: unknown): OnboardingProbe =>
+          e instanceof GoalsApiError && e.status === 404 ? 'absent' : 'unknown',
+        );
+
+      const status = resolveOnboardingStatus(profileProbe, targetProbe);
+      if (status === 'complete' || status === 'incomplete') {
         setCheckedForUserId(userId);
-        setCheckedResult(result);
-      } catch {
-        setCheckedForUserId(userId);
-        setCheckedResult('incomplete');
+        setCheckedResult(status);
       }
+      // Otherwise 'undetermined' — leave the check unrecorded so the derived
+      // status stays 'checking' (the gate holds, never routing into onboarding)
+      // and a later state change can retry, rather than trapping the user this
+      // session.
     },
     [session],
   );
