@@ -11,6 +11,19 @@ import type { DailySummaryDTO, TargetReadModel } from "@/api/dailySummary";
 import type { Session } from "@/state/session";
 import type { CadenceStore, NotificationsAdapter, WeighInCadence } from "@/state/reminderScheduler";
 
+// TrendsScreen now uses ScreenHeader → AppIcon (expo-symbols); stub the native
+// module so tests run without a native runtime.
+jest.mock("expo-symbols", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const React = require("react");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { View } = require("react-native");
+  return {
+    SymbolView: ({ name, accessibilityLabel }: { name: string; accessibilityLabel?: string }) =>
+      React.createElement(View, { testID: `sf-symbol-${String(name)}`, accessibilityLabel }),
+  };
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -867,5 +880,75 @@ describe("TrendsScreen — accessibility", () => {
       (n) => n.props.accessibilityRole === "radio",
     );
     expect(radioOpts.length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Single-title regression (FTY-151): Trends must show its title exactly once.
+// The old bug rendered "Trends" twice — once in the native nav header and once
+// as an in-content pageTitle. ScreenHeader replaces the in-content title and
+// the native header is suppressed globally.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("TrendsScreen — single-title regression (FTY-151)", () => {
+  it("renders exactly one 'Trends' heading (accessibilityRole='header')", async () => {
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={jest.fn().mockResolvedValue([])}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+
+    // Filter to host (native) text nodes only — react-test-renderer also returns
+    // the composite Text wrapper with the same props, so plain findAll would give 2.
+    const headerNodes = tree.root.findAll(
+      (n) =>
+        n.props.accessibilityRole === "header" &&
+        (n.type as unknown) === "Text",
+    );
+    expect(headerNodes).toHaveLength(1);
+    expect(headerNodes[0]!.props.children).toBe("Trends");
+  });
+
+  it("renders the gear action when onPressProfile is provided", async () => {
+    const onPressProfile = jest.fn();
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={jest.fn().mockResolvedValue([])}
+        now={NOW}
+        onPressProfile={onPressProfile}
+      />,
+    );
+    await act(async () => {});
+
+    const gear = tree.root.find(
+      (n) => n.props.accessibilityLabel === "Open profile",
+    );
+    expect(gear).toBeTruthy();
+    // Gear routes to profile on press.
+    act(() => gear.props.onPress());
+    expect(onPressProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders no gear when onPressProfile is not provided", async () => {
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={jest.fn().mockResolvedValue([])}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+
+    const gearButtons = tree.root.findAll(
+      (n) => n.props.accessibilityLabel === "Open profile",
+    );
+    expect(gearButtons).toHaveLength(0);
   });
 });

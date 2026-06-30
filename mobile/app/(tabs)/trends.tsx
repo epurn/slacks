@@ -19,6 +19,7 @@ export default function TrendsTab() {
       onDayPress={(date) =>
         router.push({ pathname: "/day", params: { date } })
       }
+      onPressProfile={() => router.push('/profile')}
     />
   );
 }

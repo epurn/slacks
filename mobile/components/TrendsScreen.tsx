@@ -29,6 +29,8 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AppIcon, ScreenHeader } from "@/components/ui";
+
 import {
   WeightApiError,
   createWeightEntry as createWeightEntryApi,
@@ -97,6 +99,8 @@ interface TrendsScreenProps {
   notifications?: NotificationsAdapter;
   /** Called when a day cell is tapped; parent handles navigation. */
   onDayPress?: (date: string) => void;
+  /** Called when the gear / profile icon in the header is pressed. */
+  onPressProfile?: () => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -113,6 +117,7 @@ export function TrendsScreen({
   store,
   notifications,
   onDayPress,
+  onPressProfile,
 }: TrendsScreenProps = {}) {
   const liveSession = useSession();
   const session: Session =
@@ -295,18 +300,26 @@ export function TrendsScreen({
         contentContainerStyle={[
           styles.content,
           {
-            paddingTop: insets.top + spacing.sm,
             paddingBottom: insets.bottom + 80 + spacing.xl,
           },
         ]}
       >
-        {/* Page title */}
-        <Text
-          style={[styles.pageTitle, { color: colors.text }]}
-          accessibilityRole="header"
-        >
-          Trends
-        </Text>
+        <ScreenHeader
+          title="Trends"
+          actions={
+            onPressProfile ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open profile"
+                accessibilityHint="Opens profile and settings"
+                onPress={onPressProfile}
+                style={styles.headerAction}
+              >
+                <AppIcon name="gear" size={22} color={colors.text} />
+              </Pressable>
+            ) : null
+          }
+        />
 
         {/* Headline delta */}
         {headline ? (
@@ -617,10 +630,11 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
 
-  pageTitle: {
-    fontSize: typeScale.largeTitle,
-    fontWeight: "700",
-    marginBottom: spacing.xs,
+  headerAction: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   headlineRow: {

@@ -75,15 +75,22 @@ jest.mock('expo-router', () => {
   }: {
     children: React.ReactNode;
     screenOptions?: {
+      headerShown?: boolean;
       headerRight?: () => React.ReactNode;
       [key: string]: unknown;
     };
   }) => {
-    // Invoke headerRight so GearButton is included in the rendered tree
+    // Render a marker node so tests can assert headerShown: false is set globally.
+    const headerHiddenMarker =
+      screenOptions?.headerShown === false
+        ? React.createElement(View, { testID: 'tabs-native-header-hidden' })
+        : null;
+    // Invoke headerRight if present (should be absent after FTY-151).
     const headerRight = screenOptions?.headerRight ? screenOptions.headerRight() : null;
     return React.createElement(
       View,
       { testID: 'tabs-container' },
+      headerHiddenMarker,
       headerRight,
       children,
     );
@@ -169,12 +176,23 @@ describe('TabLayout', () => {
     expect(unexpectedScreens).toHaveLength(0);
   });
 
-  it('renders the gear button with accessibilityLabel="Open profile"', () => {
+  it('sets headerShown: false globally so the native header is suppressed on every tab', () => {
+    // The mock renders a marker node when screenOptions.headerShown === false.
     const tree = mount();
-    const gearButton = tree.root.find(
+    const marker = tree.root.find(
+      (n) => n.props.testID === 'tabs-native-header-hidden',
+    );
+    expect(marker).toBeTruthy();
+  });
+
+  it('does not render a global headerRight gear (gear lives in per-screen ScreenHeader after FTY-151)', () => {
+    const tree = mount();
+    // No element with "Open profile" label should exist in the tab shell —
+    // the gear is now owned by each screen's ScreenHeader, not the layout.
+    const gearButtons = tree.root.findAll(
       (n) => n.props.accessibilityLabel === 'Open profile',
     );
-    expect(gearButton).toBeTruthy();
+    expect(gearButtons).toHaveLength(0);
   });
 
   // -------------------------------------------------------------------------
@@ -197,16 +215,7 @@ describe('TabLayout', () => {
     expect(symbol).toBeTruthy();
   });
 
-  it('header gear renders SF Symbol "gear" (not an emoji Text)', () => {
-    const tree = mount();
-    // The GearButton Pressable is the only one with the Open profile label;
-    // the SF Symbol inside it is "gear".
-    const gearButton = tree.root.find((n) => n.props.accessibilityLabel === 'Open profile');
-    const symbol = gearButton.find((n) => n.props.testID === 'sf-symbol-gear');
-    expect(symbol).toBeTruthy();
-  });
-
-  it('contains no emoji codepoints as chrome glyphs in any tab icon or gear button', () => {
+  it('contains no emoji codepoints as chrome glyphs in any tab icon', () => {
     const tree = mount();
     // Emoji range guard: collect every Text node in the rendered tree and
     // assert its content is free of common emoji codepoints that were
