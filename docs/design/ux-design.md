@@ -33,12 +33,14 @@ tracker**. The wedge is two things competitors don't do well together:
 
 ## 2. Information architecture & navigation
 
-- **Bottom tab bar — three tabs: Today · Log · Trends.** A standard native tab bar
-  (see Visual). Log is its own dedicated full page.
+- **Bottom tab bar — two tabs: Today · Trends.** A standard native tab bar (see
+  Visual). **Today is the single logging surface and the dashboard** — there is no
+  separate Log tab (consolidated in FTY-147; a separate surface duplicated the
+  composer and drifted, and added a navigation hop to the core loop for no benefit).
 - **Profile / Settings is a persistent gear** in the header on every screen — not a
   tab.
-- Logging is always one tap away: the **Log tab** and the **primary CTA on the
-  Today hero** both reach it.
+- Logging is always one tap away: the **composer lives at the top of Today**, so
+  capture happens on the status-home itself without a navigation hop.
 
 ---
 
@@ -46,16 +48,20 @@ tracker**. The wedge is two things competitors don't do well together:
 
 ### Logging loop
 
-- **Log page = a keyboard-up natural-language composer.** You describe the food;
-  a saved-food typeahead surfaces reactively as you type. Barcode and label
+- **Composer at the top of Today = a natural-language composer.** You describe the
+  food; a saved-food typeahead surfaces reactively as you type. Barcode and label
   capture sit alongside as SF Symbol affordances. (No proactive "recents" list in
-  v1.)
-- **Post-submit, you stay on the Log page** — no automatic navigation (page changes
-  are jarring). Submitted entries stack in a live "added" feed and the field clears
-  for the next one, enabling rapid successive adds. Returning to Today is manual.
+  v1.) The composer does **not** auto-raise the keyboard — Today is the
+  status-home; tapping the composer raises it (auto-focusing a dashboard is
+  jarring; *Calm by default*).
+- **Post-submit, you stay on Today** — no automatic navigation (page changes are
+  jarring). The submitted entry appears immediately in **Today's one canonical
+  timeline** as a present, pending row and the field clears for the next one,
+  enabling rapid successive adds.
 - **The "thinking" state is a skeleton/shimmer that fills in place;** resolved
   values fade in exactly where the placeholder was. No layout shift.
-- **Today owns the canonical timeline.** The Log feed is transient.
+- **Today owns the single canonical timeline.** There is no separate "added this
+  session" feed — the optimistic insert *is* the acknowledgement.
 - **Correction is a universal slide-up sheet** from any item (see §4a) — never a
   page change.
 - **Missing details are asked inline, non-blocking.** When Fatty needs a detail to
@@ -64,8 +70,8 @@ tracker**. The wedge is two things competitors don't do well together:
 
 ### Barcode & label capture
 
-The camera is a full-screen cover the user deliberately invokes from the Log page
-(an intended modal, not a surprise navigation), dismissing back to Log.
+The camera is a full-screen cover the user deliberately invokes from Today's
+composer (an intended modal, not a surprise navigation), dismissing back to Today.
 
 - **Barcode = fast-add (high trust).** A successful scan resolves the product and
   lands it directly in the feed/timeline like any entry (barcode provenance),
@@ -100,7 +106,7 @@ The status-first home.
 - **Empty state — full budget + gentle invite.** Before anything is logged the hero
   shows the full target as available ("0 / 2,000 kcal · 2,000 to go") in a calm,
   neutral tone — never an alarming empty zero; the bar is an empty track. The
-  timeline shows one soft invite ("Log your first thing") anchored to the Log CTA.
+  timeline shows one soft invite ("Log your first thing") anchored to the composer.
   Oriented, not blank, not a coachy illustration.
 - **Corrected values** simply carry the "✎ edited" source icon in the timeline (no
   special-case treatment — it's just another provenance); the item sheet can note
@@ -224,8 +230,9 @@ It mirrors the inputs onboarding captures, so this is where you edit them later.
 The balance is *native skeleton, bespoke soul* — native in structure and behaviour,
 unmistakable in a few expressive carriers (see the principle of that name).
 
-- **Tab bar: standard native 3-tab bar** (Today · Log · Trends), three equal
-  SF-Symbol tabs. No restyled chrome, no raised center button.
+- **Tab bar: standard native 2-tab bar** (Today · Trends), two equal SF-Symbol
+  tabs. No restyled chrome, no raised center button. (Logging lives on Today, not
+  a separate tab — FTY-147.)
 - **Aesthetic: minimal monochrome + one accent** — neutral canvas, airy whitespace,
   crisp bold type, a single accent for actions, emphasis, and progress.
 - **Accent: warm amber / honey.** Distinctive and premium-calm — deliberately not the
@@ -291,6 +298,6 @@ unmistakable in a few expressive carriers (see the principle of that name).
 
 ## v2 / parked
 
-- A smart, context-aware food recommender on the Log page (time-of-day / patterns,
-  Spotify-style) that replaces a naive recents list.
+- A smart, context-aware food recommender on Today's composer (time-of-day /
+  patterns, Spotify-style) that replaces a naive recents list.
 - Smart "save this for next time?" suggestions in the correction sheet.

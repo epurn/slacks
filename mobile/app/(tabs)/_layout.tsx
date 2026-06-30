@@ -22,9 +22,13 @@ function GearButton() {
 }
 
 /**
- * Three-tab shell: Today · Log · Trends.
+ * Two-tab shell: Today · Trends.
  *
- * Standard native tab bar — three equal SF-Symbol-style tabs, no raised center
+ * Logging is consolidated onto Today (FTY-147) — Today is the single logging
+ * surface and the dashboard — so the Log tab is gone and the core loop has no
+ * extra navigation hop.
+ *
+ * Standard native tab bar — two equal SF-Symbol-style tabs, no raised center
  * button, semi-transparent background that approximates the system ultraThin
  * material (requires expo-blur BlurView for the true UIBlurEffect; using the
  * native translucent tab bar background for now — TODO when expo-blur is added).
@@ -70,16 +74,6 @@ export default function TabLayout() {
           tabBarAccessibilityLabel: 'Today tab',
           tabBarIcon: ({ color }) => (
             <AppIcon name="sun.max" size={22} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="log"
-        options={{
-          title: 'Log',
-          tabBarAccessibilityLabel: 'Log tab',
-          tabBarIcon: ({ color }) => (
-            <AppIcon name="plus" size={22} color={color} />
           ),
         }}
       />
