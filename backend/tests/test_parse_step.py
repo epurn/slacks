@@ -437,6 +437,94 @@ def test_unknown_unit_large_amount_routes_to_clarification() -> None:
     assert "rice" in context.clarification_questions[0]
 
 
+def test_exercise_with_duration_skips_plausibility_gate() -> None:
+    # Regression (FTY-156): an exercise candidate carries a structured duration
+    # (amount=60, unit="minutes") — a time unit the food-portion plausibility
+    # vocabulary deliberately does not recognise. Such a candidate must NOT be
+    # run through the gate (which would reject it as unknown_unit once
+    # amount > MAX_PLAUSIBLE_COUNT); it must complete and persist as an exercise
+    # candidate. Covers the exercise-burn.md worked example (walking 60 min).
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [
+                    {
+                        "type": "exercise",
+                        "name": "walking",
+                        "quantity_text": "60 minutes",
+                        "amount": 60.0,
+                        "unit": "minutes",
+                    }
+                ],
+                confidence=0.9,
+            )
+        ]
+    )
+    context = _context(raw_text="walked for 60 minutes")
+
+    _run(provider, context)
+
+    assert [c.name for c in context.exercise_candidates] == ["walking"]
+    assert context.exercise_candidates[0].amount == 60.0
+    assert context.exercise_candidates[0].unit == "minutes"
+    assert context.food_candidates == []
+    assert context.clarification_questions == []
+
+
+def test_exercise_reps_above_count_cap_still_completes() -> None:
+    # The non-blocking note: an exercise rep entry (amount=50, unit=None) would
+    # trip the count cap if run through the gate. Excluding exercise candidates
+    # means it completes and persists rather than routing to clarification.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [{"type": "exercise", "name": "push-ups", "quantity_text": "50", "amount": 50.0}],
+                confidence=0.9,
+            )
+        ]
+    )
+    context = _context(raw_text="50 push-ups")
+
+    _run(provider, context)
+
+    assert [c.name for c in context.exercise_candidates] == ["push-ups"]
+    assert context.exercise_candidates[0].amount == 50.0
+    assert context.clarification_questions == []
+
+
+def test_implausible_food_still_gated_when_exercise_present() -> None:
+    # The exercise carve-out must not weaken the food gate: a mixed reply with a
+    # plausible exercise and an implausible food (50 eggs) still routes to
+    # clarification naming the food, and persists nothing.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [
+                    {
+                        "type": "exercise",
+                        "name": "cycling",
+                        "quantity_text": "45 minutes",
+                        "amount": 45.0,
+                        "unit": "minutes",
+                    },
+                    {"type": "food", "name": "eggs", "quantity_text": "50", "amount": 50.0},
+                ],
+                confidence=0.9,
+            )
+        ]
+    )
+    context = _context(raw_text="cycled 45 minutes and ate 50 eggs")
+
+    with pytest.raises(NeedsClarification) as exc:
+        _run(provider, context)
+
+    assert exc.value.reason == "implausible_candidate"
+    assert context.food_candidates == []
+    assert context.exercise_candidates == []
+    assert len(context.clarification_questions) == 1
+    assert "eggs" in context.clarification_questions[0]
+
+
 def test_plausible_reply_parses_unchanged() -> None:
     # A normal, realistic reply must pass through the plausibility gate and
     # be accumulated as candidates exactly as before FTY-156.

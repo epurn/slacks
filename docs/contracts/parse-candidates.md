@@ -89,12 +89,38 @@ documented tunable — below it the step clarifies even on a `parsed` reply):
 
 | Validated reply | Pipeline signal | Persisted | Event transition |
 | --- | --- | --- | --- |
-| `parsed`, confident, ≥1 item | _(completes)_ | candidates `unresolved` | `processing → completed` |
+| `parsed`, confident, ≥1 item, all food candidates plausible | _(completes)_ | candidates `unresolved` | `processing → completed` |
+| `parsed`, confident, ≥1 item, but a food candidate is implausible | `NeedsClarification` (`implausible_candidate`) | clarification question | `processing → needs_clarification` |
 | `needs_clarification`, or confidence below threshold | `NeedsClarification` | clarification questions | `processing → needs_clarification` |
 | `unparseable`, or `parsed` with no items | `StepFailed` (terminal) | nothing | `processing → failed` |
 | empty/whitespace input | `StepFailed` (terminal, no LLM call) | nothing | `processing → failed` |
 | schema-invalid / non-retryable provider error | `StepFailed` (terminal) | nothing | `processing → failed` |
 | transient provider error | `StepError` (retryable) | nothing | _(stays `processing`, retried)_ |
+
+### Deterministic plausibility gate (FTY-156)
+
+After confidence/disposition routing, a model-free gate
+(`app/estimator/plausibility.py`, `check_candidate`) checks each **food**
+candidate's quantity against coarse physical/serving sanity ranges before the
+parse is trusted. A single implausible food candidate makes the event's total
+untrustworthy, so the step routes the whole event to `needs_clarification`
+(`implausible_candidate`) with one targeted question naming the offending item,
+and persists no candidates.
+
+- **Bounds** (generous, documented tunables in `plausibility.py`): a discrete
+  count above `MAX_PLAUSIBLE_COUNT` (`36`), a mass above `MAX_PLAUSIBLE_GRAMS`
+  (`2000 g`), or a volume above `MAX_PLAUSIBLE_ML` (`2000 ml`) fails, as does a
+  numeric amount on an unrecognised unit when that amount exceeds the count cap.
+  A candidate with no `amount` always passes (inference gaps are the confidence
+  check's concern). Bounds are set just above any realistic single-entry portion
+  so a false reject of a large-but-real meal is effectively impossible; the
+  fail-safe is loose (an over-generous bound lets one absurd parse through rather
+  than falsely asking).
+- **Exercise candidates are excluded.** Their quantities are durations
+  (minutes/hours), not mass/volume/count, so the food-portion bounds and unit
+  vocabulary do not apply — exercise plausibility/duration parsing belongs to
+  FTY-043 (`exercise-burn.md`). Running an exercise duration through this gate
+  would falsely reject ordinary workouts (e.g. `walking, 60 minutes`).
 
 A `needs_clarification` reply with no questions persists one default question so
 the event always has at least one for the later answer flow. Candidates and
