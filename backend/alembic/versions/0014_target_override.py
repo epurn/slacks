@@ -8,8 +8,9 @@ target and an explicit user override beside it:
   but did not persist them; persisting them here lets the read-model report the
   derived macro value (what a reset restores) straight from the row, mirroring the
   existing derived ``daily_calorie_target_kcal`` / ``clamped`` columns. Added
-  ``NOT NULL`` with a ``0`` / ``false`` server default so the ``ALTER`` is safe on
-  any existing row; the application always writes the computed value.
+  ``NOT NULL`` with a type-correct server default (``0`` for the integer columns,
+  ``false`` for the boolean ``macros_clamped``) so the ``ALTER`` is safe on any
+  existing row; the application always writes the computed value.
 - **Nullable user-override columns** — ``override_calorie_target_kcal`` and one
   per overridable macro (``override_protein_target_g`` / ``override_carbs_target_g``
   / ``override_fat_target_g``), each ``NULL`` when the target is derived, plus
@@ -64,7 +65,11 @@ def upgrade() -> None:
             "macros_clamped",
             sa.Boolean(),
             nullable=False,
-            server_default=sa.text("0"),
+            # Boolean-valued literal: Postgres rejects ``BOOLEAN DEFAULT 0``
+            # (DatatypeMismatch) and accepts ``false``; SQLite tolerates both. An
+            # integer literal here silently passed the SQLite-only gate but broke
+            # every Postgres deploy (FTY-143).
+            server_default=sa.text("false"),
         ),
     )
 
