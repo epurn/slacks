@@ -1,5 +1,6 @@
 import { StyleSheet, Text, View } from "react-native";
 
+import { AppIcon, type AppIconName } from "@/components/ui/AppIcon";
 import type { OutboxSyncState } from "@/state/outbox";
 import { spacing, typeScale, useTheme } from "@/theme";
 
@@ -41,9 +42,11 @@ export function OfflineEntryRow({
         {rawText}
       </Text>
       <View style={styles.indicator} accessibilityElementsHidden>
-        <Text style={[styles.glyph, { color: colors.textMuted }]}>
-          {indicator.glyph}
-        </Text>
+        <AppIcon
+          name={indicator.icon}
+          size={typeScale.footnote}
+          color={colors.textMuted}
+        />
         <Text style={[styles.label, { color: colors.textMuted }]} numberOfLines={1}>
           {indicator.label}
         </Text>
@@ -53,25 +56,35 @@ export function OfflineEntryRow({
 }
 
 /**
- * Calm presentation for the offline indicator, by local sync state. The state is
- * always carried in words (never colour alone), and no kcal/macro value is ever
- * shown — an offline-queued entry is uncounted until the server resolves it.
+ * Calm presentation for the offline indicator, by local sync state. The glyph is
+ * an SF Symbol from the app's single icon system (never a raw Unicode/emoji
+ * character used as chrome), the state is always carried in words (never colour
+ * alone), and no kcal/macro value is ever shown — an offline-queued entry is
+ * uncounted until the server resolves it.
  */
 function offlineIndicator(state: OutboxSyncState): {
-  readonly glyph: string;
+  readonly icon: AppIconName;
   readonly label: string;
   readonly a11y: string;
 } {
   switch (state) {
     case "submitting":
-      return { glyph: "⟳", label: "Sending…", a11y: "sending" };
+      return {
+        icon: "arrow.triangle.2.circlepath",
+        label: "Sending…",
+        a11y: "sending",
+      };
     case "failed":
-      return { glyph: "!", label: "Couldn't send", a11y: "couldn't send" };
+      return {
+        icon: "exclamationmark.circle",
+        label: "Couldn't send",
+        a11y: "couldn't send",
+      };
     case "queued":
     case "accepted":
     default:
       return {
-        glyph: "⇡",
+        icon: "arrow.up.circle",
         label: "Offline — queued",
         a11y: "offline, queued to send",
       };
@@ -97,10 +110,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-  },
-  glyph: {
-    fontSize: typeScale.footnote,
-    fontWeight: "600",
   },
   label: {
     fontSize: typeScale.footnote,
