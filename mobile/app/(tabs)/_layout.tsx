@@ -1,6 +1,7 @@
-import { Pressable, Text } from 'react-native';
+import { Pressable } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 
+import { AppIcon } from '@/components/ui';
 import { useTheme } from '@/theme';
 
 /** Gear icon button rendered in each tab's navigation header. */
@@ -15,7 +16,7 @@ function GearButton() {
       onPress={() => router.push('/profile')}
       style={{ marginRight: 16, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
     >
-      <Text style={{ fontSize: 22, color: colors.text }}>⚙</Text>
+      <AppIcon name="gear" size={22} color={colors.text} />
     </Pressable>
   );
 }
@@ -68,7 +69,7 @@ export default function TabLayout() {
           headerShown: false,
           tabBarAccessibilityLabel: 'Today tab',
           tabBarIcon: ({ color }) => (
-            <Text style={{ fontSize: 22, color }}>☀</Text>
+            <AppIcon name="sun.max" size={22} color={color} />
           ),
         }}
       />
@@ -78,7 +79,7 @@ export default function TabLayout() {
           title: 'Log',
           tabBarAccessibilityLabel: 'Log tab',
           tabBarIcon: ({ color }) => (
-            <Text style={{ fontSize: 22, color }}>＋</Text>
+            <AppIcon name="plus" size={22} color={color} />
           ),
         }}
       />
@@ -88,7 +89,7 @@ export default function TabLayout() {
           title: 'Trends',
           tabBarAccessibilityLabel: 'Trends tab',
           tabBarIcon: ({ color }) => (
-            <Text style={{ fontSize: 22, color }}>📈</Text>
+            <AppIcon name="chart.line.uptrend.xyaxis" size={22} color={color} />
           ),
         }}
       />

@@ -5,3 +5,5 @@ export { Skeleton } from './Skeleton';
 export { Button } from './Button';
 export { ProvenanceIcon, provenancePresentation } from './ProvenanceIcon';
 export type { ProvenancePresentation } from './ProvenanceIcon';
+export { AppIcon } from './AppIcon';
+export type { AppIconName } from './AppIcon';

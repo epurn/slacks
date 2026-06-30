@@ -38,6 +38,7 @@ import {
   searchSavedFoods as searchSavedFoodsApi,
   type SavedFoodDTO,
 } from "@/api/savedFoods";
+import { AppIcon } from "@/components/ui";
 import { BarcodeScannerScreen } from "@/components/BarcodeScannerScreen";
 import { CorrectionSheet } from "@/components/CorrectionSheet";
 import { DailySummary } from "@/components/DailySummary";
@@ -531,7 +532,7 @@ export function TodayScreen({
                 onPress={onPressProfile}
                 style={styles.gearButton}
               >
-                <Text style={[styles.gearLabel, { color: colors.text }]}>⚙</Text>
+                <AppIcon name="gear" size={22} color={colors.text} />
               </Pressable>
             ) : null}
           </View>
@@ -873,9 +874,6 @@ const styles = StyleSheet.create({
     minHeight: 44,
     alignItems: "center",
     justifyContent: "center",
-  },
-  gearLabel: {
-    fontSize: 22,
   },
   title: {
     fontSize: typeScale.largeTitle,

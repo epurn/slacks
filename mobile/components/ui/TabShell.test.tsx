@@ -6,6 +6,34 @@ import { ThemeProvider } from '@/theme';
 import TabLayout from '@/app/(tabs)/_layout';
 
 // ---------------------------------------------------------------------------
+// Mock expo-symbols — replace SymbolView with a View stub that exposes the
+// SF Symbol name via testID so tests can assert which glyph was requested
+// without requiring the native module.
+// ---------------------------------------------------------------------------
+
+jest.mock('expo-symbols', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const React = require('react');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { View } = require('react-native');
+  return {
+    SymbolView: ({
+      name,
+      accessibilityLabel,
+    }: {
+      name: string;
+      tintColor?: string;
+      size?: number;
+      accessibilityLabel?: string;
+    }) =>
+      React.createElement(View, {
+        testID: `sf-symbol-${String(name)}`,
+        accessibilityLabel,
+      }),
+  };
+});
+
+// ---------------------------------------------------------------------------
 // Mock expo-router — replace Tabs with simple View-based stubs so the layout
 // can be rendered without the full navigation runtime.
 // ---------------------------------------------------------------------------
@@ -23,13 +51,23 @@ jest.mock('expo-router', () => {
     options,
   }: {
     name: string;
-    options?: { title?: string; tabBarAccessibilityLabel?: string };
-  }) =>
-    React.createElement(
+    options?: {
+      title?: string;
+      tabBarAccessibilityLabel?: string;
+      tabBarIcon?: (opts: { color: string; focused: boolean; size: number }) => React.ReactNode;
+    };
+  }) => {
+    // Invoke tabBarIcon so the icon is included in the rendered tree.
+    const icon = options?.tabBarIcon?.({ color: '#000000', focused: true, size: 22 });
+    return React.createElement(
       View,
       { testID: `tab-screen-${name}` },
       React.createElement(Text, {}, options?.title ?? name),
+      icon
+        ? React.createElement(View, { testID: `tab-icon-${name}` }, icon)
+        : null,
     );
+  };
 
   const MockTabs = ({
     children,
@@ -147,5 +185,55 @@ describe('TabLayout', () => {
       (n) => n.props.accessibilityLabel === 'Open profile',
     );
     expect(gearButton).toBeTruthy();
+  });
+
+  // -------------------------------------------------------------------------
+  // SF Symbol icon assertions (FTY-145) — emoji replaced with AppIcon
+  // -------------------------------------------------------------------------
+
+  it('Today tab icon renders SF Symbol "sun.max" (not an emoji Text)', () => {
+    const tree = mount();
+    const iconContainer = tree.root.find((n) => n.props.testID === 'tab-icon-index');
+    const symbol = iconContainer.find((n) => n.props.testID === 'sf-symbol-sun.max');
+    expect(symbol).toBeTruthy();
+  });
+
+  it('Log tab icon renders SF Symbol "plus" (not an emoji Text)', () => {
+    const tree = mount();
+    const iconContainer = tree.root.find((n) => n.props.testID === 'tab-icon-log');
+    const symbol = iconContainer.find((n) => n.props.testID === 'sf-symbol-plus');
+    expect(symbol).toBeTruthy();
+  });
+
+  it('Trends tab icon renders SF Symbol "chart.line.uptrend.xyaxis" (not an emoji Text)', () => {
+    const tree = mount();
+    const iconContainer = tree.root.find((n) => n.props.testID === 'tab-icon-trends');
+    const symbol = iconContainer.find(
+      (n) => n.props.testID === 'sf-symbol-chart.line.uptrend.xyaxis',
+    );
+    expect(symbol).toBeTruthy();
+  });
+
+  it('header gear renders SF Symbol "gear" (not an emoji Text)', () => {
+    const tree = mount();
+    // The GearButton Pressable is the only one with the Open profile label;
+    // the SF Symbol inside it is "gear".
+    const gearButton = tree.root.find((n) => n.props.accessibilityLabel === 'Open profile');
+    const symbol = gearButton.find((n) => n.props.testID === 'sf-symbol-gear');
+    expect(symbol).toBeTruthy();
+  });
+
+  it('contains no emoji codepoints as chrome glyphs in any tab icon or gear button', () => {
+    const tree = mount();
+    // Emoji range guard: collect every Text node in the rendered tree and
+    // assert its content is free of common emoji codepoints that were
+    // previously used as tab/header chrome.
+    const emojiPattern = /[\u{1F300}-\u{1FFFF}]|\u{2699}|\u{2600}|＋/u;
+    const textNodes = tree.root.findAll(
+      (n) => (n.type as unknown as string) === 'Text' && typeof n.props.children === 'string',
+    );
+    for (const node of textNodes) {
+      expect(node.props.children as string).not.toMatch(emojiPattern);
+    }
   });
 });
