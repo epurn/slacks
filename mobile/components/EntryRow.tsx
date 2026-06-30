@@ -161,6 +161,11 @@ function makeStyles(colors: ColorPalette) {
       paddingHorizontal: 16,
     },
     clarifyRow: {
+      // The clarify variant is its own outer element (it replaces `container`),
+      // so it carries the same hairline separator — otherwise a needs-a-detail
+      // row sitting between two entries in a cluster drops its bottom border.
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.separator,
       flexDirection: "row",
       alignItems: "center",
       gap: 12,

@@ -569,6 +569,28 @@ describe("TodayScreen needs-clarification entries", () => {
     expect(resolvedStyle(row).minHeight).toBeGreaterThanOrEqual(44);
   });
 
+  it("carries the hairline separator like every other timeline row", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: "a", raw_text: "milk", status: "needs_clarification" }),
+      ]);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
+    await act(async () => {});
+
+    // The clarify variant is its own outer element, so it must carry the same
+    // bottom separator — otherwise it drops its border when clustered between
+    // two other entries.
+    const row = tree.root.find(
+      (n) =>
+        n.props.accessibilityLabel === "milk, needs a detail, uncounted" &&
+        typeof n.props.onPress === "function",
+    );
+    expect(resolvedStyle(row).borderBottomWidth).toBeGreaterThan(0);
+  });
+
   it("opens the correction sheet in clarify-mode on tap, with no auto-filled detail", async () => {
     const load = jest
       .fn()
