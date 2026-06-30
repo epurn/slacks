@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { LogEventDTO } from "@/api/logEvents";
 import type { DerivedItem, editDerivedItem } from "@/api/derivedItems";
@@ -25,6 +25,13 @@ import type { ColorPalette } from "@/theme/colors";
  * Resolved food items show a "Save this food" action (FTY-053): the typed
  * phrase (`event.raw_text`) is passed as the alias to record. `saveFoodFn` is
  * injectable for tests.
+ *
+ * A `needs_clarification` event renders the legible, *inviting* variant
+ * (FTY-149): muted text with a gentle "needs a detail" tag and an explicit
+ * "Add a detail" call-to-action, visibly uncounted (a trailing "—"), never a
+ * bare/silent row. The whole row is one tap target that opens the clarify sheet
+ * via `onPress`; a screen reader hears the needs-a-detail state and that tapping
+ * resolves it. This honours "acknowledge every action / no inert outcomes".
  */
 export function EntryRow({
   event,
@@ -33,6 +40,7 @@ export function EntryRow({
   editItem,
   onItemChange,
   saveFoodFn = saveFood,
+  onPress,
 }: {
   event: LogEventDTO;
   items?: readonly DerivedItem[];
@@ -40,10 +48,75 @@ export function EntryRow({
   editItem?: typeof editDerivedItem;
   onItemChange?: (item: DerivedItem) => void;
   saveFoodFn?: typeof saveFood;
+  /**
+   * Tap handler for a `needs_clarification` entry — opens the clarify-mode
+   * sheet (FTY-149). Ignored for every other status (those rows are not
+   * tappable). When omitted, a needs-clarification row still renders legibly,
+   * just non-interactive.
+   */
+  onPress?: () => void;
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { label } = statusPresentation(event.status);
+
+  // Legible, inviting "needs a detail" row (FTY-149). The status is terminal
+  // and uncounted (the daily-summary filter excludes it), but the row makes the
+  // missing-detail state and the resolve path unmistakable.
+  if (event.status === "needs_clarification") {
+    return (
+      <Pressable
+        style={({ pressed }) => [
+          styles.clarifyRow,
+          pressed && onPress ? { opacity: 0.6 } : null,
+        ]}
+        onPress={onPress}
+        disabled={!onPress}
+        accessibilityRole="button"
+        accessibilityLabel={`${event.raw_text}, needs a detail, uncounted`}
+        accessibilityHint="Tap to add the missing detail so Fatty can count it"
+      >
+        <StatusIcon status={event.status} />
+        <View style={styles.body}>
+          <Text
+            style={[styles.text, styles.clarifyText]}
+            numberOfLines={2}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            {event.raw_text}
+          </Text>
+          <View style={styles.clarifyMetaRow}>
+            <View
+              style={[styles.needsDetailTag, { backgroundColor: colors.controlBackground }]}
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
+              <Text style={[styles.needsDetailText, { color: colors.textMuted }]}>
+                needs a detail
+              </Text>
+            </View>
+            <Text
+              style={[styles.addDetailCta, { color: colors.accent }]}
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
+              Add a detail ›
+            </Text>
+          </View>
+        </View>
+        {/* Visibly uncounted — never a number standing in for acknowledgement. */}
+        <Text
+          style={[styles.uncounted, { color: colors.textMuted }]}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        >
+          —
+        </Text>
+      </Pressable>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.row}>
@@ -87,12 +160,47 @@ function makeStyles(colors: ColorPalette) {
       paddingVertical: 12,
       paddingHorizontal: 16,
     },
+    clarifyRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      minHeight: 44,
+    },
     body: {
       flex: 1,
     },
     text: {
       fontSize: 16,
       color: colors.text,
+    },
+    clarifyText: {
+      color: colors.textMuted,
+    },
+    clarifyMetaRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      marginTop: 4,
+    },
+    needsDetailTag: {
+      borderRadius: 6,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+    },
+    needsDetailText: {
+      fontSize: 12,
+      fontWeight: "500",
+    },
+    addDetailCta: {
+      fontSize: 13,
+      fontWeight: "600",
+    },
+    uncounted: {
+      fontSize: 16,
+      minWidth: 24,
+      textAlign: "right",
     },
     meta: {
       fontSize: 13,

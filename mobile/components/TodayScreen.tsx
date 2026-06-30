@@ -142,6 +142,44 @@ function syntheticSavedFoodItem(
 }
 
 /**
+ * Build the placeholder item the clarify-mode sheet opens against for a
+ * `needs_clarification` event (FTY-149). A needs-clarification event has no
+ * resolved derived item — the parse stopped for a missing detail — so the sheet
+ * (which is item-addressed) is fed a minimal, uncounted stand-in: the typed
+ * phrase as the name, no nutrition. Clarify-mode only reads `name`/`id`; it never
+ * shows or commits these null values, so the item is never counted and the
+ * detail is never auto-filled.
+ */
+function clarificationPlaceholderItem(
+  event: LogEventDTO,
+): DerivedFoodItemDTO {
+  return {
+    item_type: "food",
+    id: `clarify-${event.id}`,
+    user_id: event.user_id,
+    log_event_id: event.id,
+    name: event.raw_text,
+    quantity_text: event.raw_text,
+    unit: null,
+    amount: null,
+    status: "unresolved",
+    grams: null,
+    calories: null,
+    protein_g: null,
+    carbs_g: null,
+    fat_g: null,
+    calories_estimated: null,
+    protein_g_estimated: null,
+    carbs_g_estimated: null,
+    fat_g_estimated: null,
+    source: null,
+    is_edited: false,
+    created_at: event.created_at,
+    updated_at: event.updated_at,
+  };
+}
+
+/**
  * Drop an optimistic event and its synthetic saved-food item from Today's state
  * by optimistic id — shared by the server-error rollback and the unreachable
  * discard paths the submit machine drives through the bridge.
@@ -257,8 +295,20 @@ export function TodayScreen({
   const [sheetTarget, setSheetTarget] = useState<{
     item: DerivedItem;
     logPhrase: string;
+    /** True when the sheet opens in clarify-mode for a needs_clarification event. */
+    needsClarification?: boolean;
+    /** The needs_clarification event id being resolved (clarify-mode only). */
+    eventId?: string;
   } | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
+  // Needs_clarification events the user has answered this session (FTY-149).
+  // Render state only (per the story's privacy note): an answered entry is
+  // superseded by the re-submitted, now-counting entry, so it is filtered from
+  // the timeline even though the server still lists it as needs_clarification
+  // until a future backend resolve path lands.
+  const [resolvedClarificationIds, setResolvedClarificationIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
 
   // The submit machine reads the latest selected saved food at submit time, and
   // each in-flight submit stashes its saved food by optimistic id so the right
@@ -496,6 +546,67 @@ export function TodayScreen({
   }, []);
   const closeItemSheet = useCallback(() => setSheetVisible(false), []);
 
+  // Open the correction sheet in clarify-mode for a needs_clarification entry
+  // (FTY-149). Reuses the single mounted sheet via a minimal placeholder item;
+  // clarify-mode shows Fatty's question (when known) + quick-pick chips + the
+  // free-text fallback, and never auto-fills the missing detail.
+  const openClarifySheet = useCallback((event: LogEventDTO) => {
+    setSheetTarget({
+      item: clarificationPlaceholderItem(event),
+      logPhrase: event.raw_text,
+      needsClarification: true,
+      eventId: event.id,
+    });
+    setSheetVisible(true);
+  }, []);
+
+  // Resolve a needs_clarification entry from the user's answer (FTY-149). With no
+  // backend resolve endpoint yet, the answer travels the existing create path:
+  // the user's typed phrase plus their answer become one re-submitted entry that
+  // the estimator resolves and that then *counts* in the hero/macros. The
+  // original needs-a-detail entry is marked resolved so it drops its treatment
+  // and is superseded in place — calm, no navigation, never auto-filled.
+  const handleClarificationResolved = useCallback(
+    async (eventId: string, rawText: string, answer: string) => {
+      closeItemSheet();
+      if (!apiSession) return;
+      const trimmed = answer.trim();
+      if (!trimmed) return;
+      setResolvedClarificationIds((prev) => {
+        const next = new Set(prev);
+        next.add(eventId);
+        return next;
+      });
+      const combined = `${rawText} ${trimmed}`.trim();
+      const id = `${OPTIMISTIC_ID_PREFIX}${tempId.current++}`;
+      const optimistic = optimisticLogEvent({
+        id,
+        userId: apiSession.userId,
+        rawText: combined,
+        createdAt: new Date().toISOString(),
+      });
+      setEvents((prev) => sortByNewest([optimistic, ...prev]));
+      try {
+        const created = await create(apiSession, combined);
+        setEvents((prev) =>
+          sortByNewest(prev.map((e) => (e.id === id ? created : e))),
+        );
+      } catch (error) {
+        setEvents((prev) => prev.filter((e) => e.id !== id));
+        // Roll back the optimistic hide so the original needs_clarification
+        // row reappears in the timeline — otherwise the entry is filtered for
+        // the rest of the session with no user-reachable retry path.
+        setResolvedClarificationIds((prev) => {
+          const next = new Set(prev);
+          next.delete(eventId);
+          return next;
+        });
+        setSubmitError(messageFor(error, "save"));
+      }
+    },
+    [apiSession, create, closeItemSheet, setSubmitError],
+  );
+
   // Reconcile a confirmed edit (the server's current item) back into the map,
   // replacing the prior item for its event by id so the timeline re-renders the
   // server values — including any servings-rescaled calories/macros.
@@ -539,7 +650,14 @@ export function TodayScreen({
   // (not `events`) so the timeline clusters them newest-first alongside server
   // rows; ClusterView renders them through OfflineEntryRow by their id.
   const displayEvents = useMemo(() => {
-    if (offlineEntries.length === 0) return events;
+    // Drop entries the user has answered this session — they are superseded in
+    // place by the now-counting re-submission, even after a poll re-fetches the
+    // still-needs_clarification server row (FTY-149).
+    const visible =
+      resolvedClarificationIds.size === 0
+        ? events
+        : events.filter((event) => !resolvedClarificationIds.has(event.id));
+    if (offlineEntries.length === 0) return visible;
     const offlineEvents = offlineEntries
       .filter((entry) => entry.syncState !== "accepted")
       .map((entry) =>
@@ -550,8 +668,8 @@ export function TodayScreen({
           createdAt: entry.capturedAt,
         }),
       );
-    return sortByNewest([...events, ...offlineEvents]);
-  }, [events, offlineEntries]);
+    return sortByNewest([...visible, ...offlineEvents]);
+  }, [events, offlineEntries, resolvedClarificationIds]);
 
   if (!session) {
     return <SignInRequired insetTop={insets.top + 24} />;
@@ -723,6 +841,7 @@ export function TodayScreen({
           editItem={editItem}
           onItemChange={handleItemChange}
           onOpenItem={openItemSheet}
+          onOpenClarify={openClarifySheet}
           phase={phase}
           loadError={loadError}
           onRetry={() => void refresh()}
@@ -741,6 +860,17 @@ export function TodayScreen({
           onClose={closeItemSheet}
           session={apiSession}
           onItemChange={handleItemChange}
+          needsClarification={sheetTarget.needsClarification ?? false}
+          onClarificationResolved={
+            sheetTarget.needsClarification && sheetTarget.eventId
+              ? (answer) =>
+                  void handleClarificationResolved(
+                    sheetTarget.eventId as string,
+                    sheetTarget.logPhrase,
+                    answer,
+                  )
+              : undefined
+          }
           editItem={editItem}
           listCandidates={listSourceCandidates}
           reResolve={reResolveItem}
@@ -759,6 +889,7 @@ function Timeline({
   editItem,
   onItemChange,
   onOpenItem,
+  onOpenClarify,
   phase,
   loadError,
   onRetry,
@@ -774,6 +905,7 @@ function Timeline({
   editItem: typeof editDerivedItemApi;
   onItemChange: (item: DerivedItem) => void;
   onOpenItem: (item: DerivedItem, logPhrase: string) => void;
+  onOpenClarify: (event: LogEventDTO) => void;
   phase: Phase;
   loadError: string | null;
   onRetry: () => void;
@@ -842,6 +974,7 @@ function Timeline({
           editItem={editItem}
           onItemChange={onItemChange}
           onOpenItem={onOpenItem}
+          onOpenClarify={onOpenClarify}
           saveFood={saveFood}
           colors={colors}
         />
@@ -872,6 +1005,7 @@ function ClusterView({
   editItem,
   onItemChange,
   onOpenItem,
+  onOpenClarify,
   saveFood,
   colors,
 }: {
@@ -882,6 +1016,7 @@ function ClusterView({
   editItem: typeof editDerivedItemApi;
   onItemChange: (item: DerivedItem) => void;
   onOpenItem: (item: DerivedItem, logPhrase: string) => void;
+  onOpenClarify: (event: LogEventDTO) => void;
   saveFood: typeof saveFoodApi;
   colors: ReturnType<typeof useTheme>["colors"];
 }) {
@@ -933,7 +1068,8 @@ function ClusterView({
             ));
           }
 
-          // needs_clarification → muted placeholder row
+          // needs_clarification → legible, inviting "needs a detail" row whose
+          // tap opens the clarify-mode sheet (FTY-149).
           if (event.status === "needs_clarification") {
             return (
               <EntryRow
@@ -944,6 +1080,7 @@ function ClusterView({
                 editItem={editItem}
                 onItemChange={onItemChange}
                 saveFoodFn={saveFood}
+                onPress={() => onOpenClarify(event)}
               />
             );
           }

@@ -523,6 +523,197 @@ describe("TodayScreen correction sheet wiring", () => {
   });
 });
 
+// ─── Needs-clarification legibility + clarify-mode wiring (FTY-149) ───────────
+
+describe("TodayScreen needs-clarification entries", () => {
+  it("renders a needs_clarification entry legibly and invitingly, never a silent row", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: "a", raw_text: "milk", status: "needs_clarification" }),
+      ]);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
+    await act(async () => {});
+
+    // The gentle "needs a detail" affordance + inviting call-to-action are
+    // present — not a bare dashed "—" silent row.
+    const text = textContent(tree);
+    expect(text).toContain("needs a detail");
+    expect(text).toContain("Add a detail");
+    // The typed phrase still reads in the row.
+    expect(text).toContain("milk");
+  });
+
+  it("exposes the needs-a-detail state and a resolve hint to VoiceOver on a ≥44pt target", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: "a", raw_text: "milk", status: "needs_clarification" }),
+      ]);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
+    await act(async () => {});
+
+    const row = tree.root.find(
+      (n) =>
+        n.props.accessibilityLabel === "milk, needs a detail, uncounted" &&
+        typeof n.props.onPress === "function",
+    );
+    expect(row.props.accessibilityRole).toBe("button");
+    expect(row.props.accessibilityHint).toBe(
+      "Tap to add the missing detail so Fatty can count it",
+    );
+    expect(resolvedStyle(row).minHeight).toBeGreaterThanOrEqual(44);
+  });
+
+  it("opens the correction sheet in clarify-mode on tap, with no auto-filled detail", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: "a", raw_text: "milk", status: "needs_clarification" }),
+      ]);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
+    await act(async () => {});
+
+    // The clarify free-text input is not mounted until the row is tapped.
+    expect(hasA11yLabel(tree, "Your answer")).toBe(false);
+
+    press(tree, "milk, needs a detail, uncounted");
+
+    // Clarify-mode is shown: free-text fallback present, and the missing detail
+    // is never pre-filled (Fatty does not fabricate the answer).
+    expect(hasA11yLabel(tree, "Your answer")).toBe(true);
+    expect(inputValue(tree, "Your answer")).toBe("");
+    // Clarify-mode only — the amount stepper / change-match levers stay hidden.
+    expect(hasA11yLabel(tree, "Increase amount")).toBe(false);
+  });
+
+  it("resolves via the existing create path so the entry recomputes and counts", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: "a", raw_text: "milk", status: "needs_clarification" }),
+      ]);
+    const create = jest
+      .fn()
+      .mockResolvedValue(
+        event({ id: "b", raw_text: "milk 2%", status: "completed" }),
+      );
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        create={create}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    press(tree, "milk, needs a detail, uncounted");
+    typeInto(tree, "Your answer", "2%");
+    await act(async () => {
+      press(tree, "Submit answer");
+    });
+
+    // The answer travels the existing create path as the typed phrase + answer,
+    // never auto-filled or fabricated.
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+      "milk 2%",
+    );
+
+    // The original needs-a-detail entry is superseded in place: its treatment is
+    // gone and the now-counting re-submission stands in for it.
+    expect(hasA11yLabel(tree, "milk, needs a detail, uncounted")).toBe(false);
+    expect(textContent(tree)).toContain("milk 2%");
+  });
+
+  it("restores the original entry and surfaces an error when the clarify re-submission fails", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: "a", raw_text: "milk", status: "needs_clarification" }),
+      ]);
+    const create = jest
+      .fn()
+      .mockRejectedValue(
+        new LogEventApiError(422, "That entry couldn't be saved."),
+      );
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        create={create}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    press(tree, "milk, needs a detail, uncounted");
+    typeInto(tree, "Your answer", "2%");
+    await act(async () => {
+      press(tree, "Submit answer");
+    });
+
+    // The create failed: the optimistic hide is rolled back so the original
+    // needs-a-detail entry reappears (a user-reachable retry path), and the
+    // failure is surfaced rather than swallowed.
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+      "milk 2%",
+    );
+    expect(hasA11yLabel(tree, "milk, needs a detail, uncounted")).toBe(true);
+    expect(textContent(tree)).toContain("That entry couldn't be saved.");
+  });
+
+  it("keeps the answered entry hidden even after a poll re-fetches it as needs_clarification", async () => {
+    jest.useFakeTimers();
+    try {
+      const load = jest
+        .fn()
+        // Initial load + every poll keep returning the still-unresolved server row.
+        .mockResolvedValue([
+          event({ id: "a", raw_text: "milk", status: "needs_clarification" }),
+        ]);
+      const create = jest
+        .fn()
+        .mockResolvedValue(
+          event({ id: "b", raw_text: "milk 2%", status: "pending" }),
+        );
+      const tree = mount(
+        <TodayScreen
+          session={SESSION}
+          load={load}
+          create={create}
+          useActive={() => true}
+          pollIntervalMs={1000}
+        />,
+      );
+      await act(async () => {});
+
+      press(tree, "milk, needs a detail, uncounted");
+      typeInto(tree, "Your answer", "2%");
+      await act(async () => {
+        press(tree, "Submit answer");
+      });
+
+      // The re-submission is pending → polling runs and re-fetches the original
+      // needs_clarification row; it must stay filtered (resolved this session).
+      act(() => jest.advanceTimersByTime(1000));
+      await act(async () => {});
+
+      expect(hasA11yLabel(tree, "milk, needs a detail, uncounted")).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
 describe("TodayScreen polling", () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
