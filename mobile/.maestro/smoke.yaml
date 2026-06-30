@@ -1,0 +1,22 @@
+# FTY-160 smoke flow: launch the E2E debug build and assert the app reaches Today.
+#
+# The app under test is a debug binary built with EXPO_PUBLIC_FATTY_E2E=true
+# (see verify-e2e.sh). On launch it:
+#   - seeds a synthetic authenticated session (no live auth dependency),
+#   - installs an in-process fetch mock returning hermetic fixtures,
+#   - marks onboarding complete for the E2E user.
+# AuthGate therefore routes straight to Today.
+#
+# Assertion: the Today screen ScrollView carries testID="today-screen"
+# (added in FTY-160). Maestro queries the accessibility tree by testId.
+#
+# Bundle ID: defaults to com.fatty (Expo prebuild from slug "fatty").
+# Set APP_BUNDLE_ID env var or edit the appId below if your prebuild
+# produced a different bundle identifier.
+appId: ${APP_BUNDLE_ID:-com.fatty}
+---
+- launchApp:
+    clearState: false
+- assertVisible:
+    testId: today-screen
+    timeout: 15000

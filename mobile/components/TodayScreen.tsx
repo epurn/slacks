@@ -753,6 +753,7 @@ export function TodayScreen({
       </Modal>
 
       <ScrollView
+        testID="today-screen"
         style={[styles.screen, { backgroundColor: colors.surface }]}
         contentContainerStyle={[
           styles.content,
