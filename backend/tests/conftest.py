@@ -7,6 +7,7 @@ migration itself is exercised by the same tests that exercise the API.
 
 from __future__ import annotations
 
+import os
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -21,6 +22,12 @@ from app.db import create_db_engine
 from app.main import create_app
 from app.security.rate_limit import InMemoryRateLimiter
 from app.settings import Settings
+
+#: Env var holding a Postgres URL for the opt-in, Postgres-exercised migration
+#: guard (FTY-143). When set, the Postgres migration test runs against it; when
+#: unset, that test skips so a fresh checkout and the SQLite-only path stay green
+#: without a running Postgres. CI wires this against a real Postgres in FTY-144.
+POSTGRES_TEST_URL_ENV = "FATTY_TEST_DATABASE_URL"
 
 
 class RecordingEnqueuer:
@@ -74,6 +81,35 @@ def db_engine(tmp_path: Path) -> Iterator[Engine]:
     upgrade(engine)
     try:
         yield engine
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture
+def pg_engine() -> Iterator[Engine]:
+    """A Postgres engine for the opt-in migration guard (FTY-143).
+
+    Built from ``FATTY_TEST_DATABASE_URL`` via the production ``create_db_engine``
+    (so the test exercises the same driver/URL handling the deploy uses). Skips
+    the requesting test when the env var is unset, keeping the SQLite-only path
+    green without a running Postgres.
+
+    Unlike the SQLite engines, a Postgres database persists across runs, so the
+    fixture brackets the test with ``downgrade base`` on both setup and teardown:
+    setup clears any schema a previous (possibly failed) run left behind, and
+    teardown leaves the database empty for the next run. No application or user
+    data is involved — the migrations operate on a synthetic schema only.
+    """
+
+    url = os.environ.get(POSTGRES_TEST_URL_ENV)
+    if not url:
+        pytest.skip(f"{POSTGRES_TEST_URL_ENV} not set; skipping Postgres migration guard")
+
+    engine = create_db_engine(url)
+    try:
+        downgrade(engine, "base")
+        yield engine
+        downgrade(engine, "base")
     finally:
         engine.dispose()
 

@@ -24,3 +24,20 @@ Tests are part of the feature, not a follow-up.
 - Estimator change: structured output validation, adversarial input, failed provider path.
 - Privacy/security change: negative test proving the control fails closed.
 
+## Migrations Run Against Postgres Too
+
+Migrations apply by default against a throwaway SQLite database (fast, no
+service). SQLite is permissive, though, and silently tolerates DDL that the
+deploy target (Postgres) rejects — e.g. a `BOOLEAN` column with an integer
+server default (`BOOLEAN DEFAULT 0`). An SQLite-only gate gives false
+confidence, so DB-touching code is also exercised against the production
+datastore:
+
+- Set **`FATTY_TEST_DATABASE_URL`** to a Postgres URL (e.g. the Compose `db`
+  service) and the Postgres migration guard (`tests/test_postgres_migration.py`)
+  runs the full chain — `upgrade head` → `downgrade base` → `upgrade head` —
+  against it via the `pg_engine` fixture in `tests/conftest.py`.
+- When the var is unset the guard **skips cleanly**, so a fresh checkout and the
+  default `make verify` stay green with no Postgres dependency. CI supplies a
+  real Postgres and exports the var so the guard is enforced on every PR.
+
