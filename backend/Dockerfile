@@ -18,9 +18,18 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.21 /uv /uvx /usr/local/bin/
 # pinned-dependency principle. NO credentials are added here — only the binary
 # and its runtime. The operator's Claude Code session is mounted at runtime via
 # the compose claude-config volume; nothing session-related is baked in.
+#
+# CLAUDE_CODE_VERSION pin rationale (FTY-150): the pin MUST track a CLI release
+# new enough to recognise the model id set in FATTY_LLM_MODEL. Older releases
+# (e.g. 1.0.18) default to a retired model id and return 404 on every provider
+# call, making the claude_code subscription path dead on arrival. Verified
+# working on 2.1.195 during v1 RC dogfooding; pinned to the latest stable at
+# implementation time. The CLI evolves quickly — a stale pin silently breaks the
+# provider, so bump this when upgrading the configured model or when a newer
+# release fixes a relevant bug.
 # ---------------------------------------------------------------------------
 ARG NODE_MAJOR=22
-ARG CLAUDE_CODE_VERSION=1.0.18
+ARG CLAUDE_CODE_VERSION=2.1.196
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
