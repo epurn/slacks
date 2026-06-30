@@ -633,6 +633,44 @@ describe("TodayScreen needs-clarification entries", () => {
     expect(textContent(tree)).toContain("milk 2%");
   });
 
+  it("restores the original entry and surfaces an error when the clarify re-submission fails", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: "a", raw_text: "milk", status: "needs_clarification" }),
+      ]);
+    const create = jest
+      .fn()
+      .mockRejectedValue(
+        new LogEventApiError(422, "That entry couldn't be saved."),
+      );
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        create={create}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    press(tree, "milk, needs a detail, uncounted");
+    typeInto(tree, "Your answer", "2%");
+    await act(async () => {
+      press(tree, "Submit answer");
+    });
+
+    // The create failed: the optimistic hide is rolled back so the original
+    // needs-a-detail entry reappears (a user-reachable retry path), and the
+    // failure is surfaced rather than swallowed.
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+      "milk 2%",
+    );
+    expect(hasA11yLabel(tree, "milk, needs a detail, uncounted")).toBe(true);
+    expect(textContent(tree)).toContain("That entry couldn't be saved.");
+  });
+
   it("keeps the answered entry hidden even after a poll re-fetches it as needs_clarification", async () => {
     jest.useFakeTimers();
     try {

@@ -593,6 +593,14 @@ export function TodayScreen({
         );
       } catch (error) {
         setEvents((prev) => prev.filter((e) => e.id !== id));
+        // Roll back the optimistic hide so the original needs_clarification
+        // row reappears in the timeline — otherwise the entry is filtered for
+        // the rest of the session with no user-reachable retry path.
+        setResolvedClarificationIds((prev) => {
+          const next = new Set(prev);
+          next.delete(eventId);
+          return next;
+        });
         setSubmitError(messageFor(error, "save"));
       }
     },
