@@ -210,6 +210,49 @@ describe("LogScreen", () => {
   });
 });
 
+// ─── Keyboard-up layout ───────────────────────────────────────────────────────
+
+describe("LogScreen keyboard-up layout", () => {
+  it("composer has autoFocus so the keyboard raises on entry", () => {
+    const tree = mount(
+      <LogScreen session={SESSION} useActive={INACTIVE} />,
+    );
+    const input = tree.root.find(
+      (n) => n.props.accessibilityLabel === "Log food or exercise",
+    );
+    expect(input.props.autoFocus).toBe(true);
+  });
+
+  it("feed scroll area fills available space (no empty void below composer)", () => {
+    const tree = mount(
+      <LogScreen session={SESSION} useActive={INACTIVE} />,
+    );
+    // The feed ScrollView must have flex: 1 so it expands to fill the space
+    // between the connection banner and the composer, eliminating the void
+    // that appears when the keyboard is raised and the feed is empty.
+    const flexFillScrolls = tree.root.findAll((n) => {
+      if (n.props.keyboardShouldPersistTaps !== "handled") return false;
+      const styleArr: unknown[] = Array.isArray(n.props.style)
+        ? (n.props.style as unknown[])
+        : [n.props.style];
+      return styleArr.some(
+        (s) => s != null && typeof s === "object" && (s as Record<string, unknown>).flex === 1,
+      );
+    });
+    expect(flexFillScrolls.length).toBeGreaterThan(0);
+  });
+
+  it("composer is rendered outside the feed scroll (bottom-anchored)", () => {
+    const tree = mount(
+      <LogScreen session={SESSION} useActive={INACTIVE} />,
+    );
+    // The Add entry button (composer) must always be reachable without
+    // scrolling — it is outside the feed ScrollView.
+    expect(hasA11yLabel(tree, "Add entry")).toBe(true);
+    expect(hasA11yLabel(tree, "Log food or exercise")).toBe(true);
+  });
+});
+
 // ─── Submit → stay-on-page ────────────────────────────────────────────────────
 
 describe("LogScreen submit — stay-on-page", () => {

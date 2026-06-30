@@ -1,7 +1,9 @@
 import {
   AccessibilityInfo,
   Animated,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -65,6 +67,7 @@ import {
   typeScale,
   useTheme,
 } from "@/theme";
+import { lightHaptic } from "@/utils/haptics";
 
 const MAX_RAW_TEXT_LENGTH = 2000;
 
@@ -104,6 +107,11 @@ function messageFor(error: unknown): string {
  * The Log page (FTY-099): a keyboard-up natural-language composer with a
  * reactive saved-food typeahead, barcode and label capture affordances, and a
  * transient added-this-session feed.
+ *
+ * Layout: the composer is pinned at the bottom of the screen above the
+ * keyboard (KeyboardAvoidingView), with the feed occupying the scrollable
+ * space above it. Opening the page auto-raises the keyboard (autoFocus on the
+ * input) so the user lands directly in compose mode with no dead space.
  *
  * On submit the page stays on Log — no navigation — the input clears, and the
  * entry joins the feed. While the backend estimates an entry, a skeleton/shimmer
@@ -276,14 +284,17 @@ export function LogScreen({
       createdAt: capturedAt,
     });
 
+    // Immediate acknowledgement: entry appears in feed and composer clears
+    // before the API round-trip, so submit never feels like a no-op.
     setFeed((prev) => [
       { key: idempotencyKey, event: optimistic, savedFood: pendingSavedFood },
       ...prev,
     ]);
-    // Clear the composer immediately so the next entry can be typed at once.
     setText("");
     setSubmitting(true);
     setSubmitError(null);
+    // Signature "entry added" beat so the submit feels physical and confirmed.
+    lightHaptic();
 
     try {
       const created = await create(apiSession, trimmed, idempotencyKey);
@@ -434,102 +445,67 @@ export function LogScreen({
         )}
       </Modal>
 
-      <ScrollView
+      {/*
+       * Keyboard-up composer layout: the composer is pinned at the bottom and
+       * the feed fills the space above it. KeyboardAvoidingView lifts the
+       * composer when the keyboard appears, so there is never a dead void
+       * between the feed and the keyboard.
+       */}
+      <KeyboardAvoidingView
         style={[styles.screen, { backgroundColor: colors.surface }]}
-        contentContainerStyle={[
-          styles.content,
-          { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 96 },
-        ]}
-        keyboardShouldPersistTaps="handled"
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         {/* Calm connection-status banner (hidden when online and caught up). */}
         <ConnectionBanner state={reachability} queuedCount={queuedCount} />
 
-        {/* Composer: keyboard-up natural-language input */}
-        <View style={styles.composer}>
-          <TextInput
-            accessibilityLabel="Log food or exercise"
-            placeholder="What did you eat or do?"
-            placeholderTextColor={colors.textMuted}
-            value={text}
-            onChangeText={setText}
-            multiline
-            maxLength={MAX_RAW_TEXT_LENGTH}
-            editable={!submitting}
-            autoFocus
-            style={[
-              styles.input,
-              { backgroundColor: colors.surfaceRaised, color: colors.text },
-            ]}
-          />
-          <View style={styles.composerActions}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Scan barcode"
-              accessibilityHint="Opens the camera to scan a product barcode"
-              accessibilityState={{ disabled: submitting }}
-              disabled={submitting}
-              onPress={() => setScannerOpen(true)}
-              style={[
-                styles.captureButton,
-                { backgroundColor: colors.controlBackground },
-              ]}
+        {/* Feed: fills available space between banner and composer. */}
+        <ScrollView
+          style={styles.feed}
+          contentContainerStyle={[
+            styles.feedContent,
+            { paddingTop: 12, paddingBottom: spacing.md },
+          ]}
+          keyboardShouldPersistTaps="handled"
+        >
+          {submitError ? (
+            <Text
+              style={[styles.error, { color: colors.coral }]}
+              accessibilityRole="alert"
             >
-              <AppIcon
-                name="barcode.viewfinder"
-                size={20}
-                color={colors.text}
-              />
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Capture label"
-              accessibilityHint="Opens the camera to photograph a nutrition label"
-              accessibilityState={{ disabled: submitting || !apiSession }}
-              disabled={submitting || !apiSession}
-              onPress={() => setLabelCaptureOpen(true)}
-              style={[
-                styles.captureButton,
-                { backgroundColor: colors.controlBackground },
-              ]}
-            >
-              <AppIcon
-                name="camera.fill"
-                size={20}
-                color={colors.text}
-              />
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Add entry"
-              accessibilityState={{ disabled: !canSubmit }}
-              disabled={!canSubmit}
-              onPress={() => void handleSubmit()}
-              style={[
-                styles.addButton,
-                {
-                  backgroundColor: canSubmit
-                    ? colors.accent
-                    : colors.controlBackground,
-                },
-              ]}
-            >
-              <Text
+              {submitError}
+            </Text>
+          ) : null}
+
+          {rows.length > 0 && (
+            <View style={styles.feedSection}>
+              <Text style={[styles.feedLabel, { color: colors.textMuted }]}>
+                Added this session
+              </Text>
+              <View
                 style={[
-                  styles.addButtonLabel,
-                  {
-                    color: canSubmit
-                      ? colors.accentForeground
-                      : colors.textMuted,
-                  },
+                  styles.feedList,
+                  { backgroundColor: colors.surfaceRaised },
                 ]}
               >
-                {submitting ? "Adding…" : "Add"}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
+                {rows.map((entry, index) => (
+                  <View key={entry.key}>
+                    {index > 0 && (
+                      <View
+                        style={[
+                          styles.separator,
+                          { backgroundColor: colors.separator },
+                        ]}
+                      />
+                    )}
+                    <FeedRow entry={entry} />
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+        </ScrollView>
 
+        {/* Typeahead appears between feed and composer, keyboard-side. */}
         <TypeaheadSuggestionBar
           query={text}
           session={apiSession}
@@ -540,43 +516,98 @@ export function LogScreen({
           search={searchSavedFoods}
         />
 
-        {submitError ? (
-          <Text
-            style={[styles.error, { color: colors.coral }]}
-            accessibilityRole="alert"
-          >
-            {submitError}
-          </Text>
-        ) : null}
-
-        {rows.length > 0 && (
-          <View style={styles.feedSection}>
-            <Text style={[styles.feedLabel, { color: colors.textMuted }]}>
-              Added this session
-            </Text>
-            <View
+        {/* Composer: keyboard-up natural-language input, pinned at bottom. */}
+        <View
+          style={[
+            styles.composerContainer,
+            { paddingBottom: insets.bottom + spacing.md },
+          ]}
+        >
+          <View style={styles.composer}>
+            <TextInput
+              accessibilityLabel="Log food or exercise"
+              placeholder="What did you eat or do?"
+              placeholderTextColor={colors.textMuted}
+              value={text}
+              onChangeText={setText}
+              multiline
+              maxLength={MAX_RAW_TEXT_LENGTH}
+              editable={!submitting}
+              autoFocus
               style={[
-                styles.feedList,
-                { backgroundColor: colors.surfaceRaised },
+                styles.input,
+                { backgroundColor: colors.surfaceRaised, color: colors.text },
               ]}
-            >
-              {rows.map((entry, index) => (
-                <View key={entry.key}>
-                  {index > 0 && (
-                    <View
-                      style={[
-                        styles.separator,
-                        { backgroundColor: colors.separator },
-                      ]}
-                    />
-                  )}
-                  <FeedRow entry={entry} />
-                </View>
-              ))}
+            />
+            <View style={styles.composerActions}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Scan barcode"
+                accessibilityHint="Opens the camera to scan a product barcode"
+                accessibilityState={{ disabled: submitting }}
+                disabled={submitting}
+                onPress={() => setScannerOpen(true)}
+                style={[
+                  styles.captureButton,
+                  { backgroundColor: colors.controlBackground },
+                ]}
+              >
+                <AppIcon
+                  name="barcode.viewfinder"
+                  size={20}
+                  color={colors.text}
+                />
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Capture label"
+                accessibilityHint="Opens the camera to photograph a nutrition label"
+                accessibilityState={{ disabled: submitting || !apiSession }}
+                disabled={submitting || !apiSession}
+                onPress={() => setLabelCaptureOpen(true)}
+                style={[
+                  styles.captureButton,
+                  { backgroundColor: colors.controlBackground },
+                ]}
+              >
+                <AppIcon
+                  name="camera.fill"
+                  size={20}
+                  color={colors.text}
+                />
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Add entry"
+                accessibilityState={{ disabled: !canSubmit }}
+                disabled={!canSubmit}
+                onPress={() => void handleSubmit()}
+                style={[
+                  styles.addButton,
+                  {
+                    backgroundColor: canSubmit
+                      ? colors.accent
+                      : colors.controlBackground,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.addButtonLabel,
+                    {
+                      color: canSubmit
+                        ? colors.accentForeground
+                        : colors.textMuted,
+                    },
+                  ]}
+                >
+                  {submitting ? "Adding…" : "Add"}
+                </Text>
+              </Pressable>
             </View>
           </View>
-        )}
-      </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
     </>
   );
 }
@@ -770,15 +801,22 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
   },
-  content: {
+  feed: {
+    flex: 1,
+  },
+  feedContent: {
     paddingHorizontal: spacing.base,
+    flexGrow: 1,
+  },
+  composerContainer: {
+    paddingHorizontal: spacing.base,
+    paddingTop: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   composer: {
     flexDirection: "row",
     alignItems: "flex-end",
     gap: spacing.sm,
-    marginTop: spacing.sm,
-    marginBottom: spacing.base,
   },
   composerActions: {
     flexDirection: "row",
