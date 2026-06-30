@@ -17,6 +17,22 @@ let mockTriggerScan:
   | ((result: { data: string; type: string }) => void)
   | undefined;
 
+// TodayScreen now renders AppIcon (expo-symbols) for the gear button; stub the
+// native SymbolView so tests run without a native module.
+jest.mock("expo-symbols", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const ReactNative = require("react-native");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const ReactLib = require("react");
+  return {
+    SymbolView: ({ name, accessibilityLabel }: { name: string; accessibilityLabel?: string }) =>
+      ReactLib.createElement(ReactNative.View, {
+        testID: `sf-symbol-${String(name)}`,
+        accessibilityLabel,
+      }),
+  };
+});
+
 jest.mock("expo-camera", () => {
   // Use require() inside the factory — jest.mock() factories run before imports
   // and cannot close over module-scope variables (except mock-prefixed ones).
