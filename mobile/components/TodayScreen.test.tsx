@@ -310,6 +310,143 @@ describe("TodayScreen derived items", () => {
   });
 });
 
+// ─── Correction / detail sheet wiring (FTY-148) ──────────────────────────────
+
+/** Resolve the style object for a node, collapsing a Pressable style function. */
+function resolvedStyle(node: { props: { style?: unknown } }): Record<string, unknown> {
+  const raw =
+    typeof node.props.style === "function"
+      ? (node.props.style as (s: { pressed: boolean }) => unknown)({ pressed: false })
+      : node.props.style;
+  return Object.assign(
+    {},
+    ...([] as unknown[]).concat(raw).filter(Boolean) as Record<string, unknown>[],
+  );
+}
+
+describe("TodayScreen correction sheet wiring", () => {
+  it("opens the correction sheet for a tapped completed item; the sheet is not mounted until then", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([event({ id: "a", raw_text: "Greek yogurt", status: "completed" })]);
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        items={{ a: [foodItem()] }}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    // Dead until wired: the sheet (and its stepper) is not in the tree yet.
+    expect(hasA11yLabel(tree, "Increase amount")).toBe(false);
+
+    // Tapping the completed item row opens the sheet (mounted, reachable).
+    press(tree, "Greek yogurt, 150 kcal");
+    expect(hasA11yLabel(tree, "Increase amount")).toBe(true);
+    expect(hasA11yLabel(tree, "Decrease amount")).toBe(true);
+  });
+
+  it("opens the sheet for the specific item that was tapped", async () => {
+    const editItem = jest.fn().mockResolvedValue(foodItem({ id: "item-b" }));
+    const load = jest
+      .fn()
+      .mockResolvedValue([event({ id: "a", raw_text: "Two snacks", status: "completed" })]);
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        editItem={editItem}
+        items={{
+          a: [
+            foodItem({ id: "item-a", name: "Apple", calories: 95 }),
+            foodItem({ id: "item-b", name: "Banana", calories: 105 }),
+          ],
+        }}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    // Tap the second row, then exercise a lever; the edit targets that item's id.
+    press(tree, "Banana, 105 kcal");
+    await act(async () => {
+      press(tree, "Increase amount");
+    });
+
+    expect(editItem).toHaveBeenCalledTimes(1);
+    const [, itemType, itemId] = editItem.mock.calls[0];
+    expect(itemType).toBe("food");
+    expect(itemId).toBe("item-b");
+  });
+
+  it("drives the portion stepper end-to-end and reflects the recomputed item on close", async () => {
+    // The server recomputes calories for the new portion; the UI re-renders the
+    // returned values (never client math) and the timeline reflects them on close.
+    const editItem = jest
+      .fn()
+      .mockResolvedValue(foodItem({ amount: 1.25, calories: 188 }));
+    const load = jest
+      .fn()
+      .mockResolvedValue([event({ id: "a", raw_text: "Greek yogurt", status: "completed" })]);
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        editItem={editItem}
+        items={{ a: [foodItem()] }}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    press(tree, "Greek yogurt, 150 kcal");
+    await act(async () => {
+      press(tree, "Increase amount");
+    });
+
+    // FTY-092 amount-adjust called with the stepped quantity; server values shown.
+    expect(editItem).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+      "food",
+      "item-1",
+      "quantity",
+      1.25,
+    );
+    expect(textContent(tree)).toContain("188");
+
+    // Closing returns to the timeline, which now reflects the recomputed value.
+    press(tree, "Close");
+    expect(hasA11yLabel(tree, "Increase amount")).toBe(false);
+    expect(hasA11yLabel(tree, "Greek yogurt, 188 kcal")).toBe(true);
+  });
+
+  it("exposes a ≥44pt tap target with a VoiceOver label on the completed item row", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([event({ id: "a", raw_text: "Greek yogurt", status: "completed" })]);
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        items={{ a: [foodItem()] }}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    const row = tree.root.find(
+      (n) =>
+        n.props.accessibilityLabel === "Greek yogurt, 150 kcal" &&
+        typeof n.props.onPress === "function",
+    );
+    expect(row.props.accessibilityRole).toBe("button");
+    expect(row.props.accessibilityHint).toBe("Tap to view details");
+    expect(resolvedStyle(row).minHeight).toBeGreaterThanOrEqual(44);
+  });
+});
+
 describe("TodayScreen polling", () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());

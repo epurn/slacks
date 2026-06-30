@@ -12,6 +12,10 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
+  listSourceCandidates as listSourceCandidatesApi,
+  reResolveItem as reResolveItemApi,
+} from "@/api/corrections";
+import {
   editDerivedItem as editDerivedItemApi,
   type DerivedItem,
   type DerivedFoodItemDTO,
@@ -35,6 +39,7 @@ import {
   type SavedFoodDTO,
 } from "@/api/savedFoods";
 import { BarcodeScannerScreen } from "@/components/BarcodeScannerScreen";
+import { CorrectionSheet } from "@/components/CorrectionSheet";
 import { DailySummary } from "@/components/DailySummary";
 import { EntryRow } from "@/components/EntryRow";
 import { ItemTimelineRow } from "@/components/ItemTimelineRow";
@@ -136,6 +141,8 @@ export function TodayScreen({
   pollIntervalMs = POLL_INTERVAL_MS,
   searchSavedFoods = searchSavedFoodsApi,
   saveFood = saveFoodApi,
+  listSourceCandidates = listSourceCandidatesApi,
+  reResolveItem = reResolveItemApi,
   uploadLabel = uploadLabelImageApi,
   labelTakePhoto,
   getDailySummary = getDailySummaryApi,
@@ -158,6 +165,10 @@ export function TodayScreen({
   searchSavedFoods?: typeof searchSavedFoodsApi;
   /** Injectable save-food function for tests (FTY-053). */
   saveFood?: typeof saveFoodApi;
+  /** Injectable change-match candidate list for the correction sheet (FTY-093). */
+  listSourceCandidates?: typeof listSourceCandidatesApi;
+  /** Injectable re-resolve for the correction sheet's change-match lever (FTY-093). */
+  reResolveItem?: typeof reResolveItemApi;
   /** Injectable label upload for tests (FTY-064). */
   uploadLabel?: typeof uploadLabelImageApi;
   /** Injectable photo capture for label-capture tests (FTY-064). */
@@ -200,6 +211,15 @@ export function TodayScreen({
   // Monotonic counter for optimistic placeholder ids; never collides with a
   // server UUID and stays stable across renders.
   const tempId = useRef(0);
+  // The single mounted correction/detail sheet (FTY-100, wired here in FTY-148).
+  // `target` holds the tapped item + its log phrase; `visible` drives the slide
+  // animation. We keep `target` set across a close so the sheet can animate out
+  // without the item vanishing mid-transition; a new tap replaces it in place.
+  const [sheetTarget, setSheetTarget] = useState<{
+    item: DerivedItem;
+    logPhrase: string;
+  } | null>(null);
+  const [sheetVisible, setSheetVisible] = useState(false);
 
   // User-initiated refresh: show the loading state, then bump the reload key so
   // the fetch effect re-runs. Auto-refresh of pending entries is FTY-032.
@@ -400,6 +420,15 @@ export function TodayScreen({
     );
   }, [apiSession, load, getDailySummary]);
 
+  // Open the correction/detail sheet for a tapped timeline item (FTY-148). The
+  // sheet stays put — the timeline does not navigate away — honouring "calm by
+  // default": a correction happens in a slide-up sheet, not a screen push.
+  const openItemSheet = useCallback((item: DerivedItem, logPhrase: string) => {
+    setSheetTarget({ item, logPhrase });
+    setSheetVisible(true);
+  }, []);
+  const closeItemSheet = useCallback(() => setSheetVisible(false), []);
+
   // Reconcile a confirmed edit (the server's current item) back into the map,
   // replacing the prior item for its event by id so the timeline re-renders the
   // server values — including any servings-rescaled calories/macros.
@@ -581,6 +610,7 @@ export function TodayScreen({
           session={apiSession}
           editItem={editItem}
           onItemChange={handleItemChange}
+          onOpenItem={openItemSheet}
           phase={phase}
           loadError={loadError}
           onRetry={() => void refresh()}
@@ -589,6 +619,22 @@ export function TodayScreen({
           summaryError={summaryError}
         />
       </ScrollView>
+
+      {/* The single correction/detail sheet, reused for every tapped item. */}
+      {apiSession && sheetTarget ? (
+        <CorrectionSheet
+          item={sheetTarget.item}
+          logPhrase={sheetTarget.logPhrase}
+          visible={sheetVisible}
+          onClose={closeItemSheet}
+          session={apiSession}
+          onItemChange={handleItemChange}
+          editItem={editItem}
+          listCandidates={listSourceCandidates}
+          reResolve={reResolveItem}
+          saveFood={saveFood}
+        />
+      ) : null}
     </>
   );
 }
@@ -599,6 +645,7 @@ function Timeline({
   session,
   editItem,
   onItemChange,
+  onOpenItem,
   phase,
   loadError,
   onRetry,
@@ -611,6 +658,7 @@ function Timeline({
   session: ApiSession | null;
   editItem: typeof editDerivedItemApi;
   onItemChange: (item: DerivedItem) => void;
+  onOpenItem: (item: DerivedItem, logPhrase: string) => void;
   phase: Phase;
   loadError: string | null;
   onRetry: () => void;
@@ -677,6 +725,7 @@ function Timeline({
           session={session}
           editItem={editItem}
           onItemChange={onItemChange}
+          onOpenItem={onOpenItem}
           saveFood={saveFood}
           colors={colors}
         />
@@ -705,6 +754,7 @@ function ClusterView({
   session,
   editItem,
   onItemChange,
+  onOpenItem,
   saveFood,
   colors,
 }: {
@@ -713,6 +763,7 @@ function ClusterView({
   session: ApiSession | null;
   editItem: typeof editDerivedItemApi;
   onItemChange: (item: DerivedItem) => void;
+  onOpenItem: (item: DerivedItem, logPhrase: string) => void;
   saveFood: typeof saveFoodApi;
   colors: ReturnType<typeof useTheme>["colors"];
 }) {
@@ -725,14 +776,15 @@ function ClusterView({
         {cluster.events.map((event) => {
           const items = itemsByEvent[event.id] ?? [];
 
-          // Completed event with resolved items → show item rows (items-forward)
+          // Completed event with resolved items → show item rows (items-forward).
+          // Tapping a row opens the correction/detail sheet for that item.
           if (event.status === "completed" && items.length > 0) {
             return items.map((item) => (
               <ItemTimelineRow
                 key={item.id}
                 item={item}
                 needsClarification={false}
-                onPress={() => {/* FTY-100: item detail sheet */}}
+                onPress={() => onOpenItem(item, event.raw_text)}
               />
             ));
           }
@@ -744,7 +796,7 @@ function ClusterView({
                 key={item.id}
                 item={item}
                 needsClarification={false}
-                onPress={() => {/* FTY-100: item detail sheet */}}
+                onPress={() => onOpenItem(item, event.raw_text)}
               />
             ));
           }
