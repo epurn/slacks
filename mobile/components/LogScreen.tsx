@@ -520,7 +520,10 @@ export function LogScreen({
         <View
           style={[
             styles.composerContainer,
-            { paddingBottom: insets.bottom + spacing.md },
+            {
+              borderTopColor: colors.separator,
+              paddingBottom: insets.bottom + spacing.md,
+            },
           ]}
         >
           <View style={styles.composer}>
