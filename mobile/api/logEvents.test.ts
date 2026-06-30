@@ -1,6 +1,7 @@
 import {
   LogEventApiError,
   createLogEvent,
+  getLogEventClarification,
   listTodayLogEvents,
   type LogEventDTO,
   type LogEventSession,
@@ -146,5 +147,40 @@ describe("createLogEvent", () => {
       const message = (error as LogEventApiError).message;
       expect(message).not.toContain("a very private note");
     }
+  });
+});
+
+describe("getLogEventClarification", () => {
+  it("GETs the owner-scoped clarification read for the event with a bearer token", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(
+      okResponse({ questions: [{ text: "How much peanut butter?" }] }),
+    );
+
+    const result = await getLogEventClarification(SESSION, "event-1", fetchMock);
+
+    expect(result).toEqual({ questions: [{ text: "How much peanut butter?" }] });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      "https://api.example.test/api/users/11111111-1111-1111-1111-111111111111/log-events/event-1/clarification",
+    );
+    expect(init.method).toBe("GET");
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      "Bearer test-token",
+    );
+  });
+
+  it("returns an empty question list for an event with no clarification rows", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(okResponse({ questions: [] }));
+
+    const result = await getLogEventClarification(SESSION, "event-1", fetchMock);
+
+    expect(result).toEqual({ questions: [] });
+  });
+
+  it("maps a 404 to a fail-closed LogEventApiError", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(errorResponse(404));
+    await expect(
+      getLogEventClarification(SESSION, "event-1", fetchMock),
+    ).rejects.toMatchObject({ name: "LogEventApiError", status: 404 });
   });
 });

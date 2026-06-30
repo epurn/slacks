@@ -39,6 +39,25 @@ export interface LogEventDTO {
   readonly updated_at: string;
 }
 
+/**
+ * A single clarification question Fatty needs answered (FTY-152). v1 surfaces
+ * the question `text` only — the estimator produces no quick-pick options today,
+ * so the clarify sheet answers via free-text. The shape is forward-compatible:
+ * an `options` array can be added additively if the estimator later generates one.
+ */
+export interface ClarificationQuestionDTO {
+  readonly text: string;
+}
+
+/**
+ * Response body for the owner-scoped clarification read (FTY-152). Carries the
+ * event's persisted clarification questions ordered by `position`; an event with
+ * no clarification rows yields `{ questions: [] }` (there is no status oracle).
+ */
+export interface ClarificationDTO {
+  readonly questions: readonly ClarificationQuestionDTO[];
+}
+
 /** Authenticated session needed to address the owner's events. */
 export type LogEventSession = ApiSession;
 
@@ -120,4 +139,28 @@ export async function createLogEvent(
     onError: logEventError,
     fetchImpl,
   });
+}
+
+/**
+ * Read the clarification questions Fatty persisted for a `needs_clarification`
+ * event (FTY-152). The clarify sheet (FTY-153) fetches this lazily when it opens
+ * so the Today list/poll stays lean. Owner-scoped and fail-closed server-side: a
+ * cross-user or unknown `eventId` is a `404`; an event with no clarification rows
+ * returns `{ questions: [] }`. Question text is sensitive and never logged.
+ */
+export async function getLogEventClarification(
+  session: LogEventSession,
+  eventId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ClarificationDTO> {
+  return request<ClarificationDTO>(
+    userScopedUrl(session, "log-events", eventId, "clarification"),
+    {
+      method: "GET",
+      headers: authHeaders(session),
+      action: "load the question",
+      onError: logEventError,
+      fetchImpl,
+    },
+  );
 }
