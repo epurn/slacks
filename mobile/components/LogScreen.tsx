@@ -293,8 +293,6 @@ export function LogScreen({
     setText("");
     setSubmitting(true);
     setSubmitError(null);
-    // Signature "entry added" beat so the submit feels physical and confirmed.
-    lightHaptic();
 
     try {
       const created = await create(apiSession, trimmed, idempotencyKey);
@@ -306,6 +304,10 @@ export function LogScreen({
             : entry,
         ),
       );
+      // Signature "entry added" beat, fired only once the server confirms the
+      // entry — so a rolled-back submit never produces a misleading success
+      // beat (the haptic matches the real outcome).
+      lightHaptic();
       // We just reached the server — flush any earlier offline backlog now.
       drainNow();
     } catch (error) {
@@ -463,19 +465,10 @@ export function LogScreen({
           style={styles.feed}
           contentContainerStyle={[
             styles.feedContent,
-            { paddingTop: 12, paddingBottom: spacing.md },
+            { paddingTop: spacing.md, paddingBottom: spacing.md },
           ]}
           keyboardShouldPersistTaps="handled"
         >
-          {submitError ? (
-            <Text
-              style={[styles.error, { color: colors.coral }]}
-              accessibilityRole="alert"
-            >
-              {submitError}
-            </Text>
-          ) : null}
-
           {rows.length > 0 && (
             <View style={styles.feedSection}>
               <Text style={[styles.feedLabel, { color: colors.textMuted }]}>
@@ -515,6 +508,20 @@ export function LogScreen({
           }}
           search={searchSavedFoods}
         />
+
+        {/*
+         * Submit error sits directly above the composer — the column the user
+         * is already focused on — so a failed submit is acknowledged in place,
+         * not buried above the feed (FTY-147).
+         */}
+        {submitError ? (
+          <Text
+            style={[styles.error, { color: colors.coral }]}
+            accessibilityRole="alert"
+          >
+            {submitError}
+          </Text>
+        ) : null}
 
         {/* Composer: keyboard-up natural-language input, pinned at bottom. */}
         <View
@@ -859,7 +866,8 @@ const styles = StyleSheet.create({
   error: {
     fontSize: typeScale.footnote,
     marginBottom: spacing.md,
-    marginLeft: spacing.xs,
+    // Align the banner with the composer column it belongs to (FTY-147).
+    paddingHorizontal: spacing.base,
   },
   feedSection: {
     marginTop: spacing.base,

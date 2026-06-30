@@ -13,6 +13,7 @@ import {
 } from "@/api/savedFoods";
 import { useTheme } from "@/theme/ThemeContext";
 import type { ColorPalette } from "@/theme/colors";
+import { spacing } from "@/theme";
 
 /** Debounce window in ms: avoids a network call per keystroke. */
 const DEBOUNCE_MS = 300;
@@ -107,7 +108,9 @@ function makeStyles(colors: ColorPalette) {
       marginTop: 6,
     },
     barContent: {
-      paddingRight: 4,
+      // Inset chips to the composer column so the first chip aligns with the
+      // text input it is completing, not the screen edge (FTY-147).
+      paddingHorizontal: spacing.base,
     },
     chip: {
       backgroundColor: colors.controlBackground,
