@@ -6,6 +6,7 @@ import type { DailySummaryDTO } from "@/api/dailySummary";
 import type { DerivedFoodItemDTO } from "@/api/derivedItems";
 import { LogEventApiError, type LogEventDTO } from "@/api/logEvents";
 import type { SavedFoodDTO } from "@/api/savedFoods";
+import type { OutboxEntry, OutboxStore } from "@/state/outbox";
 import type { Session } from "@/state/session";
 
 // TodayScreen imports BarcodeScannerScreen which imports expo-camera native
@@ -81,6 +82,22 @@ function event(overrides: Partial<LogEventDTO>): LogEventDTO {
 // non-polling tests stay deterministic and never touch a navigation container.
 const INACTIVE = () => false;
 
+// Unmount every tree after each test so a background interval (e.g. the offline
+// outbox retry timer) can never fire into a later test and update an unmounted
+// component.
+const activeTrees: ReactTestRenderer[] = [];
+
+afterEach(() => {
+  for (const tree of activeTrees) {
+    try {
+      act(() => tree.unmount());
+    } catch {
+      // Already unmounted / torn down — ignore.
+    }
+  }
+  activeTrees.length = 0;
+});
+
 // SafeAreaProvider needs frame/insets metrics in a non-native test environment.
 function mount(element: React.ReactElement): ReactTestRenderer {
   let tree!: ReactTestRenderer;
@@ -96,6 +113,7 @@ function mount(element: React.ReactElement): ReactTestRenderer {
       </SafeAreaProvider>,
     );
   });
+  activeTrees.push(tree);
   return tree;
 }
 
@@ -130,6 +148,46 @@ function press(tree: ReactTestRenderer, label: string): void {
   act(() => {
     node.props.onPress();
   });
+}
+
+function inputValue(tree: ReactTestRenderer, label: string): string {
+  const node = tree.root.find(
+    (n) =>
+      n.props.accessibilityLabel === label &&
+      typeof n.props.onChangeText === "function",
+  );
+  return node.props.value as string;
+}
+
+/** A network-layer failure (server unreachable), distinct from an API error. */
+function networkError(): Error {
+  return new TypeError("Network request failed");
+}
+
+/** An in-memory OutboxStore for tests, with the backing data exposed. */
+function memoryStore(initial: Record<string, OutboxEntry[]> = {}): {
+  store: OutboxStore;
+  data: Map<string, OutboxEntry[]>;
+} {
+  const data = new Map<string, OutboxEntry[]>(
+    Object.entries(initial).map(([k, v]) => [k, [...v]]),
+  );
+  const store: OutboxStore = {
+    load: async (userId) => data.get(userId) ?? [],
+    save: async (userId, entries) => {
+      data.set(userId, [...entries]);
+    },
+    clear: async (userId) => {
+      data.delete(userId);
+    },
+  };
+  return { store, data };
+}
+
+/** A deterministic, monotonically-increasing idempotency-key generator. */
+function sequentialKeys(): () => string {
+  let n = 0;
+  return () => `key-${n++}`;
 }
 
 describe("TodayScreen", () => {
@@ -210,9 +268,11 @@ describe("TodayScreen", () => {
     press(tree, "Add entry");
 
     // Optimistic: the entry appears as pending before the create resolves.
+    // create carries the FTY-096 idempotency key minted by the submit machine.
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ userId: SESSION!.userId }),
       "greek yogurt",
+      expect.any(String),
     );
     expect(textContent(tree)).toContain("greek yogurt");
     expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
@@ -1006,6 +1066,7 @@ describe("TodayScreen typeahead suggestion bar", () => {
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ userId: SESSION!.userId }),
       "banana",
+      expect.any(String),
     );
     expect(textContent(tree)).toContain("banana");
   });
@@ -1043,5 +1104,185 @@ describe("TodayScreen typeahead suggestion bar", () => {
     // Entry and synthetic item rolled back; error surfaced.
     expect(textContent(tree)).toContain("That entry couldn't be saved.");
     expect(textContent(tree)).toContain("Log your first thing");
+  });
+});
+
+// ─── Consolidated logging on Today (FTY-147) ─────────────────────────────────
+
+describe("TodayScreen composer — calm, status-first", () => {
+  it("does not auto-focus the composer on mount (Today is the status-home)", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
+    await act(async () => {});
+
+    const input = tree.root.find(
+      (n) => n.props.accessibilityLabel === "Log food or exercise",
+    );
+    // Auto-raising the keyboard on a dashboard is jarring (Calm by default).
+    expect(input.props.autoFocus).toBeFalsy();
+  });
+
+  it("acknowledges a submit in the single timeline — no separate 'added this session' feed", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    let resolveCreate!: (dto: LogEventDTO) => void;
+    const create = jest.fn().mockReturnValue(
+      new Promise<LogEventDTO>((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        create={create}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    typeInto(tree, "Log food or exercise", "greek yogurt");
+    press(tree, "Add entry");
+
+    // Immediate acknowledgement in the canonical timeline; composer cleared.
+    expect(textContent(tree)).toContain("greek yogurt");
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+    expect(inputValue(tree, "Log food or exercise")).toBe("");
+    // There is exactly one timeline — no harvested "Added this session" feed.
+    expect(textContent(tree)).not.toContain("Added this session");
+
+    await act(async () => {
+      resolveCreate(
+        event({ id: "server-1", raw_text: "greek yogurt", status: "completed" }),
+      );
+    });
+    expect(textContent(tree)).toContain("greek yogurt");
+  });
+});
+
+describe("TodayScreen offline-queue logging", () => {
+  it("queues an unreachable submit as a dedicated OfflineEntryRow + banner, never blocking", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const create = jest.fn().mockRejectedValue(networkError());
+    const { store, data } = memoryStore();
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        create={create}
+        useActive={INACTIVE}
+        outboxStore={store}
+        generateKey={sequentialKeys()}
+        now={() => "2026-06-28T08:00:00.000Z"}
+      />,
+    );
+    await act(async () => {});
+
+    typeInto(tree, "Log food or exercise", "two eggs");
+    await act(async () => {
+      press(tree, "Add entry");
+    });
+
+    // Capture was not blocked: composer stays mounted and the input cleared.
+    expect(hasA11yLabel(tree, "Log food or exercise")).toBe(true);
+    expect(inputValue(tree, "Log food or exercise")).toBe("");
+
+    // The capture renders as a dedicated offline row (in words), uncounted.
+    expect(hasA11yLabel(tree, "two eggs, offline, queued to send")).toBe(true);
+    // The calm connection banner reflects the offline + queued state.
+    expect(textContent(tree)).toContain("Offline");
+    expect(textContent(tree)).toContain("1 entry queued");
+
+    // It is durably persisted with the stable idempotency key.
+    expect(data.get(SESSION!.userId)).toEqual([
+      {
+        idempotencyKey: "key-0",
+        userId: SESSION!.userId,
+        rawText: "two eggs",
+        capturedAt: "2026-06-28T08:00:00.000Z",
+        syncState: "queued",
+      },
+    ]);
+  });
+
+  it("does not render the offline capture through EntryRow's status placeholder", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const create = jest.fn().mockRejectedValue(networkError());
+    const { store } = memoryStore();
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        create={create}
+        useActive={INACTIVE}
+        outboxStore={store}
+        generateKey={sequentialKeys()}
+      />,
+    );
+    await act(async () => {});
+
+    typeInto(tree, "Log food or exercise", "two eggs");
+    await act(async () => {
+      press(tree, "Add entry");
+    });
+
+    // The dedicated offline row is present…
+    expect(hasA11yLabel(tree, "two eggs, offline, queued to send")).toBe(true);
+    // …and the offline capture is NOT rendered as a pending EntryRow (which would
+    // read "Waiting to estimate"). The offline row owns the offline state.
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(false);
+  });
+
+  it("drains the outbox on reconnect; the capture folds into the normal pending flow", async () => {
+    jest.useFakeTimers();
+    try {
+      const load = jest.fn().mockResolvedValue([]);
+      const serverEvent = event({
+        id: "server-1",
+        raw_text: "two eggs",
+        status: "pending",
+      });
+      // Online attempt fails unreachable; the reconnect drain succeeds.
+      const create = jest
+        .fn()
+        .mockRejectedValueOnce(networkError())
+        .mockResolvedValue(serverEvent);
+      const { store } = memoryStore();
+      const tree = mount(
+        <TodayScreen
+          session={SESSION}
+          load={load}
+          create={create}
+          useActive={INACTIVE}
+          outboxStore={store}
+          generateKey={sequentialKeys()}
+          now={() => "2026-06-28T08:00:00.000Z"}
+          retryIntervalMs={1000}
+        />,
+      );
+      await act(async () => {});
+
+      typeInto(tree, "Log food or exercise", "two eggs");
+      await act(async () => {
+        press(tree, "Add entry");
+      });
+      expect(hasA11yLabel(tree, "two eggs, offline, queued to send")).toBe(true);
+
+      // Reconnect probe fires: the drain re-submits with the SAME key.
+      await act(async () => {
+        jest.advanceTimersByTime(1000);
+      });
+
+      // The drain re-submitted with the SAME idempotency key minted at capture.
+      const lastCall = create.mock.calls[create.mock.calls.length - 1];
+      expect(lastCall[1]).toBe("two eggs");
+      expect(lastCall[2]).toBe("key-0");
+      // The entry left the offline queue and now follows the normal pending flow.
+      expect(hasA11yLabel(tree, "two eggs, offline, queued to send")).toBe(false);
+      expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

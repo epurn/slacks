@@ -147,16 +147,6 @@ describe('TabLayout', () => {
     expect(textNode).toBeTruthy();
   });
 
-  it('renders a tab-screen for "log" with title "Log"', () => {
-    const tree = mount();
-    const node = tree.root.find((n) => n.props.testID === 'tab-screen-log');
-    expect(node).toBeTruthy();
-    const textNode = node.find(
-      (n) => (n.type as unknown as string) === 'Text' && n.props.children === 'Log',
-    );
-    expect(textNode).toBeTruthy();
-  });
-
   it('renders a tab-screen for "trends" with title "Trends"', () => {
     const tree = mount();
     const node = tree.root.find((n) => n.props.testID === 'tab-screen-trends');
@@ -169,7 +159,7 @@ describe('TabLayout', () => {
 
   it('does not render a tab-screen for any unexpected name', () => {
     const tree = mount();
-    const knownScreens = ['index', 'log', 'trends'];
+    const knownScreens = ['index', 'trends'];
     const unexpectedScreens = tree.root.findAll(
       (n) =>
         typeof n.props.testID === 'string' &&
@@ -195,13 +185,6 @@ describe('TabLayout', () => {
     const tree = mount();
     const iconContainer = tree.root.find((n) => n.props.testID === 'tab-icon-index');
     const symbol = iconContainer.find((n) => n.props.testID === 'sf-symbol-sun.max');
-    expect(symbol).toBeTruthy();
-  });
-
-  it('Log tab icon renders SF Symbol "plus" (not an emoji Text)', () => {
-    const tree = mount();
-    const iconContainer = tree.root.find((n) => n.props.testID === 'tab-icon-log');
-    const symbol = iconContainer.find((n) => n.props.testID === 'sf-symbol-plus');
     expect(symbol).toBeTruthy();
   });
 

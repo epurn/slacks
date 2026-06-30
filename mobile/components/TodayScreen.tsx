@@ -40,12 +40,20 @@ import {
 } from "@/api/savedFoods";
 import { AppIcon } from "@/components/ui";
 import { BarcodeScannerScreen } from "@/components/BarcodeScannerScreen";
+import { ConnectionBanner } from "@/components/ConnectionBanner";
 import { CorrectionSheet } from "@/components/CorrectionSheet";
 import { DailySummary } from "@/components/DailySummary";
 import { EntryRow } from "@/components/EntryRow";
 import { ItemTimelineRow } from "@/components/ItemTimelineRow";
 import { LabelCaptureScreen } from "@/components/LabelCaptureScreen";
+import { OfflineEntryRow } from "@/components/OfflineEntryRow";
 import { TypeaheadSuggestionBar } from "@/components/TypeaheadSuggestionBar";
+import {
+  generateIdempotencyKey,
+  type OutboxStore,
+  type OutboxSyncState,
+} from "@/state/outbox";
+import { fileOutboxStore } from "@/state/outboxStore";
 import {
   POLL_INTERVAL_MS,
   hasPendingWork,
@@ -65,6 +73,7 @@ import {
   sortByNewest,
 } from "@/state/today";
 import { useScreenActive } from "@/state/useScreenActive";
+import { useSubmitLog, type SubmitLogBridge } from "@/state/useSubmitLog";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
 
 /** Maximum raw-text length, mirrored from the FTY-030 contract. */
@@ -132,6 +141,26 @@ function syntheticSavedFoodItem(
   };
 }
 
+/**
+ * Drop an optimistic event and its synthetic saved-food item from Today's state
+ * by optimistic id — shared by the server-error rollback and the unreachable
+ * discard paths the submit machine drives through the bridge.
+ */
+function removeOptimisticEvent(
+  setEvents: React.Dispatch<React.SetStateAction<readonly LogEventDTO[]>>,
+  setItemsByEvent: React.Dispatch<
+    React.SetStateAction<Readonly<Record<string, readonly DerivedItem[]>>>
+  >,
+  optimisticId: string,
+): void {
+  setEvents((prev) => prev.filter((event) => event.id !== optimisticId));
+  setItemsByEvent((prev) => {
+    if (!(optimisticId in prev)) return prev;
+    const { [optimisticId]: _removed, ...rest } = prev;
+    return rest;
+  });
+}
+
 export function TodayScreen({
   session: sessionOverride,
   load = listTodayLogEventsApi,
@@ -147,6 +176,10 @@ export function TodayScreen({
   uploadLabel = uploadLabelImageApi,
   labelTakePhoto,
   getDailySummary = getDailySummaryApi,
+  outboxStore = fileOutboxStore,
+  retryIntervalMs,
+  generateKey = generateIdempotencyKey,
+  now = () => new Date().toISOString(),
   onPressProfile,
 }: {
   session?: Session;
@@ -176,6 +209,14 @@ export function TodayScreen({
   labelTakePhoto?: () => Promise<{ uri: string }>;
   /** Injectable daily summary fetch for tests (FTY-075). */
   getDailySummary?: typeof getDailySummaryApi;
+  /** Durable offline-outbox storage (FTY-104, harvested onto Today in FTY-147). */
+  outboxStore?: OutboxStore;
+  /** Reconnect-retry cadence for the outbox drain — injectable for tests. */
+  retryIntervalMs?: number;
+  /** Idempotency-key generator — injectable for deterministic tests. */
+  generateKey?: () => string;
+  /** Capture-timestamp source — injectable for deterministic tests. */
+  now?: () => string;
   /** Called when the user presses the gear / profile icon in the header. */
   onPressProfile?: () => void;
 } = {}) {
@@ -197,9 +238,6 @@ export function TodayScreen({
   const [phase, setPhase] = useState<Phase>("loading");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const [text, setText] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [labelCaptureOpen, setLabelCaptureOpen] = useState(false);
   // Saved food selected from the typeahead bar (FTY-053). When set, pressing
@@ -221,6 +259,100 @@ export function TodayScreen({
     logPhrase: string;
   } | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
+
+  // The submit machine reads the latest selected saved food at submit time, and
+  // each in-flight submit stashes its saved food by optimistic id so the right
+  // one is re-keyed on success / restored on a server-error rollback. The ref is
+  // synced in an effect (never during render) per the project's ref convention.
+  const selectedSavedFoodRef = useRef<SavedFoodDTO | null>(null);
+  useEffect(() => {
+    selectedSavedFoodRef.current = selectedSavedFood;
+  });
+  const pendingSavedFoodById = useRef(new Map<string, SavedFoodDTO | null>());
+
+  // Today's optimistic-timeline operations, handed to the shared submit machine
+  // (FTY-147). The machine owns create/optimistic/offline/rollback; the
+  // saved-food synthetic item (FTY-053) stays here, behind these callbacks.
+  const submitBridge = useMemo<SubmitLogBridge>(
+    () => ({
+      insertOptimistic(optimistic) {
+        setEvents((prev) => sortByNewest([optimistic, ...prev]));
+        const savedFood = selectedSavedFoodRef.current;
+        pendingSavedFoodById.current.set(optimistic.id, savedFood);
+        // A selected saved food carries resolved nutrition immediately — add a
+        // synthetic resolved item so the estimator is bypassed for this entry.
+        if (savedFood && apiSession) {
+          const syntheticItem = syntheticSavedFoodItem(
+            savedFood,
+            optimistic.id,
+            apiSession.userId,
+          );
+          setItemsByEvent((prev) => ({ ...prev, [optimistic.id]: [syntheticItem] }));
+        }
+        setSelectedSavedFood(null);
+      },
+      reconcileOptimistic(optimisticId, server) {
+        setEvents((prev) =>
+          sortByNewest(
+            prev.map((event) => (event.id === optimisticId ? server : event)),
+          ),
+        );
+        setItemsByEvent((prev) => {
+          const items = prev[optimisticId];
+          if (!items) return prev;
+          const updated = items.map((item) => ({
+            ...item,
+            log_event_id: server.id,
+          }));
+          const { [optimisticId]: _removed, ...rest } = prev;
+          return { ...rest, [server.id]: updated };
+        });
+        pendingSavedFoodById.current.delete(optimisticId);
+      },
+      rollbackOptimistic(optimisticId) {
+        removeOptimisticEvent(setEvents, setItemsByEvent, optimisticId);
+        // Restore the saved-food association so retry is one tap (server error).
+        const savedFood = pendingSavedFoodById.current.get(optimisticId) ?? null;
+        pendingSavedFoodById.current.delete(optimisticId);
+        if (savedFood) setSelectedSavedFood(savedFood);
+      },
+      discardOptimistic(optimisticId) {
+        // Unreachable: the capture is kept as an offline row, not restored to the
+        // composer — so the saved-food association is dropped, not restored.
+        removeOptimisticEvent(setEvents, setItemsByEvent, optimisticId);
+        pendingSavedFoodById.current.delete(optimisticId);
+      },
+      acceptDrained(_idempotencyKey, event) {
+        // A drained offline capture folds into the normal flow: insert the real
+        // server event (deduped by id) and let polling reconcile it to terminal.
+        setEvents((prev) =>
+          sortByNewest([event, ...prev.filter((e) => e.id !== event.id)]),
+        );
+      },
+    }),
+    [apiSession],
+  );
+
+  const {
+    text,
+    setText,
+    submitting,
+    setSubmitting,
+    submitError,
+    setSubmitError,
+    handleSubmit,
+    reachability,
+    offlineEntries,
+    queuedCount,
+  } = useSubmitLog({
+    session: apiSession,
+    bridge: submitBridge,
+    create,
+    outboxStore,
+    retryIntervalMs,
+    generateKey,
+    now,
+  });
 
   // User-initiated refresh: show the loading state, then bump the reload key so
   // the fetch effect re-runs. Auto-refresh of pending entries is FTY-032.
@@ -279,72 +411,6 @@ export function TodayScreen({
     };
   }, [apiSession, getDailySummary, reloadKey]);
 
-  const handleSubmit = useCallback(async () => {
-    const trimmed = text.trim();
-    if (!trimmed || !apiSession || submitting) {
-      return;
-    }
-    const id = `${OPTIMISTIC_ID_PREFIX}${tempId.current++}`;
-    const optimistic = optimisticLogEvent({
-      id,
-      userId: apiSession.userId,
-      rawText: trimmed,
-      createdAt: new Date().toISOString(),
-    });
-    // Capture and clear the selected saved food before the async path.
-    const pendingSavedFood = selectedSavedFood;
-    setSelectedSavedFood(null);
-
-    // Show the new entry immediately as pending, then reconcile with the server.
-    setEvents((prev) => sortByNewest([optimistic, ...prev]));
-
-    // If a saved food was selected, add a synthetic resolved item immediately
-    // with its stored nutrition — the estimator is bypassed for this item.
-    if (pendingSavedFood) {
-      const syntheticItem = syntheticSavedFoodItem(
-        pendingSavedFood,
-        id,
-        apiSession.userId,
-      );
-      setItemsByEvent((prev) => ({ ...prev, [id]: [syntheticItem] }));
-    }
-
-    setText("");
-    setSubmitting(true);
-    setSubmitError(null);
-    try {
-      const created = await create(apiSession, trimmed);
-      setEvents((prev) =>
-        sortByNewest(prev.map((event) => (event.id === id ? created : event))),
-      );
-      // Re-key the synthetic item from optimistic id to the real event id.
-      if (pendingSavedFood) {
-        setItemsByEvent((prev) => {
-          const items = prev[id] ?? [];
-          const updated = items.map((item) => ({
-            ...item,
-            log_event_id: created.id,
-          }));
-          const { [id]: _removed, ...rest } = prev;
-          return { ...rest, [created.id]: updated };
-        });
-      }
-    } catch (error) {
-      // Roll back the optimistic entry and restore the input so nothing is lost.
-      setEvents((prev) => prev.filter((event) => event.id !== id));
-      if (pendingSavedFood) {
-        setItemsByEvent((prev) => {
-          const { [id]: _removed, ...rest } = prev;
-          return rest;
-        });
-      }
-      setText(trimmed);
-      setSubmitError(messageFor(error, "save"));
-    } finally {
-      setSubmitting(false);
-    }
-  }, [text, apiSession, submitting, create, selectedSavedFood]);
-
   // Barcode scan entry point (FTY-063). Mirrors the text-composer submit flow:
   // dismiss the scanner, show the barcode as a pending optimistic entry, then
   // reconcile with the server. Rolls back cleanly on failure.
@@ -378,7 +444,7 @@ export function TodayScreen({
         setSubmitting(false);
       }
     },
-    [apiSession, submitting, create],
+    [apiSession, submitting, create, setSubmitting, setSubmitError],
   );
 
   // Label capture upload (FTY-064). The backend created and extracted the event
@@ -454,6 +520,38 @@ export function TodayScreen({
   const shouldPoll =
     phase === "ready" && isActive && !submitting && hasPendingWork(events);
   useIntervalPolling(shouldPoll, pollIntervalMs, pollOnce);
+
+  // Offline-queued captures (FTY-104, harvested onto Today in FTY-147). Each
+  // renders as a dedicated, uncounted OfflineEntryRow in the timeline — never an
+  // offline branch inside EntryRow (which carries FTY-148/149 behaviour). They
+  // are kept out of `events` so the poll reconciler only ever sees server rows.
+  const offlineStateById = useMemo(() => {
+    const byId = new Map<string, OutboxSyncState>();
+    for (const entry of offlineEntries) {
+      if (entry.syncState !== "accepted") {
+        byId.set(entry.idempotencyKey, entry.syncState);
+      }
+    }
+    return byId;
+  }, [offlineEntries]);
+
+  // A synthetic pending event per offline capture, merged into the render list
+  // (not `events`) so the timeline clusters them newest-first alongside server
+  // rows; ClusterView renders them through OfflineEntryRow by their id.
+  const displayEvents = useMemo(() => {
+    if (offlineEntries.length === 0) return events;
+    const offlineEvents = offlineEntries
+      .filter((entry) => entry.syncState !== "accepted")
+      .map((entry) =>
+        optimisticLogEvent({
+          id: entry.idempotencyKey,
+          userId: entry.userId,
+          rawText: entry.rawText,
+          createdAt: entry.capturedAt,
+        }),
+      );
+    return sortByNewest([...events, ...offlineEvents]);
+  }, [events, offlineEntries]);
 
   if (!session) {
     return <SignInRequired insetTop={insets.top + 24} />;
@@ -538,6 +636,10 @@ export function TodayScreen({
           </View>
         </View>
 
+        {/* Calm connection banner between header and composer; self-hides when
+            online and caught up (FTY-104, harvested onto Today in FTY-147). */}
+        <ConnectionBanner state={reachability} queuedCount={queuedCount} />
+
         <View style={styles.composer}>
           <TextInput
             accessibilityLabel="Log food or exercise"
@@ -614,8 +716,9 @@ export function TodayScreen({
         ) : null}
 
         <Timeline
-          events={events}
+          events={displayEvents}
           itemsByEvent={itemsByEvent}
+          offlineStateById={offlineStateById}
           session={apiSession}
           editItem={editItem}
           onItemChange={handleItemChange}
@@ -651,6 +754,7 @@ export function TodayScreen({
 function Timeline({
   events,
   itemsByEvent,
+  offlineStateById,
   session,
   editItem,
   onItemChange,
@@ -664,6 +768,8 @@ function Timeline({
 }: {
   events: readonly LogEventDTO[];
   itemsByEvent: Readonly<Record<string, readonly DerivedItem[]>>;
+  /** Idempotency key → offline sync state for offline-queued rows (FTY-147). */
+  offlineStateById: ReadonlyMap<string, OutboxSyncState>;
   session: ApiSession | null;
   editItem: typeof editDerivedItemApi;
   onItemChange: (item: DerivedItem) => void;
@@ -731,6 +837,7 @@ function Timeline({
           key={cluster.anchorTime}
           cluster={cluster}
           itemsByEvent={itemsByEvent}
+          offlineStateById={offlineStateById}
           session={session}
           editItem={editItem}
           onItemChange={onItemChange}
@@ -760,6 +867,7 @@ function formatClusterTime(isoTime: string): string {
 function ClusterView({
   cluster,
   itemsByEvent,
+  offlineStateById,
   session,
   editItem,
   onItemChange,
@@ -769,6 +877,7 @@ function ClusterView({
 }: {
   cluster: { anchorTime: string; events: readonly LogEventDTO[] };
   itemsByEvent: Readonly<Record<string, readonly DerivedItem[]>>;
+  offlineStateById: ReadonlyMap<string, OutboxSyncState>;
   session: ApiSession | null;
   editItem: typeof editDerivedItemApi;
   onItemChange: (item: DerivedItem) => void;
@@ -783,6 +892,20 @@ function ClusterView({
       </Text>
       <View style={[styles.card, { backgroundColor: colors.surfaceRaised }]}>
         {cluster.events.map((event) => {
+          // An offline-queued capture renders through its own dedicated row —
+          // never an offline branch inside EntryRow (FTY-147). It is calm,
+          // uncounted, non-tappable: raw text + an explicit offline indicator.
+          const offlineState = offlineStateById.get(event.id);
+          if (offlineState) {
+            return (
+              <OfflineEntryRow
+                key={event.id}
+                rawText={event.raw_text}
+                state={offlineState}
+              />
+            );
+          }
+
           const items = itemsByEvent[event.id] ?? [];
 
           // Completed event with resolved items → show item rows (items-forward).
