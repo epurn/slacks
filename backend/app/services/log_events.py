@@ -29,6 +29,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.enums import LogEventStatus
+from app.models.derived import ClarificationQuestion
 from app.models.identity import User
 from app.models.log_events import LogEvent
 from app.timeutils import current_day, day_bounds_utc, user_timezone
@@ -192,6 +193,34 @@ def get_event(
     if event is None:
         raise LogEventNotFound("log event not found")
     return event
+
+
+def list_clarification_questions(
+    session: Session, owner_id: uuid.UUID, current_user: User, event_id: uuid.UUID
+) -> list[ClarificationQuestion]:
+    """Return an owned event's persisted clarification questions, ordered.
+
+    Ownership is enforced by delegating to :func:`get_event`: a cross-user or
+    nonexistent ``event_id`` raises :class:`LogEventNotFound` (rendered ``404``),
+    so the read is fail-closed with no existence oracle. The estimator persisted
+    these rows (FTY-042); this is purely a read path.
+
+    An event with no clarification rows — any non-``needs_clarification`` event, or
+    one with none persisted — returns an empty list. There is **no status oracle**:
+    "wrong status" and "no rows" are indistinguishable in the response.
+
+    ``question_text`` is sensitive (tied to the user's log, like ``raw_text``): it
+    is returned only to the owner and never written to logs.
+    """
+
+    get_event(session, owner_id, current_user, event_id)
+    return list(
+        session.scalars(
+            select(ClarificationQuestion)
+            .where(ClarificationQuestion.log_event_id == event_id)
+            .order_by(ClarificationQuestion.position.asc(), ClarificationQuestion.id.asc())
+        )
+    )
 
 
 def transition_event(session: Session, event: LogEvent, target: LogEventStatus) -> LogEvent:
