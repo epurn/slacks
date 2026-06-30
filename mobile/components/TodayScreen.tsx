@@ -38,7 +38,7 @@ import {
   searchSavedFoods as searchSavedFoodsApi,
   type SavedFoodDTO,
 } from "@/api/savedFoods";
-import { AppIcon } from "@/components/ui";
+import { AppIcon, ScreenHeader } from "@/components/ui";
 import { BarcodeScannerScreen } from "@/components/BarcodeScannerScreen";
 import { ConnectionBanner } from "@/components/ConnectionBanner";
 import { CorrectionSheet } from "@/components/CorrectionSheet";
@@ -721,38 +721,38 @@ export function TodayScreen({
           // positioned tab bar that now overlays the scroll content; mirrors
           // the placeholder tabs' insets.bottom + 80 reservation with extra
           // breathing room for a scrollable list.
-          { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 96 },
+          { paddingBottom: insets.bottom + 96 },
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.header}>
-          <Text style={[styles.title, { color: colors.text }]} accessibilityRole="header">
-            Today
-          </Text>
-          <View style={styles.headerActions}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Refresh"
-              accessibilityState={{ disabled: phase === "loading" }}
-              disabled={phase === "loading"}
-              onPress={() => void refresh()}
-              style={styles.refresh}
-            >
-              <Text style={[styles.refreshLabel, { color: colors.accent }]}>Refresh</Text>
-            </Pressable>
-            {onPressProfile ? (
+        <ScreenHeader
+          title="Today"
+          actions={
+            <>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Open profile"
-                accessibilityHint="Opens profile and settings"
-                onPress={onPressProfile}
-                style={styles.gearButton}
+                accessibilityLabel="Refresh"
+                accessibilityState={{ disabled: phase === "loading" }}
+                disabled={phase === "loading"}
+                onPress={() => void refresh()}
+                style={styles.headerAction}
               >
-                <AppIcon name="gear" size={22} color={colors.text} />
+                <AppIcon name="arrow.clockwise" size={20} color={colors.accent} />
               </Pressable>
-            ) : null}
-          </View>
-        </View>
+              {onPressProfile ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Open profile"
+                  accessibilityHint="Opens profile and settings"
+                  onPress={onPressProfile}
+                  style={styles.headerAction}
+                >
+                  <AppIcon name="gear" size={22} color={colors.text} />
+                </Pressable>
+              ) : null}
+            </>
+          }
+        />
 
         {/* Calm connection banner between header and composer; self-hides when
             online and caught up (FTY-104, harvested onto Today in FTY-147). */}
@@ -1125,35 +1125,11 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: spacing.base,
   },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  headerActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  gearButton: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.sm,
+  headerAction: {
     minWidth: 44,
     minHeight: 44,
     alignItems: "center",
     justifyContent: "center",
-  },
-  title: {
-    fontSize: typeScale.largeTitle,
-    fontWeight: "700",
-  },
-  refresh: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.xs,
-  },
-  refreshLabel: {
-    fontSize: typeScale.callout,
-    fontWeight: "500",
   },
   composer: {
     flexDirection: "row",
