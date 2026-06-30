@@ -190,6 +190,15 @@ function sequentialKeys(): () => string {
   return () => `key-${n++}`;
 }
 
+/**
+ * A clarification read that returns no persisted question — the clarify sheet
+ * falls back to the generic prompt + free-text. Injected so clarify-mode tests
+ * that don't exercise the question stay deterministic (no real fetch).
+ */
+function emptyClarification(): jest.Mock {
+  return jest.fn().mockResolvedValue({ questions: [] });
+}
+
 describe("TodayScreen", () => {
   it("prompts sign-in when there is no session", () => {
     const tree = mount(<TodayScreen session={null} useActive={INACTIVE} />);
@@ -259,6 +268,7 @@ describe("TodayScreen", () => {
         session={SESSION}
         load={load}
         create={create}
+        getClarification={emptyClarification()}
         useActive={INACTIVE}
       />,
     );
@@ -576,14 +586,21 @@ describe("TodayScreen needs-clarification entries", () => {
         event({ id: "a", raw_text: "milk", status: "needs_clarification" }),
       ]);
     const tree = mount(
-      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        getClarification={emptyClarification()}
+        useActive={INACTIVE}
+      />,
     );
     await act(async () => {});
 
     // The clarify free-text input is not mounted until the row is tapped.
     expect(hasA11yLabel(tree, "Your answer")).toBe(false);
 
-    press(tree, "milk, needs a detail, uncounted");
+    await act(async () => {
+      press(tree, "milk, needs a detail, uncounted");
+    });
 
     // Clarify-mode is shown: free-text fallback present, and the missing detail
     // is never pre-filled (Fatty does not fabricate the answer).
@@ -609,6 +626,7 @@ describe("TodayScreen needs-clarification entries", () => {
         session={SESSION}
         load={load}
         create={create}
+        getClarification={emptyClarification()}
         useActive={INACTIVE}
       />,
     );
@@ -649,6 +667,7 @@ describe("TodayScreen needs-clarification entries", () => {
         session={SESSION}
         load={load}
         create={create}
+        getClarification={emptyClarification()}
         useActive={INACTIVE}
       />,
     );
@@ -690,6 +709,7 @@ describe("TodayScreen needs-clarification entries", () => {
           session={SESSION}
           load={load}
           create={create}
+          getClarification={emptyClarification()}
           useActive={() => true}
           pollIntervalMs={1000}
         />,
@@ -711,6 +731,98 @@ describe("TodayScreen needs-clarification entries", () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it("fetches FTY-152's clarification read and shows Fatty's real question", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: "a", raw_text: "peanut butter", status: "needs_clarification" }),
+      ]);
+    const getClarification = jest.fn().mockResolvedValue({
+      questions: [{ text: "How much peanut butter?" }, { text: "Smooth or crunchy?" }],
+    });
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        getClarification={getClarification}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    await act(async () => {
+      press(tree, "peanut butter, needs a detail, uncounted");
+    });
+
+    // The read is scoped to the tapped event, and the primary question is shown
+    // verbatim — not the generic "We need a detail…" fallback.
+    expect(getClarification).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+      "a",
+    );
+    expect(textContent(tree)).toContain("How much peanut butter?");
+    expect(textContent(tree)).not.toContain("We need a detail");
+    // The answer affordances stay reachable alongside the question.
+    expect(hasA11yLabel(tree, "Your answer")).toBe(true);
+    expect(hasA11yLabel(tree, "Submit answer")).toBe(true);
+  });
+
+  it("falls back to the generic prompt + free-text when the read returns no question", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: "a", raw_text: "milk", status: "needs_clarification" }),
+      ]);
+    const getClarification = jest.fn().mockResolvedValue({ questions: [] });
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        getClarification={getClarification}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    await act(async () => {
+      press(tree, "milk, needs a detail, uncounted");
+    });
+
+    // No persisted question → the generic prompt + free-text fallback remain
+    // usable; the user is never blocked.
+    expect(textContent(tree)).toContain("We need a detail");
+    expect(hasA11yLabel(tree, "Your answer")).toBe(true);
+    expect(hasA11yLabel(tree, "Submit answer")).toBe(true);
+  });
+
+  it("keeps the free-text fallback usable when the clarification read fails", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: "a", raw_text: "milk", status: "needs_clarification" }),
+      ]);
+    const getClarification = jest
+      .fn()
+      .mockRejectedValue(new LogEventApiError(404, "We couldn't find your log."));
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        getClarification={getClarification}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    await act(async () => {
+      press(tree, "milk, needs a detail, uncounted");
+    });
+
+    // A failed read never blocks the flow: the fallback prompt + free-text stand.
+    expect(textContent(tree)).toContain("We need a detail");
+    expect(hasA11yLabel(tree, "Your answer")).toBe(true);
   });
 });
 
@@ -836,6 +948,7 @@ describe("TodayScreen barcode scanning", () => {
         session={SESSION}
         load={load}
         create={create}
+        getClarification={emptyClarification()}
         useActive={INACTIVE}
       />,
     );
@@ -877,6 +990,7 @@ describe("TodayScreen barcode scanning", () => {
         session={SESSION}
         load={load}
         create={create}
+        getClarification={emptyClarification()}
         useActive={INACTIVE}
       />,
     );
@@ -1328,6 +1442,7 @@ describe("TodayScreen composer — calm, status-first", () => {
         session={SESSION}
         load={load}
         create={create}
+        getClarification={emptyClarification()}
         useActive={INACTIVE}
       />,
     );

@@ -19,7 +19,11 @@ import { act, create as render, type ReactTestRenderer } from "react-test-render
 import { AccessibilityInfo } from "react-native";
 import { ThemeProvider } from "@/theme";
 
-import { CorrectionSheet, type ClarificationData } from "./CorrectionSheet";
+import {
+  CorrectionSheet,
+  type ClarificationData,
+  type CorrectionSheetBaseProps,
+} from "./CorrectionSheet";
 import { CorrectionsApiError, type SourceCandidate } from "@/api/corrections";
 import {
   DerivedItemApiError,
@@ -180,7 +184,7 @@ function typeInto(tree: ReactTestRenderer, label: string, value: string): void {
   });
 }
 
-function defaultProps(overrides: Partial<Parameters<typeof CorrectionSheet>[0]> = {}) {
+function defaultProps(overrides: Partial<CorrectionSheetBaseProps> = {}) {
   return {
     item: food(),
     visible: true,
@@ -620,14 +624,46 @@ describe("clarify mode", () => {
     expect(onClarificationResolved).toHaveBeenCalledWith("Almond milk");
   });
 
-  it("renders the fallback question when clarificationData has no question prop", () => {
+  it("renders the fallback question when the question is absent/loading", () => {
     const tree = mount(
       <CorrectionSheet
         {...defaultProps()}
         needsClarification
+        clarificationData={{ question: null, options: [] }}
       />,
     );
     expect(allText(tree)).toContain("We need a detail");
+  });
+
+  it("renders the free-text input + Done at a usable height in both states", () => {
+    // A height floor on the clarify sheet keeps the body usable instead of the
+    // collapsed zero-height strip (the live RC regression this story fixes) —
+    // proven for question present and question absent/loading.
+    for (const data of [
+      clarificationData,
+      { question: null, options: [] as const },
+    ]) {
+      const tree = mount(
+        <CorrectionSheet
+          {...defaultProps()}
+          needsClarification
+          clarificationData={data}
+        />,
+      );
+      // Free-text input + Done are present and reachable.
+      expect(hasA11yLabel(tree, "Your answer")).toBe(true);
+      expect(hasA11yLabel(tree, "Submit answer")).toBe(true);
+      // The sheet pins a minimum height so the flex:1 body can't collapse.
+      const sheetStyles = tree.root
+        .findAll((n) => Array.isArray(n.props.style))
+        .map((n) => n.props.style as unknown[])
+        .find((styleArr) =>
+          styleArr.some(
+            (s) => s && typeof s === "object" && "minHeight" in s,
+          ),
+        );
+      expect(sheetStyles).toBeDefined();
+    }
   });
 
   it("does not auto-fill the missing detail — free-text starts empty", () => {
@@ -642,6 +678,19 @@ describe("clarify mode", () => {
       (n) => n.props.accessibilityLabel === "Your answer",
     );
     expect(input.props.value).toBe("");
+  });
+
+  it("requires clarificationData when needsClarification (type-level contract)", () => {
+    // The prop contract is discriminated: a needsClarification sheet cannot
+    // type-check without clarificationData (FTY-153 replaces the comment-only
+    // "required when needsClarification" with an enforced shape). tsc verifies
+    // this @ts-expect-error is a real error; the runtime free-text fallback still
+    // covers the loading/empty-question case.
+    const invalid = (
+      // @ts-expect-error — needsClarification without clarificationData must fail.
+      <CorrectionSheet {...defaultProps()} needsClarification />
+    );
+    expect(invalid).toBeDefined();
   });
 
   it("does not render the amount stepper or change-match lever in clarify mode", () => {

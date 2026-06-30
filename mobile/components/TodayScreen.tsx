@@ -30,6 +30,7 @@ import {
 import {
   LogEventApiError,
   createLogEvent as createLogEventApi,
+  getLogEventClarification as getLogEventClarificationApi,
   listTodayLogEvents as listTodayLogEventsApi,
   type LogEventDTO,
 } from "@/api/logEvents";
@@ -41,7 +42,10 @@ import {
 import { AppIcon, ScreenHeader } from "@/components/ui";
 import { BarcodeScannerScreen } from "@/components/BarcodeScannerScreen";
 import { ConnectionBanner } from "@/components/ConnectionBanner";
-import { CorrectionSheet } from "@/components/CorrectionSheet";
+import {
+  CorrectionSheet,
+  type ClarificationData,
+} from "@/components/CorrectionSheet";
 import { DailySummary } from "@/components/DailySummary";
 import { EntryRow } from "@/components/EntryRow";
 import { ItemTimelineRow } from "@/components/ItemTimelineRow";
@@ -203,6 +207,7 @@ export function TodayScreen({
   session: sessionOverride,
   load = listTodayLogEventsApi,
   create = createLogEventApi,
+  getClarification = getLogEventClarificationApi,
   editItem = editDerivedItemApi,
   items: itemsOverride,
   useActive = useScreenActive,
@@ -223,6 +228,8 @@ export function TodayScreen({
   session?: Session;
   load?: typeof listTodayLogEventsApi;
   create?: typeof createLogEventApi;
+  /** Injectable clarification-question read for the clarify sheet (FTY-153). */
+  getClarification?: typeof getLogEventClarificationApi;
   editItem?: typeof editDerivedItemApi;
   /**
    * Derived food/exercise items keyed by their `log_event_id`, rendered as
@@ -299,6 +306,12 @@ export function TodayScreen({
     needsClarification?: boolean;
     /** The needs_clarification event id being resolved (clarify-mode only). */
     eventId?: string;
+    /**
+     * Fatty's question + options for clarify-mode (FTY-153). Seeded with a `null`
+     * question (the generic-prompt + free-text fallback) and filled in place once
+     * the FTY-152 clarification read resolves — calm, no layout jump.
+     */
+    clarificationData?: ClarificationData;
   } | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
   // Needs_clarification events the user has answered this session (FTY-149).
@@ -547,18 +560,44 @@ export function TodayScreen({
   const closeItemSheet = useCallback(() => setSheetVisible(false), []);
 
   // Open the correction sheet in clarify-mode for a needs_clarification entry
-  // (FTY-149). Reuses the single mounted sheet via a minimal placeholder item;
+  // (FTY-149/153). Reuses the single mounted sheet via a minimal placeholder item;
   // clarify-mode shows Fatty's question (when known) + quick-pick chips + the
   // free-text fallback, and never auto-fills the missing detail.
-  const openClarifySheet = useCallback((event: LogEventDTO) => {
-    setSheetTarget({
-      item: clarificationPlaceholderItem(event),
-      logPhrase: event.raw_text,
-      needsClarification: true,
-      eventId: event.id,
-    });
-    setSheetVisible(true);
-  }, []);
+  //
+  // The sheet opens immediately at a usable height with the generic prompt, then
+  // fetches FTY-152's clarification read and fills Fatty's real question in place
+  // when it resolves (calm, no layout jump). A loading/empty/error read leaves the
+  // generic prompt + free-text path intact — the user is never blocked.
+  const openClarifySheet = useCallback(
+    (event: LogEventDTO) => {
+      setSheetTarget({
+        item: clarificationPlaceholderItem(event),
+        logPhrase: event.raw_text,
+        needsClarification: true,
+        eventId: event.id,
+        clarificationData: { question: null, options: [] },
+      });
+      setSheetVisible(true);
+      if (!apiSession) return;
+      getClarification(apiSession, event.id).then(
+        (result) => {
+          const question = result.questions[0]?.text ?? null;
+          if (question === null) return;
+          // Only fill if the sheet still targets this event (the user may have
+          // tapped a different entry while the read was in flight).
+          setSheetTarget((prev) =>
+            prev && prev.eventId === event.id
+              ? { ...prev, clarificationData: { question, options: [] } }
+              : prev,
+          );
+        },
+        () => {
+          // Keep the generic prompt + free-text fallback; never block the user.
+        },
+      );
+    },
+    [apiSession, getClarification],
+  );
 
   // Resolve a needs_clarification entry from the user's answer (FTY-149). With no
   // backend resolve endpoint yet, the answer travels the existing create path:
@@ -851,31 +890,49 @@ export function TodayScreen({
         />
       </ScrollView>
 
-      {/* The single correction/detail sheet, reused for every tapped item. */}
+      {/* The single correction/detail sheet, reused for every tapped item. The
+          clarify and normal forms are split so the discriminated prop contract
+          (clarificationData required when needsClarification) holds at the call
+          site, not just in a comment. */}
       {apiSession && sheetTarget ? (
-        <CorrectionSheet
-          item={sheetTarget.item}
-          logPhrase={sheetTarget.logPhrase}
-          visible={sheetVisible}
-          onClose={closeItemSheet}
-          session={apiSession}
-          onItemChange={handleItemChange}
-          needsClarification={sheetTarget.needsClarification ?? false}
-          onClarificationResolved={
-            sheetTarget.needsClarification && sheetTarget.eventId
-              ? (answer) =>
-                  void handleClarificationResolved(
-                    sheetTarget.eventId as string,
-                    sheetTarget.logPhrase,
-                    answer,
-                  )
-              : undefined
-          }
-          editItem={editItem}
-          listCandidates={listSourceCandidates}
-          reResolve={reResolveItem}
-          saveFood={saveFood}
-        />
+        sheetTarget.needsClarification && sheetTarget.eventId ? (
+          <CorrectionSheet
+            item={sheetTarget.item}
+            logPhrase={sheetTarget.logPhrase}
+            visible={sheetVisible}
+            onClose={closeItemSheet}
+            session={apiSession}
+            onItemChange={handleItemChange}
+            needsClarification
+            clarificationData={
+              sheetTarget.clarificationData ?? { question: null, options: [] }
+            }
+            onClarificationResolved={(answer) =>
+              void handleClarificationResolved(
+                sheetTarget.eventId as string,
+                sheetTarget.logPhrase,
+                answer,
+              )
+            }
+            editItem={editItem}
+            listCandidates={listSourceCandidates}
+            reResolve={reResolveItem}
+            saveFood={saveFood}
+          />
+        ) : (
+          <CorrectionSheet
+            item={sheetTarget.item}
+            logPhrase={sheetTarget.logPhrase}
+            visible={sheetVisible}
+            onClose={closeItemSheet}
+            session={apiSession}
+            onItemChange={handleItemChange}
+            editItem={editItem}
+            listCandidates={listSourceCandidates}
+            reResolve={reResolveItem}
+            saveFood={saveFood}
+          />
+        )
       ) : null}
     </>
   );

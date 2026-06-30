@@ -58,14 +58,63 @@ import { useTheme, spacing, typeScale, radius } from "@/theme";
 
 /** Clarification data for an item in the needs_clarification state. */
 export interface ClarificationData {
-  /** Fatty's specific question (e.g. "What kind of milk?"). */
-  readonly question: string;
-  /** Quick-pick answer options (tappable chips). */
+  /**
+   * Fatty's specific question (e.g. "What kind of milk?"), or `null` while the
+   * clarification read is loading or when the event has no persisted question.
+   * Clarify-mode falls back to the generic prompt + free-text when it is `null`.
+   */
+  readonly question: string | null;
+  /** Quick-pick answer options (tappable chips). Empty for v1 (FTY-152). */
   readonly options: readonly string[];
 }
 
 type SheetMode = "normal" | "change-match" | "override" | "clarify";
 type SaveFoodStatus = "idle" | "saving" | "saved" | "error";
+
+/** Props shared by every sheet, regardless of clarify-mode. */
+export interface CorrectionSheetBaseProps {
+  item: DerivedItem;
+  visible: boolean;
+  onClose: () => void;
+  session: ApiSession;
+  onItemChange?: (item: DerivedItem) => void;
+  /** The original typed phrase from the log event — shown quoted in evidence block. */
+  logPhrase?: string;
+  /** Injectable for tests (FTY-051 PATCH). */
+  editItem?: typeof editDerivedItemApi;
+  /** Injectable for tests (FTY-093 list candidates). */
+  listCandidates?: typeof listSourceCandidatesApi;
+  /** Injectable for tests (FTY-093 re-resolve). */
+  reResolve?: typeof reResolveItemApi;
+  /** Injectable for tests (FTY-052/053 save-as-food). */
+  saveFood?: typeof saveFoodApi;
+}
+
+/**
+ * Clarify-mode is a discriminated branch: a `needsClarification` sheet *requires*
+ * `clarificationData` (its `question` may be `null` while the read loads), so the
+ * "Add a detail" flow can never type-check without wiring the question read. A
+ * normal sheet forbids the clarify-only props.
+ */
+type CorrectionSheetClarifyProps =
+  | {
+      needsClarification: true;
+      clarificationData: ClarificationData;
+      /**
+       * Called when the user resolves a clarification. The answer is the selected
+       * chip text or the free-text the user typed. With no first-class resolve
+       * endpoint yet (FTY-152), the parent wires this to the re-submit path.
+       */
+      onClarificationResolved?: (answer: string) => void;
+    }
+  | {
+      needsClarification?: false;
+      clarificationData?: never;
+      onClarificationResolved?: never;
+    };
+
+export type CorrectionSheetProps = CorrectionSheetBaseProps &
+  CorrectionSheetClarifyProps;
 
 /**
  * Debounce for the Change-match search field. Each keystroke would otherwise
@@ -113,34 +162,7 @@ export function CorrectionSheet({
   listCandidates = listSourceCandidatesApi,
   reResolve = reResolveItemApi,
   saveFood = saveFoodApi,
-}: {
-  item: DerivedItem;
-  visible: boolean;
-  onClose: () => void;
-  session: ApiSession;
-  onItemChange?: (item: DerivedItem) => void;
-  /** The original typed phrase from the log event — shown quoted in evidence block. */
-  logPhrase?: string;
-  /** True when the parent log event is in needs_clarification status. */
-  needsClarification?: boolean;
-  /** Clarification question + quick-pick options (required when needsClarification). */
-  clarificationData?: ClarificationData;
-  /**
-   * Called when the user resolves a clarification. The answer is the selected
-   * chip text or the free-text the user typed. The actual backend endpoint for
-   * submitting clarification answers is defined in a later story; this callback
-   * lets the parent wire it when available.
-   */
-  onClarificationResolved?: (answer: string) => void;
-  /** Injectable for tests (FTY-051 PATCH). */
-  editItem?: typeof editDerivedItemApi;
-  /** Injectable for tests (FTY-093 list candidates). */
-  listCandidates?: typeof listSourceCandidatesApi;
-  /** Injectable for tests (FTY-093 re-resolve). */
-  reResolve?: typeof reResolveItemApi;
-  /** Injectable for tests (FTY-052/053 save-as-food). */
-  saveFood?: typeof saveFoodApi;
-}) {
+}: CorrectionSheetProps) {
   const { colors } = useTheme();
   const [item, setItem] = useState<DerivedItem>(initialItem);
 
@@ -164,6 +186,13 @@ export function CorrectionSheet({
 
   // Large detent when Change-match or override is open.
   const expanded = mode === "change-match" || mode === "override";
+
+  // Clarify-mode pins a minimum height so the question + free-text input + "Done"
+  // always render at a usable height. The body is a flex:1 ScrollView, which
+  // collapses to a near-zero strip when the sheet hugs its (short) clarify
+  // content — the live RC bug this story fixes. A floor gives it room in both
+  // states: question present, and question absent/loading.
+  const clarifying = mode === "clarify";
 
   // ─── Amount stepper state ───────────────────────────────────────────────────
   const [amountPending, setAmountPending] = useState(false);
@@ -441,6 +470,7 @@ export function CorrectionSheet({
             styles.sheet,
             { backgroundColor: sheetBg },
             expanded ? styles.sheetLarge : styles.sheetMedium,
+            clarifying ? styles.sheetClarify : null,
           ]}
         >
           {/* Decorative grabber (non-draggable; hidden from assistive tech) */}
@@ -1184,6 +1214,13 @@ const styles = StyleSheet.create({
   },
   sheetLarge: {
     maxHeight: "90%",
+  },
+  // Clarify-mode height floor: the body's flex:1 ScrollView collapses to a
+  // near-zero strip when the sheet hugs short clarify content, so pin a minimum
+  // height that keeps the question + free-text input + "Done" usable. Stays under
+  // sheetMedium's 55% max, so the sheet never grows past the medium detent.
+  sheetClarify: {
+    minHeight: "42%",
   },
   handleContainer: {
     alignItems: "center",
