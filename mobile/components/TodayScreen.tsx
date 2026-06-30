@@ -560,7 +560,11 @@ export function TodayScreen({
               onPress={() => setScannerOpen(true)}
               style={[styles.scanButton, { backgroundColor: colors.controlBackground }]}
             >
-              <Text style={[styles.scanButtonLabel, { color: colors.text }]}>⊡</Text>
+              <AppIcon
+                name="barcode.viewfinder"
+                size={20}
+                color={colors.text}
+              />
             </Pressable>
             <Pressable
               accessibilityRole="button"
@@ -571,7 +575,11 @@ export function TodayScreen({
               onPress={() => setLabelCaptureOpen(true)}
               style={[styles.scanButton, { backgroundColor: colors.controlBackground }]}
             >
-              <Text style={[styles.scanButtonLabel, { color: colors.text }]}>◉</Text>
+              <AppIcon
+                name="camera.fill"
+                size={20}
+                color={colors.text}
+              />
             </Pressable>
             <Pressable
               accessibilityRole="button"
@@ -895,9 +903,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.base,
   },
   composerActions: {
-    flexDirection: "column",
-    gap: 6,
-    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.xs,
+    alignItems: "flex-end",
   },
   scanButton: {
     width: 44,
@@ -905,9 +913,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
-  },
-  scanButtonLabel: {
-    fontSize: 22,
+    minHeight: 44,
+    minWidth: 44,
   },
   input: {
     flex: 1,

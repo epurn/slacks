@@ -27,7 +27,7 @@ import { BarcodeScannerScreen } from "@/components/BarcodeScannerScreen";
 import { ConnectionBanner } from "@/components/ConnectionBanner";
 import { LabelCaptureScreen } from "@/components/LabelCaptureScreen";
 import { TypeaheadSuggestionBar } from "@/components/TypeaheadSuggestionBar";
-import { Skeleton } from "@/components/ui";
+import { AppIcon, Skeleton } from "@/components/ui";
 import {
   POLL_INTERVAL_MS,
   hasPendingWork,
@@ -475,9 +475,11 @@ export function LogScreen({
                 { backgroundColor: colors.controlBackground },
               ]}
             >
-              <Text style={[styles.captureButtonLabel, { color: colors.text }]}>
-                ⊡
-              </Text>
+              <AppIcon
+                name="barcode.viewfinder"
+                size={20}
+                color={colors.text}
+              />
             </Pressable>
             <Pressable
               accessibilityRole="button"
@@ -491,9 +493,11 @@ export function LogScreen({
                 { backgroundColor: colors.controlBackground },
               ]}
             >
-              <Text style={[styles.captureButtonLabel, { color: colors.text }]}>
-                ◉
-              </Text>
+              <AppIcon
+                name="camera.fill"
+                size={20}
+                color={colors.text}
+              />
             </Pressable>
             <Pressable
               accessibilityRole="button"
@@ -777,9 +781,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.base,
   },
   composerActions: {
-    flexDirection: "column",
-    gap: 6,
-    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.xs,
+    alignItems: "flex-end",
   },
   captureButton: {
     width: 44,
@@ -787,9 +791,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
-  },
-  captureButtonLabel: {
-    fontSize: 22,
+    minHeight: 44,
+    minWidth: 44,
   },
   input: {
     flex: 1,
