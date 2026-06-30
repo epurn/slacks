@@ -1104,7 +1104,9 @@ function ClarifyMode({
 
       {/* Free-text fallback */}
       <Text style={[styles.clarifyOrLabel, { color: colors.textMuted }]}>
-        Or type your own:
+        {clarificationData && clarificationData.options.length > 0
+          ? "Or type your own:"
+          : "Type your answer:"}
       </Text>
       <View style={styles.clarifyInputRow}>
         <TextInput

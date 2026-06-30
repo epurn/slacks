@@ -595,6 +595,30 @@ describe("clarify mode", () => {
     }
   });
 
+  it("shows 'Or type your own:' when options are present, 'Type your answer:' when absent", () => {
+    // With options, label reads "Or type your own:"
+    const treeWithOptions = mount(
+      <CorrectionSheet
+        {...defaultProps()}
+        needsClarification
+        clarificationData={clarificationData}
+      />,
+    );
+    expect(allText(treeWithOptions)).toContain("Or type your own:");
+    expect(allText(treeWithOptions)).not.toContain("Type your answer:");
+
+    // Without options, label reads "Type your answer:" (no dangling "Or")
+    const treeNoOptions = mount(
+      <CorrectionSheet
+        {...defaultProps()}
+        needsClarification
+        clarificationData={{ question: "What kind of milk?", options: [] }}
+      />,
+    );
+    expect(allText(treeNoOptions)).toContain("Type your answer:");
+    expect(allText(treeNoOptions)).not.toContain("Or type your own:");
+  });
+
   it("calls onClarificationResolved with the tapped chip answer", () => {
     const onClarificationResolved = jest.fn();
     const tree = mount(
