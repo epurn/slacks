@@ -80,3 +80,26 @@ class LogEventDTO(BaseModel):
     status: LogEventStatus
     created_at: datetime
     updated_at: datetime
+
+
+class ClarificationQuestionDTO(BaseModel):
+    """A single persisted clarification question (FTY-152).
+
+    v1 surfaces the question ``text`` only. The estimator does not produce
+    quick-pick options today, so the client answers via free-text; the shape is
+    forward-compatible — an additive ``options`` array can be added later without
+    breaking this contract.
+    """
+
+    text: str
+
+
+class ClarificationResponse(BaseModel):
+    """Response body for the owner-scoped clarification read (FTY-152).
+
+    Carries the event's persisted clarification questions ordered by ``position``.
+    An event with no clarification rows (any non-``needs_clarification`` event, or
+    one with none persisted) yields an empty list — there is no status oracle.
+    """
+
+    questions: list[ClarificationQuestionDTO]

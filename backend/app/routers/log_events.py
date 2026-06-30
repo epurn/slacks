@@ -35,7 +35,12 @@ from app.deps import CurrentUser
 from app.estimator.enqueue import EstimationEnqueuer, get_enqueuer
 from app.estimator.label_step import LabelInput
 from app.estimator.label_upload import LabelProcessor, get_label_processor
-from app.schemas.log_events import LogEventCreateRequest, LogEventDTO
+from app.schemas.log_events import (
+    ClarificationQuestionDTO,
+    ClarificationResponse,
+    LogEventCreateRequest,
+    LogEventDTO,
+)
 from app.services import log_events as log_event_service
 from app.services.attachments import (
     AttachmentInvalidContentType,
@@ -196,3 +201,36 @@ def get_log_event(
     except (LogEventForbidden, LogEventNotFound) as exc:
         raise _NOT_FOUND from exc
     return LogEventDTO.model_validate(event)
+
+
+@router.get(
+    "/{user_id}/log-events/{event_id}/clarification",
+    response_model=ClarificationResponse,
+)
+def get_log_event_clarification(
+    user_id: uuid.UUID,
+    event_id: uuid.UUID,
+    current_user: CurrentUser,
+    session: Annotated[Session, Depends(get_session)],
+) -> ClarificationResponse:
+    """Return the persisted clarification questions for one of the caller's events.
+
+    The mobile clarify sheet (FTY-153) fetches this lazily when it opens, so the
+    Today list/poll DTO stays lean. Questions are ordered by ``position`` and carry
+    only their ``text`` — the estimator produces no quick-pick options today.
+
+    Ownership is fail-closed (FTY-030): a cross-user or nonexistent ``event_id`` is
+    indistinguishable as ``404`` (no existence oracle). An event with no
+    clarification rows returns ``200`` with an empty list (no status oracle). The
+    question text, like raw text, is never logged.
+    """
+
+    try:
+        questions = log_event_service.list_clarification_questions(
+            session, user_id, current_user, event_id
+        )
+    except (LogEventForbidden, LogEventNotFound) as exc:
+        raise _NOT_FOUND from exc
+    return ClarificationResponse(
+        questions=[ClarificationQuestionDTO(text=q.question_text) for q in questions]
+    )

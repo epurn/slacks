@@ -31,6 +31,15 @@ backend-core / contracts lane (`backend/app/models/log_events.py`,
 
 ## Version
 
+3 (FTY-152): adds an **owner-scoped clarification read** —
+`GET /api/users/{user_id}/log-events/{event_id}/clarification` — that returns the
+clarification questions the estimator already persisted for a
+`needs_clarification` event (see [Clarification read](#clarification-read)). This
+is additive: no existing DTO field, endpoint, or status code changes, and no
+schema migration is involved (the `clarification_questions` table already exists).
+It is the backend half of the "Add a detail" clarify flow; the mobile sheet
+(FTY-153) consumes it.
+
 2 (FTY-096): the create request gains an optional, opaque `idempotency_key`, and
 create becomes a safe-to-retry **first-write-wins** operation — a fresh create
 returns `201`, an idempotent replay of an already-submitted key returns `200`
@@ -78,6 +87,11 @@ authenticated user's own `{user_id}`.
   `day` is optional and defaults to the current day in that timezone.
 - `GET /api/users/{user_id}/log-events/{event_id}` — returns one of the user's
   events by id (for polling).
+- `GET /api/users/{user_id}/log-events/{event_id}/clarification` — returns the
+  clarification questions persisted for one of the user's events, ordered by
+  `position`. A lazy per-event read the client fetches when opening the clarify
+  sheet, so the Today list/poll DTO stays lean. See
+  [Clarification read](#clarification-read).
 
 ## Outputs
 
@@ -143,6 +157,44 @@ in the day's totals) — and runs the unchanged `pending → processing → comp
 transitions the estimator drives (see `estimation-jobs.md`). A keyed create
 enqueues exactly as the no-key path does; the replay path enqueues nothing.
 
+### Clarification read
+
+`GET /api/users/{user_id}/log-events/{event_id}/clarification` exposes the
+clarification questions the estimator persisted for an event (FTY-042 writes one
+`clarification_questions` row per question when a parse is too ambiguous to
+commit; this endpoint reads them back to the owning client). It is the data the
+mobile clarify sheet (FTY-153) needs to show Fatty's actual question (e.g. "How
+much peanut butter?") instead of a generic fallback.
+
+The response carries the question text only, ordered by `position`:
+
+```json
+{
+  "questions": [
+    { "text": "How much peanut butter?" },
+    { "text": "Smooth or crunchy?" }
+  ]
+}
+```
+
+- **Owned event with persisted questions** → `200` with the questions ordered by
+  `position`, matching the stored rows.
+- **Owned event with no clarification rows** — any non-`needs_clarification`
+  event, or one with none persisted → `200 { "questions": [] }`. There is **no
+  status oracle**: "wrong status" and "no rows" are indistinguishable.
+- **Cross-user or nonexistent `event_id`** → `404`, reusing get-by-id's
+  fail-closed scoping (no existence oracle).
+
+**Question text only for v1.** Each question carries `text` and nothing else. The
+estimator produces no quick-pick options today (the parse schema has only
+`clarification_questions: list[str]`), so the client answers via free-text. The
+shape is forward-compatible: an `options` array can be added additively if the
+estimator later generates them.
+
+There is **no clarification *answer* / resolve endpoint** here — the mobile side
+resolves by re-submitting the combined phrase via the existing create path
+(FTY-149). A first-class resolve endpoint is a future story.
+
 ## State machine
 
 `status` is a `LogEventStatus`. The legal transitions are the named contract in
@@ -184,6 +236,9 @@ transitions by reusing this map.
   get-by-id is scoped to the owner so a cross-user id is indistinguishable from a
   missing one. A mismatch fails closed as `404` (no existence oracle). Negative
   tests prove create, list, and get-by-id all fail closed.
+- The clarification read reuses the same object-level scoping: a cross-user or
+  nonexistent `event_id` returns `404` with no existence oracle, proven by a
+  cross-user negative test.
 - The idempotency-key lookup is **scoped to the authenticated user**, so a key can
   only ever address that user's own events: the same key string from two users
   yields two distinct events and never crosses the boundary. Proven by a per-user
@@ -193,6 +248,9 @@ transitions by reusing this map.
 
 - `raw_text` is sensitive personal data: it is user-owned, never logged, and
   never returned to a non-owner.
+- `clarification_questions.question_text` is likewise tied to the user's
+  sensitive log: it is returned only to the owning client (via the clarification
+  read), never logged, and never returned to a non-owner.
 - `idempotency_key` is treated as potentially sensitive (a client may derive it
   from content): it is never logged, never returned in the DTO, and never surfaced
   to a non-owner.
@@ -207,7 +265,7 @@ transitions by reusing this map.
 | Status | When |
 | --- | --- |
 | `401` | Missing/invalid/expired bearer token. |
-| `404` | Creating, listing, or reading events for an account the caller does not own; a get-by-id whose event does not exist for the owner (fail closed). |
+| `404` | Creating, listing, or reading events for an account the caller does not own; a get-by-id or clarification read whose event does not exist for the owner (fail closed). |
 | `422` | Empty/whitespace/oversized `raw_text`, empty/whitespace/oversized/wrong-type `idempotency_key`, unknown body key, or malformed `day`. |
 
 ## Examples
@@ -236,6 +294,11 @@ curl -s ':8000/api/users/<uid>/log-events?day=2026-06-26' -H 'authorization: Bea
 # Poll one event
 curl -s :8000/api/users/<uid>/log-events/<event_id> -H 'authorization: Bearer <t>'
 # → 200 { "id": "...", "status": "pending", ... }
+
+# Read an event's clarification questions (for the clarify sheet)
+curl -s :8000/api/users/<uid>/log-events/<event_id>/clarification -H 'authorization: Bearer <t>'
+# → 200 { "questions": [ { "text": "How much peanut butter?" } ] }
+# (an event with no clarification rows → 200 { "questions": [] })
 ```
 
 ## Migration / Compatibility
@@ -253,4 +316,7 @@ curl -s :8000/api/users/<uid>/log-events/<event_id> -H 'authorization: Bearer <t
   endpoint shapes; the estimator (M4) depends on the table and extends the state
   machine map defined here. The offline outbox (FTY-104) depends on the
   safe-to-retry submit semantics and the `201`/`200` distinction.
+- The FTY-152 clarification read is additive and needs no migration: the
+  `clarification_questions` table already exists (migration `0005`, FTY-042). The
+  mobile clarify sheet (FTY-153) consumes the read.
 ```

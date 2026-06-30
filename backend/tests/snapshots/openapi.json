@@ -63,6 +63,37 @@
         "title": "ClampStatus",
         "type": "object"
       },
+      "ClarificationQuestionDTO": {
+        "description": "A single persisted clarification question (FTY-152).\n\nv1 surfaces the question ``text`` only. The estimator does not produce\nquick-pick options today, so the client answers via free-text; the shape is\nforward-compatible \u2014 an additive ``options`` array can be added later without\nbreaking this contract.",
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "ClarificationQuestionDTO",
+        "type": "object"
+      },
+      "ClarificationResponse": {
+        "description": "Response body for the owner-scoped clarification read (FTY-152).\n\nCarries the event's persisted clarification questions ordered by ``position``.\nAn event with no clarification rows (any non-``needs_clarification`` event, or\none with none persisted) yields an empty list \u2014 there is no status oracle.",
+        "properties": {
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/ClarificationQuestionDTO"
+            },
+            "title": "Questions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "questions"
+        ],
+        "title": "ClarificationResponse",
+        "type": "object"
+      },
       "DailySummaryDTO": {
         "additionalProperties": false,
         "description": "Daily summary response DTO (FTY-071; target read-model FTY-094/FTY-095).\n\nExposes separated intake, target, and exercise components for the requested\nday in the user's profile timezone. ``target`` is the calorie + macro\nread-model \u2014 each target carrying its effective value, derived value, and\n``derived | user`` provenance (FTY-095) \u2014 or ``None`` when no active goal or no\nstored target exists for the day.",
@@ -2727,6 +2758,76 @@
           }
         },
         "summary": "Get Log Event",
+        "tags": [
+          "log-events"
+        ]
+      }
+    },
+    "/api/users/{user_id}/log-events/{event_id}/clarification": {
+      "get": {
+        "description": "Return the persisted clarification questions for one of the caller's events.\n\nThe mobile clarify sheet (FTY-153) fetches this lazily when it opens, so the\nToday list/poll DTO stays lean. Questions are ordered by ``position`` and carry\nonly their ``text`` \u2014 the estimator produces no quick-pick options today.\n\nOwnership is fail-closed (FTY-030): a cross-user or nonexistent ``event_id`` is\nindistinguishable as ``404`` (no existence oracle). An event with no\nclarification rows returns ``200`` with an empty list (no status oracle). The\nquestion text, like raw text, is never logged.",
+        "operationId": "get_log_event_clarification_api_users__user_id__log_events__event_id__clarification_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClarificationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Log Event Clarification",
         "tags": [
           "log-events"
         ]
