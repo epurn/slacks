@@ -279,10 +279,12 @@ class FoodResolveStep:
 
         A barcode candidate prefers Open Food Facts; a generic candidate uses USDA. On
         a **miss**, a branded (official-source-eligible) candidate is deferred to the
-        official-source step (FTY-062) via ``pending_official_candidates``; a generic
-        one keeps the FTY-044/060 behavior (``needs_clarification``). When no enabled
-        source applies and the candidate is not eligible, it is left ``unresolved`` and
-        the event still completes.
+        official-source step (FTY-062) via ``pending_official_candidates``, and a
+        detail-rich generic candidate defers the same way so it reaches the
+        model-prior estimate (FTY-167); only a generic candidate with no usable
+        amount keeps the FTY-044/060 behavior (``needs_clarification``). When no
+        enabled source applies and the candidate is not eligible, it is left
+        ``unresolved`` and the event still completes.
         """
 
         eligible = _is_official_eligible(candidate)

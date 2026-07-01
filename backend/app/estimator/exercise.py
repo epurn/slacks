@@ -101,11 +101,18 @@ _DURATION_TEXT_RE: Final[re.Pattern[str]] = re.compile(
 # inference is visible on the estimation run. All values are documented tunables.
 # ---------------------------------------------------------------------------
 
-#: Walking cadence for a step-count → duration conversion, in steps per minute.
-#: ~100 steps/min is the widely cited threshold for moderate-intensity walking
-#: (Tudor-Locke et al., "How many steps/day are enough?", IJBNPA 2011), matching
-#: the moderate "walking, 3.0 mph" MET entry. 13 000 steps ÷ 100 ≈ 130 min.
-STEPS_PER_MINUTE: Final[float] = 100.0
+#: Steps-per-minute cadence for a step-count → duration conversion, keyed by
+#: curated MET-table activity. ~100 steps/min is the widely cited threshold for
+#: moderate-intensity walking (Tudor-Locke et al., "How many steps/day are
+#: enough?", IJBNPA 2011), matching the moderate "walking, 3.0 mph" MET entry:
+#: 13 000 steps ÷ 100 ≈ 130 min. Only walking has a documented cadence — a step
+#: count logged against any other activity (a run's steps come at a different,
+#: undocumented cadence; costing them at 100 steps/min with the run's MET would
+#: systematically overestimate) cannot be costed from steps alone and fails
+#: closed to clarification, like the other two conversions.
+CADENCE_STEPS_PER_MINUTE: Final[dict[str, float]] = {
+    "walking": 100.0,
+}
 
 #: Representative pace (kilometres per hour) for a distance → duration conversion,
 #: keyed by curated MET-table activity. Values are common recreational speeds:
@@ -216,8 +223,13 @@ def resolve_duration(
 
     1. an explicit duration (the user stated minutes/hours) — no assumption;
     2. a **distance** → duration via the activity's documented pace;
-    3. a **step count** → walking duration via the documented cadence;
+    3. a **step count** → duration via the activity's documented cadence
+       (walking only — see :data:`CADENCE_STEPS_PER_MINUTE`);
     4. a **game count** → duration via the activity's documented per-game minutes.
+
+    Every conversion is gated on the activity having a documented constant; an
+    activity without one falls through and fails closed rather than borrowing
+    another activity's pace/cadence while keeping its own MET.
 
     Raises :class:`InvalidDurationError` (``missing_duration``) when none apply, so
     the caller routes to ``needs_clarification`` rather than guessing. Each inferred
@@ -242,12 +254,14 @@ def resolve_duration(
 
     steps = step_count(unit, amount, quantity_text)
     if steps is not None:
-        minutes = steps / STEPS_PER_MINUTE
-        assumption = (
-            f"steps→duration: {steps:g} steps ÷ {STEPS_PER_MINUTE:g} steps/min "
-            f"= {round(minutes, 1):g} min (walking cadence)"
-        )
-        return minutes, (assumption,)
+        cadence = CADENCE_STEPS_PER_MINUTE.get(entry.key)
+        if cadence is not None:
+            minutes = steps / cadence
+            assumption = (
+                f"steps→duration: {steps:g} steps ÷ {cadence:g} steps/min "
+                f"= {round(minutes, 1):g} min ({entry.key})"
+            )
+            return minutes, (assumption,)
 
     games = game_count(unit, amount, quantity_text)
     if games is not None:

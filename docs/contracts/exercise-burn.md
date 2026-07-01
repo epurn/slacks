@@ -82,9 +82,12 @@ in `exercise.py`:
 - **Distance → duration** via a representative pace per curated activity
   (`PACE_KM_PER_HOUR`): walking 5 km/h, running 10 km/h, swimming 2.5 km/h. An
   activity with no documented pace cannot be costed from distance alone.
-- **Steps → walking duration** via the documented cadence `STEPS_PER_MINUTE` = 100
-  steps/min (Tudor-Locke et al. 2011, the moderate-walking threshold): `13000 ÷ 100 =
-  130 min`.
+- **Steps → walking duration** via a documented cadence per curated activity
+  (`CADENCE_STEPS_PER_MINUTE`): walking = 100 steps/min (Tudor-Locke et al. 2011, the
+  moderate-walking threshold): `13000 ÷ 100 = 130 min`. Only walking has a documented
+  cadence — a step count logged against any other activity (a run, a swim) cannot be
+  costed from steps alone, because borrowing the walking cadence while keeping the
+  activity's own MET would systematically overestimate.
 - **Game count → duration** via `GAME_DURATION_MINUTES` per curated activity
   (badminton 15 min/game). An activity with no documented per-game duration cannot be
   costed from a game count.

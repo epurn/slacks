@@ -189,48 +189,62 @@ class ParseStep:
 
         # Deterministic plausibility gate (FTY-156): check each *food* candidate's
         # quantity/unit against physical sanity ranges before trusting the parse.
+        # The gate runs on each candidate's *effective* amount — a range midpoint
+        # ("500-1000" → 750) is filled first so it is bounded by the same count
+        # caps as an explicit amount rather than bypassing the gate (FTY-167).
         # A single implausible candidate makes the whole event's total
         # untrustworthy, so route the event to clarification with a targeted
         # question naming the offending item. Exercise candidates are excluded:
         # their quantities are durations (minutes/hours), not mass/volume/count,
         # so the food-portion bounds and unit vocabulary do not apply — exercise
         # plausibility/duration parsing is FTY-043's concern (exercise-burn.md).
-        implausible = _first_implausible(result.items)
+        effective = [_effective_candidate(item) for item in result.items]
+
+        implausible = _first_implausible([item for item, _ in effective])
         if implausible is not None:
             context.clarification_questions = [implausible]
             raise NeedsClarification("implausible_candidate")
 
-        for item in result.items:
-            draft = _to_draft(item, context)
+        for item, assumption in effective:
+            if assumption is not None and assumption not in context.assumptions:
+                context.assumptions.append(assumption)
+            draft = _to_draft(item)
             if item.type is CandidateType.FOOD:
                 context.food_candidates.append(draft)
             else:
                 context.exercise_candidates.append(draft)
 
 
-def _to_draft(item: ParsedCandidate, context: EstimationContext) -> CandidateDraft:
-    """Map a validated schema candidate to the neutral persistence draft.
+def _effective_candidate(item: ParsedCandidate) -> tuple[ParsedCandidate, str | None]:
+    """Fill a food candidate's effective amount from a range midpoint, if any.
 
     When a food candidate has no structured amount but ``quantity_text`` states a
     numeric range ("5-10"), the range's midpoint is filled deterministically so the
-    serving math can estimate a single portion, and the conversion is recorded as a
-    content-free run assumption (numbers only — never raw diary text). FTY-167.
+    serving math can estimate a single portion. The fill happens *before* the
+    plausibility gate so the midpoint is subject to the same count caps as an
+    explicit amount — a gross range ("500-1000") must not bypass FTY-156. Returns
+    the effective candidate plus the content-free assumption string (numbers only —
+    never raw diary text) to record if the event is accepted. FTY-167.
     """
 
     amount = item.amount
     if item.type is CandidateType.FOOD and (amount is None or amount <= 0):
         parsed_range = parse_range_midpoint(item.quantity_text)
         if parsed_range is not None:
-            low, high, amount = parsed_range
-            assumption = f"range_midpoint: {low:g}-{high:g} → {amount:g}"
-            if assumption not in context.assumptions:
-                context.assumptions.append(assumption)
+            low, high, midpoint = parsed_range
+            assumption = f"range_midpoint: {low:g}-{high:g} → {midpoint:g}"
+            return item.model_copy(update={"amount": midpoint}), assumption
+    return item, None
+
+
+def _to_draft(item: ParsedCandidate) -> CandidateDraft:
+    """Map a validated (effective) schema candidate to the neutral persistence draft."""
 
     return CandidateDraft(
         name=item.name,
         quantity_text=item.quantity_text,
         unit=item.unit,
-        amount=amount,
+        amount=item.amount,
         barcode=item.barcode,
         brand=item.brand,
     )

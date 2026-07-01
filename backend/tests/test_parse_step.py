@@ -678,6 +678,38 @@ def test_range_fills_midpoint_and_records_assumption() -> None:
     assert "range_midpoint: 5-10 → 7.5" in context.assumptions
 
 
+def test_implausible_range_midpoint_routes_to_clarification() -> None:
+    # The midpoint is filled *before* the FTY-156 plausibility gate: "500-1000"
+    # onion rings is an effective count of 750, far above the count cap, so the
+    # event clarifies — a range must not bypass the gate that an explicit
+    # amount=750 would fail.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [
+                    {
+                        "type": "food",
+                        "name": "onion rings",
+                        "quantity_text": "500-1000",
+                        "unit": "rings",
+                    }
+                ]
+            )
+        ]
+    )
+    context = _context(raw_text="had 500-1000 onion rings")
+
+    with pytest.raises(NeedsClarification) as exc:
+        _run(provider, context)
+
+    assert exc.value.reason == "implausible_candidate"
+    # Nothing persisted, and no midpoint assumption recorded for a rejected reply.
+    assert context.food_candidates == []
+    assert context.assumptions == []
+    assert len(context.clarification_questions) == 1
+    assert "onion rings" in context.clarification_questions[0]
+
+
 def test_needs_clarification_disposition_with_detail_is_estimated() -> None:
     # Even a ``needs_clarification`` disposition is overridden when the item carries
     # enough structure to estimate: "a slice of donair pizza and 2 small garlic

@@ -12,10 +12,10 @@ from __future__ import annotations
 import pytest
 
 from app.estimator.exercise import (
+    CADENCE_STEPS_PER_MINUTE,
     GAME_DURATION_MINUTES,
     MAX_DURATION_MINUTES,
     PACE_KM_PER_HOUR,
-    STEPS_PER_MINUTE,
     InvalidDurationError,
     MissingBodyWeightError,
     UnknownActivityError,
@@ -206,9 +206,30 @@ def test_step_count_converts_to_walking_duration_via_cadence() -> None:
     assert burn.duration_minutes == pytest.approx(130.0)
     # (3.5 - 1) * 70 * (130/60) ≈ 379.2 kcal.
     assert burn.active_calories == pytest.approx(379.2, abs=0.1)
-    assert burn.assumptions == (
-        "steps→duration: 13000 steps ÷ 100 steps/min = 130 min (walking cadence)",
-    )
+    assert burn.assumptions == ("steps→duration: 13000 steps ÷ 100 steps/min = 130 min (walking)",)
+
+
+def test_step_count_without_documented_cadence_cannot_be_costed() -> None:
+    # Steps convert via the documented *walking* cadence only. Costing a 13000-step
+    # run at 100 steps/min while keeping the running MET would systematically
+    # overestimate (130 min at MET 7.0 = 910 kcal vs ~80 min of real running), so a
+    # non-walking activity fails closed to clarification like the other conversions.
+    with pytest.raises(InvalidDurationError):
+        resolve_exercise(
+            activity="running",
+            weight_kg=70.0,
+            unit="steps",
+            amount=13000.0,
+            quantity_text="13000 steps",
+        )
+    with pytest.raises(InvalidDurationError):
+        resolve_exercise(
+            activity="swimming",
+            weight_kg=70.0,
+            unit="steps",
+            amount=5000.0,
+            quantity_text="5000 steps",
+        )
 
 
 def test_game_count_converts_to_duration_via_per_game_minutes() -> None:
@@ -271,6 +292,6 @@ def test_has_exercise_detail(
 
 def test_documented_conversion_constants_are_sane() -> None:
     # Guard the documented tunables so an accidental edit is caught.
-    assert STEPS_PER_MINUTE == 100.0
+    assert CADENCE_STEPS_PER_MINUTE == {"walking": 100.0}
     assert PACE_KM_PER_HOUR == {"walking": 5.0, "running": 10.0, "swimming": 2.5}
     assert GAME_DURATION_MINUTES == {"badminton": 15.0}

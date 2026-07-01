@@ -70,8 +70,10 @@ _VOLUME_UNIT_GRAMS: Final[dict[str, float]] = {
 #: casual log uses (slice, sandwich, handful, ring, finger, bowl, …) so a
 #: detail-rich generic entry — "a slice of pizza", "3 cracker sandwiches", "a
 #: handful of onion rings" — resolves its portion via the default serving size
-#: instead of stopping at clarification (FTY-167). Mirrors the plausibility
-#: validator's count vocabulary so the two stay consistent.
+#: instead of stopping at clarification (FTY-167). This vocabulary is a superset
+#: of the plausibility validator's ``_COUNT_UNITS``: food nouns such as sandwich/
+#: ring/finger are accepted there via its name-match heuristic or its bounded
+#: unknown-unit allowance, not by sharing this list.
 _COUNT_UNITS: Final[frozenset[str]] = frozenset(
     {
         "",

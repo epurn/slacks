@@ -162,8 +162,11 @@ the accepted items.
 **Range midpoint.** When a food item has no structured `amount` but its `quantity_text`
 states a numeric range, the step fills the arithmetic **midpoint** as the count
 (`5-10 → 7.5`) so the serving math can estimate a single portion, and records a
-content-free `range_midpoint: <low>-<high> → <mid>` assumption on the run. This changes
-routing and the count only — the parse step still carries **no** energy/macro value;
+content-free `range_midpoint: <low>-<high> → <mid>` assumption on the run. The midpoint
+is filled **before** the FTY-156 plausibility gate, so it is bounded by the same count
+caps as an explicit amount (`500-1000 → 750` clarifies rather than bypassing the gate),
+and the assumption is recorded only when the event is accepted. This changes routing
+and the count only — the parse step still carries **no** energy/macro value;
 calories/macros remain the calculator layers' responsibility (FTY-043/044/062).
 
 ## Validation
