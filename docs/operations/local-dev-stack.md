@@ -20,6 +20,7 @@ checklist, smoke check) see the README **Self-Hosting** section.
 | `migrate` | `./backend` (Alembic) | One-shot first-boot migration runner. | — |
 | `api` | `./backend` (FastAPI) | HTTP API; serves `GET /healthz` (liveness), `GET /readyz` (readiness — checks DB), and `GET /healthz/sources`. | `${API_PORT:-8000}` |
 | `worker` | `./backend` (Celery) | Background estimation worker. | — |
+| `searxng` | `searxng/searxng` (pinned) | Private, keyless metasearch backing the official-source search adapter (FTY-164/165). | — (internal only) |
 
 - Postgres and Redis are **not published to host interfaces by default** (FTY-109).
   The `api`, `worker`, and `migrate` services reach them over the internal compose
@@ -46,8 +47,21 @@ checklist, smoke check) see the README **Self-Hosting** section.
 - The API healthcheck polls its own `GET /healthz` and expects HTTP 200.
 - The worker healthcheck runs `celery inspect ping` against the configured
   `app.worker:celery_app` to confirm the worker is alive and connected to Redis.
-- Images for Postgres and Redis are pinned per the security baseline's
-  pinned-dependency principle.
+- Images for Postgres, Redis, and SearXNG are pinned to exact tags per the
+  security baseline's pinned-dependency principle.
+- `searxng` runs a private [SearXNG](https://docs.searxng.org/) metasearch
+  instance that backs the official-source search adapter (FTY-164). It is
+  **keyless** and **enabled by default**, so search works out of the box — no
+  Brave API key required. Like Postgres and Redis it is **not published to the
+  host** (FTY-165); the `api` and `worker` reach it over the internal compose
+  network at `http://searxng:8080`. The backend sends only sanitized
+  item-identity queries — never any personal context. Its minimal config lives in
+  `searxng/settings.yml` (mounted read-only at `/etc/searxng`), which enables the
+  JSON output format the adapter consumes and sets a documented **non-secret dev
+  placeholder** secret key. Exposing SearXNG to the host or the public internet is
+  out of scope and would need a separate, explicit operator story. Search
+  degrades gracefully (model-prior-with-status) when the service is unreachable,
+  so `api`/`worker` do not hard-depend on it starting.
 - The `backend/` image includes a pinned Node.js runtime and the Claude Code CLI
   (`claude`) so the `api` and `worker` services can use the `claude_code` LLM
   provider (FTY-087/088) without mounting a host binary.
@@ -83,7 +97,7 @@ Key variable groups (see `.env.example` for full documentation):
 | LLM provider | `FATTY_LLM_*` | Optional; defaults to `fake` (model-prior-with-status). See LLM providers below. |
 | USDA FDC | `FATTY_FDC_*` | Optional; free data.gov key. Disabled when key absent. |
 | Open Food Facts | `FATTY_OFF_*` | Optional, open API; enabled by default, no key required. |
-| Search | `FATTY_SEARCH_*` | Optional; disabled by default (no bundled Brave key). |
+| Search | `FATTY_SEARCH_*` | Keyless SearXNG by default (points at the `searxng` service; enabled, no key). Brave is an opt-in override; `none` turns search off. |
 
 ## LLM Providers
 
@@ -149,15 +163,28 @@ docker compose up -d
 curl -fsS http://localhost:8000/healthz          # -> {"status":"ok"} — liveness (process-up, no DB)
 curl -fsS http://localhost:8000/readyz           # -> {"status":"ready"} — readiness (200 DB reachable / 503 not ready)
 curl -fsS http://localhost:8000/healthz/sources  # -> provider capability list
-docker compose ps                                # migrate exited 0, api/postgres/redis/worker all healthy
+docker compose ps                                # migrate exited 0, api/postgres/redis/worker/searxng all healthy
 docker compose down                              # add -v to drop all volumes
 ```
 
 `GET /healthz/sources` lists each evidence source (LLM, FDC, OFF, search) with
 its `enabled` and `available` flags, so you can confirm provider configuration
-without making any estimation calls. The `claude_code` entry specifically shows
-whether the CLI is installed and the session is valid — both must be `true` for
-the provider to work.
+without making any estimation calls. With the default keyless SearXNG search
+(FTY-165) the `official_source` entry reports both `enabled: true` and
+`available: true` out of the box — no API key needed:
+
+```sh
+curl -fsS http://localhost:8000/healthz/sources | python3 -m json.tool
+# official_source: {"enabled": true, "available": true, ...}
+# (available reflects config, not a live probe: it is true whenever the searxng
+#  provider is selected. Confirm the container itself is up with `docker compose ps`.)
+```
+
+Selecting Brave without a key, or setting `FATTY_SEARCH_PROVIDER=none` /
+`FATTY_SEARCH_ENABLED=false`, flips these flags so the opt-out or missing
+credential is visible here. The `claude_code` entry specifically shows whether
+the CLI is installed and the session is valid — both must be `true` for the
+provider to work.
 
 ## Container User
 

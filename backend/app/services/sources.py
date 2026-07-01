@@ -68,9 +68,11 @@ def _probe_claude_code(environ: Mapping[str, str] | None = None) -> tuple[bool, 
 def list_source_capabilities(environ: Mapping[str, str] | None = None) -> SourcesStatus:
     """Return the capability descriptor for each configured evidence source.
 
-    The official-source search provider (FTY-079) is ``enabled`` by self-host flag but
-    only ``available`` with an API key, so out of the box (no bundled key) it reports
-    available=false; USDA FDC (generic foods) is always ``enabled`` but only
+    The official-source search provider (FTY-079/164) defaults to the keyless local
+    SearXNG backend, so out of the box it is ``enabled`` and ``available`` with no
+    API key; selecting Brave gates ``available`` on its key, and the ``none``
+    provider (or ``FATTY_SEARCH_ENABLED=false``) reports enabled=false — the
+    explicit opt-out. USDA FDC (generic foods) is always ``enabled`` but only
     ``available`` with an API key; Open Food Facts (barcode) needs no credentials, so
     it is always ``available`` and ``enabled`` unless a self-hoster turns it off.
     The ``claude_code`` LLM provider (FTY-087/088) is ``enabled`` when selected as
@@ -89,7 +91,7 @@ def list_source_capabilities(environ: Mapping[str, str] | None = None) -> Source
                 id=OFFICIAL_SOURCE,
                 source_type=OFFICIAL_SOURCE_TYPE,
                 kinds=list(SEARCH_KINDS),
-                enabled=search.enabled,
+                enabled=search.is_enabled,
                 available=search.is_available,
             ),
             SourceCapability(

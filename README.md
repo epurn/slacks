@@ -100,7 +100,7 @@ Open `.env` and configure any providers you want:
   - **API key providers:** for OpenAI or Anthropic, set `FATTY_LLM_PROVIDER`, `FATTY_LLM_API_KEY`, and `FATTY_LLM_MODEL`.
 - **USDA FDC:** set `FATTY_FDC_API_KEY` with your free data.gov key. Omit to skip generic-food lookups.
 - **Open Food Facts:** enabled by default (no key needed). Set `FATTY_OFF_ENABLED=false` to disable.
-- **Brave Search:** set `FATTY_SEARCH_API_KEY` and `FATTY_SEARCH_ENABLED=true`. Disabled by default.
+- **Official-source search:** enabled by default via the bundled keyless `searxng` service — no key or setup needed. To use Brave instead, set `FATTY_SEARCH_PROVIDER=brave` and `FATTY_SEARCH_API_KEY`; set `FATTY_SEARCH_PROVIDER=none` to turn search off.
 
 See `.env.example` for all available options with documentation.
 
@@ -112,7 +112,8 @@ docker compose up
 
 Docker Compose builds the backend image, runs first-boot Alembic migrations
 automatically (the `migrate` service completes before the API starts), then
-brings up all four services.
+brings up all services (Postgres, Redis, the API, the Celery worker, and the
+private `searxng` search service).
 
 **7. (Required if using `claude_code` provider) One-time Claude Code login:**
 
@@ -153,10 +154,11 @@ A 200 response from `/healthz` confirms the API is up. `/readyz` returns 200 whe
 
 ### Provider Availability
 
-Every optional provider (LLM, USDA FDC, OFF, Brave Search) can be omitted.
-The app starts and serves health with all providers unconfigured; estimation
-degrades to model-prior-with-status rather than failing. Source availability is
-reflected in `GET /healthz/sources`.
+Every optional provider (LLM, USDA FDC, OFF) can be omitted, and official-source
+search runs keyless by default via the bundled `searxng` service. The app starts
+and serves health with all providers unconfigured; estimation degrades to
+model-prior-with-status rather than failing. Source availability is reflected in
+`GET /healthz/sources`.
 
 ### First-Boot Migrations
 

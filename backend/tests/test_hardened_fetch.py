@@ -486,3 +486,122 @@ def test_strip_active_content_drops_scripts_styles_and_attributes() -> None:
     assert "body{}" not in text
     assert "onerror" not in text
     assert "alert" not in text
+
+
+# --- Narrow local-HTTP exception for the local SearXNG service (FTY-164) -------
+
+SEARXNG_ALLOWED = frozenset({"searxng"})
+SEARXNG_URL = "http://searxng:8080/search?q=pizza&format=json"
+
+
+@pytest.mark.parametrize(
+    "local_ip",
+    [
+        "127.0.0.1",  # loopback
+        "::1",  # IPv6 loopback
+        "172.19.0.5",  # docker bridge network (RFC 1918)
+        "10.0.0.5",  # RFC 1918
+        "192.168.1.10",  # RFC 1918
+        "fd12:3456::7",  # IPv6 unique-local
+    ],
+)
+def test_local_http_host_resolving_locally_is_allowed(local_ip: str) -> None:
+    vetted = assert_url_allowed(
+        SEARXNG_URL,
+        allowed_hosts=SEARXNG_ALLOWED,
+        resolver=_resolver_returning(local_ip),
+        local_http_hosts=frozenset({"searxng"}),
+    )
+    assert vetted == local_ip
+
+
+@pytest.mark.parametrize(
+    "non_local_ip",
+    [
+        "23.1.2.3",  # public — plaintext to the internet is refused
+        "169.254.169.254",  # link-local cloud metadata service
+        "0.0.0.0",  # unspecified  # noqa: S104
+        "224.0.0.1",  # multicast
+    ],
+)
+def test_local_http_host_resolving_non_locally_is_blocked(non_local_ip: str) -> None:
+    # The exception is for a *local service* only: a name that resolves outward
+    # (public) or sideways (metadata) fails closed even though the name is listed.
+    with pytest.raises(FetchPolicyError) as exc:
+        assert_url_allowed(
+            SEARXNG_URL,
+            allowed_hosts=SEARXNG_ALLOWED,
+            resolver=_resolver_returning(non_local_ip),
+            local_http_hosts=frozenset({"searxng"}),
+        )
+    assert exc.value.reason == "local_http_target_not_local"
+
+
+def test_http_host_not_named_in_local_exception_is_still_scheme_blocked() -> None:
+    # The exception names exact hosts; any other host keeps the HTTPS-only rule
+    # even when it appears in the ordinary allowlist.
+    with pytest.raises(FetchPolicyError) as exc:
+        assert_url_allowed(
+            "http://api.nal.usda.gov/fdc/v1/foods/search",
+            allowed_hosts=ALLOWED,
+            resolver=_resolver_returning("10.0.0.5"),
+            local_http_hosts=frozenset({"searxng"}),
+        )
+    assert exc.value.reason == "scheme_not_allowed"
+
+
+def test_local_exception_does_not_relax_https_public_requirement() -> None:
+    # An HTTPS URL keeps the public-address requirement even when its host is
+    # (mistakenly) named in local_http_hosts: the carve-out is scheme-scoped.
+    with pytest.raises(FetchPolicyError) as exc:
+        assert_url_allowed(
+            "https://searxng:8080/search",
+            allowed_hosts=SEARXNG_ALLOWED,
+            resolver=_resolver_returning("172.19.0.5"),
+            local_http_hosts=frozenset({"searxng"}),
+        )
+    assert exc.value.reason == "private_address_blocked"
+
+
+def test_get_json_refuses_public_resolving_local_http_before_any_socket() -> None:
+    class _ExplodingOpener:
+        def open(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover - must not run
+            raise AssertionError("transport must not be reached for a blocked URL")
+
+    with pytest.raises(FetchPolicyError):
+        get_json(
+            SEARXNG_URL,
+            timeout_seconds=5.0,
+            allowed_hosts=SEARXNG_ALLOWED,
+            resolver=_resolver_returning("23.1.2.3"),
+            opener=_ExplodingOpener(),  # type: ignore[arg-type]
+            local_http_hosts=frozenset({"searxng"}),
+        )
+
+
+def test_get_json_without_the_exception_is_unchanged_https_only() -> None:
+    # Default (empty) local_http_hosts: the pre-FTY-164 HTTPS-only policy, exactly.
+    with pytest.raises(FetchPolicyError) as exc:
+        get_json(
+            SEARXNG_URL,
+            timeout_seconds=5.0,
+            allowed_hosts=SEARXNG_ALLOWED,
+            resolver=_resolver_returning("172.19.0.5"),
+        )
+    assert exc.value.reason == "scheme_not_allowed"
+
+
+def test_local_http_default_port_is_80() -> None:
+    captured: dict[str, Any] = {}
+
+    def _resolver(host: str, port: int, *args: Any, **kwargs: Any) -> list[Any]:
+        captured["port"] = port
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", port))]
+
+    assert_url_allowed(
+        "http://localhost/search",
+        allowed_hosts=frozenset({"localhost"}),
+        resolver=_resolver,
+        local_http_hosts=frozenset({"localhost"}),
+    )
+    assert captured["port"] == 80

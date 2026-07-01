@@ -94,13 +94,15 @@ def test_healthz_sources_reports_provider_capabilities(client: TestClient) -> No
     assert fdc["kinds"] == ["generic_food"]
     assert isinstance(fdc["available"], bool)
 
-    # Official-source search (FTY-079) advertises availability gated on an API key
-    # (disabled-by-default posture; proven deterministically in the adapter tests).
+    # Official-source search (FTY-079/164) defaults to the keyless local SearXNG
+    # backend, so with no FATTY_SEARCH_* config it is enabled AND available with
+    # no API key (the Brave/none postures are proven in the adapter tests).
     # The descriptor carries no secret.
     official = sources["official_source"]
     assert official["source_type"] == "official_source"
     assert official["kinds"] == ["named_product", "restaurant_item"]
-    assert isinstance(official["available"], bool)
+    assert official["enabled"] is True
+    assert official["available"] is True
     assert "api_key" not in official
     assert "key" not in official
 
