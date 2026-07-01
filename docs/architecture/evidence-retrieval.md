@@ -40,7 +40,11 @@ network access:
 - sanitize queries before search,
 - avoid sending personal profile or food-history context to search providers,
 - fetch allowlisted public HTTP(S) URLs only,
-- block private network, localhost, file, and metadata-service targets,
+- block private network, localhost, file, and metadata-service targets — with one
+  narrow, explicitly-configured exception (FTY-164): the local self-hosted
+  SearXNG search service may be reached over plain HTTP at a local name
+  (`searxng` / `localhost` / loopback) that must resolve to a loopback or
+  ordinary private address (never link-local/metadata, never public),
 - enforce redirect, size, timeout, and content-type limits,
 - strip scripts and active content before extraction,
 - store extracted facts, URL, timestamp, and content hash rather than raw pages
@@ -55,8 +59,11 @@ validated by backend schemas and deterministic calculators.
   detail endpoints, and publishes data in the public domain/CC0.
 - Open Food Facts provides an open API for product data and has documented rate
   limits and data-quality caveats.
-- Brave Search API is a reasonable first search adapter for official-source
-  lookup because it provides web search and LLM-context-oriented search results.
+- A local/self-hosted SearXNG instance is the default search backend for
+  official-source lookup (FTY-164): it is keyless, so search works out of the
+  box for a dev/self-host install with no paid API dependency.
+- Brave Search API remains an explicit opt-in search adapter (API key required)
+  because it provides web search and LLM-context-oriented search results.
 
 Self-hosted deployments may disable any optional provider, but v1 must make
 provider availability explicit in health/config diagnostics and estimation
@@ -74,4 +81,5 @@ implementation is `docs/contracts/food-resolution.md` (FTY-044).
 
 - USDA FoodData Central API Guide: https://fdc.nal.usda.gov/api-guide
 - Open Food Facts API documentation: https://openfoodfacts.github.io/openfoodfacts-server/api/
+- SearXNG documentation: https://docs.searxng.org/
 - Brave Search API documentation: https://api-dashboard.search.brave.com/app/documentation

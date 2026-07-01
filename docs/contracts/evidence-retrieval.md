@@ -52,7 +52,7 @@ The official-source **search** adapter (`search.py`, the `official_source` tier'
 search half) is implemented in FTY-079 behind the **Search Request / Response
 Boundary** below; its result URLs are fetched by the hardened fetcher (FTY-078) and
 consumed by the official-source resolution step (FTY-062). See **Search Provider
-Adapter (Brave) — FTY-079**.
+Adapter — FTY-079 / FTY-164**.
 
 ## Version
 
@@ -61,9 +61,15 @@ evidence record and on the estimation run `source_refs`: `usda_fdc`,
 `open_food_facts`, `official_source`, `user_label`, `model_prior`.
 
 FTY-079 implements the `official_source` **search** boundary (the pluggable
-search-provider adapter, Brave default, disabled by default) without changing this
-contract; see **Search Provider Adapter (Brave) — FTY-079**. The six lookup-status
-values and the sanitized-query / header-only-key rules are exactly those fixed here.
+search-provider adapter) without changing this contract; see **Search Provider
+Adapter — FTY-079 / FTY-164**. The six lookup-status values and the
+sanitized-query / header-only-key rules are exactly those fixed here.
+
+FTY-164 makes search a **keyless default capability**: the default backend becomes
+a local/self-hosted **SearXNG** instance (no API key), Brave becomes the explicit
+keyed opt-in, and `none` is the explicit operator off switch. The registered
+provider ids are `searxng`, `brave`, and `none`. The status vocabulary, the
+sanitized-query chokepoint, and the header-only-key rule (for Brave) are unchanged.
 
 FTY-093 adds the **item re-match** capability (list alternative source matches +
 re-resolve an item to a chosen source) on top of the existing resolution pipeline,
@@ -214,8 +220,9 @@ the estimation-job state machine.
 
 ## Search Request / Response Boundary
 
-Official-source lookup uses a configurable search provider (Brave Search is the
-initial candidate) behind the backend; the estimator never browses directly.
+Official-source lookup uses a configurable search provider (a local/self-hosted
+SearXNG instance by default; Brave Search as the keyed opt-in) behind the
+backend; the estimator never browses directly.
 
 **Request (estimator → search provider).** A single sanitized query string plus
 a result cap. The query is built from the **item identity only** — product /
@@ -339,48 +346,78 @@ generic food with no configured source and no label:
     assumptions=["usda_fdc unavailable"], surfaced to client as a model-prior estimate
 ```
 
-## Search Provider Adapter (Brave) — FTY-079
+## Search Provider Adapter — FTY-079 / FTY-164
 
 The search-provider adapter is the **search half** of the `official_source` tier: it
 turns a sanitized item-identity query into candidate result URLs plus an explicit
 status, implementing the **Search Request / Response Boundary** above. It is a
-**pluggable** adapter — **Brave Search** is the default (and v1-only) backend — and is
-**disabled by default** for self-host: no key is bundled, so out of the box it reports
-`unavailable` and callers (FTY-062) fall through to the model-prior path. It ships
-**no fetcher** (the result URLs are fetched by FTY-078's hardened fetcher) and **no
-resolution pipeline** (FTY-062).
+**pluggable** adapter (FTY-079) with three registered backends (FTY-164):
+
+- **`searxng` (default).** A local/self-hosted [SearXNG](https://docs.searxng.org/)
+  instance queried via its JSON API (`/search?q=...&format=json`). **Keyless**: a
+  normal dev/self-host install starts with search enabled *and available* — no paid
+  API, no credential. The dev-stack container is FTY-165.
+- **`brave` (explicit opt-in).** The Brave Search API; requires
+  `FATTY_SEARCH_API_KEY`. Without the key it reports `unavailable`.
+- **`none` (explicit opt-out).** Search deliberately off: every lookup is
+  `disabled`, nothing egresses, and diagnostics show the opt-out rather than a
+  missing credential.
+
+Search is a **non-optional default capability**: the out-of-the-box posture is
+"available, keyless", and only an explicit operator choice (`none`, or
+`FATTY_SEARCH_ENABLED=false`) turns it off. The adapter ships **no fetcher** (the
+result URLs are fetched by FTY-078's hardened fetcher) and **no resolution
+pipeline** (FTY-062).
 
 ### Owner (additional)
 
 `backend/app/estimator/search.py` (the `SearchProvider` interface, the
-`BraveSearchProvider` adapter, `SearchSettings`, the `sanitize_query` chokepoint, the
-`SearchStatus` values, and `build_search_provider`); the `official_source` entry in
-the source-diagnostics surface (`backend/app/services/sources.py`,
-`backend/app/routers/health.py`). The adapter reuses `hardened_fetch.py` for egress.
+`SearXNGSearchProvider` / `BraveSearchProvider` / `NullSearchProvider` adapters,
+`SearchSettings`, the `sanitize_query` chokepoint, the `SearchStatus` values, and
+`build_search_provider`); the `official_source` entry in the source-diagnostics
+surface (`backend/app/services/sources.py`, `backend/app/routers/health.py`). The
+adapters reuse `hardened_fetch.py` for egress.
 
 ### Config (`SearchSettings`, `FATTY_SEARCH_` env vars)
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `FATTY_SEARCH_PROVIDER` | `brave` | Which registered backend to use; only `brave` is registered in v1. An unknown value fails closed at config load. |
-| `FATTY_SEARCH_ENABLED` | `true` | Self-host enable/disable flag. `false` → `disabled` even if a key is present. |
-| `FATTY_SEARCH_API_KEY` | _(none)_ | Provider key (secret). **Absent → source `unavailable`** (disabled by default). |
-| `FATTY_SEARCH_BASE_URL` | `https://api.search.brave.com` | API base; **must be https**. The allowlisted host is derived from it. |
+| `FATTY_SEARCH_PROVIDER` | `searxng` | Which registered backend to use: `searxng`, `brave`, or `none`. An unknown value fails closed at config load. |
+| `FATTY_SEARCH_ENABLED` | `true` | Self-host enable/disable flag. `false` → `disabled` regardless of provider. |
+| `FATTY_SEARCH_API_KEY` | _(none)_ | Brave key (secret); only the `brave` backend uses it. **Absent with `brave` → `unavailable`.** SearXNG ignores it. |
+| `FATTY_SEARCH_BASE_URL` | `http://searxng:8080` (searxng) / `https://api.search.brave.com` (brave) | API base; the allowlisted host is derived from it. See **Base URL rules** below. |
 | `FATTY_SEARCH_TIMEOUT_SECONDS` | `10` | Per-request wall-clock timeout. |
-| `FATTY_SEARCH_MAX_RESULTS` | `5` | Candidate result URLs requested / surfaced. |
+| `FATTY_SEARCH_MAX_RESULTS` | `5` | Candidate result URLs surfaced (Brave: also requested via `count`; SearXNG: bounded client-side). |
 
-The key is a `SecretStr`, read from the environment only, never exposed to clients,
-never logged, and sent only in the `X-Subscription-Token` **header** (never the query
-string, so it cannot leak through a logged URL). With no key the source is unavailable
-and callers fall through to model-prior-with-status.
+The Brave key is a `SecretStr`, read from the environment only, never exposed to
+clients, never logged, and sent only in the `X-Subscription-Token` **header** (never
+the query string, so it cannot leak through a logged URL). SearXNG sends **no
+credential at all**.
+
+### Base URL rules (narrow local-HTTP exception)
+
+Provider base URLs must be **https**, with exactly one narrow carve-out:
+
+- **SearXNG** may use plain `http` **only** for the local service targets the dev
+  stack needs: the `searxng` service name, `localhost`, and loopback IP literals.
+  Any other SearXNG URL — a public host, an internal DNS name, a non-loopback
+  private IP — must be `https`. The rule is enforced twice: at config validation
+  (`SearchSettings` rejects e.g. `http://public.example.com`) and again at egress,
+  where the hardened fetcher admits the plain-HTTP host only if every resolved
+  address is loopback or ordinary private (RFC 1918 / ULA) — never link-local
+  (`169.254.169.254`), never public — and still pins the vetted IP.
+- **Brave** is https-only, no exception.
+- **`none`** never egresses; its base URL is inert.
 
 ### Capability / availability
 
-The adapter advertises a capability descriptor — `enabled` (the self-host flag) and
-`available` (a key is present) — surfaced in `GET /healthz/sources` under
-`id = official_source`, `source_type = official_source`,
-`kinds = [named_product, restaurant_item]`, so a self-hoster can confirm whether
-search is on without any trial call. The descriptor carries no secret.
+The adapter advertises a capability descriptor — `enabled` (the self-host flag, and
+`false` for the `none` provider) and `available` (required credentials present:
+always `true` for keyless SearXNG, key-gated for Brave, `false` for `none`) —
+surfaced in `GET /healthz/sources` under `id = official_source`,
+`source_type = official_source`, `kinds = [named_product, restaurant_item]`, so a
+self-hoster can confirm whether search is on without any trial call. The descriptor
+carries no secret and no query content.
 
 ### Status values
 
@@ -389,10 +426,10 @@ Capability / Status** vocabulary above:
 
 | Status | When | Result |
 | --- | --- | --- |
-| `disabled` | `FATTY_SEARCH_ENABLED=false`. | No call; caller tries next source / `model_prior`. |
-| `unavailable` | No API key configured (default posture). | No call; caller falls through. |
+| `disabled` | `FATTY_SEARCH_ENABLED=false`, or `FATTY_SEARCH_PROVIDER=none`. | No call; caller tries next source / `model_prior`. |
+| `unavailable` | `brave` selected with no API key. (SearXNG is keyless and never `unavailable` by config.) | No call; caller falls through. |
 | `rate_limited` | Provider returned an HTTP 429 rate-limit / quota signal. | Bounded retry, then next source / `model_prior`. |
-| `failed` | Timeout, connection error, 5xx, other 4xx, non-JSON, oversized, or policy-blocked (non-https / non-allowlisted / redirect / private-IP) response. | Nothing trusted; next source / `model_prior`. |
+| `failed` | Timeout, connection error, 5xx, other 4xx, non-JSON, oversized, or policy-blocked (scheme / non-allowlisted / redirect / address-posture) response. | Nothing trusted; next source / `model_prior`. |
 | `partial` | The provider answered but offered no usable candidate URL (or the sanitized query was empty). | Not finalizable; next source. |
 | `success` | A bounded list of candidate HTTP(S) result URLs was returned. | URLs handed to the fetch step (FTY-078). |
 
@@ -404,10 +441,11 @@ lookup can never be mistaken for a result.
 `sanitize_query` is the **single chokepoint** every query passes through before
 egress: it strips control characters (so multi-line / structured personal context
 cannot be smuggled), collapses whitespace, and length-bounds the string (≤ 256
-chars). The adapter accepts a single item-identity string and sends a **closed**
-request shape — only `q` (the sanitized name) and `count` — so profile, weight, food
-history, and event metadata have **no channel** to the provider. A test proves no
-personal context egresses.
+chars). Each adapter accepts a single item-identity string and sends a **closed**
+request shape — `q` (the sanitized name) + `count` for Brave, `q` + `format=json`
+for SearXNG — so profile, weight, food history, and event metadata have **no
+channel** to the provider. Tests prove no personal context egresses on either
+backend.
 
 ### Errors
 
@@ -632,10 +670,20 @@ cross-user / unknown / unauthenticated fail-closed.
   descriptors). The provider contract itself stays in `llm-provider.md`.
 - FTY-079 adds the `official_source` search adapter (`search.py`) and an
   `official_source` entry in `GET /healthz/sources`. It is additive: a new
-  `FATTY_SEARCH_`-prefixed config block (disabled by default, no bundled key), no
-  schema change, and a backward-compatible `status_code` attribute on
-  `hardened_fetch`'s response/transient errors for rate-limit (HTTP 429) detection.
-  The fetcher (FTY-078) and the resolution pipeline (FTY-062) remain separate.
+  `FATTY_SEARCH_`-prefixed config block, no schema change, and a
+  backward-compatible `status_code` attribute on `hardened_fetch`'s
+  response/transient errors for rate-limit (HTTP 429) detection. The fetcher
+  (FTY-078) and the resolution pipeline (FTY-062) remain separate.
+- FTY-164 **changes the search defaults** (a deliberate pre-v1 breaking change):
+  `FATTY_SEARCH_PROVIDER` defaults to `searxng` (was `brave`) and search is
+  available out of the box with **no API key**. It registers the `searxng` and
+  `none` provider ids alongside `brave`, adds the per-provider default base URL
+  (`http://searxng:8080` for SearXNG), and adds the narrow local-HTTP egress
+  exception (see **Base URL rules**) as an opt-in `local_http_hosts` seam on
+  `hardened_fetch.get_json` — every other egress path remains https-only with the
+  public-address requirement. The status vocabulary, `sanitize_query` chokepoint,
+  capability descriptor shape, and the Brave adapter (key in header, https-only)
+  are unchanged. The dev-stack SearXNG container itself is FTY-165.
 - FTY-062 adds the `official_source` resolution pipeline step (`official_step.py`)
   consuming the FTY-079 search + FTY-078 fetch, and the `model_prior` fallback. It is
   additive: an optional `brand` parse-candidate field, the `NamedFoodEstimate`

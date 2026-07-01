@@ -5,6 +5,14 @@ through this module, which enforces the evidence-retrieval security boundary
 (``docs/architecture/evidence-retrieval.md`` and ``docs/security/security-baseline.md``):
 
 - **HTTPS only.** ``http``/``file``/anything else is rejected before a socket opens.
+  The single, narrow exception (FTY-164) is an explicitly named **local** HTTP
+  service: a caller may pass ``local_http_hosts`` naming the local search service
+  (e.g. the dev-stack SearXNG container), and plain HTTP is then allowed for
+  exactly those hosts — and only when every resolved address is a loopback or
+  private (RFC 1918 / ULA) target, never link-local (so the ``169.254.169.254``
+  metadata service stays unreachable), so the exception cannot be repointed at
+  the public internet or an internal metadata endpoint. Only :func:`get_json`
+  exposes the seam; :func:`post_json` and :func:`fetch_text` remain HTTPS-only.
 - **Host allowlist.** Only hosts the caller explicitly allowlists (the configured
   provider host) may be contacted; everything else fails closed.
 - **SSRF / private-network blocking.** The host is resolved and every resolved IP
@@ -62,6 +70,9 @@ DEFAULT_TEXT_CONTENT_TYPES = frozenset({"text/html", "application/xhtml+xml", "t
 #: The only scheme an evidence fetch may use.
 _ALLOWED_SCHEME = "https"
 
+#: The scheme admitted solely for hosts named in ``local_http_hosts`` (FTY-164).
+_LOCAL_HTTP_SCHEME = "http"
+
 #: Resolver signature (``socket.getaddrinfo``), injectable so tests can drive the
 #: private-address checks without real DNS.
 Resolver = Callable[..., list[Any]]
@@ -108,13 +119,25 @@ class FetchResponseError(Exception):
 
 
 def assert_url_allowed(
-    url: str, *, allowed_hosts: frozenset[str], resolver: Resolver = socket.getaddrinfo
+    url: str,
+    *,
+    allowed_hosts: frozenset[str],
+    resolver: Resolver = socket.getaddrinfo,
+    local_http_hosts: frozenset[str] = frozenset(),
 ) -> str:
     """Vet ``url`` against the fetch policy and return the vetted public IP.
 
     Enforces: ``https`` scheme, host in ``allowed_hosts`` (compared lower-cased),
     and every resolved IP for that host globally routable (no loopback/private/
     link-local/reserved targets). Pure except for the (injectable) DNS lookup.
+
+    ``local_http_hosts`` is the narrow FTY-164 exception for a **local** service
+    (the self-hosted SearXNG container): plain ``http`` is admitted only for a
+    host named in that set, and then the address requirement **inverts** — every
+    resolved IP must be loopback or private (RFC 1918 / ULA), never link-local /
+    metadata / public, so the exception can neither leak plaintext to the public
+    internet nor be re-pointed at ``169.254.169.254``. With the default empty set
+    the behaviour is exactly the HTTPS-only policy above.
 
     Returns the single vetted IP the connection must pin to — the first resolved
     address (every resolved address has already been required public, so any of
@@ -126,14 +149,17 @@ def assert_url_allowed(
     """
 
     parts = urllib.parse.urlsplit(url)
-    if parts.scheme.lower() != _ALLOWED_SCHEME:
+    scheme = parts.scheme.lower()
+    host_lower = (parts.hostname or "").lower()
+    local_http = scheme == _LOCAL_HTTP_SCHEME and host_lower in local_http_hosts
+    if scheme != _ALLOWED_SCHEME and not local_http:
         raise FetchPolicyError("scheme_not_allowed")
 
     host = parts.hostname
     if not host or host.lower() not in allowed_hosts:
         raise FetchPolicyError("host_not_allowed")
 
-    port = parts.port or 443
+    port = parts.port or (80 if local_http else 443)
     try:
         infos = resolver(host, port, proto=socket.IPPROTO_TCP)
     except OSError as exc:
@@ -145,11 +171,16 @@ def assert_url_allowed(
     if not addresses:
         raise FetchPolicyError("host_resolution_failed")
     for address in addresses:
-        # Every resolved address must be public — no relaxation, no short-circuit
-        # before the full set is checked (a mix of public + private still fails).
-        if not _is_public_address(address):
+        # Every resolved address must satisfy the scheme's posture — no relaxation,
+        # no short-circuit before the full set is checked (a mixed set still fails).
+        if local_http:
+            # The local-HTTP exception is for a local service only: a name that
+            # resolves outward (public) or sideways (link-local/metadata) is refused.
+            if not _is_local_service_address(address):
+                raise FetchPolicyError("local_http_target_not_local")
+        elif not _is_public_address(address):
             raise FetchPolicyError("private_address_blocked")
-    # All addresses vetted public; pin the first one deterministically.
+    # All addresses vetted; pin the first one deterministically.
     return str(addresses[0])
 
 
@@ -172,6 +203,29 @@ def _is_public_address(address: str) -> bool:
     except ValueError:
         return False
     return ip.is_global and not ip.is_multicast
+
+
+def _is_local_service_address(address: str) -> bool:
+    """Return whether ``address`` is a loopback or private-network *service* IP.
+
+    The address posture for the FTY-164 local-HTTP exception — allowlist-by-property
+    again, but inverted: only loopback (``127.0.0.0/8`` / ``::1``) and ordinary
+    private unicast ranges (RFC 1918 / IPv6 ULA — where a compose/dev-stack service
+    like the SearXNG container lives) are accepted. Link-local (incl. the
+    ``169.254.169.254`` metadata service), multicast, reserved, unspecified, and
+    every **public** address are refused, so a local-HTTP host that resolves
+    anywhere but a genuinely local service fails closed.
+    """
+
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    if ip.is_loopback:
+        return True
+    return ip.is_private and not (
+        ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified
+    )
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -236,10 +290,52 @@ class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
         return self.do_open(_Conn, req)
 
 
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    """A plain ``HTTPConnection`` that connects to a fixed, pre-vetted local IP.
+
+    The plain-HTTP counterpart of :class:`_PinnedHTTPSConnection`, used only for the
+    FTY-164 local-service exception: the socket opens to ``pinned_ip`` (already
+    required loopback/private by :func:`assert_url_allowed`) instead of re-resolving
+    the name, so the local-HTTP path gets the same no-DNS-rebinding guarantee as the
+    HTTPS path. The ``Host`` header still carries the original service name.
+    """
+
+    def __init__(self, host: str, *, pinned_ip: str, **kwargs: Any) -> None:
+        super().__init__(host, **kwargs)
+        self._pinned_ip = pinned_ip
+
+    def connect(self) -> None:
+        self.sock = socket.create_connection((self._pinned_ip, self.port), self.timeout)
+
+
+class _PinnedHTTPHandler(urllib.request.HTTPHandler):
+    """An ``HTTPHandler`` that routes every plain-HTTP connection through a pinned IP.
+
+    Installed alongside :class:`_PinnedHTTPSHandler` so the rare vetted local-HTTP
+    request (FTY-164) cannot fall through to the stock handler's connect-time DNS
+    re-resolution.
+    """
+
+    def __init__(self, pinned_ip: str) -> None:
+        super().__init__()
+        self._pinned_ip = pinned_ip
+
+    def http_open(self, req: urllib.request.Request) -> http.client.HTTPResponse:
+        pinned_ip = self._pinned_ip
+
+        class _Conn(_PinnedHTTPConnection):
+            def __init__(self, host: str, **kwargs: Any) -> None:
+                super().__init__(host, pinned_ip=pinned_ip, **kwargs)
+
+        return self.do_open(_Conn, req)
+
+
 def _build_opener(pinned_ip: str) -> urllib.request.OpenerDirector:
     """An opener that blocks redirects and pins the connection to ``pinned_ip``."""
 
-    return urllib.request.build_opener(_NoRedirectHandler(), _PinnedHTTPSHandler(pinned_ip))
+    return urllib.request.build_opener(
+        _NoRedirectHandler(), _PinnedHTTPSHandler(pinned_ip), _PinnedHTTPHandler(pinned_ip)
+    )
 
 
 def post_json(
@@ -292,13 +388,17 @@ def get_json(
     max_bytes: int = DEFAULT_MAX_BYTES,
     resolver: Resolver = socket.getaddrinfo,
     opener: urllib.request.OpenerDirector | None = None,
+    local_http_hosts: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """GET ``url`` through the hardened policy and return the JSON object body.
 
     Same security guarantees as :func:`post_json` (scheme/host/SSRF validated before
     the socket opens, redirects refused, response size-capped and required to be a
     JSON object); the read-only verb for providers whose lookup is a GET (e.g. Open
-    Food Facts' barcode endpoint).
+    Food Facts' barcode endpoint). ``local_http_hosts`` opts a named **local**
+    service (the self-hosted SearXNG container, FTY-164) into plain HTTP under the
+    inverted address posture documented on :func:`assert_url_allowed`; leave it
+    empty (the default) for the standard HTTPS-only policy.
 
     Raises:
         FetchPolicyError: the URL violated the policy, or a redirect was attempted.
@@ -306,7 +406,9 @@ def get_json(
         FetchResponseError: a ``4xx`` response, an oversized body, or a non-JSON body.
     """
 
-    vetted_ip = assert_url_allowed(url, allowed_hosts=allowed_hosts, resolver=resolver)
+    vetted_ip = assert_url_allowed(
+        url, allowed_hosts=allowed_hosts, resolver=resolver, local_http_hosts=local_http_hosts
+    )
 
     request = urllib.request.Request(  # noqa: S310 — scheme/host validated above
         url,

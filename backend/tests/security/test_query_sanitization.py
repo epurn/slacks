@@ -6,9 +6,11 @@ history, memories, event metadata) egresses to an external search provider — o
 sanitized product/restaurant identity leaves the system.
 
 It extends ``tests/test_search_provider.py`` by proving the chokepoint end-to-end:
-the official-source step builds an identity-only query, and the real Brave adapter
-egresses exactly ``q`` (sanitized) + ``count`` with the key in a header — even when
-the identity is laced with smuggled multi-line "context".
+the official-source step builds an identity-only query, and each real adapter
+egresses exactly its closed request shape — ``q`` (sanitized) + ``count`` with the
+key in a header for Brave, ``q`` (sanitized) + ``format=json`` with no credential
+at all for the keyless SearXNG default (FTY-164) — even when the identity is laced
+with smuggled multi-line "context".
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from app.estimator.pipeline import CandidateDraft
 from app.estimator.search import (
     BraveSearchProvider,
     SearchSettings,
+    SearXNGSearchProvider,
     sanitize_query,
 )
 from tests.security._harness import resolver_returning
@@ -58,7 +61,9 @@ def test_sanitize_query_strips_smuggled_multiline_context() -> None:
     assert cleaned == "Big Mac user_id=42 weight=200lb goal=loss"
 
 
-def _recording_transport(captured: list[dict[str, Any]]) -> Any:
+def _recording_transport(
+    captured: list[dict[str, Any]], reply: dict[str, Any] | None = None
+) -> Any:
     def _transport(
         url: str,
         *,
@@ -66,8 +71,11 @@ def _recording_transport(captured: list[dict[str, Any]]) -> Any:
         timeout_seconds: float,
         allowed_hosts: frozenset[str],
         resolver: Any,
+        local_http_hosts: frozenset[str],
     ) -> dict[str, Any]:
         captured.append({"url": url, "headers": headers})
+        if reply is not None:
+            return reply
         return {"web": {"results": [{"url": "https://example.com/x", "title": "Big Mac"}]}}
 
     return _transport
@@ -75,7 +83,9 @@ def _recording_transport(captured: list[dict[str, Any]]) -> Any:
 
 def test_only_sanitized_identity_and_count_egress_to_provider() -> None:
     captured: list[dict[str, Any]] = []
-    settings = SearchSettings(api_key=SecretStr("super-secret-key"), max_results=5)
+    settings = SearchSettings(
+        provider="brave", api_key=SecretStr("super-secret-key"), max_results=5
+    )
     provider = BraveSearchProvider(
         settings,
         transport=_recording_transport(captured),
@@ -97,6 +107,35 @@ def test_only_sanitized_identity_and_count_egress_to_provider() -> None:
     # No personal markers survive as discrete params; they are flattened into the
     # single q string (and would in practice never reach here — the official step
     # sends identity only), but none ride as structured fields the provider parses.
+    assert "user_id" not in params
+    assert "weight" not in params
+    assert "goal" not in params
+
+
+def test_only_sanitized_identity_and_format_egress_to_searxng_default() -> None:
+    # The keyless SearXNG default (FTY-164) keeps the same data-minimization boundary:
+    # the closed request shape is q + format=json, with no credential header at all.
+    captured: list[dict[str, Any]] = []
+    settings = SearchSettings()  # the empty-env default: searxng, keyless
+    provider = SearXNGSearchProvider(
+        settings,
+        transport=_recording_transport(
+            captured,
+            reply={"results": [{"url": "https://example.com/x", "title": "Big Mac"}]},
+        ),
+        resolver=resolver_returning("172.19.0.5"),
+    )
+
+    provider.search("Big Mac\nuser_id=42 weight=200lb goal=loss partner history@example.com")
+
+    assert len(captured) == 1
+    request = captured[0]
+    params = parse_qs(urlsplit(request["url"]).query)
+    # The egressed request shape is closed to exactly q + format.
+    assert set(params) == {"q", "format"}
+    # Keyless: nothing rides in a header, so there is no secret to leak.
+    assert request["headers"] == {}
+    # No personal markers survive as discrete params.
     assert "user_id" not in params
     assert "weight" not in params
     assert "goal" not in params
