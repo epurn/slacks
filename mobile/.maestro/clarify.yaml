@@ -18,10 +18,9 @@
 # `questions` array) and the step-6 assertVisible for the question text goes
 # red, confirming the harness catches the data-starved sheet.
 #
-# Bundle ID: defaults to com.fatty (Expo prebuild from slug "fatty").
-# Set APP_BUNDLE_ID env var or edit the appId below if your prebuild
-# produced a different bundle identifier.
-appId: ${APP_BUNDLE_ID:-com.fatty}
+# Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
+# directory-level Maestro runs launch the installed app under test reliably.
+appId: com.fatty
 ---
 # Step 1: Launch in E2E mode. The mock starts in phase 0 (empty day).
 - launchApp:

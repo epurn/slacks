@@ -53,14 +53,11 @@ maestro test .maestro/smoke.yaml
 
 ## Bundle ID
 
-The smoke flow uses bundle ID `com.fatty` by default (Expo prebuild from slug
-`"fatty"`). If your prebuild produced a different identifier, set the env var:
-
-```sh
-APP_BUNDLE_ID=com.yourorg.fatty maestro test .maestro/smoke.yaml
-```
-
-Or edit the `appId` line in `smoke.yaml` permanently.
+The flows use bundle ID `com.fatty`. Expo prebuild generates the native iOS
+bundle identifier and Android package from `app.json`, and each Maestro flow
+declares the same literal `appId` so directory-level runs launch the installed
+app under test reliably. If the app ID changes, update `app.json` and every flow
+`appId` together.
 
 ## Flows
 

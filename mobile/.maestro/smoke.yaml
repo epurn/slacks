@@ -16,10 +16,9 @@
 # if a fixture 404s, the timeline renders the error state instead and this fails,
 # rather than going green on the always-mounted ScrollView alone.
 #
-# Bundle ID: defaults to com.fatty (Expo prebuild from slug "fatty").
-# Set APP_BUNDLE_ID env var or edit the appId below if your prebuild
-# produced a different bundle identifier.
-appId: ${APP_BUNDLE_ID:-com.fatty}
+# Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
+# directory-level Maestro runs launch the installed app under test reliably.
+appId: com.fatty
 ---
 - launchApp:
     clearState: false
