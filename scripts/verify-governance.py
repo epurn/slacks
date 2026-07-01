@@ -139,6 +139,8 @@ def main() -> None:
     mobile_workflow = read(".github/workflows/mobile.yml")
     if "\n  mobile-e2e:\n" not in f"\n{mobile_workflow}":
         fail("mobile workflow must define the 'mobile-e2e' required status job")
+    if "\n    timeout-minutes: 30\n" not in mobile_workflow:
+        fail("mobile-e2e required status job must be bounded by a 30-minute timeout")
 
     protection = json.loads(read("docs/operations/main-branch-protection.json"))
     checks = protection.get("required_status_checks", {}).get("contexts", [])

@@ -36,13 +36,20 @@ describe('verify-e2e runner contract', () => {
     expect(appConfig.expo.ios?.bundleIdentifier).toBe('com.fatty');
   });
 
-  it('uses platform-specific Expo build flags', () => {
+  it('starts Metro explicitly and builds without Expo owning the bundler', () => {
     const script = readText(scriptPath);
 
-    expect(script).toContain('npx expo run:android $BUILD_CACHE_FLAG --variant debug');
+    expect(script).toContain(
+      'npx expo start --dev-client --host localhost --port "$METRO_PORT"',
+    );
+    expect(script).toContain('METRO_PORT="8081"');
+    expect(script).toContain('trap cleanup_metro EXIT');
+    expect(script).toContain(
+      'npx expo run:android $BUILD_CACHE_FLAG --variant debug --no-bundler',
+    );
     expect(script).not.toContain('npx expo run:android $BUILD_CACHE_FLAG --configuration');
     expect(script).toContain(
-      'npx expo run:ios $BUILD_CACHE_FLAG --configuration Debug --simulator',
+      'npx expo run:ios $BUILD_CACHE_FLAG --configuration Debug --simulator --no-bundler',
     );
   });
 
