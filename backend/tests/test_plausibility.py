@@ -17,6 +17,7 @@ from app.enums import CandidateType
 from app.estimator.plausibility import (
     MAX_PLAUSIBLE_COUNT,
     MAX_PLAUSIBLE_GRAMS,
+    MAX_PLAUSIBLE_LARGE_ITEM_COUNT,
     MAX_PLAUSIBLE_ML,
     check_candidate,
 )
@@ -49,7 +50,7 @@ def _candidate(
 
 
 def test_implausible_count_fails() -> None:
-    # 50 eggs is the acceptance-criteria example — well above MAX_PLAUSIBLE_COUNT.
+    # 50 eggs is the acceptance-criteria example — above the large-item count cap.
     result = check_candidate(_candidate("eggs", amount=50.0))
     assert not result.plausible
     assert result.reason == "implausible_count"
@@ -58,13 +59,13 @@ def test_implausible_count_fails() -> None:
 
 
 def test_implausible_count_explicit_count_unit_fails() -> None:
-    result = check_candidate(_candidate("crackers", amount=100.0, unit="piece"))
+    result = check_candidate(_candidate("eggs", amount=50.0, unit="piece"))
     assert not result.plausible
     assert result.reason == "implausible_count"
 
 
 def test_count_at_max_boundary_passes() -> None:
-    # MAX_PLAUSIBLE_COUNT itself must pass (boundary is exclusive above).
+    # MAX_PLAUSIBLE_COUNT itself must pass for generic/small countable foods.
     result = check_candidate(_candidate("grapes", amount=MAX_PLAUSIBLE_COUNT))
     assert result.plausible
 
@@ -73,6 +74,24 @@ def test_count_just_above_max_fails() -> None:
     result = check_candidate(_candidate("grapes", amount=MAX_PLAUSIBLE_COUNT + 1))
     assert not result.plausible
     assert result.reason == "implausible_count"
+
+
+def test_large_item_count_at_override_boundary_passes() -> None:
+    result = check_candidate(_candidate("eggs", amount=MAX_PLAUSIBLE_LARGE_ITEM_COUNT))
+    assert result.plausible
+
+
+def test_realistic_small_food_count_passes() -> None:
+    # A counted bowl/bag of small items is realistic and must not hit the
+    # narrower large-item cap that catches "50 eggs".
+    result = check_candidate(_candidate("blueberries", amount=50.0))
+    assert result.plausible
+
+
+def test_realistic_small_food_specific_unit_count_passes() -> None:
+    # Food-specific count units are common model output ("crackers" as the unit).
+    result = check_candidate(_candidate("Kraft Toppables crackers", amount=50.0, unit="crackers"))
+    assert result.plausible
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +128,14 @@ def test_implausible_mass_in_quantity_text_with_structured_count_fails() -> None
     result = check_candidate(
         _candidate("chicken", quantity_text="5000g", amount=1.0, unit="serving")
     )
+    assert not result.plausible
+    assert result.reason == "implausible_mass"
+
+
+def test_implausible_later_mass_in_quantity_text_fails() -> None:
+    # Regression: the scanner must inspect every explicit measure, not stop at
+    # the first plausible one.
+    result = check_candidate(_candidate("meal", quantity_text="100g chicken and 5,000 g rice"))
     assert not result.plausible
     assert result.reason == "implausible_mass"
 
@@ -202,6 +229,14 @@ def test_unknown_unit_small_amount_passes() -> None:
     # plausible amount is treated generously and passes through.
     result = check_candidate(_candidate("crackers", amount=6.0, unit="crackers"))
     assert result.plausible
+
+
+def test_unknown_unit_large_food_specific_count_uses_count_cap() -> None:
+    result = check_candidate(
+        _candidate("crackers", amount=MAX_PLAUSIBLE_COUNT + 1, unit="crackers")
+    )
+    assert not result.plausible
+    assert result.reason == "implausible_count"
 
 
 # ---------------------------------------------------------------------------

@@ -490,6 +490,36 @@ def test_unknown_unit_large_amount_routes_to_clarification() -> None:
     assert "rice" in context.clarification_questions[0]
 
 
+def test_realistic_small_food_count_routes_to_parsed() -> None:
+    # Regression (FTY-156): high counts for small food-specific items are normal
+    # logs ("50 blueberries", a pile of crackers) and must not be rejected by the
+    # large-item cap that catches "50 eggs".
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [
+                    {
+                        "type": "food",
+                        "name": "blueberries",
+                        "quantity_text": "50 blueberries",
+                        "amount": 50.0,
+                        "unit": "blueberries",
+                    }
+                ],
+                confidence=0.9,
+            )
+        ]
+    )
+    context = _context(raw_text="50 blueberries")
+
+    _run(provider, context)
+
+    assert [c.name for c in context.food_candidates] == ["blueberries"]
+    assert context.food_candidates[0].amount == 50.0
+    assert context.food_candidates[0].unit == "blueberries"
+    assert context.clarification_questions == []
+
+
 def test_exercise_with_duration_skips_plausibility_gate() -> None:
     # Regression (FTY-156): an exercise candidate carries a structured duration
     # (amount=60, unit="minutes") — a time unit the food-portion plausibility

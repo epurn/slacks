@@ -107,18 +107,23 @@ untrustworthy, so the step routes the whole event to `needs_clarification`
 (`implausible_candidate`) with one targeted question naming the offending item,
 and persists no candidates.
 
-- **Bounds** (generous, documented tunables in `plausibility.py`): a discrete
-  count above `MAX_PLAUSIBLE_COUNT` (`36`), a mass above `MAX_PLAUSIBLE_GRAMS`
-  (`2000 g`), or a volume above `MAX_PLAUSIBLE_ML` (`2000 ml`) fails, as does a
-  numeric amount on an unrecognised unit when that amount exceeds the count cap.
-  If `quantity_text` carries an explicit `<number> <mass|volume unit>` measure,
-  that measure is checked against the same mass/volume bounds even when structured
-  fields are absent or describe a count/portion such as `1 serving`. A candidate
-  with no structured `amount` and no explicit measured quantity in `quantity_text`
-  passes (inference gaps are the confidence check's concern). Bounds are set just
-  above any realistic single-entry portion so a false reject of a large-but-real
-  meal is effectively impossible; the fail-safe is loose (an over-generous bound
-  lets one absurd parse through rather than falsely asking).
+- **Bounds** (generous, documented tunables in `plausibility.py`): a generic
+  discrete count above `MAX_PLAUSIBLE_COUNT` (`250`) fails, while clearly large
+  counted foods use `MAX_PLAUSIBLE_LARGE_ITEM_COUNT` (`36`) so examples such as
+  `50 eggs` still route to clarification without rejecting realistic small-food
+  logs such as `50 blueberries` or food-specific units like `50 crackers`. A mass
+  above `MAX_PLAUSIBLE_GRAMS` (`2000 g`) or a volume above `MAX_PLAUSIBLE_ML`
+  (`2000 ml`) fails. A numeric amount on an unrecognised unit fails above
+  `MAX_PLAUSIBLE_UNKNOWN_UNIT_AMOUNT` (`36`) unless the unit appears to be a
+  food-specific count unit matching the candidate name, in which case the count
+  cap applies. Every explicit `<number> <mass|volume unit>` measure in
+  `quantity_text` is checked against the same mass/volume bounds even when
+  structured fields are absent or describe a count/portion such as `1 serving`.
+  A candidate with no structured `amount` and no explicit measured quantity in
+  `quantity_text` passes (inference gaps are the confidence check's concern).
+  Bounds are set just above any realistic single-entry portion so a false reject
+  of a large-but-real meal is effectively impossible; the fail-safe is loose (an
+  over-generous bound lets one absurd parse through rather than falsely asking).
 - **Exercise candidates are excluded.** Their quantities are durations
   (minutes/hours), not mass/volume/count, so the food-portion bounds and unit
   vocabulary do not apply — exercise plausibility/duration parsing belongs to

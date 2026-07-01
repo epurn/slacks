@@ -20,8 +20,8 @@ Design:
 - The fail-safe failure mode is *loose*: an over-generous bound lets an absurd parse
   through once; a too-tight bound falsely asks the user. The former is cheaper.
 - An unknown/garbage unit with a large numeric amount cannot be trusted because the
-  units determine the scale; small food-specific count units pass as the loose,
-  low-false-reject default.
+  units determine the scale; food-specific count units that match the item name pass
+  as the loose, low-false-reject default.
 """
 
 from __future__ import annotations
@@ -39,11 +39,22 @@ from app.schemas.parse import ParsedCandidate
 # whether a value should move.
 # ---------------------------------------------------------------------------
 
-#: Maximum realistic *discrete count* for a single logged entry.
-#: A person might log "20 grapes", "12 crackers", or "8 chicken nuggets";
-#: 36 is already very generous (e.g. a large bag of grapes counted one-by-one).
-#: 50 raw eggs (the acceptance-criteria example) is well above this limit.
-MAX_PLAUSIBLE_COUNT: Final[float] = 36.0
+#: Maximum realistic *generic discrete count* for a single logged entry.
+#: Small foods can be logged one-by-one ("100 blueberries", "80 grapes", or a
+#: large pile of crackers), so this global cap is deliberately loose.
+#: Clearly large counted foods use the narrower override below.
+MAX_PLAUSIBLE_COUNT: Final[float] = 250.0
+
+#: Maximum realistic count for clearly large item words.
+#: This intentionally starts narrow: it preserves the acceptance-criteria reject
+#: for "50 eggs" without re-tightening the global cap for small foods.
+MAX_PLAUSIBLE_LARGE_ITEM_COUNT: Final[float] = 36.0
+
+#: Unknown units above this amount fail unless they look like a food-specific
+#: count unit matching the item name (e.g. "50 crackers" as a unit on crackers).
+#: This keeps garbage units such as "50 zxcv" from becoming plausible just
+#: because the generic small-food count cap is loose.
+MAX_PLAUSIBLE_UNKNOWN_UNIT_AMOUNT: Final[float] = 36.0
 
 #: Maximum realistic *mass in grams* for a single logged entry.
 #: The heaviest plausible single-sitting meal is a large restaurant steak + sides
@@ -260,6 +271,10 @@ _QUANTITY_TEXT_MEASURE_RE: Final[re.Pattern[str]] = re.compile(
     r"(?<![0-9A-Za-z.])(\d+(?:,\d{3})*(?:\.\d+)?)\s*([A-Za-z_]+)\b"
 )
 
+_WORD_RE: Final[re.Pattern[str]] = re.compile(r"[a-z]+")
+
+_LARGE_COUNT_ITEM_WORDS: Final[frozenset[str]] = frozenset({"egg"})
+
 _ALL_KNOWN_UNITS: Final[frozenset[str]] = _MASS_UNITS | _VOLUME_UNITS | _COUNT_UNITS
 
 
@@ -290,17 +305,18 @@ def check_candidate(candidate: ParsedCandidate) -> PlausibilityResult:
        some serialisation paths (JSON ``Infinity``); gate defensively.
     2. **Unknown/garbage unit with a large numeric amount → fail.**  A unit not
        in the recognised vocabulary is treated as a possible food-specific count
-       only while the amount is within the count cap; above that, the candidate is
-       too ambiguous to trust.
-    3. **Implausible count → fail.**  A discrete count above ``MAX_PLAUSIBLE_COUNT``
-       (e.g. 50 eggs) is beyond any realistic single-entry portion.
+       only when it matches the item name; otherwise a large unknown-unit amount
+       is too ambiguous to trust.
+    3. **Implausible count → fail.**  A discrete count above the applicable count
+       cap is beyond any realistic single-entry portion. The generic cap is loose
+       for small foods; clearly large counted items use a narrower cap.
     4. **Implausible mass → fail.**  A mass that converts to more than
        ``MAX_PLAUSIBLE_GRAMS`` grams is beyond any realistic single-entry portion.
     5. **Implausible volume → fail.**  A volume that converts to more than
        ``MAX_PLAUSIBLE_ML`` ml is beyond any realistic single-entry portion.
 
-    An explicit mass/volume measure in ``quantity_text`` is always checked against
-    the same bounds, even when the model also supplied a structured count/portion
+    Every explicit mass/volume measure in ``quantity_text`` is checked against the
+    same bounds, even when the model also supplied a structured count/portion
     amount. A candidate with no structured ``amount`` and no explicit mass/volume
     measure in ``quantity_text`` is considered plausible; quantity inference
     failures are handled by the confidence/disposition check upstream.
@@ -317,36 +333,42 @@ def check_candidate(candidate: ParsedCandidate) -> PlausibilityResult:
             clarification_question=_question(candidate.name, "amount"),
         )
 
-    text_measure = _measure_from_quantity_text(candidate.quantity_text)
-    if text_measure is not None:
-        measure_failure = _measured_quantity_failure(candidate, *text_measure)
-        if measure_failure is not None:
-            return measure_failure
+    measure_failure = _quantity_text_measure_failure(candidate)
+    if measure_failure is not None:
+        return measure_failure
 
     if amount is None:
         # No amount and no implausible explicit text measure: nothing else to validate here.
         return PlausibilityResult(plausible=True)
 
     # Rule 2: unknown/garbage unit with a numeric amount.
-    # "Normalise away" interpretation: a unit not in any recognised family could
+    # "Normalise away" interpretation: a unit not in any recognised family can
     # be a food-specific count (e.g. "crackers" used as the count unit for a
-    # cracker entry). Treat it as a count and apply the count cap. This is the
-    # generous, safe failure mode: a legitimate food-specific count unit at a
-    # plausible amount passes; an absurd amount still fails. Only when the unit
-    # is truly ambiguous AND the count would be implausible do we reject.
+    # cracker entry). Treat name-matching units as counts and keep unrelated
+    # unknown units on the conservative garbage-unit threshold.
     if candidate.unit is not None and normalized_unit not in _ALL_KNOWN_UNITS:
-        if amount > MAX_PLAUSIBLE_COUNT:
+        if _looks_like_food_specific_count_unit(candidate.name, normalized_unit):
+            count_cap = _count_cap(candidate, normalized_unit)
+            if amount > count_cap:
+                return PlausibilityResult(
+                    plausible=False,
+                    reason="implausible_count",
+                    clarification_question=_question(candidate.name, "count"),
+                )
+            return PlausibilityResult(plausible=True)
+
+        if amount > MAX_PLAUSIBLE_UNKNOWN_UNIT_AMOUNT:
             return PlausibilityResult(
                 plausible=False,
                 reason="unknown_unit",
                 clarification_question=_question(candidate.name, "unit"),
             )
-        # Amount is within count range for an unknown unit — treat as food-specific
-        # count and pass (generous/safe failure mode).
+        # Amount is within the conservative unknown-unit amount range; pass as
+        # the loose/safe failure mode for odd but small food-specific units.
         return PlausibilityResult(plausible=True)
 
     # Rule 3: implausible count.
-    if normalized_unit in _COUNT_UNITS and amount > MAX_PLAUSIBLE_COUNT:
+    if normalized_unit in _COUNT_UNITS and amount > _count_cap(candidate, normalized_unit):
         return PlausibilityResult(
             plausible=False,
             reason="implausible_count",
@@ -391,8 +413,8 @@ def _measured_quantity_failure(
     return None
 
 
-def _measure_from_quantity_text(quantity_text: str) -> tuple[float, str] | None:
-    """Return the first explicit mass/volume measure found in ``quantity_text``.
+def _quantity_text_measure_failure(candidate: ParsedCandidate) -> PlausibilityResult | None:
+    """Return the first mass/volume bound failure found in ``candidate.quantity_text``.
 
     This is a validation signal only: it does not normalise or persist the
     candidate. It closes the bypass where the raw portion phrase still carries a
@@ -400,14 +422,69 @@ def _measure_from_quantity_text(quantity_text: str) -> tuple[float, str] | None:
     missing or describe only a count/portion.
     """
 
-    for match in _QUANTITY_TEXT_MEASURE_RE.finditer(quantity_text):
+    for match in _QUANTITY_TEXT_MEASURE_RE.finditer(candidate.quantity_text):
         normalized_unit = match.group(2).lower()
         if normalized_unit not in _MASS_UNIT_GRAMS and normalized_unit not in _VOLUME_UNIT_ML:
             continue
         amount = float(match.group(1).replace(",", ""))
         if amount > 0 and math.isfinite(amount):
-            return amount, normalized_unit
+            measure_failure = _measured_quantity_failure(candidate, amount, normalized_unit)
+            if measure_failure is not None:
+                return measure_failure
     return None
+
+
+def _count_cap(candidate: ParsedCandidate, normalized_unit: str) -> float:
+    """Return the count cap for ``candidate`` after item-size overrides."""
+
+    if _uses_large_item_count_cap(candidate.name, normalized_unit):
+        return MAX_PLAUSIBLE_LARGE_ITEM_COUNT
+    return MAX_PLAUSIBLE_COUNT
+
+
+def _uses_large_item_count_cap(item_name: str, normalized_unit: str) -> bool:
+    """Return whether count bounds should use the narrow large-item cap."""
+
+    unit_stems = _word_stems(normalized_unit)
+    if unit_stems & _LARGE_COUNT_ITEM_WORDS:
+        return True
+
+    last_name_word = _last_word_stem(item_name)
+    return last_name_word in _LARGE_COUNT_ITEM_WORDS
+
+
+def _looks_like_food_specific_count_unit(item_name: str, normalized_unit: str) -> bool:
+    """Return whether an unknown unit appears to name the item being counted."""
+
+    unit_stems = _word_stems(normalized_unit)
+    if not unit_stems:
+        return False
+    return unit_stems <= _word_stems(item_name)
+
+
+def _word_stems(text: str) -> frozenset[str]:
+    """Return simple lower-case singular-ish stems for count-word comparison."""
+
+    return frozenset(_count_word_stem(word) for word in _WORD_RE.findall(text.lower()))
+
+
+def _last_word_stem(text: str) -> str:
+    """Return the simple stem of the last word in ``text``."""
+
+    words = _WORD_RE.findall(text.lower())
+    if not words:
+        return ""
+    return _count_word_stem(words[-1])
+
+
+def _count_word_stem(word: str) -> str:
+    """Return a small plural-normalised form for food count terms."""
+
+    if len(word) > 3 and word.endswith("ies"):
+        return f"{word[:-3]}y"
+    if len(word) > 1 and word.endswith("s"):
+        return word[:-1]
+    return word
 
 
 def _question(item_name: str, mode: str) -> str:
