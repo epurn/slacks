@@ -183,9 +183,17 @@ class OfficialSourceResolveStep:
         context.record_step(self.name, "ok")
 
     def _resolve(self, context: EstimationContext, candidate: CandidateDraft) -> ResolvedFoodItem:
-        """Resolve one candidate via official source, else model-prior."""
+        """Resolve one candidate via official source, else model-prior.
 
-        item = self._try_official_source(context, candidate)
+        A *branded* candidate is searched against official sources first (a named
+        restaurant/manufacturer product has an authoritative page). A *generic*
+        detail-rich candidate (FTY-167) has no official brand page to search, so it
+        goes straight to a model-prior estimate carrying an explicit source status.
+        """
+
+        item = None
+        if _has_brand(candidate):
+            item = self._try_official_source(context, candidate)
         if item is None:
             item = self._model_prior(context, candidate)
         # Surface the resolution's assumptions on the run too (content-free metadata).
@@ -250,7 +258,7 @@ class OfficialSourceResolveStep:
         """
 
         _record_source_ref(context, MODEL_PRIOR_SOURCE)
-        reason = self._fallback_reason()
+        reason = self._fallback_reason(candidate)
         estimate = self._estimate_model_prior(candidate)
         if estimate is None or estimate.disposition is not EstimateDisposition.RESOLVED:
             context.clarification_questions = [UNKNOWN_FOOD_QUESTION]
@@ -281,9 +289,13 @@ class OfficialSourceResolveStep:
             and self.fetch_settings.is_available
         )
 
-    def _fallback_reason(self) -> str:
+    def _fallback_reason(self, candidate: CandidateDraft) -> str:
         """A short, sanitized reason why model-prior was used (no raw user text)."""
 
+        if not _has_brand(candidate):
+            # A generic food is never searched against official sources (no brand
+            # page exists); it is estimated directly from the model prior.
+            return "generic food; estimated from model prior"
         if not self.search_provider.enabled:
             return "official_source disabled; estimated from model prior"
         if not self.search_provider.available:
@@ -410,6 +422,12 @@ class OfficialSourceResolveStep:
             fat_per_100g=round(per_100g.fat_g, 4),
             assumptions=assumptions,
         )
+
+
+def _has_brand(candidate: CandidateDraft) -> bool:
+    """Whether ``candidate`` names a branded product (has a non-blank ``brand``)."""
+
+    return bool(candidate.brand and candidate.brand.strip())
 
 
 def _identity_query(candidate: CandidateDraft) -> str:

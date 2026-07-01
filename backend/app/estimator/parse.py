@@ -28,6 +28,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.enums import CandidateType
+from app.estimator.detail_signals import has_food_detail, parse_range_midpoint
+from app.estimator.exercise import has_exercise_detail
 from app.estimator.pipeline import (
     CandidateDraft,
     EstimationContext,
@@ -164,17 +166,24 @@ class ParseStep:
         if result.disposition is ParseDisposition.UNPARSEABLE:
             raise StepFailed(_failure_reason(result))
 
-        needs_clarification = (
+        # A conservative model reply (``needs_clarification`` disposition or a
+        # confidence below the threshold) normally routes to clarification.
+        # FTY-167: override that when the extracted items already carry enough
+        # real-world detail (a count, a range, a distance, steps, or a game
+        # count) to estimate — a casual-but-detailed log should be estimated, not
+        # asked about. A genuinely vague reply (no items, or any item lacking an
+        # amount signal) still clarifies.
+        conservative = (
             result.disposition is ParseDisposition.NEEDS_CLARIFICATION
             or result.confidence < PARSE_CONFIDENCE_CLARIFY_THRESHOLD
         )
-        if needs_clarification:
+        if conservative and not _reply_has_sufficient_detail(result.items):
             context.clarification_questions = _clarification_questions(result)
             raise NeedsClarification("low_confidence_or_ambiguous")
 
-        # Parsed with sufficient confidence. A model that claims "parsed" yet
-        # returns nothing to persist is treated as unparseable (fail closed)
-        # rather than silently completing with no candidates.
+        # A model that claims "parsed" yet returns nothing to persist is treated as
+        # unparseable (fail closed) rather than silently completing with no
+        # candidates.
         if not result.items:
             raise StepFailed("no_candidates")
 
@@ -192,24 +201,62 @@ class ParseStep:
             raise NeedsClarification("implausible_candidate")
 
         for item in result.items:
-            draft = _to_draft(item)
+            draft = _to_draft(item, context)
             if item.type is CandidateType.FOOD:
                 context.food_candidates.append(draft)
             else:
                 context.exercise_candidates.append(draft)
 
 
-def _to_draft(item: ParsedCandidate) -> CandidateDraft:
-    """Map a validated schema candidate to the neutral persistence draft."""
+def _to_draft(item: ParsedCandidate, context: EstimationContext) -> CandidateDraft:
+    """Map a validated schema candidate to the neutral persistence draft.
+
+    When a food candidate has no structured amount but ``quantity_text`` states a
+    numeric range ("5-10"), the range's midpoint is filled deterministically so the
+    serving math can estimate a single portion, and the conversion is recorded as a
+    content-free run assumption (numbers only — never raw diary text). FTY-167.
+    """
+
+    amount = item.amount
+    if item.type is CandidateType.FOOD and (amount is None or amount <= 0):
+        parsed_range = parse_range_midpoint(item.quantity_text)
+        if parsed_range is not None:
+            low, high, amount = parsed_range
+            assumption = f"range_midpoint: {low:g}-{high:g} → {amount:g}"
+            if assumption not in context.assumptions:
+                context.assumptions.append(assumption)
 
     return CandidateDraft(
         name=item.name,
         quantity_text=item.quantity_text,
         unit=item.unit,
-        amount=item.amount,
+        amount=amount,
         barcode=item.barcode,
         brand=item.brand,
     )
+
+
+def _reply_has_sufficient_detail(items: list[ParsedCandidate]) -> bool:
+    """Whether every extracted item carries enough amount detail to estimate.
+
+    Empty ``items`` is insufficient (nothing to estimate). Otherwise each item must
+    carry a detail signal for its kind — a food count/range/measure, or an exercise
+    duration/distance/step/game signal — so that a single vague item in an otherwise
+    detailed reply still routes the whole event to clarification (its portion is
+    genuinely unknown).
+    """
+
+    if not items:
+        return False
+    return all(_candidate_has_detail(item) for item in items)
+
+
+def _candidate_has_detail(item: ParsedCandidate) -> bool:
+    """Whether one candidate carries a detail signal appropriate to its kind."""
+
+    if item.type is CandidateType.EXERCISE:
+        return has_exercise_detail(item.unit, item.amount, item.quantity_text)
+    return has_food_detail(item.amount, item.quantity_text)
 
 
 def _clarification_questions(result: ParseResult) -> list[str]:

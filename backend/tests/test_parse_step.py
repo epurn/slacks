@@ -608,6 +608,225 @@ def test_implausible_food_still_gated_when_exercise_present() -> None:
     assert "eggs" in context.clarification_questions[0]
 
 
+# ---------------------------------------------------------------------------
+# Detail-rich logs estimate despite conservative confidence (FTY-167)
+# ---------------------------------------------------------------------------
+# A casual entry the model returns with a low confidence (or a
+# ``needs_clarification`` disposition) should still route to ``parsed`` when the
+# extracted items carry enough real-world detail — a count, a range, a distance,
+# steps, or a game count. Genuinely vague entries still clarify.
+
+
+def _low() -> float:
+    return PARSE_CONFIDENCE_CLARIFY_THRESHOLD - 0.1
+
+
+def test_detailed_food_count_overrides_low_confidence() -> None:
+    # "Had 3 cracker sandwiches" — an explicit count. Even at a low confidence the
+    # detail is sufficient to estimate, so it parses instead of clarifying.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [
+                    {
+                        "type": "food",
+                        "name": "cracker sandwiches",
+                        "quantity_text": "3 cracker sandwiches",
+                        "amount": 3,
+                        "unit": "sandwiches",
+                    }
+                ],
+                confidence=_low(),
+            )
+        ]
+    )
+    context = _context(raw_text="Had 3 cracker sandwiches (toppables brand)")
+
+    _run(provider, context)
+
+    assert [c.name for c in context.food_candidates] == ["cracker sandwiches"]
+    assert context.food_candidates[0].amount == 3
+    assert context.clarification_questions == []
+
+
+def test_range_fills_midpoint_and_records_assumption() -> None:
+    # "a handful (5-10) of onion rings": the model gives a range but no structured
+    # amount. The step fills the deterministic midpoint (7.5) and records a
+    # content-free assumption; low confidence does not force clarification.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [
+                    {
+                        "type": "food",
+                        "name": "onion rings",
+                        "quantity_text": "a handful (5-10)",
+                        "unit": "rings",
+                    }
+                ],
+                confidence=_low(),
+            )
+        ]
+    )
+    context = _context(raw_text="Had a handful (5-10) of deep fried onion rings")
+
+    _run(provider, context)
+
+    assert len(context.food_candidates) == 1
+    assert context.food_candidates[0].amount == 7.5
+    assert context.clarification_questions == []
+    assert "range_midpoint: 5-10 → 7.5" in context.assumptions
+
+
+def test_needs_clarification_disposition_with_detail_is_estimated() -> None:
+    # Even a ``needs_clarification`` disposition is overridden when the item carries
+    # enough structure to estimate: "a slice of donair pizza and 2 small garlic
+    # fingers" has counts for both items.
+    provider = FakeProvider(
+        responses=[
+            {
+                "disposition": "needs_clarification",
+                "confidence": 0.4,
+                "items": [
+                    {
+                        "type": "food",
+                        "name": "donair pizza",
+                        "quantity_text": "a slice",
+                        "amount": 1,
+                        "unit": "slice",
+                    },
+                    {
+                        "type": "food",
+                        "name": "garlic fingers",
+                        "quantity_text": "2 small",
+                        "amount": 2,
+                        "unit": "fingers",
+                    },
+                ],
+            }
+        ]
+    )
+    context = _context(raw_text="Had a slice of donair pizza and 2 small garlic fingers")
+
+    _run(provider, context)
+
+    assert {c.name for c in context.food_candidates} == {"donair pizza", "garlic fingers"}
+    assert context.clarification_questions == []
+
+
+@pytest.mark.parametrize(
+    "exercise_item",
+    [
+        {
+            "type": "exercise",
+            "name": "walking",
+            "quantity_text": "13000 steps",
+            "amount": 13000,
+            "unit": "steps",
+        },
+        {"type": "exercise", "name": "running", "quantity_text": "5 km", "amount": 5, "unit": "km"},
+        {"type": "exercise", "name": "swimming", "quantity_text": "a mile"},
+        {
+            "type": "exercise",
+            "name": "badminton",
+            "quantity_text": "3 games",
+            "amount": 3,
+            "unit": "games",
+        },
+    ],
+)
+def test_detailed_exercise_overrides_low_confidence(exercise_item: dict[str, object]) -> None:
+    # Steps, distance, and game counts are each sufficient detail to estimate an
+    # exercise even when the model was unsure.
+    provider = FakeProvider(responses=[_parsed([exercise_item], confidence=_low())])
+    context = _context(raw_text="did some exercise")
+
+    _run(provider, context)
+
+    assert len(context.exercise_candidates) == 1
+    assert context.food_candidates == []
+    assert context.clarification_questions == []
+
+
+def test_vague_food_without_detail_still_clarifies() -> None:
+    # "some crackers": identity but no count/range/measure — genuinely
+    # indeterminate, so a low-confidence reply still routes to clarification.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [{"type": "food", "name": "crackers", "quantity_text": "some"}], confidence=_low()
+            )
+        ]
+    )
+    context = _context(raw_text="some crackers")
+
+    with pytest.raises(NeedsClarification):
+        _run(provider, context)
+
+    assert context.food_candidates == []
+
+
+def test_vague_exercise_without_detail_still_clarifies() -> None:
+    # "played sports": no duration/distance/steps/games signal — still clarifies.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [{"type": "exercise", "name": "sports", "quantity_text": "played sports"}],
+                confidence=_low(),
+            )
+        ]
+    )
+    context = _context(raw_text="played sports")
+
+    with pytest.raises(NeedsClarification):
+        _run(provider, context)
+
+    assert context.exercise_candidates == []
+
+
+def test_mixed_detail_and_vague_items_clarifies() -> None:
+    # A detailed food alongside a vague one: the vague item's portion is genuinely
+    # unknown, so the whole event clarifies rather than half-guessing.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [
+                    {"type": "food", "name": "eggs", "quantity_text": "2", "amount": 2},
+                    {"type": "food", "name": "toast", "quantity_text": "some"},
+                ],
+                confidence=_low(),
+            )
+        ]
+    )
+    context = _context(raw_text="2 eggs and some toast")
+
+    with pytest.raises(NeedsClarification):
+        _run(provider, context)
+
+    assert context.food_candidates == []
+
+
+def test_no_calories_invented_on_the_detailed_parse_path() -> None:
+    # The detail override changes routing only: the parse step still never carries
+    # any energy/macro number — resolution is the calculators' job.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [{"type": "food", "name": "onion rings", "quantity_text": "5-10", "unit": "rings"}],
+                confidence=_low(),
+            )
+        ]
+    )
+    context = _context(raw_text="a handful (5-10) of onion rings")
+
+    _run(provider, context)
+
+    draft = context.food_candidates[0]
+    assert not hasattr(draft, "calories")
+    # Only structured parse fields are populated; the midpoint is a count, not energy.
+    assert draft.amount == 7.5
+
+
 def test_plausible_reply_parses_unchanged() -> None:
     # A normal, realistic reply must pass through the plausibility gate and
     # be accumulated as candidates exactly as before FTY-156.

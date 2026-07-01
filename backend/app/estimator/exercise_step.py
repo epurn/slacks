@@ -97,6 +97,12 @@ class ExerciseCalculateStep:
             # ask a question the answer flow cannot resolve.
             raise StepFailed(exc.reason) from exc
 
+        # Surface any duration-inference assumption (distance/steps/games → minutes)
+        # on the run so the conversion is visible; content-free metadata only.
+        for assumption in burn.assumptions:
+            if assumption not in context.assumptions:
+                context.assumptions.append(assumption)
+
         return ResolvedExerciseItem(
             name=candidate.name,
             quantity_text=candidate.quantity_text,

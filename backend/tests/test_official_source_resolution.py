@@ -262,12 +262,14 @@ def test_branded_food_resolves_from_official_source(client: TestClient, session:
     assert fetcher.fetched == [_BIG_MAC_URL]
 
 
-def test_generic_miss_clarifies_without_official_search(
+def test_detailed_generic_miss_falls_through_to_model_prior(
     client: TestClient, session: Session
 ) -> None:
-    # A generic (unbranded) food USDA cannot resolve still clarifies — the official
-    # step runs only for branded candidates, so search is never consulted.
-    user_id, event_id = _seed_event(client, "official-generic@example.com", "some zorblax")
+    # FTY-167: a detail-rich generic (unbranded) food USDA cannot resolve no longer
+    # clarifies — it falls through to a model-prior estimate with an explicit source
+    # status. Official *search* is never consulted (there is no brand page to find);
+    # the estimate comes straight from the model prior.
+    user_id, event_id = _seed_event(client, "official-generic@example.com", "150g of gruel")
     search = FakeSearchProvider(_success_result())
     fetcher = RecordingFetcher()
     pipeline = _pipeline(
@@ -275,11 +277,51 @@ def test_generic_miss_clarifies_without_official_search(
         food_source=FakeFoodSource({}),
         parsed_item={
             "type": "food",
-            "name": "zorblax",
+            "name": "gruel",
             "quantity_text": "150g",
             "unit": "g",
             "amount": 150,
         },
+        search_provider=search,
+        fetcher=fetcher,
+        estimate={"disposition": "resolved", "confidence": 0.9, "facts": _PAGE_FACTS},
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.job_status is EstimationJobStatus.SUCCEEDED
+    assert result.event_status is LogEventStatus.COMPLETED
+
+    foods = _foods(session, event_id)
+    assert len(foods) == 1
+    assert foods[0].status == DerivedItemStatus.RESOLVED
+    # 150 g of 250 kcal/100 g per the model-prior facts.
+    assert foods[0].calories == 375.0
+
+    evidence = session.scalars(
+        select(EvidenceSource).where(EvidenceSource.log_event_id == event_id)
+    ).one()
+    assert evidence.source_type == MODEL_PRIOR_SOURCE_TYPE
+    assert evidence.source_ref == "model_prior"
+    # The explicit source status names the generic-food model-prior reason.
+    assert evidence.assumptions is not None
+    assert any("generic food" in a for a in evidence.assumptions)
+
+    # A generic food is never searched or fetched against official sources.
+    assert search.queries == []
+    assert fetcher.fetched == []
+
+
+def test_vague_generic_miss_still_clarifies(client: TestClient, session: Session) -> None:
+    # The clarification boundary is preserved: a generic food with no usable amount
+    # detail ("some crackers") is not deferrable and still routes to clarification.
+    user_id, event_id = _seed_event(client, "official-vague@example.com", "some crackers")
+    search = FakeSearchProvider(_success_result())
+    fetcher = RecordingFetcher()
+    pipeline = _pipeline(
+        session,
+        food_source=FakeFoodSource({}),
+        parsed_item={"type": "food", "name": "crackers"},  # no amount / count / range
         search_provider=search,
         fetcher=fetcher,
         estimate={"disposition": "resolved", "confidence": 0.9, "facts": _PAGE_FACTS},

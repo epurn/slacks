@@ -35,6 +35,12 @@ from app.estimator.food_serving import (
         (None, 2.0, "two", 50.0, 100.0),
         ("servings", 1.5, "", 80.0, 120.0),
         ("pieces", 3.0, "", 30.0, 90.0),
+        # Serving/portion nouns are counts too (FTY-167): "a slice", "3 cracker
+        # sandwiches", "a handful of onion rings" resolve via the default serving.
+        ("slice", 1.0, "a slice", 120.0, 120.0),
+        ("sandwiches", 3.0, "3 cracker sandwiches", 20.0, 60.0),
+        ("handful", 1.0, "one handful", 100.0, 100.0),
+        ("rings", 7.5, "handful (5-10)", 8.0, 60.0),
         # No structured amount: fall back to scanning the quantity text.
         (None, None, "150 g of rice", None, 150.0),
         (None, None, "250ml milk", None, 250.0),
@@ -68,8 +74,10 @@ def test_resolve_grams_resolvable_cases(
         (None, None, "", 100.0),
         # A recognised unit but a non-positive amount.
         ("g", 0.0, "", None),
-        # An unrecognised unit with no fallback in the text.
-        ("handful", 1.0, "one handful", 100.0),
+        # A serving-noun count still needs a known default serving size to resolve.
+        ("handful", 1.0, "one handful", None),
+        # A genuinely unknown unit with no fallback measure in the text.
+        ("zorblax", 1.0, "one zorblax", 100.0),
     ],
 )
 def test_resolve_grams_unresolvable_returns_none(

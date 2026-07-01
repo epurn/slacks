@@ -135,6 +135,37 @@ the event always has at least one for the later answer flow. Candidates and
 questions are committed in the **same transaction** as the terminal status, so a
 completed/clarification outcome and its rows are atomic.
 
+### Detail-signal routing override (FTY-167)
+
+A casual entry is often returned by the model with a conservative confidence (or
+even a `needs_clarification` disposition) even though it already carries enough
+real-world structure to estimate — "Had a handful (5-10) of deep fried onion rings",
+"Had 3 cracker sandwiches", "ran 5 km", "played 3 games of badminton". Before routing
+such a reply to clarification, the step checks each extracted item for a **deterministic
+detail signal** (`app/estimator/detail_signals.py`):
+
+- **food** — a positive structured `amount` (a count or a measured quantity), or a
+  numeric **range** in `quantity_text` (`5-10`);
+- **exercise** — an explicit duration, a **distance**, a **step count**, or a **game
+  count**.
+
+When the model's reply would otherwise clarify (low confidence or a
+`needs_clarification` disposition) **but every extracted item carries a detail signal**,
+the step routes to `parsed` instead and lets the calculator layers estimate — a
+detail-rich casual log should be estimated, not asked about. Clarification is *sharpened*,
+not removed: an empty item list, or **any** item lacking a detail signal ("some crackers",
+"played sports"), still routes the whole event to clarification, because that item's
+portion is genuinely missing. A high-confidence `parsed` reply is unaffected (it never
+entered the clarify branch), and the deterministic plausibility gate above still runs on
+the accepted items.
+
+**Range midpoint.** When a food item has no structured `amount` but its `quantity_text`
+states a numeric range, the step fills the arithmetic **midpoint** as the count
+(`5-10 → 7.5`) so the serving math can estimate a single portion, and records a
+content-free `range_midpoint: <low>-<high> → <mid>` assumption on the run. This changes
+routing and the count only — the parse step still carries **no** energy/macro value;
+calories/macros remain the calculator layers' responsibility (FTY-043/044/062).
+
 ## Validation
 
 - Every provider reply is validated against `ParseResult` before any of it is

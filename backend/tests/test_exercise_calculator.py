@@ -12,14 +12,20 @@ from __future__ import annotations
 import pytest
 
 from app.estimator.exercise import (
+    GAME_DURATION_MINUTES,
     MAX_DURATION_MINUTES,
+    PACE_KM_PER_HOUR,
+    STEPS_PER_MINUTE,
     InvalidDurationError,
     MissingBodyWeightError,
     UnknownActivityError,
+    has_exercise_detail,
     net_active_calories,
     parse_duration_minutes,
+    resolve_duration,
     resolve_exercise,
 )
+from app.estimator.met_table import lookup_met
 
 # --- Net-active formula: exact worked examples --------------------------------
 
@@ -153,3 +159,118 @@ def test_missing_or_implausible_weight_is_rejected(weight: float | None) -> None
         resolve_exercise(
             activity="run", weight_kg=weight, unit="min", amount=30.0, quantity_text=""
         )
+
+
+# --- Distance / steps / games → duration conversions (FTY-167) ----------------
+
+
+def test_running_distance_converts_to_duration_via_pace() -> None:
+    # "ran 5 km": running MET 7.0, 10 km/h pace → 30 min; (7-1)*70*0.5 = 210.0.
+    entry = lookup_met("running")
+    assert entry is not None
+    minutes, assumptions = resolve_duration(entry, "km", 5.0, "5 km")
+    assert minutes == pytest.approx(30.0)
+    assert assumptions == ("distance→duration: 5 km ÷ 10 km/h = 30 min (running)",)
+
+    burn = resolve_exercise(
+        activity="running", weight_kg=70.0, unit="km", amount=5.0, quantity_text="5 km"
+    )
+    assert burn.met == 7.0
+    assert burn.duration_minutes == pytest.approx(30.0)
+    assert burn.active_calories == 210.0
+    assert burn.assumptions == ("distance→duration: 5 km ÷ 10 km/h = 30 min (running)",)
+
+
+def test_swimming_a_mile_converts_via_pace() -> None:
+    # "swam a mile": no number/unit, a bare mile → 1.609 km ÷ 2.5 km/h ≈ 38.6 min.
+    burn = resolve_exercise(
+        activity="swimming", weight_kg=70.0, unit=None, amount=None, quantity_text="a mile"
+    )
+    assert burn.met == 6.0
+    assert burn.duration_minutes == pytest.approx(38.62, abs=0.1)
+    # (6 - 1) * 70 * (38.62/60) ≈ 225.3 kcal.
+    assert burn.active_calories == pytest.approx(225.3, abs=0.2)
+    assert burn.assumptions and "distance→duration" in burn.assumptions[0]
+
+
+def test_step_count_converts_to_walking_duration_via_cadence() -> None:
+    # "walked 13000 steps": 13000 ÷ 100 steps/min = 130 min walking.
+    burn = resolve_exercise(
+        activity="walking",
+        weight_kg=70.0,
+        unit="steps",
+        amount=13000.0,
+        quantity_text="13000 steps",
+    )
+    assert burn.met == 3.5
+    assert burn.duration_minutes == pytest.approx(130.0)
+    # (3.5 - 1) * 70 * (130/60) ≈ 379.2 kcal.
+    assert burn.active_calories == pytest.approx(379.2, abs=0.1)
+    assert burn.assumptions == (
+        "steps→duration: 13000 steps ÷ 100 steps/min = 130 min (walking cadence)",
+    )
+
+
+def test_game_count_converts_to_duration_via_per_game_minutes() -> None:
+    # "played 3 games of badminton": 3 × 15 min/game = 45 min; badminton MET 5.5.
+    burn = resolve_exercise(
+        activity="badminton", weight_kg=70.0, unit="games", amount=3.0, quantity_text="3 games"
+    )
+    assert burn.met == 5.5
+    assert burn.duration_minutes == pytest.approx(45.0)
+    # (5.5 - 1) * 70 * (45/60) = 236.25 → 236.2/236.3 after rounding.
+    assert burn.active_calories == pytest.approx(236.25, abs=0.1)
+    assert burn.assumptions == ("games→duration: 3 × 15 min/game = 45 min (badminton)",)
+
+
+def test_explicit_duration_beats_distance_and_records_no_assumption() -> None:
+    # A stated duration wins over a distance in the same phrase, and adds no
+    # inference assumption (nothing was inferred).
+    entry = lookup_met("running")
+    assert entry is not None
+    minutes, assumptions = resolve_duration(entry, "min", 25.0, "25 min over 5 km")
+    assert minutes == 25.0
+    assert assumptions == ()
+
+
+def test_distance_without_documented_pace_cannot_be_costed() -> None:
+    # A distance for an activity with no documented pace (e.g. rowing) yields no
+    # duration and routes to clarification rather than guessing.
+    with pytest.raises(InvalidDurationError):
+        resolve_exercise(
+            activity="rowing", weight_kg=70.0, unit="km", amount=5.0, quantity_text="5 km"
+        )
+
+
+def test_game_count_without_documented_duration_cannot_be_costed() -> None:
+    # tennis has a MET entry but no documented per-game minutes; a game count alone
+    # cannot be converted.
+    with pytest.raises(InvalidDurationError):
+        resolve_exercise(
+            activity="tennis", weight_kg=70.0, unit="games", amount=2.0, quantity_text="2 games"
+        )
+
+
+@pytest.mark.parametrize(
+    ("unit", "amount", "quantity_text", "expected"),
+    [
+        ("min", 30.0, "", True),  # explicit duration
+        ("km", 5.0, "5 km", True),  # distance
+        ("steps", 13000.0, "13000 steps", True),  # steps
+        ("games", 3.0, "3 games", True),  # games
+        (None, None, "a mile", True),  # bare distance in text
+        (None, None, "went for a run", False),  # no quantifiable signal
+        (None, None, "played sports", False),  # genuinely vague
+    ],
+)
+def test_has_exercise_detail(
+    unit: str | None, amount: float | None, quantity_text: str, expected: bool
+) -> None:
+    assert has_exercise_detail(unit, amount, quantity_text) is expected
+
+
+def test_documented_conversion_constants_are_sane() -> None:
+    # Guard the documented tunables so an accidental edit is caught.
+    assert STEPS_PER_MINUTE == 100.0
+    assert PACE_KM_PER_HOUR == {"walking": 5.0, "running": 10.0, "swimming": 2.5}
+    assert GAME_DURATION_MINUTES == {"badminton": 15.0}
