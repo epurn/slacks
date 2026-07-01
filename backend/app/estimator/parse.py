@@ -35,6 +35,7 @@ from app.estimator.pipeline import (
     StepError,
     StepFailed,
 )
+from app.estimator.plausibility import check_candidate
 from app.llm.base import Provider
 from app.llm.errors import (
     LLMConfigurationError,
@@ -177,6 +178,19 @@ class ParseStep:
         if not result.items:
             raise StepFailed("no_candidates")
 
+        # Deterministic plausibility gate (FTY-156): check each *food* candidate's
+        # quantity/unit against physical sanity ranges before trusting the parse.
+        # A single implausible candidate makes the whole event's total
+        # untrustworthy, so route the event to clarification with a targeted
+        # question naming the offending item. Exercise candidates are excluded:
+        # their quantities are durations (minutes/hours), not mass/volume/count,
+        # so the food-portion bounds and unit vocabulary do not apply — exercise
+        # plausibility/duration parsing is FTY-043's concern (exercise-burn.md).
+        implausible = _first_implausible(result.items)
+        if implausible is not None:
+            context.clarification_questions = [implausible]
+            raise NeedsClarification("implausible_candidate")
+
         for item in result.items:
             draft = _to_draft(item)
             if item.type is CandidateType.FOOD:
@@ -213,3 +227,24 @@ def _failure_reason(result: ParseResult) -> str:
     """
 
     return "unparseable_input"
+
+
+def _first_implausible(items: list[ParsedCandidate]) -> str | None:
+    """Return a clarification question for the first implausible food candidate, or None.
+
+    Checks each *food* candidate in order; returns the targeted question from the
+    first failure so the user can correct the most prominent implausible entry
+    first. Exercise candidates are skipped — the plausibility validator's bounds
+    and unit vocabulary are food-portion specific (mass/volume/count), whereas an
+    exercise quantity is a duration (minutes/hours); running it through the gate
+    would falsely reject ordinary exercise durations. Returns ``None`` when all
+    food candidates are plausible.
+    """
+
+    for item in items:
+        if item.type is not CandidateType.FOOD:
+            continue
+        result = check_candidate(item)
+        if not result.plausible:
+            return result.clarification_question
+    return None

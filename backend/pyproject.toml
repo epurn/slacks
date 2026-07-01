@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "Fatty backend FastAPI application skeleton."
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115",
+    "fastapi>=0.138.2",
     "uvicorn>=0.30",
     # Celery worker + Redis broker for the local Docker Compose stack (FTY-011).
     # The architecture (docs/architecture/system-overview.md) and README mandate
