@@ -753,6 +753,7 @@ export function TodayScreen({
       </Modal>
 
       <ScrollView
+        testID="today-screen"
         style={[styles.screen, { backgroundColor: colors.surface }]}
         contentContainerStyle={[
           styles.content,
@@ -1000,7 +1001,7 @@ function Timeline({
             </Pressable>
           </View>
         ) : (
-          <View style={styles.state}>
+          <View style={styles.state} testID="today-timeline-ready">
             <Text style={[styles.stateText, { color: colors.textMuted }]}>
               Log your first thing
             </Text>
@@ -1013,7 +1014,7 @@ function Timeline({
   const clusters = clusterByTime(events);
 
   return (
-    <View>
+    <View testID="today-timeline-with-entries">
       <DailySummary summary={summary} error={summaryError} />
       {phase === "error" && loadError ? (
         <Text style={styles.error} accessibilityRole="alert">

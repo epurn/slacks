@@ -29,6 +29,20 @@ import {
   useSessionController,
 } from '@/state/session';
 import { useTheme } from '@/theme';
+import {
+  isE2EMode,
+  setupE2EMode,
+  e2eSessionStore,
+  e2eConnectionStore,
+} from '@/e2e/launchMode';
+
+// Install the E2E mock fetch and mark onboarding complete for the synthetic
+// user before any provider mounts. In release builds __DEV__ is false so
+// setupE2EMode() returns immediately — this branch is dead code that Metro
+// eliminates. See mobile/e2e/launchMode.ts for the security properties.
+if (isE2EMode()) {
+  setupE2EMode();
+}
 
 /** StatusBar style driven by the active theme. */
 function ThemedStatusBar() {
@@ -177,10 +191,11 @@ function AuthGate() {
  * preference.
  */
 export default function RootLayout() {
+  const e2e = isE2EMode();
   return (
     <AppearanceProvider>
-      <ConnectionProvider>
-        <SessionProvider>
+      <ConnectionProvider store={e2e ? e2eConnectionStore : undefined}>
+        <SessionProvider store={e2e ? e2eSessionStore : undefined}>
           <SafeAreaProvider>
             <ThemedStatusBar />
             <AuthGate />
