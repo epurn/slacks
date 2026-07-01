@@ -1001,7 +1001,7 @@ function Timeline({
             </Pressable>
           </View>
         ) : (
-          <View style={styles.state}>
+          <View style={styles.state} testID="today-timeline-ready">
             <Text style={[styles.stateText, { color: colors.textMuted }]}>
               Log your first thing
             </Text>

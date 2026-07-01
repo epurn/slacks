@@ -29,6 +29,18 @@ import {
 import { E2E_SESSION, E2E_SERVER_URL } from './fixtures';
 // eslint-disable-next-line import/first
 import { markOnboardingComplete } from '@/state/onboardingComplete';
+// The real API clients — driven through the mock so the fixture suffixes are
+// validated against the URLs the app actually requests, not fabricated ones.
+// eslint-disable-next-line import/first
+import { toApiSession } from '@/state/session';
+// eslint-disable-next-line import/first
+import { getProfile } from '@/api/profile';
+// eslint-disable-next-line import/first
+import { getTarget } from '@/api/goals';
+// eslint-disable-next-line import/first
+import { listTodayLogEvents } from '@/api/logEvents';
+// eslint-disable-next-line import/first
+import { getDailySummary } from '@/api/dailySummary';
 
 // jest-expo sets __DEV__ = true globally. Use globalThis so TypeScript is happy
 // without needing @types/node (which the project excludes from "types").
@@ -185,35 +197,6 @@ describe('createE2EMockFetch', () => {
   const mockFetch = createE2EMockFetch();
   const base = `${E2E_SERVER_URL}/api/users/${encodeURIComponent(E2E_SESSION.userId)}`;
 
-  it('returns 200 with profile fixture for the profile endpoint', async () => {
-    const res = await mockFetch(`${base}/profile`);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { user_id: string };
-    expect(body.user_id).toBe(E2E_SESSION.userId);
-  });
-
-  it('returns 200 with [] for today log events', async () => {
-    const res = await mockFetch(`${base}/log-events/today`);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as unknown[];
-    expect(Array.isArray(body)).toBe(true);
-    expect(body).toHaveLength(0);
-  });
-
-  it('returns 200 with zero summary for daily-summary', async () => {
-    const res = await mockFetch(`${base}/daily-summary`);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { has_intake: boolean };
-    expect(body.has_intake).toBe(false);
-  });
-
-  it('returns 200 with target fixture for goals/target', async () => {
-    const res = await mockFetch(`${base}/goals/target`);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { calories: { effective: number } };
-    expect(body.calories.effective).toBe(2000);
-  });
-
   it('returns 404 for unknown endpoints', async () => {
     const res = await mockFetch(`${base}/unknown-endpoint`);
     expect(res.status).toBe(404);
@@ -223,5 +206,42 @@ describe('createE2EMockFetch', () => {
     const urlObj = new URL(`${base}/profile`);
     const res = await mockFetch(urlObj);
     expect(res.status).toBe(200);
+  });
+});
+
+// ─── mock fetch ↔ real client alignment ──────────────────────────────────────
+//
+// Drift guard: instead of asserting the mock against hand-written suffixes, we
+// drive the REAL API clients (the ones Today/Settings call on mount) through the
+// mock. Each function builds its URL via `userScopedUrl`, so if a fixture suffix
+// stops matching the real request path the mock 404s and the client throws —
+// failing the test. This is what proves the fixtures serve the calls the app
+// actually makes, and would have caught the `/goals/target` and
+// `/log-events/today` mismatches.
+
+describe('E2E mock serves the URLs the real API clients request', () => {
+  const mockFetch = createE2EMockFetch();
+  const apiSession = toApiSession(E2E_SESSION);
+
+  it('getProfile resolves to the profile fixture', async () => {
+    const profile = await getProfile(apiSession, mockFetch);
+    expect(profile.user_id).toBe(E2E_SESSION.userId);
+  });
+
+  it('getTarget resolves to the target fixture', async () => {
+    const target = await getTarget(apiSession, mockFetch);
+    expect(target.calories.effective).toBe(2000);
+  });
+
+  it('listTodayLogEvents resolves to an empty timeline (with the ?day= query)', async () => {
+    const events = await listTodayLogEvents(apiSession, '2026-01-01', mockFetch);
+    expect(Array.isArray(events)).toBe(true);
+    expect(events).toHaveLength(0);
+  });
+
+  it('getDailySummary resolves to the zero-intake fixture', async () => {
+    const summary = await getDailySummary(apiSession, '2026-01-01', mockFetch);
+    expect(summary.has_intake).toBe(false);
+    expect(summary.target?.calories.effective).toBe(2000);
   });
 });

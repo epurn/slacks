@@ -66,7 +66,7 @@ Or edit the `appId` line in `smoke.yaml` permanently.
 
 | File | What it tests |
 |------|---------------|
-| `smoke.yaml` | App launches in E2E mode → reaches the Today screen (FTY-160) |
+| `smoke.yaml` | App launches in E2E mode → Today mounts **and** its timeline reaches the ready, non-error state — data-present, not data-starved (FTY-160) |
 
 More flows will be added in subsequent stories:
 - FTY-162: clarification-needs flow regression (the FTY-149 sheet driven to completion)

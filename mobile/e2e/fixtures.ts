@@ -58,10 +58,17 @@ export const E2E_DAILY_SUMMARY: DailySummaryDTO = {
 /**
  * URL patterns the E2E mock fetch responds to. Keyed by the path suffix after
  * the user-scoped base, so the mock works for any userId/server combination.
+ *
+ * The suffixes MUST match the segments the real API clients pass to
+ * `userScopedUrl` (see `api/*.ts`): `getTarget` requests `/target` (not
+ * `/goals/target`) and `listTodayLogEvents` requests `/log-events` (not
+ * `/log-events/today`). The mock strips the query string before matching, so
+ * the optional `?day=` on those calls is handled. `launchMode.test.ts` drives
+ * the real clients through this map to catch any future drift.
  */
 export const E2E_FIXTURE_MAP: Record<string, unknown> = {
   '/profile': E2E_PROFILE,
-  '/goals/target': E2E_TARGET,
-  '/log-events/today': [],
+  '/target': E2E_TARGET,
+  '/log-events': [],
   '/daily-summary': E2E_DAILY_SUMMARY,
 };
