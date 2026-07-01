@@ -40,10 +40,11 @@ describe('verify-e2e runner contract', () => {
     const script = readText(scriptPath);
 
     expect(script).toContain(
-      'npx expo start --dev-client --host localhost --port "$METRO_PORT"',
+      'EXPO_PUBLIC_FATTY_E2E=true EXPO_UNSTABLE_HEADLESS=1 npx expo start --dev-client --host localhost --port "$METRO_PORT"',
     );
     expect(script).toContain('METRO_PORT="8081"');
     expect(script).toContain('trap cleanup_metro EXIT');
+    expect(script).toContain('grep -q "Waiting on .*:$METRO_PORT" "$METRO_LOG"');
     expect(script).toContain(
       'npx expo run:android $BUILD_CACHE_FLAG --variant debug --no-bundler',
     );

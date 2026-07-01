@@ -67,7 +67,10 @@ dump_metro_log() {
 start_metro() {
   echo "==> [verify-e2e] Starting Expo dev server..."
   : > "$METRO_LOG"
-  EXPO_PUBLIC_FATTY_E2E=true npx expo start --dev-client --host localhost --port "$METRO_PORT" > "$METRO_LOG" 2>&1 &
+  # Headless mode keeps Expo from launching the optional React Native DevTools
+  # shell; the Linux CI sandbox blocks that Chromium binary before Metro is
+  # ready.
+  EXPO_PUBLIC_FATTY_E2E=true EXPO_UNSTABLE_HEADLESS=1 npx expo start --dev-client --host localhost --port "$METRO_PORT" > "$METRO_LOG" 2>&1 &
   METRO_PID="$!"
 
   for _ in $(seq 1 60); do
@@ -77,7 +80,8 @@ start_metro() {
       exit 1
     fi
 
-    if curl --fail --silent --max-time 2 "http://127.0.0.1:$METRO_PORT/status" | grep -q "packager-status:running"; then
+    if curl --fail --silent --max-time 2 "http://127.0.0.1:$METRO_PORT/status" | grep -q "packager-status:running" ||
+      grep -q "Waiting on .*:$METRO_PORT" "$METRO_LOG"; then
       echo "==> [verify-e2e] Expo dev server is ready."
       return
     fi
