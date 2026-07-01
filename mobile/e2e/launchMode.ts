@@ -30,6 +30,11 @@ import {
   E2E_SESSION,
   E2E_SERVER_URL,
   E2E_FIXTURE_MAP,
+  E2E_DAILY_SUMMARY,
+  E2E_CLARIFY_EVENT,
+  E2E_CLARIFICATION,
+  E2E_RESOLVED_EVENT,
+  E2E_RESOLVED_SUMMARY,
 } from './fixtures';
 
 /**
@@ -70,12 +75,28 @@ export const e2eConnectionStore: ServerConnectionStore = {
 };
 
 /**
- * Build the E2E mock fetch function. Matches URLs by the path suffix after the
- * user-scoped API base and returns fixture JSON; returns 404 for anything else.
- * All responses are synthetic — no network I/O occurs.
+ * Build the E2E mock fetch function. Returns hermetic fixture JSON for every
+ * API call the app makes — no network I/O. The mock is stateful: it tracks the
+ * clarify-flow phase so the smoke flow (FTY-160) and the clarify flow (FTY-162)
+ * can share one binary without conflicting fixture state.
+ *
+ * Phase transitions (driven by POST /log-events calls):
+ *   phase 0 — empty day (smoke test; no POST made)
+ *   phase 1 — needs_clarification entry visible (after first POST)
+ *   phase 2 — entry resolved and counting (after second POST / re-submission)
+ *
+ * The smoke flow never POSTs, so it always sees the phase-0 empty-day fixture.
  */
 export function createE2EMockFetch(): typeof fetch {
-  return async (input: RequestInfo | URL): Promise<Response> => {
+  let phase: 0 | 1 | 2 = 0;
+
+  const json = (body: unknown, status = 200): Response =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url =
       typeof input === 'string'
         ? input
@@ -83,24 +104,46 @@ export function createE2EMockFetch(): typeof fetch {
           ? input.href
           : (input as Request).url;
 
+    const method = (
+      init?.method ?? (input instanceof Request ? input.method : 'GET')
+    ).toUpperCase();
+
+    const pathEnd = url.split('?')[0];
+
+    // /log-events — POST advances the phase and returns the next event;
+    // GET returns the phase-appropriate event list.
+    if (pathEnd.endsWith('/log-events')) {
+      if (method === 'POST') {
+        if (phase === 0) {
+          phase = 1;
+          return json(E2E_CLARIFY_EVENT, 201);
+        }
+        phase = 2;
+        return json(E2E_RESOLVED_EVENT, 201);
+      }
+      if (phase === 0) return json([]);
+      if (phase === 1) return json([E2E_CLARIFY_EVENT]);
+      return json([E2E_RESOLVED_EVENT]);
+    }
+
+    // /clarification — the clarify sheet's lazy question-read.
+    if (pathEnd.endsWith('/clarification')) {
+      return json(E2E_CLARIFICATION);
+    }
+
+    // /daily-summary — returns non-zero intake once the entry is resolved.
+    if (pathEnd.endsWith('/daily-summary')) {
+      return json(phase === 2 ? E2E_RESOLVED_SUMMARY : E2E_DAILY_SUMMARY);
+    }
+
+    // Static fixtures (profile, target).
     for (const [suffix, fixture] of Object.entries(E2E_FIXTURE_MAP)) {
-      // Match the suffix at the end of the path component, allowing query params.
-      const pathEnd = url.split('?')[0];
       if (pathEnd.endsWith(suffix)) {
-        return new Response(JSON.stringify(fixture), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return json(fixture);
       }
     }
 
-    return new Response(
-      JSON.stringify({ detail: 'E2E fixture not found for this URL' }),
-      {
-        status: 404,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    );
+    return json({ detail: 'E2E fixture not found for this URL' }, 404);
   };
 }
 

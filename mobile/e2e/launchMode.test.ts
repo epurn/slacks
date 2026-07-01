@@ -26,7 +26,14 @@ import {
   setupE2EMode,
 } from './launchMode';
 // eslint-disable-next-line import/first
-import { E2E_SESSION, E2E_SERVER_URL } from './fixtures';
+import {
+  E2E_SESSION,
+  E2E_SERVER_URL,
+  E2E_CLARIFY_EVENT_ID,
+  E2E_CLARIFY_QUESTION,
+  E2E_CLARIFY_EVENT,
+  E2E_RESOLVED_EVENT,
+} from './fixtures';
 // eslint-disable-next-line import/first
 import { markOnboardingComplete } from '@/state/onboardingComplete';
 // The real API clients — driven through the mock so the fixture suffixes are
@@ -38,7 +45,7 @@ import { getProfile } from '@/api/profile';
 // eslint-disable-next-line import/first
 import { getTarget } from '@/api/goals';
 // eslint-disable-next-line import/first
-import { listTodayLogEvents } from '@/api/logEvents';
+import { listTodayLogEvents, createLogEvent, getLogEventClarification } from '@/api/logEvents';
 // eslint-disable-next-line import/first
 import { getDailySummary } from '@/api/dailySummary';
 
@@ -243,5 +250,77 @@ describe('E2E mock serves the URLs the real API clients request', () => {
     const summary = await getDailySummary(apiSession, '2026-01-01', mockFetch);
     expect(summary.has_intake).toBe(false);
     expect(summary.target?.calories.effective).toBe(2000);
+  });
+});
+
+// ─── FTY-162 clarify-flow stateful mock ──────────────────────────────────────
+//
+// Proves the stateful phase transitions that the clarify.yaml Maestro flow
+// relies on. Each test creates a fresh mock instance so phases do not leak.
+
+describe('FTY-162 clarify-flow: stateful mock phase transitions', () => {
+  const apiSession = toApiSession(E2E_SESSION);
+
+  it('phase 0 → POST /log-events returns needs_clarification event', async () => {
+    const mockFetch = createE2EMockFetch();
+    const created = await createLogEvent(apiSession, 'coffee', undefined, mockFetch);
+    expect(created.id).toBe(E2E_CLARIFY_EVENT_ID);
+    expect(created.status).toBe('needs_clarification');
+    expect(created.raw_text).toBe(E2E_CLARIFY_EVENT.raw_text);
+  });
+
+  it('phase 1 → GET /log-events returns the needs_clarification event list', async () => {
+    const mockFetch = createE2EMockFetch();
+    await createLogEvent(apiSession, 'coffee', undefined, mockFetch); // advance to phase 1
+    const events = await listTodayLogEvents(apiSession, '2026-01-01', mockFetch);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.id).toBe(E2E_CLARIFY_EVENT_ID);
+    expect(events[0]?.status).toBe('needs_clarification');
+  });
+
+  it('phase 1 → GET /clarification returns the seeded question', async () => {
+    const mockFetch = createE2EMockFetch();
+    await createLogEvent(apiSession, 'coffee', undefined, mockFetch); // advance to phase 1
+    const clarification = await getLogEventClarification(
+      apiSession,
+      E2E_CLARIFY_EVENT_ID,
+      mockFetch,
+    );
+    expect(clarification.questions).toHaveLength(1);
+    expect(clarification.questions[0]?.text).toBe(E2E_CLARIFY_QUESTION);
+  });
+
+  it('phase 1 → second POST /log-events returns resolved event', async () => {
+    const mockFetch = createE2EMockFetch();
+    await createLogEvent(apiSession, 'coffee', undefined, mockFetch); // phase 0 → 1
+    const resolved = await createLogEvent(apiSession, 'coffee large', undefined, mockFetch); // phase 1 → 2
+    expect(resolved.id).toBe(E2E_RESOLVED_EVENT.id);
+    expect(resolved.status).toBe('completed');
+    expect(resolved.raw_text).toBe('coffee large');
+  });
+
+  it('phase 2 → GET /log-events returns the resolved event list', async () => {
+    const mockFetch = createE2EMockFetch();
+    await createLogEvent(apiSession, 'coffee', undefined, mockFetch); // phase 0 → 1
+    await createLogEvent(apiSession, 'coffee large', undefined, mockFetch); // phase 1 → 2
+    const events = await listTodayLogEvents(apiSession, '2026-01-01', mockFetch);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.id).toBe(E2E_RESOLVED_EVENT.id);
+    expect(events[0]?.status).toBe('completed');
+  });
+
+  it('phase 2 → GET /daily-summary returns non-zero intake', async () => {
+    const mockFetch = createE2EMockFetch();
+    await createLogEvent(apiSession, 'coffee', undefined, mockFetch); // phase 0 → 1
+    await createLogEvent(apiSession, 'coffee large', undefined, mockFetch); // phase 1 → 2
+    const summary = await getDailySummary(apiSession, '2026-01-01', mockFetch);
+    expect(summary.has_intake).toBe(true);
+    expect(summary.intake.calories).toBe(120);
+  });
+
+  it('phase 0 smoke: no POST means GET /log-events still returns empty list', async () => {
+    const mockFetch = createE2EMockFetch();
+    const events = await listTodayLogEvents(apiSession, '2026-01-01', mockFetch);
+    expect(events).toHaveLength(0);
   });
 });
