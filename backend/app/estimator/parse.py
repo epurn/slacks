@@ -63,6 +63,14 @@ DEFAULT_CLARIFICATION_QUESTION = "Could you clarify what you logged and how much
 #: Instruction framing for the parse call. The user's text is delimited and
 #: explicitly labelled as data; any instructions inside it are to be ignored. The
 #: real guarantee is schema validation downstream — this only reduces the surface.
+#:
+#: Estimate-first framing (FTY-155): when the user names a food/exercise but
+#: leaves a quantity unspecified, the model infers the typical portion implied by
+#: the structure given (counts, container words, named/branded standard servings)
+#: and extracts that as the candidate with a real confidence. needs_clarification
+#: is reserved for input that is genuinely indeterminate — no count, no portion
+#: word, no standard serving cue, or the item itself is ambiguous. The security
+#: framing (untrusted DATA, no fabricated calories/brands/barcodes) is unchanged.
 _PROMPT_TEMPLATE = """\
 You are a nutrition log parser. Extract the food and exercise items from the \
 user's log entry below into the required structured schema.
@@ -80,12 +88,25 @@ manufacturer product, or a named packaged food (e.g. name "Big Mac" brand \
 "McDonald's"). Leave brand empty for a generic food (e.g. "white rice", "an \
 apple"). Never invent a brand the user did not name.
 - Do not invent calories, macros, or energy values — later steps resolve those.
-- If the entry clearly logs food/exercise but is too ambiguous to extract \
-confidently, set disposition "needs_clarification" and provide concise \
-clarification_questions.
+- Estimate-first: when the user names a food or exercise but leaves a quantity \
+unspecified, infer the typical or default portion implied by the structure given. \
+Use these anchors: explicit counts ("3 sandwiches", "6 crackers"); named or \
+branded products with a standard package or serving size; container or portion \
+words ("a bowl", "a handful", "a slice"); and standard accompaniment amounts for \
+components whose quantity is contextually implied (e.g. ~1 tbsp peanut butter \
+per 2-3 crackers, a drizzle of dressing on a salad). Extract the inferred amount \
+and report a confidence that honestly reflects how typical the estimate is — do \
+not floor confidence just because a number was inferred rather than stated.
+- Clarify only when genuinely indeterminate: set disposition \
+"needs_clarification" only when a food or exercise is named but there is no \
+structural basis to infer an amount — no explicit count, no portion word, no \
+standard serving from the item's name or structure — or when the item itself is \
+ambiguous. A named food with any quantity cue should be estimated, not asked \
+about. Provide concise clarification_questions for each item you cannot infer.
 - If the entry is empty, gibberish, or not a food/exercise log at all, set \
 disposition "unparseable" and a short reason.
-- Set confidence in [0, 1] reflecting how sure you are of the extraction.
+- Set confidence in [0, 1] reflecting how sure you are of the extraction. A \
+confident estimate of a typical portion warrants a genuinely high confidence.
 
 <log_entry>
 {raw_text}

@@ -194,6 +194,136 @@ def test_response_error_fails_closed_non_retryable() -> None:
     assert exc.value.reason == "provider_error"
 
 
+# ---------------------------------------------------------------------------
+# Estimate-vs-ask golden boundary (FTY-155)
+# ---------------------------------------------------------------------------
+# These tests pin the routing contract for the estimate-first prompt: inputs
+# with an inferable portion should parse confidently; inputs with no structural
+# basis for inference should still clarify. The FakeProvider models the LLM
+# reply that the new prompt is intended to produce.
+
+
+def test_inferable_from_structure_routes_to_parsed() -> None:
+    # "3 toppables PB sandwiches (kraft)": explicit count (3 sandwiches) and a
+    # named branded product give enough structure to infer crackers count and a
+    # peanut-butter portion. The model should return parsed, not clarification.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [
+                    {
+                        "type": "food",
+                        "name": "Kraft Toppables crackers",
+                        "quantity_text": "3 sandwiches worth",
+                        "brand": "Kraft",
+                        "amount": 18,
+                        "unit": "crackers",
+                    },
+                    {
+                        "type": "food",
+                        "name": "peanut butter",
+                        "quantity_text": "~3 tbsp (1 tbsp per sandwich)",
+                        "amount": 3,
+                        "unit": "tbsp",
+                    },
+                ],
+                confidence=0.78,
+            )
+        ]
+    )
+    context = _context(raw_text="3 toppables PB sandwiches (kraft)")
+
+    _run(provider, context)
+
+    assert len(context.food_candidates) == 2
+    names = {c.name for c in context.food_candidates}
+    assert "Kraft Toppables crackers" in names
+    assert "peanut butter" in names
+    # Confident estimate — no clarification requested.
+    assert context.clarification_questions == []
+    assert context.exercise_candidates == []
+
+
+def test_explicit_count_with_unstated_portion_routes_to_parsed() -> None:
+    # "6 crackers with peanut butter": explicit cracker count plus a named
+    # accompaniment whose portion is contextually implied — model estimates PB.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [
+                    {
+                        "type": "food",
+                        "name": "crackers",
+                        "quantity_text": "6",
+                        "amount": 6,
+                        "unit": "crackers",
+                    },
+                    {
+                        "type": "food",
+                        "name": "peanut butter",
+                        "quantity_text": "~2 tbsp (estimated)",
+                        "amount": 2,
+                        "unit": "tbsp",
+                    },
+                ],
+                confidence=0.82,
+            )
+        ]
+    )
+    context = _context(raw_text="6 crackers with peanut butter")
+
+    _run(provider, context)
+
+    assert [c.name for c in context.food_candidates] == ["crackers", "peanut butter"]
+    pb = context.food_candidates[1]
+    assert pb.amount == 2
+    assert pb.unit == "tbsp"
+    assert context.clarification_questions == []
+
+
+def test_genuinely_indeterminate_still_routes_to_clarification() -> None:
+    # "crackers and peanut butter" with no count or portion word — genuinely
+    # indeterminate; the model should ask rather than guess wildly.
+    provider = FakeProvider(
+        responses=[
+            {
+                "disposition": "needs_clarification",
+                "confidence": 0.3,
+                "clarification_questions": [
+                    "How many crackers did you have?",
+                    "How much peanut butter — a teaspoon, tablespoon, or more?",
+                ],
+            }
+        ]
+    )
+    context = _context(raw_text="crackers and peanut butter")
+
+    with pytest.raises(NeedsClarification):
+        _run(provider, context)
+
+    assert len(context.clarification_questions) == 2
+    assert "crackers" in context.clarification_questions[0].lower()
+    assert context.food_candidates == []
+
+
+def test_estimate_first_framing_is_in_prompt() -> None:
+    # Regression guard: the prompt must contain the estimate-first framing so an
+    # accidental revert to the old conservative prompt is caught immediately.
+    provider = FakeProvider(
+        responses=[_parsed([{"type": "food", "name": "rice", "quantity_text": "1 cup"}])]
+    )
+    context = _context(raw_text="a cup of rice")
+
+    _run(provider, context)
+
+    prompt = provider.prompts[0]
+    assert "Estimate-first" in prompt
+    assert "genuinely indeterminate" in prompt
+    # The untrusted-DATA framing must still be present.
+    assert "untrusted DATA" in prompt
+    assert "never invent" in prompt.lower() or "do not invent" in prompt.lower()
+
+
 def test_embedded_instructions_are_not_executed_and_text_is_delimited() -> None:
     # The user text tries to hijack the model. The step's outcome is driven solely
     # by the schema-validated reply (here: unparseable → fail closed), never by the
