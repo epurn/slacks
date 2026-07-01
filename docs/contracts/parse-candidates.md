@@ -111,7 +111,10 @@ and persists no candidates.
   count above `MAX_PLAUSIBLE_COUNT` (`36`), a mass above `MAX_PLAUSIBLE_GRAMS`
   (`2000 g`), or a volume above `MAX_PLAUSIBLE_ML` (`2000 ml`) fails, as does a
   numeric amount on an unrecognised unit when that amount exceeds the count cap.
-  A candidate with no `amount` always passes (inference gaps are the confidence
+  If structured `amount`/`unit` are absent but `quantity_text` carries an explicit
+  `<number> <mass|volume unit>` measure, that measure is checked against the same
+  mass/volume bounds. A candidate with no structured `amount` and no explicit
+  measured quantity in `quantity_text` passes (inference gaps are the confidence
   check's concern). Bounds are set just above any realistic single-entry portion
   so a false reject of a large-but-real meal is effectively impossible; the
   fail-safe is loose (an over-generous bound lets one absurd parse through rather

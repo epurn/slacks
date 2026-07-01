@@ -27,6 +27,7 @@ Design:
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from typing import Final
 
@@ -252,6 +253,13 @@ _VOLUME_UNIT_ML: Final[dict[str, float]] = {
     "gal": 3785.41,
 }
 
+# Match a bounded explicit "<number> <mass|volume unit>" phrase in quantity_text
+# when the model omitted structured amount/unit. The parse schema bounds
+# quantity_text to 120 chars, so scanning is deterministic and cheap.
+_QUANTITY_TEXT_MEASURE_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?<![0-9A-Za-z.])(\d+(?:,\d{3})*(?:\.\d+)?)\s*([A-Za-z_]+)\b"
+)
+
 _ALL_KNOWN_UNITS: Final[frozenset[str]] = _MASS_UNITS | _VOLUME_UNITS | _COUNT_UNITS
 
 
@@ -290,16 +298,21 @@ def check_candidate(candidate: ParsedCandidate) -> PlausibilityResult:
     5. **Implausible volume → fail.**  A volume that converts to more than
        ``MAX_PLAUSIBLE_ML`` ml is beyond any realistic single-entry portion.
 
-    A candidate with no ``amount`` (amount is ``None``) is always considered
-    plausible by this gate — quantity inference failures are handled by the
-    confidence/disposition check upstream.
+    A candidate with no structured ``amount`` (amount is ``None``) is considered
+    plausible only when ``quantity_text`` does not carry an explicit mass/volume
+    measure; quantity inference failures are handled by the confidence/disposition
+    check upstream.
     """
 
     amount = candidate.amount
+    normalized_unit = (candidate.unit or "").strip().lower()
 
-    # No amount: nothing to validate here; pass through.
     if amount is None:
-        return PlausibilityResult(plausible=True)
+        text_measure = _measure_from_quantity_text(candidate.quantity_text)
+        if text_measure is None:
+            # No amount and no explicit text measure: nothing to validate here.
+            return PlausibilityResult(plausible=True)
+        amount, normalized_unit = text_measure
 
     # Rule 1: negative or non-finite amount (schema guards ge=0, but guard NaN/inf).
     if not math.isfinite(amount) or amount < 0:
@@ -308,8 +321,6 @@ def check_candidate(candidate: ParsedCandidate) -> PlausibilityResult:
             reason="non_finite_or_negative_amount",
             clarification_question=_question(candidate.name, "amount"),
         )
-
-    normalized_unit = (candidate.unit or "").strip().lower()
 
     # Rule 2: unknown/garbage unit with a numeric amount.
     # "Normalise away" interpretation: a unit not in any recognised family could
@@ -360,6 +371,25 @@ def check_candidate(candidate: ParsedCandidate) -> PlausibilityResult:
             )
 
     return PlausibilityResult(plausible=True)
+
+
+def _measure_from_quantity_text(quantity_text: str) -> tuple[float, str] | None:
+    """Return the first explicit mass/volume measure found in ``quantity_text``.
+
+    This is a validation fallback only: it does not normalise or persist the
+    candidate. It closes the bypass where the model leaves ``amount``/``unit``
+    empty while still carrying a concrete measured quantity such as ``5000g`` in
+    the raw portion phrase.
+    """
+
+    for match in _QUANTITY_TEXT_MEASURE_RE.finditer(quantity_text):
+        normalized_unit = match.group(2).lower()
+        if normalized_unit not in _MASS_UNIT_GRAMS and normalized_unit not in _VOLUME_UNIT_ML:
+            continue
+        amount = float(match.group(1).replace(",", ""))
+        if amount > 0 and math.isfinite(amount):
+            return amount, normalized_unit
+    return None
 
 
 def _question(item_name: str, mode: str) -> str:

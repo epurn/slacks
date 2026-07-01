@@ -408,6 +408,28 @@ def test_implausible_mass_routes_to_clarification() -> None:
     assert "chicken" in context.clarification_questions[0]
 
 
+def test_implausible_mass_only_in_quantity_text_routes_to_clarification() -> None:
+    # Regression (FTY-156): a model reply can keep an explicit mass only in
+    # quantity_text. That must not bypass the deterministic plausibility gate.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [{"type": "food", "name": "chicken", "quantity_text": "5000g"}],
+                confidence=0.9,
+            )
+        ]
+    )
+    context = _context(raw_text="5000g chicken")
+
+    with pytest.raises(NeedsClarification) as exc:
+        _run(provider, context)
+
+    assert exc.value.reason == "implausible_candidate"
+    assert context.food_candidates == []
+    assert len(context.clarification_questions) == 1
+    assert "chicken" in context.clarification_questions[0]
+
+
 def test_unknown_unit_large_amount_routes_to_clarification() -> None:
     # A garbage unit with an amount above the count cap — unambiguously implausible.
     provider = FakeProvider(

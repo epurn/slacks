@@ -89,6 +89,20 @@ def test_implausible_mass_grams_fails() -> None:
     assert "chicken" in result.clarification_question
 
 
+def test_implausible_mass_in_quantity_text_without_structured_amount_fails() -> None:
+    # The model can carry the explicit measure only in quantity_text; the gate
+    # must still apply the mass bound before the parse is trusted.
+    result = check_candidate(_candidate("chicken", quantity_text="5000g"))
+    assert not result.plausible
+    assert result.reason == "implausible_mass"
+
+
+def test_implausible_mass_in_quantity_text_with_comma_fails() -> None:
+    result = check_candidate(_candidate("chicken", quantity_text="5,000 g"))
+    assert not result.plausible
+    assert result.reason == "implausible_mass"
+
+
 def test_implausible_mass_kg_fails() -> None:
     # 3 kg = 3 000 g, above 2 000 g limit.
     result = check_candidate(_candidate("steak", amount=3.0, unit="kg"))
@@ -123,6 +137,12 @@ def test_implausible_mass_pounds_fails() -> None:
 def test_implausible_volume_litres_fails() -> None:
     # 3 L = 3 000 ml, above 2 000 ml limit.
     result = check_candidate(_candidate("juice", amount=3.0, unit="l"))
+    assert not result.plausible
+    assert result.reason == "implausible_volume"
+
+
+def test_implausible_volume_in_quantity_text_without_structured_amount_fails() -> None:
+    result = check_candidate(_candidate("soup", quantity_text="3 liters"))
     assert not result.plausible
     assert result.reason == "implausible_volume"
 
@@ -245,6 +265,11 @@ def test_large_salad_grams_passes() -> None:
 def test_large_smoothie_ml_passes() -> None:
     # A large blended smoothie might be 600–800 ml.
     result = check_candidate(_candidate("banana smoothie", amount=750.0, unit="ml"))
+    assert result.plausible
+
+
+def test_realistic_quantity_text_measure_without_structured_amount_passes() -> None:
+    result = check_candidate(_candidate("banana smoothie", quantity_text="750 ml"))
     assert result.plausible
 
 
