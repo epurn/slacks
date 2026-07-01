@@ -80,6 +80,7 @@ appId: com.fatty
 - tapOn:
     text: "Your answer"
 - inputText: "large"
+- hideKeyboard
 - tapOn:
     text: "Submit answer"
 
