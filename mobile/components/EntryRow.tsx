@@ -66,6 +66,7 @@ export function EntryRow({
   if (event.status === "needs_clarification") {
     return (
       <Pressable
+        testID="add-a-detail-row"
         style={({ pressed }) => [
           styles.clarifyRow,
           pressed && onPress ? { opacity: 0.6 } : null,

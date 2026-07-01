@@ -61,7 +61,8 @@ else
 fi
 
 # ── 4. Run Maestro flows ───────────────────────────────────────────────────────
-echo "==> [verify-e2e] Running Maestro smoke flow..."
+echo "==> [verify-e2e] Running Maestro flows..."
 APP_BUNDLE_ID="$BUNDLE_ID" maestro test .maestro/smoke.yaml
+APP_BUNDLE_ID="$BUNDLE_ID" maestro test .maestro/clarify.yaml
 
 echo "==> [verify-e2e] All E2E flows passed."

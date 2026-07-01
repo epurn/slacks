@@ -67,9 +67,7 @@ Or edit the `appId` line in `smoke.yaml` permanently.
 | File | What it tests |
 |------|---------------|
 | `smoke.yaml` | App launches in E2E mode → Today mounts **and** its timeline reaches the ready, non-error state — data-present, not data-starved (FTY-160) |
-
-More flows will be added in subsequent stories:
-- FTY-162: clarification-needs flow regression (the FTY-149 sheet driven to completion)
+| `clarify.yaml` | Full clarify path: submit an entry → needs-a-detail row appears → tap row → clarify sheet shows the seeded question (data-starved sheet fails here) → free-text answer → entry resolves and counts in Today totals (FTY-162) |
 
 ## E2E launch mode (deterministic boot)
 

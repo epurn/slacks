@@ -1,5 +1,5 @@
 /**
- * Synthetic E2E fixtures (FTY-160).
+ * Synthetic E2E fixtures (FTY-160, FTY-162).
  *
  * All data is fabricated for testing only — no real tokens, user logs, or body
  * data. These constants live in the public repo and must never carry secrets,
@@ -9,6 +9,7 @@
 import type { SessionRecord } from '@/state/session';
 import type { ProfileDTO } from '@/api/profile';
 import type { DailySummaryDTO, TargetReadModel } from '@/api/dailySummary';
+import type { LogEventDTO, ClarificationDTO } from '@/api/logEvents';
 
 export const E2E_SERVER_URL = 'http://localhost:8000';
 
@@ -56,19 +57,64 @@ export const E2E_DAILY_SUMMARY: DailySummaryDTO = {
 };
 
 /**
- * URL patterns the E2E mock fetch responds to. Keyed by the path suffix after
- * the user-scoped base, so the mock works for any userId/server combination.
+ * Static URL patterns for endpoints that never change across E2E flow phases.
+ * Keyed by path suffix; the mock strips the query string before matching, so
+ * the optional `?day=` on log-events/daily-summary calls is handled.
+ * `launchMode.test.ts` drives the real clients through the mock to catch drift.
  *
- * The suffixes MUST match the segments the real API clients pass to
- * `userScopedUrl` (see `api/*.ts`): `getTarget` requests `/target` (not
- * `/goals/target`) and `listTodayLogEvents` requests `/log-events` (not
- * `/log-events/today`). The mock strips the query string before matching, so
- * the optional `?day=` on those calls is handled. `launchMode.test.ts` drives
- * the real clients through this map to catch any future drift.
+ * Dynamic endpoints (/log-events POST+GET, /daily-summary, /clarification) are
+ * handled explicitly in the stateful `createE2EMockFetch` in launchMode.ts.
  */
 export const E2E_FIXTURE_MAP: Record<string, unknown> = {
   '/profile': E2E_PROFILE,
   '/target': E2E_TARGET,
-  '/log-events': [],
-  '/daily-summary': E2E_DAILY_SUMMARY,
+};
+
+// ─── FTY-162 clarify-flow fixtures ────────────────────────────────────────────
+
+/** Stable id for the synthetic needs_clarification event in clarify.yaml. */
+export const E2E_CLARIFY_EVENT_ID =
+  'e2e-clarify-event-00000000-0000-0000-0000-000000000000';
+
+/**
+ * The seeded clarification question text. clarify.yaml asserts this exact
+ * string is visible in the ClarifyMode sheet — if the sheet opens data-starved
+ * (no question seeded), the generic fallback appears instead and the Maestro
+ * assertion fails, proving the harness catches the FTY-149 bug class.
+ */
+export const E2E_CLARIFY_QUESTION =
+  'What size was the coffee — small, medium, or large?';
+
+/** Synthetic needs_clarification event for the FTY-162 clarify flow. */
+export const E2E_CLARIFY_EVENT: LogEventDTO = {
+  id: E2E_CLARIFY_EVENT_ID,
+  user_id: E2E_SESSION.userId,
+  raw_text: 'coffee',
+  status: 'needs_clarification',
+  created_at: '2026-01-01T08:00:00Z',
+  updated_at: '2026-01-01T08:00:00Z',
+};
+
+/** Clarification read response carrying the seeded question. */
+export const E2E_CLARIFICATION: ClarificationDTO = {
+  questions: [{ text: E2E_CLARIFY_QUESTION }],
+};
+
+/** Resolved event returned after the user answers the clarify question. */
+export const E2E_RESOLVED_EVENT: LogEventDTO = {
+  id: 'e2e-resolved-event-00000000-0000-0000-0000-000000000000',
+  user_id: E2E_SESSION.userId,
+  raw_text: 'coffee large',
+  status: 'completed',
+  created_at: '2026-01-01T08:01:00Z',
+  updated_at: '2026-01-01T08:01:00Z',
+};
+
+/** Daily summary reflecting the resolved "coffee large" entry (120 kcal). */
+export const E2E_RESOLVED_SUMMARY: DailySummaryDTO = {
+  date: '2026-01-01',
+  intake: { calories: 120, protein_g: 1, carbs_g: 20, fat_g: 3 },
+  has_intake: true,
+  target: E2E_TARGET,
+  exercise: { active_calories: 0 },
 };
