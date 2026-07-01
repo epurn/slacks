@@ -61,7 +61,7 @@ EXPO_PUBLIC_FATTY_E2E=true npx expo prebuild --no-install --clean
 # ── 3. Build and install the debug binary ─────────────────────────────────────
 if [ "$PLATFORM" = "android" ]; then
   echo "==> [verify-e2e] Building Android debug APK..."
-  EXPO_PUBLIC_FATTY_E2E=true npx expo run:android $BUILD_CACHE_FLAG --configuration debug
+  EXPO_PUBLIC_FATTY_E2E=true npx expo run:android $BUILD_CACHE_FLAG --variant debug
 
 elif [ "$PLATFORM" = "ios" ]; then
   echo "==> [verify-e2e] Building iOS simulator binary..."
