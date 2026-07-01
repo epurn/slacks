@@ -22,9 +22,11 @@ appId: com.fatty
 ---
 - launchApp:
     clearState: false
-- assertVisible:
-    id: today-screen
+- extendedWaitUntil:
+    visible:
+      id: today-screen
     timeout: 15000
-- assertVisible:
-    id: today-timeline-ready
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-ready
     timeout: 15000

@@ -68,6 +68,7 @@ describe('verify-e2e runner contract', () => {
       expect(flow).not.toMatch(/^appId:\s*\$/m);
       expect(flow).toContain('- launchApp:');
       expect(flow).not.toContain('testId:');
+      expect(flow).not.toContain('label:');
     }
   });
 });
