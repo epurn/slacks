@@ -29,10 +29,10 @@ appId: com.fatty
 # Step 2: Assert the app reaches Today and the timeline is in the ready,
 #         empty-day state (reuses the FTY-160 Today marker).
 - assertVisible:
-    testId: today-screen
+    id: today-screen
     timeout: 15000
 - assertVisible:
-    testId: today-timeline-ready
+    id: today-timeline-ready
     timeout: 15000
 
 # Step 3: Submit "coffee" — the mock POST handler transitions to phase 1 and
@@ -46,7 +46,7 @@ appId: com.fatty
 # Step 4: Wait for the timeline to show entries (optimistic event inserted
 #         immediately, then reconciled to the needs_clarification event).
 - assertVisible:
-    testId: today-timeline-with-entries
+    id: today-timeline-with-entries
     timeout: 10000
 
 # Step 5: Assert the entry renders as "needs a detail" — legible and inviting,
@@ -57,14 +57,14 @@ appId: com.fatty
 
 # Step 6: Tap the row to open the clarify sheet.
 - tapOn:
-    testId: add-a-detail-row
+    id: add-a-detail-row
 
 # Step 7: Assert the clarify sheet is open and shows the seeded question text.
 #         This is the regression-proving assertion: a data-starved sheet would
 #         show the generic fallback ("We need a detail to count this entry.")
 #         instead, failing this check.
 - assertVisible:
-    testId: clarify-question
+    id: clarify-question
     timeout: 5000
 - assertVisible:
     text: "What size was the coffee"
