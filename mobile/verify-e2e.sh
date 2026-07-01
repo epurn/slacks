@@ -26,6 +26,9 @@
 #                     deterministic local binary. Set to any value (CI sets it)
 #                     to reuse the restored Gradle/Xcode build cache and keep the
 #                     build bounded.
+#   E2E_MAESTRO_TIMEOUT_SECONDS
+#                     Maximum time to let Maestro run before failing with a clear
+#                     timeout (default: 300).
 
 set -euo pipefail
 
@@ -35,6 +38,8 @@ PLATFORM="${PLATFORM:-ios}"
 METRO_PORT="8081"
 METRO_LOG="${E2E_METRO_LOG:-${TMPDIR:-/tmp}/fatty-e2e-metro.log}"
 METRO_PID=""
+METRO_STATUS_ERROR=""
+MAESTRO_TIMEOUT_SECONDS="${E2E_MAESTRO_TIMEOUT_SECONDS:-300}"
 
 # A clean build (no cache) is the local default for a deterministic binary. CI
 # sets E2E_BUILD_CACHE to reuse the cached Gradle state so the emulator build
@@ -64,10 +69,30 @@ dump_metro_log() {
   fi
 }
 
+metro_ready() {
+  local host
+  local response
+
+  for host in localhost 127.0.0.1; do
+    if response="$(curl --fail --silent --max-time 2 "http://$host:$METRO_PORT/status" 2>&1)"; then
+      if [[ "$response" == *"packager-status:running"* ]]; then
+        return 0
+      fi
+      METRO_STATUS_ERROR="unexpected response from $host: $response"
+    else
+      METRO_STATUS_ERROR="curl failed for $host: $response"
+    fi
+  done
+
+  return 1
+}
+
 start_metro() {
   echo "==> [verify-e2e] Starting Expo dev server..."
   : > "$METRO_LOG"
-  EXPO_PUBLIC_FATTY_E2E=true npx expo start --dev-client --host localhost --port "$METRO_PORT" > "$METRO_LOG" 2>&1 &
+  # Expo 57 otherwise prepares the standalone React Native DevTools shell, whose
+  # bundled Chromium sandbox is not usable on GitHub's headless Linux runner.
+  EXPO_PUBLIC_FATTY_E2E=true EXPO_UNSTABLE_HEADLESS=1 npx expo start --dev-client --host localhost --port "$METRO_PORT" > "$METRO_LOG" 2>&1 &
   METRO_PID="$!"
 
   for _ in $(seq 1 60); do
@@ -77,7 +102,7 @@ start_metro() {
       exit 1
     fi
 
-    if curl --fail --silent --max-time 2 "http://127.0.0.1:$METRO_PORT/status" | grep -q "packager-status:running"; then
+    if metro_ready; then
       echo "==> [verify-e2e] Expo dev server is ready."
       return
     fi
@@ -86,8 +111,34 @@ start_metro() {
   done
 
   echo "ERROR: Expo dev server did not become ready on port $METRO_PORT."
+  if [ -n "$METRO_STATUS_ERROR" ]; then
+    echo "Last status probe: $METRO_STATUS_ERROR"
+  fi
   dump_metro_log
   exit 1
+}
+
+run_maestro() {
+  local maestro_pid
+  local started_at
+
+  echo "==> [verify-e2e] Maestro timeout: ${MAESTRO_TIMEOUT_SECONDS}s"
+  MAESTRO_CLI_NO_ANALYTICS=1 maestro test .maestro/ &
+  maestro_pid="$!"
+  started_at="$SECONDS"
+
+  while kill -0 "$maestro_pid" 2> /dev/null; do
+    if (( SECONDS - started_at >= MAESTRO_TIMEOUT_SECONDS )); then
+      echo "ERROR: Maestro flows exceeded ${MAESTRO_TIMEOUT_SECONDS}s."
+      kill "$maestro_pid" 2> /dev/null || true
+      wait "$maestro_pid" 2> /dev/null || true
+      return 124
+    fi
+
+    sleep 1
+  done
+
+  wait "$maestro_pid"
 }
 
 trap cleanup_metro EXIT
@@ -130,6 +181,11 @@ fi
 # now, and any flow added later (e.g. FTY-162's clarify regression) with no
 # runner or CI change.
 echo "==> [verify-e2e] Running Maestro flows (.maestro/)..."
-maestro test .maestro/
+maestro_status=0
+run_maestro || maestro_status="$?"
+if [ "$maestro_status" -ne 0 ]; then
+  dump_metro_log
+  exit "$maestro_status"
+fi
 
 echo "==> [verify-e2e] All E2E flows passed."

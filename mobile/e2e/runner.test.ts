@@ -51,6 +51,8 @@ describe('verify-e2e runner contract', () => {
     expect(script).toContain(
       'npx expo run:ios $BUILD_CACHE_FLAG --configuration Debug --simulator --no-bundler',
     );
+    expect(script).toContain('E2E_MAESTRO_TIMEOUT_SECONDS:-300');
+    expect(script).toContain('MAESTRO_CLI_NO_ANALYTICS=1 maestro test .maestro/');
   });
 
   it('runs directory-level Maestro flows against literal app IDs', () => {
@@ -67,6 +69,8 @@ describe('verify-e2e runner contract', () => {
       expect(flow).toContain(`appId: ${expectedAppId}`);
       expect(flow).not.toMatch(/^appId:\s*\$/m);
       expect(flow).toContain('- launchApp:');
+      expect(flow).not.toContain('testId:');
+      expect(flow).not.toContain('label:');
     }
   });
 });

@@ -28,59 +28,66 @@ appId: com.fatty
 
 # Step 2: Assert the app reaches Today and the timeline is in the ready,
 #         empty-day state (reuses the FTY-160 Today marker).
-- assertVisible:
-    testId: today-screen
+- extendedWaitUntil:
+    visible:
+      id: today-screen
     timeout: 15000
-- assertVisible:
-    testId: today-timeline-ready
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-ready
     timeout: 15000
 
 # Step 3: Submit "coffee" — the mock POST handler transitions to phase 1 and
 #         returns the needs_clarification event.
 - tapOn:
-    label: "Log food or exercise"
+    text: "Log food or exercise"
 - inputText: "coffee"
 - tapOn:
-    label: "Add entry"
+    text: "Add entry"
 
 # Step 4: Wait for the timeline to show entries (optimistic event inserted
 #         immediately, then reconciled to the needs_clarification event).
-- assertVisible:
-    testId: today-timeline-with-entries
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-with-entries
     timeout: 10000
 
 # Step 5: Assert the entry renders as "needs a detail" — legible and inviting,
 #         not a silent zero (the FTY-149 outcome that this flow guards against).
-- assertVisible:
-    label: "coffee, needs a detail, uncounted"
+- extendedWaitUntil:
+    visible:
+      text: "coffee, needs a detail, uncounted"
     timeout: 10000
 
 # Step 6: Tap the row to open the clarify sheet.
 - tapOn:
-    testId: add-a-detail-row
+    id: add-a-detail-row
 
 # Step 7: Assert the clarify sheet is open and shows the seeded question text.
 #         This is the regression-proving assertion: a data-starved sheet would
 #         show the generic fallback ("We need a detail to count this entry.")
 #         instead, failing this check.
-- assertVisible:
-    testId: clarify-question
+- extendedWaitUntil:
+    visible:
+      id: clarify-question
     timeout: 5000
-- assertVisible:
-    text: "What size was the coffee"
+- extendedWaitUntil:
+    visible:
+      text: ".*What size was the coffee.*"
     timeout: 5000
 
 # Step 8: Enter a free-text answer and submit.
 - tapOn:
-    label: "Your answer"
+    text: "Your answer"
 - inputText: "large"
 - tapOn:
-    label: "Submit answer"
+    text: "Submit answer"
 
 # Step 9: Assert the needs-a-detail treatment dropped — the entry resolved.
 #         The sheet closes, the row disappears from the "needs a detail" state.
-- assertNotVisible:
-    label: "coffee, needs a detail, uncounted"
+- extendedWaitUntil:
+    notVisible:
+      text: "coffee, needs a detail, uncounted"
     timeout: 10000
 
 # Step 10: Tap Refresh to load the phase-2 fixture: resolved event list and
@@ -88,11 +95,12 @@ appId: com.fatty
 #          re-submitted event completes synchronously in the mock and there is
 #          no polling window before the test asserts counts.)
 - tapOn:
-    label: "Refresh"
+    text: "Refresh"
 
 # Step 11: Assert the entry counts — the CalorieHero accessibility label
 #          includes the consumed kcal from the E2E_RESOLVED_SUMMARY fixture
 #          (120 kcal of 2,000 kcal).
-- assertVisible:
-    text: "120 of 2,000 kcal"
+- extendedWaitUntil:
+    visible:
+      text: "120 of 2,000 kcal"
     timeout: 10000
