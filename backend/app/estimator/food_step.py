@@ -52,6 +52,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.estimator.detail_signals import has_food_detail
 from app.estimator.evidence_utils import _record_source_ref
 from app.estimator.fdc import (
     FDC_SOURCE,
@@ -83,15 +84,32 @@ from app.models.food_sources import Product
 
 
 def _is_official_eligible(candidate: CandidateDraft) -> bool:
-    """Whether a USDA/OFF miss for ``candidate`` should defer to official source.
+    """Whether ``candidate`` names a *branded* product for official-source search.
 
     A candidate carrying a non-blank ``brand`` is a *named* restaurant / manufacturer
     / packaged product (FTY-062): if USDA/OFF cannot cost it, it falls through to the
-    official-source resolver instead of stopping at ``needs_clarification``. A generic
-    food (no brand) keeps the FTY-044 behavior (a USDA miss clarifies).
+    official-source resolver (search + hardened fetch) instead of stopping at
+    clarification. A generic food (no brand) is never searched against official
+    sources.
     """
 
     return bool(candidate.brand and candidate.brand.strip())
+
+
+def _is_resolution_deferrable(candidate: CandidateDraft) -> bool:
+    """Whether an *enabled-source* miss for ``candidate`` should defer to model-prior.
+
+    A branded candidate defers so official-source resolution can search for it; a
+    generic candidate carrying enough amount detail (a count, range, or measured
+    quantity — FTY-167) defers so it reaches a **model-prior** estimate with an
+    explicit source status instead of stopping at ``needs_clarification``. A generic
+    food with no usable amount ("some crackers") is *not* deferrable and still
+    clarifies — the portion is genuinely missing, not merely casual.
+    """
+
+    return _is_official_eligible(candidate) or has_food_detail(
+        candidate.amount, candidate.quantity_text
+    )
 
 
 #: Fixed, sanitized clarification questions used in place of any raw user text, so a
@@ -261,10 +279,12 @@ class FoodResolveStep:
 
         A barcode candidate prefers Open Food Facts; a generic candidate uses USDA. On
         a **miss**, a branded (official-source-eligible) candidate is deferred to the
-        official-source step (FTY-062) via ``pending_official_candidates``; a generic
-        one keeps the FTY-044/060 behavior (``needs_clarification``). When no enabled
-        source applies and the candidate is not eligible, it is left ``unresolved`` and
-        the event still completes.
+        official-source step (FTY-062) via ``pending_official_candidates``, and a
+        detail-rich generic candidate defers the same way so it reaches the
+        model-prior estimate (FTY-167); only a generic candidate with no usable
+        amount keeps the FTY-044/060 behavior (``needs_clarification``). When no
+        enabled source applies and the candidate is not eligible, it is left
+        ``unresolved`` and the event still completes.
         """
 
         eligible = _is_official_eligible(candidate)
@@ -288,7 +308,10 @@ class FoodResolveStep:
             if item is not None:
                 context.resolved_food_items.append(item)
                 return
-            if eligible:
+            # A branded miss searches official sources; a detail-rich generic miss
+            # falls through to a model-prior estimate (FTY-167). Only a generic food
+            # with no usable amount still clarifies.
+            if _is_resolution_deferrable(candidate):
                 context.pending_official_candidates.append(candidate)
                 return
             context.clarification_questions = [UNKNOWN_FOOD_QUESTION]

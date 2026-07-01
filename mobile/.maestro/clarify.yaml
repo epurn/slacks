@@ -76,10 +76,12 @@ appId: com.fatty
       text: ".*What size was the coffee.*"
     timeout: 5000
 
-# Step 8: Enter a free-text answer and submit.
+# Step 8: Enter a free-text answer and submit. The keyboard opened by the text
+# input covers the submit button on the CI emulator, so dismiss it first.
 - tapOn:
     text: "Your answer"
 - inputText: "large"
+- hideKeyboard
 - tapOn:
     text: "Submit answer"
 

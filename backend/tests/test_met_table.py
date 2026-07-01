@@ -65,6 +65,15 @@ def test_every_curated_met_is_above_rest() -> None:
 
 
 def test_version_and_source_are_recorded() -> None:
-    assert MET_TABLE_VERSION == "met/v1"
+    assert MET_TABLE_VERSION == "met/v2"
     assert MET_TABLE_SOURCE
     assert "Compendium" in MET_TABLE_SOURCE
+
+
+def test_badminton_resolves_for_game_count_conversion() -> None:
+    # FTY-167: "played 3 games of badminton" needs a curated MET for the
+    # game-count → duration conversion; social/general badminton is MET 5.5.
+    entry = lookup_met("badminton")
+    assert entry is not None
+    assert entry.key == "badminton"
+    assert entry.met == 5.5

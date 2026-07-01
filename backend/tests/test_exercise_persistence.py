@@ -121,6 +121,97 @@ def test_unknown_activity_needs_clarification(client: TestClient, session: Sessi
     assert _exercise(session, event_id) == []
 
 
+def test_walked_steps_resolves_with_duration_assumption(
+    client: TestClient, session: Session
+) -> None:
+    # FTY-167: "Walked 13000 steps" resolves as walking with a deterministic
+    # step-count → duration conversion (13000 ÷ 100 = 130 min) and MET-math calories,
+    # and the inference is recorded as a run assumption.
+    user_id, event_id = _seed_event(client, "steps@example.com", "Walked 13000 steps")
+    _set_weight(session, user_id, 70.0)
+    pipeline = _pipeline(
+        {
+            "type": "exercise",
+            "name": "walking",
+            "quantity_text": "13000 steps",
+            "unit": "steps",
+            "amount": 13000,
+        }
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.job_status is EstimationJobStatus.SUCCEEDED
+    exercises = _exercise(session, event_id)
+    assert len(exercises) == 1
+    assert exercises[0].status == DerivedItemStatus.RESOLVED
+    # walking MET 3.5, 70 kg, 130 min: (3.5 - 1) * 70 * (130/60) ≈ 379.2
+    assert exercises[0].active_calories == pytest.approx(379.2, abs=0.1)
+
+    run = session.scalars(select(EstimationRun).where(EstimationRun.log_event_id == event_id)).one()
+    assert any("steps→duration" in a for a in run.assumptions)
+
+
+@pytest.mark.parametrize(
+    ("raw_text", "item", "expected_calories", "assumption_marker"),
+    [
+        (
+            "ran 5 km",
+            {
+                "type": "exercise",
+                "name": "running",
+                "quantity_text": "5 km",
+                "unit": "km",
+                "amount": 5,
+            },
+            210.0,  # running MET 7.0, 70 kg, 30 min
+            "distance→duration",
+        ),
+        (
+            "swam a mile",
+            {"type": "exercise", "name": "swimming", "quantity_text": "a mile"},
+            225.3,  # swimming MET 6.0, 70 kg, ~38.6 min
+            "distance→duration",
+        ),
+        (
+            "played 3 games of badminton",
+            {
+                "type": "exercise",
+                "name": "badminton",
+                "quantity_text": "3 games",
+                "unit": "games",
+                "amount": 3,
+            },
+            236.25,  # badminton MET 5.5, 70 kg, 45 min
+            "games→duration",
+        ),
+    ],
+)
+def test_distance_and_game_conversions_resolve_with_assumptions(
+    client: TestClient,
+    session: Session,
+    raw_text: str,
+    item: dict[str, object],
+    expected_calories: float,
+    assumption_marker: str,
+) -> None:
+    email = f"conv-{assumption_marker}-{item['name']}@example.com"
+    user_id, event_id = _seed_event(client, email, raw_text)
+    _set_weight(session, user_id, 70.0)
+
+    result = process_estimation(
+        session, log_event_id=event_id, user_id=user_id, pipeline=_pipeline(item)
+    )
+
+    assert result.job_status is EstimationJobStatus.SUCCEEDED
+    exercises = _exercise(session, event_id)
+    assert len(exercises) == 1
+    assert exercises[0].active_calories == pytest.approx(expected_calories, abs=0.2)
+
+    run = session.scalars(select(EstimationRun).where(EstimationRun.log_event_id == event_id)).one()
+    assert any(assumption_marker in a for a in run.assumptions)
+
+
 def test_missing_weight_fails_closed(client: TestClient, session: Session) -> None:
     # No profile weight set: the burn cannot be computed, so the event fails closed
     # rather than guessing — terminal on the first attempt, nothing persisted.

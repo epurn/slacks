@@ -28,6 +28,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.enums import CandidateType
+from app.estimator.detail_signals import has_food_detail, parse_range_midpoint
+from app.estimator.exercise import has_exercise_detail
 from app.estimator.pipeline import (
     CandidateDraft,
     EstimationContext,
@@ -164,34 +166,48 @@ class ParseStep:
         if result.disposition is ParseDisposition.UNPARSEABLE:
             raise StepFailed(_failure_reason(result))
 
-        needs_clarification = (
+        # A conservative model reply (``needs_clarification`` disposition or a
+        # confidence below the threshold) normally routes to clarification.
+        # FTY-167: override that when the extracted items already carry enough
+        # real-world detail (a count, a range, a distance, steps, or a game
+        # count) to estimate — a casual-but-detailed log should be estimated, not
+        # asked about. A genuinely vague reply (no items, or any item lacking an
+        # amount signal) still clarifies.
+        conservative = (
             result.disposition is ParseDisposition.NEEDS_CLARIFICATION
             or result.confidence < PARSE_CONFIDENCE_CLARIFY_THRESHOLD
         )
-        if needs_clarification:
+        if conservative and not _reply_has_sufficient_detail(result.items):
             context.clarification_questions = _clarification_questions(result)
             raise NeedsClarification("low_confidence_or_ambiguous")
 
-        # Parsed with sufficient confidence. A model that claims "parsed" yet
-        # returns nothing to persist is treated as unparseable (fail closed)
-        # rather than silently completing with no candidates.
+        # A model that claims "parsed" yet returns nothing to persist is treated as
+        # unparseable (fail closed) rather than silently completing with no
+        # candidates.
         if not result.items:
             raise StepFailed("no_candidates")
 
         # Deterministic plausibility gate (FTY-156): check each *food* candidate's
         # quantity/unit against physical sanity ranges before trusting the parse.
+        # The gate runs on each candidate's *effective* amount — a range midpoint
+        # ("500-1000" → 750) is filled first so it is bounded by the same count
+        # caps as an explicit amount rather than bypassing the gate (FTY-167).
         # A single implausible candidate makes the whole event's total
         # untrustworthy, so route the event to clarification with a targeted
         # question naming the offending item. Exercise candidates are excluded:
         # their quantities are durations (minutes/hours), not mass/volume/count,
         # so the food-portion bounds and unit vocabulary do not apply — exercise
         # plausibility/duration parsing is FTY-043's concern (exercise-burn.md).
-        implausible = _first_implausible(result.items)
+        effective = [_effective_candidate(item) for item in result.items]
+
+        implausible = _first_implausible([item for item, _ in effective])
         if implausible is not None:
             context.clarification_questions = [implausible]
             raise NeedsClarification("implausible_candidate")
 
-        for item in result.items:
+        for item, assumption in effective:
+            if assumption is not None and assumption not in context.assumptions:
+                context.assumptions.append(assumption)
             draft = _to_draft(item)
             if item.type is CandidateType.FOOD:
                 context.food_candidates.append(draft)
@@ -199,8 +215,30 @@ class ParseStep:
                 context.exercise_candidates.append(draft)
 
 
+def _effective_candidate(item: ParsedCandidate) -> tuple[ParsedCandidate, str | None]:
+    """Fill a food candidate's effective amount from a range midpoint, if any.
+
+    When a food candidate has no structured amount but ``quantity_text`` states a
+    numeric range ("5-10"), the range's midpoint is filled deterministically so the
+    serving math can estimate a single portion. The fill happens *before* the
+    plausibility gate so the midpoint is subject to the same count caps as an
+    explicit amount — a gross range ("500-1000") must not bypass FTY-156. Returns
+    the effective candidate plus the content-free assumption string (numbers only —
+    never raw diary text) to record if the event is accepted. FTY-167.
+    """
+
+    amount = item.amount
+    if item.type is CandidateType.FOOD and (amount is None or amount <= 0):
+        parsed_range = parse_range_midpoint(item.quantity_text)
+        if parsed_range is not None:
+            low, high, midpoint = parsed_range
+            assumption = f"range_midpoint: {low:g}-{high:g} → {midpoint:g}"
+            return item.model_copy(update={"amount": midpoint}), assumption
+    return item, None
+
+
 def _to_draft(item: ParsedCandidate) -> CandidateDraft:
-    """Map a validated schema candidate to the neutral persistence draft."""
+    """Map a validated (effective) schema candidate to the neutral persistence draft."""
 
     return CandidateDraft(
         name=item.name,
@@ -210,6 +248,29 @@ def _to_draft(item: ParsedCandidate) -> CandidateDraft:
         barcode=item.barcode,
         brand=item.brand,
     )
+
+
+def _reply_has_sufficient_detail(items: list[ParsedCandidate]) -> bool:
+    """Whether every extracted item carries enough amount detail to estimate.
+
+    Empty ``items`` is insufficient (nothing to estimate). Otherwise each item must
+    carry a detail signal for its kind — a food count/range/measure, or an exercise
+    duration/distance/step/game signal — so that a single vague item in an otherwise
+    detailed reply still routes the whole event to clarification (its portion is
+    genuinely unknown).
+    """
+
+    if not items:
+        return False
+    return all(_candidate_has_detail(item) for item in items)
+
+
+def _candidate_has_detail(item: ParsedCandidate) -> bool:
+    """Whether one candidate carries a detail signal appropriate to its kind."""
+
+    if item.type is CandidateType.EXERCISE:
+        return has_exercise_detail(item.unit, item.amount, item.quantity_text)
+    return has_food_detail(item.amount, item.quantity_text)
 
 
 def _clarification_questions(result: ParseResult) -> list[str]:

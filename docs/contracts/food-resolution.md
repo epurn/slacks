@@ -63,6 +63,18 @@ column (`0012` migration) and an additive `brand` field on the parse candidate; 
 does not change the FTY-044 USDA, FTY-060 OFF, or FTY-061 label paths. See
 **Official-Source Resolution (FTY-062)** below.
 
+6 (FTY-167) **sharpens the generic-food clarification boundary** and widens the count
+vocabulary. A generic (unbranded) food USDA/OFF cannot cost no longer always clarifies:
+a **detail-rich** generic candidate (identity plus a usable amount — a count, a numeric
+range, or a measured quantity) is deferred to the official-source step and estimated
+from the **model prior** with an explicit `source_type = model_prior` status, exactly
+like the FTY-062 branded fallback but **skipping the official web search** (a generic
+food has no brand page to find). Only a generic food with **no usable amount** ("some
+crackers") still routes to `needs_clarification`. The serving math's count vocabulary
+also gains common serving/portion nouns (`slice`, `sandwich`, `handful`, `ring`,
+`finger`, …). No schema, migration, or serving-math change beyond the count vocabulary;
+the USDA/OFF/label/official paths and their plausibility gate are unchanged.
+
 5 (FTY-093) adds **item re-match** — a *list-alternatives* + *re-resolve-to-chosen-source*
 capability over an existing `derived_food_items` row. It adds `FdcClient.list_matches`
 (the USDA list-candidates path, surfacing every energy-bearing match rather than the
@@ -140,7 +152,11 @@ quantity to grams, v1-simple per the story scope:
 1. structured `amount` + **mass** unit (mg/g/kg/oz/lb) → grams directly;
 2. structured `amount` + **volume** unit (ml/l, 1 ml ≈ 1 g) → grams;
 3. structured `amount` + **count** unit (or no unit) → `amount × default_serving_g`
-   when the source supplies a default serving size;
+   when the source supplies a default serving size. The count vocabulary includes the
+   common serving/portion nouns a casual log uses — `slice`, `sandwich`, `handful`,
+   `ring`, `finger`, `bowl`, `scoop`, … (FTY-167) — so "a slice of pizza", "3 cracker
+   sandwiches", or "a handful of onion rings" resolve via the default serving size
+   instead of stopping at clarification;
 4. otherwise scan `quantity_text` for a leading `<number> <mass|volume unit>`.
 
 Returns `None` (→ `needs_clarification`) when none apply — e.g. a count with no known
@@ -195,7 +211,8 @@ FDC facts (per 100 g): 130 kcal / 2.0 g protein / 28 g carbs / 0.2 g fat
 | Condition | Pipeline signal | Persisted | Event transition |
 | --- | --- | --- | --- |
 | All food candidates resolve | _(completes)_ | food items `resolved` + `products` + `evidence_sources` | `processing → completed` |
-| No confident source match | `NeedsClarification` | clarification question | `processing → needs_clarification` |
+| No confident source match, generic food **without** usable amount | `NeedsClarification` | clarification question | `processing → needs_clarification` |
+| No confident source match, **detail-rich** generic food (FTY-167) | _(deferred → model-prior)_ | via official step (`model_prior`) | per the official step |
 | Unresolvable quantity | `NeedsClarification` | clarification question | `processing → needs_clarification` |
 | Transient source failure (timeout/5xx) | `StepError` (retryable) | nothing | retries within bound, then `failed` |
 | Non-retryable source error (4xx/non-JSON/policy) | `StepFailed` (terminal) | nothing | `processing → failed` |
@@ -428,10 +445,18 @@ empty for a generic food (`"white rice"`). A candidate carrying a non-blank `bra
 
 - The food step (FTY-044/060) tries USDA/OFF first. On a **miss**, a *branded*
   candidate is **deferred** to the official-source step (it does not stop at
-  `needs_clarification`); a *generic* candidate keeps the FTY-044 behavior (a USDA miss
-  clarifies). A branded item USDA/OFF **does** resolve never reaches this step.
+  `needs_clarification`); a *generic* candidate is deferred too **when it is detail-rich**
+  (identity plus a usable amount — FTY-167), otherwise it clarifies. A branded item
+  USDA/OFF **does** resolve never reaches this step.
 - The model never supplies a `brand` it was not given, and `brand` is stored as data,
   never interpreted.
+
+Inside the official step, a **branded** candidate is searched against official sources
+(a named product has an authoritative page) and falls through to model-prior on a miss;
+a **generic** detail-rich candidate has no brand page to search, so it goes **straight
+to the model-prior** estimate (search is never consulted) with a `"generic food;
+estimated from model prior"` assumption. Either way the result carries the explicit
+`source_type = model_prior` status and stays user-editable — never a silent guess.
 
 ### Orchestration
 
@@ -495,7 +520,8 @@ the run `source_refs`, and the assumptions on the run `assumptions`.
 | Search disabled / unavailable / no confident match → model-prior | _(completes)_ | food `resolved` (`model_prior`) + `evidence_sources` (`model_prior`, assumptions) | `processing → completed` |
 | Model-prior estimate fails the FTY-115 plausibility bound | `NeedsClarification` | clarification question | `processing → needs_clarification` |
 | Branded candidate USDA/OFF **resolves** | _(as FTY-044/060)_ | official source not consulted | `processing → completed` |
-| Generic candidate USDA miss | `NeedsClarification` | clarification question | `processing → needs_clarification` |
+| Generic candidate USDA miss, **no usable amount** | `NeedsClarification` | clarification question | `processing → needs_clarification` |
+| Generic candidate USDA miss, **detail-rich** (FTY-167) | _(completes)_ | food `resolved` (`model_prior`, no official search) | `processing → completed` |
 | Usable facts but unresolvable quantity, or model cannot estimate | `NeedsClarification` | clarification question | `processing → needs_clarification` |
 
 ### Security / Privacy

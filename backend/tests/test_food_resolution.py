@@ -161,13 +161,19 @@ def test_food_resolves_with_calories_macros_evidence_and_cache(
     assert evidence.calories_per_100g == 130.0
 
 
-def test_unknown_food_needs_clarification(client: TestClient, session: Session) -> None:
+def test_unknown_food_without_detail_needs_clarification(
+    client: TestClient, session: Session
+) -> None:
+    # A generic food USDA cannot cost and that carries no usable amount detail
+    # ("some crackers") still clarifies — the portion is genuinely missing, not just
+    # casual. (A *detail-rich* generic miss instead falls through to model-prior via
+    # the official step; see test_official_source_resolution.py.)
     user_id, event_id = _seed_event(client, "food-unknown@example.com")
     source = FakeFoodSource({})  # nothing matches
     pipeline = _pipeline(
         session,
         source,
-        {"type": "food", "name": "zorblax", "quantity_text": "150g", "unit": "g", "amount": 150},
+        {"type": "food", "name": "zorblax"},  # no amount / count / range / measure
     )
 
     result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
@@ -176,6 +182,31 @@ def test_unknown_food_needs_clarification(client: TestClient, session: Session) 
     assert result.event_status is LogEventStatus.NEEDS_CLARIFICATION
     assert _foods(session, event_id) == []
     assert session.scalars(select(EvidenceSource)).all() == []
+
+
+def test_detailed_generic_miss_defers_instead_of_clarifying(
+    client: TestClient, session: Session
+) -> None:
+    # FTY-167: a detail-rich generic food (identity + amount) USDA cannot cost no
+    # longer clarifies. With no official/model-prior step wired it is left
+    # ``unresolved`` and the event completes (in production the official step gives
+    # it a model-prior estimate) — never a dead-end clarification.
+    user_id, event_id = _seed_event(client, "food-detailed-miss@example.com")
+    source = FakeFoodSource({})  # nothing matches
+    pipeline = _pipeline(
+        session,
+        source,
+        {"type": "food", "name": "donair pizza", "quantity_text": "a slice", "amount": 1},
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.job_status is EstimationJobStatus.SUCCEEDED
+    assert result.event_status is LogEventStatus.COMPLETED
+    foods = _foods(session, event_id)
+    assert len(foods) == 1
+    assert foods[0].status == DerivedItemStatus.UNRESOLVED
+    assert foods[0].calories is None
 
 
 def test_unresolvable_quantity_needs_clarification(client: TestClient, session: Session) -> None:

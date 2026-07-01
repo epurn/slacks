@@ -38,7 +38,7 @@ from typing import Final
 
 #: Version string for the curated table, recorded on the estimation run as evidence.
 #: Bump on any change to a MET value, key, or alias so runs remain reproducible.
-MET_TABLE_VERSION: Final[str] = "met/v1"
+MET_TABLE_VERSION: Final[str] = "met/v2"
 
 #: Human-readable source of the MET values, recorded alongside the version.
 MET_TABLE_SOURCE: Final[str] = "2011 Compendium of Physical Activities (curated v1 subset)"
@@ -162,6 +162,12 @@ _ENTRIES: Final[tuple[MetEntry, ...]] = (
         met=7.3,
         compendium="tennis, general",
         aliases=frozenset({"tennis"}),
+    ),
+    MetEntry(
+        key="badminton",
+        met=5.5,
+        compendium="badminton, social, singles and doubles, general",
+        aliases=frozenset({"badminton"}),
     ),
 )
 

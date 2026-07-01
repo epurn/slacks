@@ -36,6 +36,12 @@ estimator / contracts / backend-core lane:
 
 1 (FTY-043). MET table version string `met/v1`, recorded on the estimation run.
 
+2 (FTY-167). MET table `met/v2` — adds a `badminton` entry (social/general, MET 5.5)
+for the game-count conversion — and extends the calculator to infer a duration from a
+logged distance, step count, or game count via documented pace/cadence/per-game
+constants. The `(MET − 1)` burn formula and the version/source/formula evidence are
+unchanged.
+
 ## Inputs
 
 ### MET table (`met_table.py`)
@@ -62,6 +68,34 @@ duration). Duration is taken from the structured `unit` + `amount` when `unit` i
 recognised time unit (seconds / minutes / hours); a non-time unit (e.g. `km`) is not
 trusted as a duration, falling back to a `<number> <time-unit>` phrase scanned from
 `quantity_text`.
+
+### Quantity → duration conversions (FTY-167)
+
+When a log states a **distance**, a **step count**, or a **game count** instead of a
+duration, the duration is inferred deterministically from a documented, evidence-based
+assumption so a detail-rich entry ("ran 5 km", "walked 13000 steps", "played 3 games
+of badminton") is costed rather than sent to clarification. Resolution order is
+explicit-time → distance → steps → games; the first signal present wins, and an
+explicit duration never triggers an inference. The constants are documented tunables
+in `exercise.py`:
+
+- **Distance → duration** via a representative pace per curated activity
+  (`PACE_KM_PER_HOUR`): walking 5 km/h, running 10 km/h, swimming 2.5 km/h. An
+  activity with no documented pace cannot be costed from distance alone.
+- **Steps → walking duration** via a documented cadence per curated activity
+  (`CADENCE_STEPS_PER_MINUTE`): walking = 100 steps/min (Tudor-Locke et al. 2011, the
+  moderate-walking threshold): `13000 ÷ 100 = 130 min`. Only walking has a documented
+  cadence — a step count logged against any other activity (a run, a swim) cannot be
+  costed from steps alone, because borrowing the walking cadence while keeping the
+  activity's own MET would systematically overestimate.
+- **Game count → duration** via `GAME_DURATION_MINUTES` per curated activity
+  (badminton 15 min/game). An activity with no documented per-game duration cannot be
+  costed from a game count.
+
+Each inferred conversion appends a **content-free assumption** string (numbers plus
+the curated activity key only — never raw diary text) to the run `assumptions`, so the
+inference is visible and the entry stays user-editable. The inferred duration is still
+gated by the `(0, 24 h]` plausibility band below.
 
 ## Outputs
 

@@ -65,6 +65,15 @@ _VOLUME_UNIT_GRAMS: Final[dict[str, float]] = {
 #: Unit phrases that denote a **count of servings** rather than a measured amount.
 #: ``None`` (no unit) is also treated as a count. Resolved via the source's default
 #: serving size, so a count is only resolvable when that serving size is known.
+#:
+#: Beyond the bare count words, this includes the common serving/portion nouns a
+#: casual log uses (slice, sandwich, handful, ring, finger, bowl, …) so a
+#: detail-rich generic entry — "a slice of pizza", "3 cracker sandwiches", "a
+#: handful of onion rings" — resolves its portion via the default serving size
+#: instead of stopping at clarification (FTY-167). This vocabulary is a superset
+#: of the plausibility validator's ``_COUNT_UNITS``: food nouns such as sandwich/
+#: ring/finger are accepted there via its name-match heuristic or its bounded
+#: unknown-unit allowance, not by sharing this list.
 _COUNT_UNITS: Final[frozenset[str]] = frozenset(
     {
         "",
@@ -81,6 +90,30 @@ _COUNT_UNITS: Final[frozenset[str]] = frozenset(
         "units",
         "portion",
         "portions",
+        "slice",
+        "slices",
+        "sandwich",
+        "sandwiches",
+        "handful",
+        "handfuls",
+        "ring",
+        "rings",
+        "finger",
+        "fingers",
+        "strip",
+        "strips",
+        "stick",
+        "sticks",
+        "bar",
+        "bars",
+        "scoop",
+        "scoops",
+        "bowl",
+        "bowls",
+        "plate",
+        "plates",
+        "cracker",
+        "crackers",
     }
 )
 
