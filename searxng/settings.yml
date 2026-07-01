@@ -1,0 +1,45 @@
+# SearXNG settings for the Fatty local / self-host dev stack (FTY-165).
+#
+# This is a MINIMAL private-instance configuration. It inherits every upstream
+# default (`use_default_settings: true`) and overrides only what Fatty's
+# official-source search adapter (FTY-164) requires:
+#
+#   - JSON output format, which the adapter consumes at
+#     GET /search?q=<sanitized item identity>&format=json;
+#   - a dev-only secret key (see the security note below).
+#
+# SearXNG runs as an INTERNAL backend tool on the compose network (service name
+# `searxng`, container port 8080). It is NOT published to the host — see the
+# port-exposure note in docker-compose.yml. The backend sends only sanitized
+# item-identity queries (FTY-164); no personal context ever reaches this
+# instance.
+
+use_default_settings: true
+
+server:
+  # NON-SECRET DEV PLACEHOLDER — not a real secret, and safe to commit.
+  #
+  # This instance is private to the compose network and never exposed to the
+  # host, so this key protects nothing that is reachable from outside the stack.
+  # SearXNG requires the field to be set, so a fixed placeholder is used here
+  # instead of the image's random per-boot key, keeping the dev stack
+  # reproducible. If you ever expose this instance (this stack deliberately does
+  # not), override it with a real random value via the ${SEARXNG_SECRET}
+  # environment variable. Do NOT treat this value as a credential.
+  secret_key: "fatty-dev-searxng-placeholder-not-a-secret"
+
+  # Keep the bot limiter off: the only caller is the trusted backend on the
+  # internal network, and the limiter would otherwise rate-limit / block it as a
+  # "bot". Nothing on the public internet can reach this instance.
+  limiter: false
+
+  # This is a private instance, not a public search service.
+  public_instance: false
+
+search:
+  # Enable the JSON API the FTY-164 adapter depends on. Upstream default is
+  # [html] only; `json` must be added for the adapter's format=json request to
+  # return results instead of an HTTP 403.
+  formats:
+    - html
+    - json
