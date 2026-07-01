@@ -69,20 +69,20 @@
   "operating_threshold": 0.45,
   "risk_coverage_curve": [
     {
-      "answered": 300,
-      "answered_accuracy": 0.666667,
-      "asked": 0,
-      "correct_decision_rate": 0.666667,
+      "answered": 221,
+      "answered_accuracy": 0.904977,
+      "asked": 79,
+      "correct_decision_rate": 0.93,
       "correct_estimates": 200,
-      "coverage": 1.0,
+      "coverage": 0.736667,
       "gold_ask": 100,
       "gold_estimate": 200,
       "over_ask": 0,
       "over_ask_rate": 0.0,
       "threshold": 0.0,
       "total": 300,
-      "under_ask": 100,
-      "under_ask_rate": 1.0
+      "under_ask": 21,
+      "under_ask_rate": 0.21
     },
     {
       "answered": 221,

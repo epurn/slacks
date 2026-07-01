@@ -14,6 +14,7 @@ from tests.parse_calibration.harness import (
     evaluate_recorded_baseline,
     evaluate_signal,
     load_examples,
+    verbalized_confidence_baseline,
 )
 
 EXPECTED_TOTAL_EXAMPLES = 300
@@ -60,6 +61,32 @@ def test_metric_math_on_hand_checked_fixture() -> None:
     assert operating.under_ask == 1
     assert operating.under_ask_rate == 0.5
     assert operating.correct_decision_rate == 0.5
+
+
+def test_recorded_baseline_keeps_nonparsed_rows_asked_at_zero_threshold() -> None:
+    examples = [
+        _example(
+            "ask-a",
+            "indeterminate",
+            "needs_clarification",
+            baseline_disposition="needs_clarification",
+            baseline_confidence=1.0,
+        )
+    ]
+
+    summary = evaluate_signal(
+        examples,
+        verbalized_confidence_baseline,
+        signal_name="baseline_edge_case",
+        fixture_name="inline",
+        operating_threshold=0.0,
+        risk_thresholds=(0.0,),
+    )
+
+    assert summary.operating.answered == 0
+    assert summary.operating.asked == 1
+    assert summary.operating.under_ask == 0
+    assert summary.operating.correct_decision_rate == 1.0
 
 
 def test_committed_fixture_validates_and_is_stratified_synthetic_only() -> None:
@@ -113,6 +140,9 @@ def _example(
     example_id: str,
     difficulty: str,
     gold_decision: str,
+    *,
+    baseline_disposition: str = "parsed",
+    baseline_confidence: float = 0.9,
 ) -> LabeledParseExample:
     return LabeledParseExample.model_validate(
         {
@@ -131,7 +161,7 @@ def _example(
                     "unit": "serving",
                 }
             ],
-            "baseline": {"disposition": "parsed", "confidence": 0.9},
+            "baseline": {"disposition": baseline_disposition, "confidence": baseline_confidence},
         }
     )
 

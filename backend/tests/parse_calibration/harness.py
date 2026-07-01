@@ -255,7 +255,7 @@ def verbalized_confidence_baseline(example: LabeledParseExample) -> SignalResult
 
     if example.baseline.disposition is ParseDisposition.PARSED:
         return SignalResult(score=example.baseline.confidence)
-    return SignalResult(score=0.0, decision="needs_clarification")
+    return SignalResult(decision="needs_clarification")
 
 
 def evaluate_signal(
