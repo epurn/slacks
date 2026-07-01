@@ -47,6 +47,7 @@ Configure GitHub `main` with:
 - require status checks:
   - `governance`,
   - `reviewer-approved`,
+  - `mobile-e2e` (mobile end-to-end Maestro smoke gate, FTY-161),
   - future backend/mobile/security checks,
 - block force pushes,
 - block deletions,

@@ -13,6 +13,7 @@ Required status checks on `main`:
 
 - `governance`
 - `reviewer-approved`
+- `mobile-e2e` (the mobile end-to-end Maestro smoke gate, FTY-161)
 
 ## Branch Protection
 
@@ -24,6 +25,7 @@ Configure `main` with:
 - require branches to be up to date before merging,
 - require the `governance` status check,
 - require the `reviewer-approved` status check,
+- require the `mobile-e2e` status check (FTY-161),
 - keep native required approving review count at zero for the app-reviewer flow,
 - block force pushes,
 - block deletions,
@@ -88,5 +90,6 @@ When branch protection is available:
 10. Require branches to be up to date before merging.
 11. Require `governance`.
 12. Require `reviewer-approved`.
-13. Block force pushes and deletions.
-14. Apply to administrators if the plan allows it.
+13. Require `mobile-e2e` (FTY-161).
+14. Block force pushes and deletions.
+15. Apply to administrators if the plan allows it.

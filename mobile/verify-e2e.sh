@@ -23,6 +23,10 @@
 #   PLATFORM          ios (default) or android
 #   APP_BUNDLE_ID     Override the iOS bundle ID / Android package name
 #                     (default: com.fatty)
+#   E2E_BUILD_CACHE   Unset (default) → build with --no-build-cache for a clean,
+#                     deterministic local binary. Set to any value (CI sets it)
+#                     to reuse the restored Gradle/Xcode build cache and keep the
+#                     build bounded.
 
 set -euo pipefail
 
@@ -31,7 +35,15 @@ cd "$(dirname "$0")"
 PLATFORM="${PLATFORM:-ios}"
 BUNDLE_ID="${APP_BUNDLE_ID:-com.fatty}"
 
-echo "==> [verify-e2e] Platform: $PLATFORM | Bundle ID: $BUNDLE_ID"
+# A clean build (no cache) is the local default for a deterministic binary. CI
+# sets E2E_BUILD_CACHE to reuse the cached Gradle state so the emulator build
+# stays bounded across runs.
+BUILD_CACHE_FLAG="--no-build-cache"
+if [ -n "${E2E_BUILD_CACHE:-}" ]; then
+  BUILD_CACHE_FLAG=""
+fi
+
+echo "==> [verify-e2e] Platform: $PLATFORM | Bundle ID: $BUNDLE_ID | Build cache: ${E2E_BUILD_CACHE:+on}${E2E_BUILD_CACHE:-off}"
 
 # ── 1. Ensure Maestro is installed ────────────────────────────────────────────
 if ! command -v maestro &> /dev/null; then
@@ -49,11 +61,11 @@ EXPO_PUBLIC_FATTY_E2E=true npx expo prebuild --no-install --clean
 # ── 3. Build and install the debug binary ─────────────────────────────────────
 if [ "$PLATFORM" = "android" ]; then
   echo "==> [verify-e2e] Building Android debug APK..."
-  EXPO_PUBLIC_FATTY_E2E=true npx expo run:android --no-build-cache --configuration debug
+  EXPO_PUBLIC_FATTY_E2E=true npx expo run:android $BUILD_CACHE_FLAG --configuration debug
 
 elif [ "$PLATFORM" = "ios" ]; then
   echo "==> [verify-e2e] Building iOS simulator binary..."
-  EXPO_PUBLIC_FATTY_E2E=true npx expo run:ios --no-build-cache --configuration Debug --simulator
+  EXPO_PUBLIC_FATTY_E2E=true npx expo run:ios $BUILD_CACHE_FLAG --configuration Debug --simulator
 
 else
   echo "ERROR: Unknown PLATFORM='$PLATFORM'. Use 'ios' or 'android'."
@@ -61,7 +73,10 @@ else
 fi
 
 # ── 4. Run Maestro flows ───────────────────────────────────────────────────────
-echo "==> [verify-e2e] Running Maestro smoke flow..."
-APP_BUNDLE_ID="$BUNDLE_ID" maestro test .maestro/smoke.yaml
+# Run the whole .maestro/ directory so every flow is exercised — the smoke flow
+# now, and any flow added later (e.g. FTY-162's clarify regression) with no
+# runner or CI change.
+echo "==> [verify-e2e] Running Maestro flows (.maestro/)..."
+APP_BUNDLE_ID="$BUNDLE_ID" maestro test .maestro/
 
 echo "==> [verify-e2e] All E2E flows passed."

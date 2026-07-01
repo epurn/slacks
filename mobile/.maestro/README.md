@@ -42,7 +42,7 @@ This script:
 1. Builds the E2E debug binary with `EXPO_PUBLIC_FATTY_E2E=true` (iOS simulator
    by default; set `PLATFORM=android` to build an APK).
 2. Installs the binary on the active simulator/emulator.
-3. Runs `maestro test .maestro/smoke.yaml`.
+3. Runs `maestro test .maestro/` — every flow in this directory.
 
 **Running the flow directly** (if you already have the binary installed):
 
