@@ -103,6 +103,16 @@ def test_implausible_mass_in_quantity_text_with_comma_fails() -> None:
     assert result.reason == "implausible_mass"
 
 
+def test_implausible_mass_in_quantity_text_with_structured_count_fails() -> None:
+    # The raw portion phrase remains authoritative for measured quantity sanity:
+    # a harmless structured serving/count must not hide an impossible mass.
+    result = check_candidate(
+        _candidate("chicken", quantity_text="5000g", amount=1.0, unit="serving")
+    )
+    assert not result.plausible
+    assert result.reason == "implausible_mass"
+
+
 def test_implausible_mass_kg_fails() -> None:
     # 3 kg = 3 000 g, above 2 000 g limit.
     result = check_candidate(_candidate("steak", amount=3.0, unit="kg"))
@@ -143,6 +153,12 @@ def test_implausible_volume_litres_fails() -> None:
 
 def test_implausible_volume_in_quantity_text_without_structured_amount_fails() -> None:
     result = check_candidate(_candidate("soup", quantity_text="3 liters"))
+    assert not result.plausible
+    assert result.reason == "implausible_volume"
+
+
+def test_implausible_volume_in_quantity_text_with_structured_count_fails() -> None:
+    result = check_candidate(_candidate("soup", quantity_text="3 liters", amount=1.0, unit="bowl"))
     assert not result.plausible
     assert result.reason == "implausible_volume"
 
@@ -270,6 +286,13 @@ def test_large_smoothie_ml_passes() -> None:
 
 def test_realistic_quantity_text_measure_without_structured_amount_passes() -> None:
     result = check_candidate(_candidate("banana smoothie", quantity_text="750 ml"))
+    assert result.plausible
+
+
+def test_realistic_quantity_text_measure_with_structured_count_passes() -> None:
+    result = check_candidate(
+        _candidate("banana smoothie", quantity_text="750 ml", amount=1.0, unit="bottle")
+    )
     assert result.plausible
 
 

@@ -19,9 +19,9 @@ Design:
   impossible (FTY-115 philosophy: bound just above the true max, not tight to typical).
 - The fail-safe failure mode is *loose*: an over-generous bound lets an absurd parse
   through once; a too-tight bound falsely asks the user. The former is cheaper.
-- An unknown/garbage unit with a numeric amount cannot be trusted because the units
-  determine the scale; the entry is implausible not by magnitude but by
-  uninterpretability.
+- An unknown/garbage unit with a large numeric amount cannot be trusted because the
+  units determine the scale; small food-specific count units pass as the loose,
+  low-false-reject default.
 """
 
 from __future__ import annotations
@@ -253,9 +253,9 @@ _VOLUME_UNIT_ML: Final[dict[str, float]] = {
     "gal": 3785.41,
 }
 
-# Match a bounded explicit "<number> <mass|volume unit>" phrase in quantity_text
-# when the model omitted structured amount/unit. The parse schema bounds
-# quantity_text to 120 chars, so scanning is deterministic and cheap.
+# Match a bounded explicit "<number> <mass|volume unit>" phrase in quantity_text.
+# The parse schema bounds quantity_text to 120 chars, so scanning is deterministic
+# and cheap.
 _QUANTITY_TEXT_MEASURE_RE: Final[re.Pattern[str]] = re.compile(
     r"(?<![0-9A-Za-z.])(\d+(?:,\d{3})*(?:\.\d+)?)\s*([A-Za-z_]+)\b"
 )
@@ -288,9 +288,10 @@ def check_candidate(candidate: ParsedCandidate) -> PlausibilityResult:
     1. **Negative / non-finite amount → fail.**  The schema already enforces
        ``amount >= 0`` via Pydantic, but NaN/inf can reach a ``float`` field in
        some serialisation paths (JSON ``Infinity``); gate defensively.
-    2. **Unknown/garbage unit with a numeric amount → fail.**  A unit not in the
-       recognised vocabulary makes the amount uninterpretable, so the candidate
-       is implausible regardless of magnitude.
+    2. **Unknown/garbage unit with a large numeric amount → fail.**  A unit not
+       in the recognised vocabulary is treated as a possible food-specific count
+       only while the amount is within the count cap; above that, the candidate is
+       too ambiguous to trust.
     3. **Implausible count → fail.**  A discrete count above ``MAX_PLAUSIBLE_COUNT``
        (e.g. 50 eggs) is beyond any realistic single-entry portion.
     4. **Implausible mass → fail.**  A mass that converts to more than
@@ -298,29 +299,33 @@ def check_candidate(candidate: ParsedCandidate) -> PlausibilityResult:
     5. **Implausible volume → fail.**  A volume that converts to more than
        ``MAX_PLAUSIBLE_ML`` ml is beyond any realistic single-entry portion.
 
-    A candidate with no structured ``amount`` (amount is ``None``) is considered
-    plausible only when ``quantity_text`` does not carry an explicit mass/volume
-    measure; quantity inference failures are handled by the confidence/disposition
-    check upstream.
+    An explicit mass/volume measure in ``quantity_text`` is always checked against
+    the same bounds, even when the model also supplied a structured count/portion
+    amount. A candidate with no structured ``amount`` and no explicit mass/volume
+    measure in ``quantity_text`` is considered plausible; quantity inference
+    failures are handled by the confidence/disposition check upstream.
     """
 
     amount = candidate.amount
     normalized_unit = (candidate.unit or "").strip().lower()
 
-    if amount is None:
-        text_measure = _measure_from_quantity_text(candidate.quantity_text)
-        if text_measure is None:
-            # No amount and no explicit text measure: nothing to validate here.
-            return PlausibilityResult(plausible=True)
-        amount, normalized_unit = text_measure
-
     # Rule 1: negative or non-finite amount (schema guards ge=0, but guard NaN/inf).
-    if not math.isfinite(amount) or amount < 0:
+    if amount is not None and (not math.isfinite(amount) or amount < 0):
         return PlausibilityResult(
             plausible=False,
             reason="non_finite_or_negative_amount",
             clarification_question=_question(candidate.name, "amount"),
         )
+
+    text_measure = _measure_from_quantity_text(candidate.quantity_text)
+    if text_measure is not None:
+        measure_failure = _measured_quantity_failure(candidate, *text_measure)
+        if measure_failure is not None:
+            return measure_failure
+
+    if amount is None:
+        # No amount and no implausible explicit text measure: nothing else to validate here.
+        return PlausibilityResult(plausible=True)
 
     # Rule 2: unknown/garbage unit with a numeric amount.
     # "Normalise away" interpretation: a unit not in any recognised family could
@@ -349,6 +354,20 @@ def check_candidate(candidate: ParsedCandidate) -> PlausibilityResult:
         )
 
     # Rule 4: implausible mass.
+    measure_failure = _measured_quantity_failure(candidate, amount, normalized_unit)
+    if measure_failure is not None:
+        return measure_failure
+
+    # Rule 5: implausible volume.
+    # Covered by _measured_quantity_failure above.
+    return PlausibilityResult(plausible=True)
+
+
+def _measured_quantity_failure(
+    candidate: ParsedCandidate, amount: float, normalized_unit: str
+) -> PlausibilityResult | None:
+    """Return a mass/volume bound failure for ``amount`` + ``normalized_unit``, if any."""
+
     grams_per_unit = _MASS_UNIT_GRAMS.get(normalized_unit)
     if grams_per_unit is not None:
         mass_g = amount * grams_per_unit
@@ -359,7 +378,6 @@ def check_candidate(candidate: ParsedCandidate) -> PlausibilityResult:
                 clarification_question=_question(candidate.name, "amount"),
             )
 
-    # Rule 5: implausible volume.
     ml_per_unit = _VOLUME_UNIT_ML.get(normalized_unit)
     if ml_per_unit is not None:
         volume_ml = amount * ml_per_unit
@@ -370,16 +388,16 @@ def check_candidate(candidate: ParsedCandidate) -> PlausibilityResult:
                 clarification_question=_question(candidate.name, "amount"),
             )
 
-    return PlausibilityResult(plausible=True)
+    return None
 
 
 def _measure_from_quantity_text(quantity_text: str) -> tuple[float, str] | None:
     """Return the first explicit mass/volume measure found in ``quantity_text``.
 
-    This is a validation fallback only: it does not normalise or persist the
-    candidate. It closes the bypass where the model leaves ``amount``/``unit``
-    empty while still carrying a concrete measured quantity such as ``5000g`` in
-    the raw portion phrase.
+    This is a validation signal only: it does not normalise or persist the
+    candidate. It closes the bypass where the raw portion phrase still carries a
+    concrete measured quantity such as ``5000g`` even when structured fields are
+    missing or describe only a count/portion.
     """
 
     for match in _QUANTITY_TEXT_MEASURE_RE.finditer(quantity_text):
