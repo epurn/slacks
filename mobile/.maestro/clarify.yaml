@@ -73,7 +73,7 @@ appId: com.fatty
     timeout: 5000
 - extendedWaitUntil:
     visible:
-      text: "What size was the coffee"
+      text: ".*What size was the coffee.*"
     timeout: 5000
 
 # Step 8: Enter a free-text answer and submit.

@@ -26,6 +26,9 @@
 #                     deterministic local binary. Set to any value (CI sets it)
 #                     to reuse the restored Gradle/Xcode build cache and keep the
 #                     build bounded.
+#   E2E_MAESTRO_TIMEOUT_SECONDS
+#                     Maximum time to let Maestro run before failing with a clear
+#                     timeout (default: 300).
 
 set -euo pipefail
 
@@ -36,6 +39,7 @@ METRO_PORT="8081"
 METRO_LOG="${E2E_METRO_LOG:-${TMPDIR:-/tmp}/fatty-e2e-metro.log}"
 METRO_PID=""
 METRO_STATUS_ERROR=""
+MAESTRO_TIMEOUT_SECONDS="${E2E_MAESTRO_TIMEOUT_SECONDS:-300}"
 
 # A clean build (no cache) is the local default for a deterministic binary. CI
 # sets E2E_BUILD_CACHE to reuse the cached Gradle state so the emulator build
@@ -114,6 +118,29 @@ start_metro() {
   exit 1
 }
 
+run_maestro() {
+  local maestro_pid
+  local started_at
+
+  echo "==> [verify-e2e] Maestro timeout: ${MAESTRO_TIMEOUT_SECONDS}s"
+  MAESTRO_CLI_NO_ANALYTICS=1 maestro test .maestro/ &
+  maestro_pid="$!"
+  started_at="$SECONDS"
+
+  while kill -0 "$maestro_pid" 2> /dev/null; do
+    if (( SECONDS - started_at >= MAESTRO_TIMEOUT_SECONDS )); then
+      echo "ERROR: Maestro flows exceeded ${MAESTRO_TIMEOUT_SECONDS}s."
+      kill "$maestro_pid" 2> /dev/null || true
+      wait "$maestro_pid" 2> /dev/null || true
+      return 124
+    fi
+
+    sleep 1
+  done
+
+  wait "$maestro_pid"
+}
+
 trap cleanup_metro EXIT
 
 # ── 1. Ensure Maestro is installed ────────────────────────────────────────────
@@ -154,6 +181,11 @@ fi
 # now, and any flow added later (e.g. FTY-162's clarify regression) with no
 # runner or CI change.
 echo "==> [verify-e2e] Running Maestro flows (.maestro/)..."
-maestro test .maestro/
+maestro_status=0
+run_maestro || maestro_status="$?"
+if [ "$maestro_status" -ne 0 ]; then
+  dump_metro_log
+  exit "$maestro_status"
+fi
 
 echo "==> [verify-e2e] All E2E flows passed."
