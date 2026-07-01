@@ -3,7 +3,8 @@
     "strict": true,
     "contexts": [
       "governance",
-      "reviewer-approved"
+      "reviewer-approved",
+      "mobile-e2e"
     ]
   },
   "enforce_admins": true,

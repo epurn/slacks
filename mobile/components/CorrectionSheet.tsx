@@ -1078,8 +1078,11 @@ function ClarifyMode({
 }) {
   return (
     <View style={styles.clarifySection}>
-      {/* Question */}
-      <Text style={[styles.clarifyQuestion, { color: colors.text }]}>
+      {/* Question — testID targets this element in Maestro (FTY-162 clarify flow). */}
+      <Text
+        testID="clarify-question"
+        style={[styles.clarifyQuestion, { color: colors.text }]}
+      >
         {clarificationData?.question ?? "We need a detail to count this entry."}
       </Text>
 

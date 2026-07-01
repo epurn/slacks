@@ -9,6 +9,7 @@ Tests are part of the feature, not a follow-up.
 - Contract tests for DTOs, LLM schemas, job payloads, and estimator tools.
 - Security tests for access control, SSRF defenses, prompt injection, file upload constraints, logging, and memory isolation.
 - Mobile tests for navigation logic, state transitions, editing flows, and accessibility-critical components.
+- User-facing flow changes also require a Maestro E2E flow-completion test in `mobile/.maestro/`.
 
 ## Data
 
@@ -23,6 +24,9 @@ Tests are part of the feature, not a follow-up.
 - Database change: migration test and rollback note.
 - Estimator change: structured output validation, adversarial input, failed provider path.
 - Privacy/security change: negative test proving the control fails closed.
+- User-facing flow change: add a flow-completion E2E test against the running app via the Maestro harness, not just a unit or render test. Put the flow in `mobile/.maestro/`, run it locally with `cd mobile && ./verify-e2e.sh`, and rely on the `mobile-e2e` CI job to enforce the same suite.
+- User-facing flow change: rendering an empty, fallback, or placeholder state is an explicit failure. The flow test must assert the successful end state, meaning the action completes and the data is present and acted on.
+- User-facing flow change: unit and render tests do not satisfy this requirement; they can cover component logic, but they do not replace the flow-completion E2E.
 
 ## Migrations Run Against Postgres Too
 
@@ -40,4 +44,3 @@ datastore:
 - When the var is unset the guard **skips cleanly**, so a fresh checkout and the
   default `make verify` stay green with no Postgres dependency. CI supplies a
   real Postgres and exports the var so the guard is enforced on every PR.
-

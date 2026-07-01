@@ -24,6 +24,7 @@ REQUIRED_FILES = [
     ".github/CODEOWNERS",
     ".github/pull_request_template.md",
     ".github/workflows/governance.yml",
+    ".github/workflows/mobile.yml",
     ".github/dependabot.yml",
     "docs/architecture/system-overview.md",
     "docs/standards/coding-standards.md",
@@ -50,6 +51,12 @@ FORBIDDEN_PATHS = [
     "docs/operations/story-steward-orchestrator.md",
     "docs/stories",
     "docs/adr/0001-agent-operating-system.md",
+]
+
+REQUIRED_STATUS_CHECKS = [
+    "governance",
+    "reviewer-approved",
+    "mobile-e2e",
 ]
 
 
@@ -106,24 +113,38 @@ def main() -> None:
         if term not in review_checklist:
             fail(f"review checklist must include {term!r}")
 
-    github_setup = read("docs/operations/github-setup.md").lower()
+    github_setup_text = read("docs/operations/github-setup.md")
+    github_setup = github_setup_text.lower()
     for term in ["required native approving reviews to zero", "app-reviewer flow", "reviewer-approved"]:
         if term not in github_setup:
             fail(f"github setup must document {term!r}")
+    for check in REQUIRED_STATUS_CHECKS:
+        if f"`{check}`" not in github_setup_text:
+            fail(f"github setup must document required status check {check!r}")
 
-    branching = read("docs/operations/branching-and-prs.md").lower()
+    branching_text = read("docs/operations/branching-and-prs.md")
+    branching = branching_text.lower()
     for term in ["native required approving review count at zero", "app-reviewer flow", "reviewer-approved"]:
         if term not in branching:
             fail(f"branching docs must document {term!r}")
+    for check in REQUIRED_STATUS_CHECKS:
+        if f"`{check}`" not in branching_text:
+            fail(f"branching docs must document required status check {check!r}")
 
     review_policy = read("docs/review-policy.md")
     for term in ["reviewer-approved", "current PR head SHA", "other than the PR author"]:
         if term not in review_policy:
             fail(f"review policy must document reviewer status gate term {term!r}")
 
+    mobile_workflow = read(".github/workflows/mobile.yml")
+    if "\n  mobile-e2e:\n" not in f"\n{mobile_workflow}":
+        fail("mobile workflow must define the 'mobile-e2e' required status job")
+    if "\n    timeout-minutes: 30\n" not in mobile_workflow:
+        fail("mobile-e2e required status job must be bounded by a 30-minute timeout")
+
     protection = json.loads(read("docs/operations/main-branch-protection.json"))
     checks = protection.get("required_status_checks", {}).get("contexts", [])
-    for check in ["governance", "reviewer-approved"]:
+    for check in REQUIRED_STATUS_CHECKS:
         if check not in checks:
             fail(f"branch protection template must require {check!r}")
     required_reviews = protection.get("required_pull_request_reviews")

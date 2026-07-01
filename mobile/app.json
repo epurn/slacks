@@ -8,10 +8,14 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
+      "bundleIdentifier": "com.fatty",
       "supportsTablet": false,
       "infoPlist": {
         "NSCameraUsageDescription": "Fatty uses the camera to scan product barcodes so you can log packaged foods quickly."
       }
+    },
+    "android": {
+      "package": "com.fatty"
     },
     "plugins": [
       "expo-router",

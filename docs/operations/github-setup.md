@@ -13,6 +13,7 @@ Required status checks on `main`:
 
 - `governance`
 - `reviewer-approved`
+- `mobile-e2e` (the mobile end-to-end Maestro smoke gate, FTY-161)
 
 ## Branch Protection
 
@@ -24,6 +25,7 @@ Configure `main` with:
 - require branches to be up to date before merging,
 - require the `governance` status check,
 - require the `reviewer-approved` status check,
+- require the `mobile-e2e` status check (FTY-161),
 - keep native required approving review count at zero for the app-reviewer flow,
 - block force pushes,
 - block deletions,
@@ -39,8 +41,8 @@ submitted by the `fatty-reviewer` app as eligible native approvals.
 
 For the autonomous flow, the reviewer enables GitHub native auto-merge on a PR
 after it approves the current head; GitHub then merges automatically once
-`governance` and `reviewer-approved` are green and branch protection is
-satisfied. This requires:
+`governance`, `mobile-e2e`, and `reviewer-approved` are green and branch
+protection is satisfied. This requires:
 
 - **Repo-level auto-merge enabled.** Settings → General → "Allow auto-merge",
   or:
@@ -70,7 +72,7 @@ gh api \
   --input docs/operations/main-branch-protection.json
 ```
 
-GitHub may reject required status checks until each workflow has run at least once. If that happens, open a tiny PR, let both checks run, then apply the protection again.
+GitHub may reject required status checks until each workflow has run at least once. If that happens, open a tiny PR, let all required checks run, then apply the protection again.
 
 ## Manual Setup Path
 
@@ -88,5 +90,6 @@ When branch protection is available:
 10. Require branches to be up to date before merging.
 11. Require `governance`.
 12. Require `reviewer-approved`.
-13. Block force pushes and deletions.
-14. Apply to administrators if the plan allows it.
+13. Require `mobile-e2e` (FTY-161).
+14. Block force pushes and deletions.
+15. Apply to administrators if the plan allows it.

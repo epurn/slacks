@@ -343,3 +343,300 @@ def test_embedded_instructions_are_not_executed_and_text_is_delimited() -> None:
     assert injection in provider.prompts[0]
     assert context.food_candidates == []
     assert context.exercise_candidates == []
+
+
+# ---------------------------------------------------------------------------
+# Plausibility gate routing (FTY-156)
+# ---------------------------------------------------------------------------
+# These tests pin the parse-step routing for the deterministic plausibility
+# validator: a model reply carrying an implausible candidate must route to
+# NeedsClarification (not persist the candidate), while a plausible reply
+# parses unchanged.
+
+
+def test_implausible_count_routes_to_clarification() -> None:
+    # "50 eggs" is the acceptance-criteria example.  The model returns parsed
+    # with a count that violates the plausibility cap; the step must not persist
+    # the candidate and must route to clarification with a targeted question.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [{"type": "food", "name": "eggs", "quantity_text": "50", "amount": 50.0}],
+                confidence=0.9,
+            )
+        ]
+    )
+    context = _context(raw_text="50 eggs")
+
+    with pytest.raises(NeedsClarification) as exc:
+        _run(provider, context)
+
+    assert exc.value.reason == "implausible_candidate"
+    # No food candidates persisted.
+    assert context.food_candidates == []
+    # A targeted question naming the item is set.
+    assert len(context.clarification_questions) == 1
+    assert "eggs" in context.clarification_questions[0]
+
+
+def test_implausible_mass_routes_to_clarification() -> None:
+    # "5000 g" single serving is the acceptance-criteria example.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [
+                    {
+                        "type": "food",
+                        "name": "chicken",
+                        "quantity_text": "5000g",
+                        "amount": 5000.0,
+                        "unit": "g",
+                    }
+                ],
+                confidence=0.9,
+            )
+        ]
+    )
+    context = _context(raw_text="5000g chicken")
+
+    with pytest.raises(NeedsClarification) as exc:
+        _run(provider, context)
+
+    assert exc.value.reason == "implausible_candidate"
+    assert context.food_candidates == []
+    assert len(context.clarification_questions) == 1
+    assert "chicken" in context.clarification_questions[0]
+
+
+def test_implausible_mass_only_in_quantity_text_routes_to_clarification() -> None:
+    # Regression (FTY-156): a model reply can keep an explicit mass only in
+    # quantity_text. That must not bypass the deterministic plausibility gate.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [{"type": "food", "name": "chicken", "quantity_text": "5000g"}],
+                confidence=0.9,
+            )
+        ]
+    )
+    context = _context(raw_text="5000g chicken")
+
+    with pytest.raises(NeedsClarification) as exc:
+        _run(provider, context)
+
+    assert exc.value.reason == "implausible_candidate"
+    assert context.food_candidates == []
+    assert len(context.clarification_questions) == 1
+    assert "chicken" in context.clarification_questions[0]
+
+
+def test_implausible_quantity_text_mass_with_structured_count_clarifies() -> None:
+    # Regression (FTY-156): a model reply can pair an explicit measured raw phrase
+    # with a harmless structured serving/count. The measured phrase must still be
+    # bounded before the parse is trusted.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [
+                    {
+                        "type": "food",
+                        "name": "chicken",
+                        "quantity_text": "5000g",
+                        "amount": 1.0,
+                        "unit": "serving",
+                    }
+                ],
+                confidence=0.9,
+            )
+        ]
+    )
+    context = _context(raw_text="5000g chicken")
+
+    with pytest.raises(NeedsClarification) as exc:
+        _run(provider, context)
+
+    assert exc.value.reason == "implausible_candidate"
+    assert context.food_candidates == []
+    assert len(context.clarification_questions) == 1
+    assert "chicken" in context.clarification_questions[0]
+
+
+def test_unknown_unit_large_amount_routes_to_clarification() -> None:
+    # A garbage unit with an amount above the count cap — unambiguously implausible.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [
+                    {
+                        "type": "food",
+                        "name": "rice",
+                        "quantity_text": "50 zxcv",
+                        "amount": 50.0,
+                        "unit": "zxcv",
+                    }
+                ],
+                confidence=0.9,
+            )
+        ]
+    )
+    context = _context(raw_text="50 zxcv rice")
+
+    with pytest.raises(NeedsClarification) as exc:
+        _run(provider, context)
+
+    assert exc.value.reason == "implausible_candidate"
+    assert context.food_candidates == []
+    assert len(context.clarification_questions) == 1
+    assert "rice" in context.clarification_questions[0]
+
+
+def test_realistic_small_food_count_routes_to_parsed() -> None:
+    # Regression (FTY-156): high counts for small food-specific items are normal
+    # logs ("50 blueberries", a pile of crackers) and must not be rejected by the
+    # large-item cap that catches "50 eggs".
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [
+                    {
+                        "type": "food",
+                        "name": "blueberries",
+                        "quantity_text": "50 blueberries",
+                        "amount": 50.0,
+                        "unit": "blueberries",
+                    }
+                ],
+                confidence=0.9,
+            )
+        ]
+    )
+    context = _context(raw_text="50 blueberries")
+
+    _run(provider, context)
+
+    assert [c.name for c in context.food_candidates] == ["blueberries"]
+    assert context.food_candidates[0].amount == 50.0
+    assert context.food_candidates[0].unit == "blueberries"
+    assert context.clarification_questions == []
+
+
+def test_exercise_with_duration_skips_plausibility_gate() -> None:
+    # Regression (FTY-156): an exercise candidate carries a structured duration
+    # (amount=60, unit="minutes") — a time unit the food-portion plausibility
+    # vocabulary deliberately does not recognise. Such a candidate must NOT be
+    # run through the gate (which would reject it as unknown_unit once
+    # amount > MAX_PLAUSIBLE_COUNT); it must complete and persist as an exercise
+    # candidate. Covers the exercise-burn.md worked example (walking 60 min).
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [
+                    {
+                        "type": "exercise",
+                        "name": "walking",
+                        "quantity_text": "60 minutes",
+                        "amount": 60.0,
+                        "unit": "minutes",
+                    }
+                ],
+                confidence=0.9,
+            )
+        ]
+    )
+    context = _context(raw_text="walked for 60 minutes")
+
+    _run(provider, context)
+
+    assert [c.name for c in context.exercise_candidates] == ["walking"]
+    assert context.exercise_candidates[0].amount == 60.0
+    assert context.exercise_candidates[0].unit == "minutes"
+    assert context.food_candidates == []
+    assert context.clarification_questions == []
+
+
+def test_exercise_reps_above_count_cap_still_completes() -> None:
+    # The non-blocking note: an exercise rep entry (amount=50, unit=None) would
+    # trip the count cap if run through the gate. Excluding exercise candidates
+    # means it completes and persists rather than routing to clarification.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [{"type": "exercise", "name": "push-ups", "quantity_text": "50", "amount": 50.0}],
+                confidence=0.9,
+            )
+        ]
+    )
+    context = _context(raw_text="50 push-ups")
+
+    _run(provider, context)
+
+    assert [c.name for c in context.exercise_candidates] == ["push-ups"]
+    assert context.exercise_candidates[0].amount == 50.0
+    assert context.clarification_questions == []
+
+
+def test_implausible_food_still_gated_when_exercise_present() -> None:
+    # The exercise carve-out must not weaken the food gate: a mixed reply with a
+    # plausible exercise and an implausible food (50 eggs) still routes to
+    # clarification naming the food, and persists nothing.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [
+                    {
+                        "type": "exercise",
+                        "name": "cycling",
+                        "quantity_text": "45 minutes",
+                        "amount": 45.0,
+                        "unit": "minutes",
+                    },
+                    {"type": "food", "name": "eggs", "quantity_text": "50", "amount": 50.0},
+                ],
+                confidence=0.9,
+            )
+        ]
+    )
+    context = _context(raw_text="cycled 45 minutes and ate 50 eggs")
+
+    with pytest.raises(NeedsClarification) as exc:
+        _run(provider, context)
+
+    assert exc.value.reason == "implausible_candidate"
+    assert context.food_candidates == []
+    assert context.exercise_candidates == []
+    assert len(context.clarification_questions) == 1
+    assert "eggs" in context.clarification_questions[0]
+
+
+def test_plausible_reply_parses_unchanged() -> None:
+    # A normal, realistic reply must pass through the plausibility gate and
+    # be accumulated as candidates exactly as before FTY-156.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [
+                    {
+                        "type": "food",
+                        "name": "oatmeal",
+                        "quantity_text": "1 cup",
+                        "amount": 1.0,
+                        "unit": "cups",
+                    },
+                    {
+                        "type": "food",
+                        "name": "banana",
+                        "quantity_text": "1",
+                        "amount": 1.0,
+                    },
+                ],
+                confidence=0.9,
+            )
+        ]
+    )
+    context = _context(raw_text="oatmeal with a banana")
+
+    _run(provider, context)
+
+    assert len(context.food_candidates) == 2
+    assert {c.name for c in context.food_candidates} == {"oatmeal", "banana"}
+    assert context.clarification_questions == []
