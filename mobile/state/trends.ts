@@ -8,6 +8,7 @@
 
 import type { WeightEntryDTO } from "@/api/weightEntries";
 import type { DailySummaryDTO } from "@/api/dailySummary";
+import type { GoalDirection } from "@/api/goals";
 import type { UnitsPreference } from "@/state/profile";
 import {
   kgToDisplay,
@@ -76,6 +77,19 @@ export function rangeDays(key: DateRangeKey): number {
   return DATE_RANGE_OPTIONS.find((r) => r.key === key)!.days;
 }
 
+/** Prose for a range key, e.g. "this month" / "these three months". Used by
+ * both the visible headline delta and its accessibility label so neither ever
+ * leaks a raw range key ("1M"/"3M"/"6M") into user-facing copy. */
+const RANGE_PROSE: Record<DateRangeKey, string> = {
+  "1M": "this month",
+  "3M": "these three months",
+  "6M": "these six months",
+};
+
+export function rangeProse(range: DateRangeKey): string {
+  return RANGE_PROSE[range];
+}
+
 /** Compute the from/to date strings for a range, relative to today. */
 export function rangeBounds(
   range: DateRangeKey,
@@ -138,6 +152,37 @@ export function computeHeadlineDelta(
   const direction: "↑" | "↓" | "→" =
     delta > 0.05 ? "↑" : delta < -0.05 ? "↓" : "→";
   return { current, delta, unit, direction };
+}
+
+/**
+ * Fallback goal direction when none is known yet this session (e.g. cold
+ * launch, before Settings/Onboarding has reported one — see
+ * state/goalDirection.tsx). `loss` matches the app-wide default a fresh goal
+ * starts from (onboarding, Settings' edit card) and preserves the prior
+ * "down = good" behaviour for the common case rather than defaulting to a
+ * misleading or arbitrary direction.
+ */
+export const DEFAULT_GOAL_DIRECTION: GoalDirection = "loss";
+
+/** How the headline delta relates to the user's goal: colored/narrated accordingly. */
+export type DeltaGoalState = "toward" | "away" | "neutral";
+
+/**
+ * Classify a headline delta against the goal direction (ux-design §4b,
+ * FTY-189): a change *toward* the goal reads positive, a change *away* reads
+ * as a warning, and a stable trend is always neutral regardless of goal.
+ * `maintain` has no directional target, so any real drift (any non-"→" arrow —
+ * `computeHeadlineDelta` already zeroes out sub-0.05 noise into "→") counts as
+ * away from goal; only a genuinely stable trend is neutral.
+ */
+export function resolveDeltaGoalState(
+  direction: HeadlineDelta["direction"],
+  goal: GoalDirection,
+): DeltaGoalState {
+  if (direction === "→") return "neutral";
+  if (goal === "maintain") return "away";
+  const goodArrow = goal === "gain" ? "↑" : "↓";
+  return direction === goodArrow ? "toward" : "away";
 }
 
 /**

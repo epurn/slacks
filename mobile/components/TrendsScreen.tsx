@@ -43,19 +43,24 @@ import {
   type DailySummaryDTO,
   type DailySummarySession,
 } from "@/api/dailySummary";
+import type { GoalDirection } from "@/api/goals";
 import { AdherenceStrip } from "@/components/AdherenceStrip";
 import { EWMATrendChart } from "@/components/EWMATrendChart";
 import { WeightLogSheet } from "@/components/WeightLogSheet";
+import { useGoalDirection } from "@/state/goalDirection";
 import type { UnitsPreference } from "@/state/profile";
 import { useSession, toApiSession, type Session, type ApiSession } from "@/state/session";
 import { formatDate } from "@/state/weightEntries";
 import {
   DEFAULT_DATE_RANGE,
   DATE_RANGE_OPTIONS,
+  DEFAULT_GOAL_DIRECTION,
   computeEWMAFromEntries,
   computeHeadlineDelta,
   computeAdherence,
   rangeBounds,
+  rangeProse,
+  resolveDeltaGoalState,
   buildDayRange,
   type DateRangeKey,
   type AdherenceSummary,
@@ -86,6 +91,8 @@ function weightMessageFor(error: unknown): string {
 interface TrendsScreenProps {
   session?: Session;
   unitsPreference?: UnitsPreference;
+  /** Injectable for tests; defaults to the live session-scoped value (state/goalDirection.tsx). */
+  goalDirection?: GoalDirection;
   now?: Date;
   /** Injectable for tests. */
   listWeightEntries?: typeof listWeightEntriesApi;
@@ -110,6 +117,7 @@ interface TrendsScreenProps {
 export function TrendsScreen({
   session: sessionOverride,
   unitsPreference = "metric",
+  goalDirection: goalDirectionOverride,
   now = new Date(),
   listWeightEntries = listWeightEntriesApi,
   getDailySummaryRange = getDailySummaryRangeApi,
@@ -126,6 +134,10 @@ export function TrendsScreen({
     () => (session ? toApiSession(session) : null),
     [session],
   );
+
+  const liveGoalDirection = useGoalDirection();
+  const goalDirection: GoalDirection =
+    goalDirectionOverride ?? liveGoalDirection ?? DEFAULT_GOAL_DIRECTION;
 
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -178,6 +190,11 @@ export function TrendsScreen({
   const headline = useMemo(
     () => computeHeadlineDelta(ewmaKg, unitsPreference),
     [ewmaKg, unitsPreference],
+  );
+  // Goal-aware, not "down = good" (ux-design §4b, FTY-189).
+  const deltaGoalState = useMemo(
+    () => (headline ? resolveDeltaGoalState(headline.direction, goalDirection) : "neutral"),
+    [headline, goalDirection],
   );
 
   // ── Adherence summaries ──────────────────────────────────────────────────
@@ -325,7 +342,13 @@ export function TrendsScreen({
         {headline ? (
           <View
             style={styles.headlineRow}
-            accessibilityLabel={`Current weight trend: ${headline.current} ${headline.unit}, ${headline.direction === "↑" ? "up" : headline.direction === "↓" ? "down" : "stable"} ${Math.abs(headline.delta)} ${headline.unit} this ${range === "1M" ? "month" : range === "3M" ? "three months" : "six months"}`}
+            accessibilityLabel={`Current weight trend: ${headline.current} ${headline.unit}, ${headline.direction === "↑" ? "up" : headline.direction === "↓" ? "down" : "stable"} ${Math.abs(headline.delta)} ${headline.unit} ${rangeProse(range)}${
+              deltaGoalState === "toward"
+                ? ", toward your goal"
+                : deltaGoalState === "away"
+                  ? ", away from your goal"
+                  : ""
+            }`}
           >
             <Text style={[styles.headlineValue, { color: colors.text }]}>
               {`${headline.current} ${headline.unit}`}
@@ -334,16 +357,19 @@ export function TrendsScreen({
               style={[
                 styles.headlineDelta,
                 {
+                  // Goal-aware: keyed off progress toward the user's goal
+                  // direction, not "down = good" (ux-design §4b, FTY-189).
+                  // `accentText` (not `accent`) is the AA-safe token for text.
                   color:
-                    headline.direction === "↓"
-                      ? colors.accent
-                      : headline.direction === "↑"
+                    deltaGoalState === "toward"
+                      ? colors.accentText
+                      : deltaGoalState === "away"
                         ? colors.coral
                         : colors.textSecondary,
                 },
               ]}
             >
-              {` ${headline.direction}${Math.abs(headline.delta)} this ${range === "1M" ? "month" : range}`}
+              {` ${headline.direction}${Math.abs(headline.delta)} ${rangeProse(range)}`}
             </Text>
           </View>
         ) : null}
@@ -431,6 +457,7 @@ export function TrendsScreen({
               />
               <AdherenceStrip
                 days={adherence.days}
+                today={todayStr}
                 onDayPress={onDayPress}
               />
             </>

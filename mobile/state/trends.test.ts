@@ -10,8 +10,11 @@ import {
   ON_TARGET_TOLERANCE,
   DATE_RANGE_OPTIONS,
   DEFAULT_DATE_RANGE,
+  DEFAULT_GOAL_DIRECTION,
   rangeDays,
   rangeBounds,
+  rangeProse,
+  resolveDeltaGoalState,
   buildDayRange,
 } from "./trends";
 
@@ -377,5 +380,63 @@ describe("computeAdherence", () => {
   it("days array length equals allDates length", () => {
     const result = computeAdherence([], allDates);
     expect(result.days).toHaveLength(allDates.length);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Range prose (FTY-189)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("rangeProse", () => {
+  it("maps 1M to 'this month'", () => {
+    expect(rangeProse("1M")).toBe("this month");
+  });
+
+  it("maps 3M to 'these three months'", () => {
+    expect(rangeProse("3M")).toBe("these three months");
+  });
+
+  it("maps 6M to 'these six months'", () => {
+    expect(rangeProse("6M")).toBe("these six months");
+  });
+
+  it("never contains a raw range key for any option", () => {
+    for (const opt of DATE_RANGE_OPTIONS) {
+      const prose = rangeProse(opt.key);
+      expect(prose).not.toMatch(/\b[136]M\b/);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Goal-aware delta state (FTY-189)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("resolveDeltaGoalState", () => {
+  it("a stable trend ('→') is always neutral, regardless of goal", () => {
+    expect(resolveDeltaGoalState("→", "loss")).toBe("neutral");
+    expect(resolveDeltaGoalState("→", "gain")).toBe("neutral");
+    expect(resolveDeltaGoalState("→", "maintain")).toBe("neutral");
+  });
+
+  it("loss goal: a decrease is toward, an increase is away", () => {
+    expect(resolveDeltaGoalState("↓", "loss")).toBe("toward");
+    expect(resolveDeltaGoalState("↑", "loss")).toBe("away");
+  });
+
+  it("gain goal: an increase is toward, a decrease is away", () => {
+    expect(resolveDeltaGoalState("↑", "gain")).toBe("toward");
+    expect(resolveDeltaGoalState("↓", "gain")).toBe("away");
+  });
+
+  it("maintain goal: any real drift (up or down) is away", () => {
+    expect(resolveDeltaGoalState("↑", "maintain")).toBe("away");
+    expect(resolveDeltaGoalState("↓", "maintain")).toBe("away");
+  });
+
+  it("DEFAULT_GOAL_DIRECTION preserves the pre-FTY-189 'down = good' default", () => {
+    expect(DEFAULT_GOAL_DIRECTION).toBe("loss");
+    expect(resolveDeltaGoalState("↓", DEFAULT_GOAL_DIRECTION)).toBe("toward");
+    expect(resolveDeltaGoalState("↑", DEFAULT_GOAL_DIRECTION)).toBe("away");
   });
 });

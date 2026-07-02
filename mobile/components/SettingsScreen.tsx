@@ -52,6 +52,7 @@ import {
   type TargetOverridePayload,
 } from '@/api/goals';
 import { getProfile, putProfile, ProfileApiError } from '@/api/profile';
+import { useGoalDirectionController } from '@/state/goalDirection';
 import {
   CADENCE_OPTIONS,
   DEFAULT_CADENCE,
@@ -170,6 +171,7 @@ export function SettingsScreen({
   const liveSession = useSession();
   const sessionController = useSessionController();
   const session = sessionOverride !== undefined ? sessionOverride : liveSession;
+  const goalDirectionController = useGoalDirectionController();
 
   const router = useRouter();
   const { colors } = useTheme();
@@ -313,6 +315,7 @@ export function SettingsScreen({
     try {
       const reveal: GoalTargetResponse = await createGoalFn(apiSession, payload);
       setGoalDirection(reveal.target.direction);
+      goalDirectionController.setGoalDirection(reveal.target.direction);
       setGoalPace(editDirection !== 'maintain' ? editPace : null);
       setEditingGoal(false);
       // Fetch the full read-model (reveal only has calories, not macros)
@@ -334,6 +337,7 @@ export function SettingsScreen({
     createGoalFn,
     getTargetFn,
     showReveal,
+    goalDirectionController,
   ]);
 
   // ── Body metric edit handlers ─────────────────────────────────────────────
