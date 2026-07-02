@@ -16,7 +16,12 @@ export interface ClarificationData {
    * Clarify-mode falls back to the generic prompt + free-text when it is `null`.
    */
   readonly question: string | null;
-  /** Quick-pick answer options (tappable chips). Empty for v1 (FTY-152). */
+  /**
+   * Quick-pick answer options (tappable chips), from the clarification payload
+   * (FTY-170). MAY be empty — deterministic backend-raised questions carry none,
+   * and the read is still loading — in which case the sheet shows the free-text
+   * affordance only. Never synthesized client-side.
+   */
   readonly options: readonly string[];
 }
 

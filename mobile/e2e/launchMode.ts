@@ -33,6 +33,8 @@ import {
   E2E_DAILY_SUMMARY,
   E2E_CLARIFY_EVENT,
   E2E_CLARIFICATION,
+  E2E_CLARIFY_PROCESSING_EVENT,
+  E2E_CLARIFY_RESOLVED_EVENT,
   E2E_RESOLVED_EVENT,
   E2E_RESOLVED_SUMMARY,
   E2E_FAILED_RAW_TEXT,
@@ -83,13 +85,26 @@ export const e2eConnectionStore: ServerConnectionStore = {
  * clarify-flow phase so the smoke flow (FTY-160) and the clarify flow (FTY-162)
  * can share one binary without conflicting fixture state.
  *
- * Phase transitions (driven by POST /log-events calls):
+ * Phase transitions:
  *   phase 0 — empty day (smoke test; no POST made)
- *   phase 1 — needs_clarification entry visible (after first POST)
- *   phase 2 — entry resolved and counting (after second POST / re-submission)
+ *   phase 1 — needs_clarification entry visible (after first POST /log-events)
+ *   phase 2 — entry resolved and counting, reached two ways:
+ *             • clarify flow (FTY-175): POST /clarification/answers resolves the
+ *               same event in place (→ processing), raw phrase untouched; or
+ *             • smoke flow (FTY-178): a second POST /log-events re-submission.
+ *
+ * The two phase-2 routes serve different day-lists, because they model
+ * different server behaviour: the answer route resolves the SAME event in
+ * place, so GET returns E2E_CLARIFY_RESOLVED_EVENT — identical id, raw_text,
+ * and created_at, now `completed` — which is what lets clarify.yaml prove the
+ * no-duplicate, same-entry resolution end-to-end. The re-submission route
+ * genuinely created a second event, so GET returns the distinct-id
+ * E2E_RESOLVED_EVENT.
  *
  * The smoke flow (FTY-178) asserts the phase-0 empty-day hero first, then
- * POSTs twice to walk the phase machine to the resolved, counting summary.
+ * POSTs twice to walk the phase machine to the resolved, counting summary. The
+ * clarify flow (FTY-162) submits once, opens the sheet, and taps a chip — the
+ * answer round-trip advances the same event to the resolved phase.
  *
  * The FTY-176 failed-parse flow runs off a separate `failedStage` keyed on the
  * gibberish `raw_text` (never "coffee"), so it drives independent state in the
@@ -100,6 +115,8 @@ export const e2eConnectionStore: ServerConnectionStore = {
 export function createE2EMockFetch(): typeof fetch {
   let phase: 0 | 1 | 2 = 0;
   let failedStage: 0 | 1 | 2 = 0;
+  // How phase 2 was reached — decides which day-list GET serves (see above).
+  let resolvedVia: 'answer' | 'resubmit' | null = null;
 
   const rawTextOf = (init?: RequestInit): string | undefined => {
     if (typeof init?.body !== 'string') return undefined;
@@ -150,6 +167,7 @@ export function createE2EMockFetch(): typeof fetch {
           return json(E2E_CLARIFY_EVENT, 201);
         }
         phase = 2;
+        resolvedVia = 'resubmit';
         return json(E2E_RESOLVED_EVENT, 201);
       }
       // The failed-parse flow's GET reflects its own stage so a poll never drops
@@ -158,7 +176,25 @@ export function createE2EMockFetch(): typeof fetch {
       if (failedStage === 2) return json([E2E_FAILED_RETRY_EVENT]);
       if (phase === 0) return json([]);
       if (phase === 1) return json([E2E_CLARIFY_EVENT]);
-      return json([E2E_RESOLVED_EVENT]);
+      // Resolved via the answer round-trip → the SAME event, now completed
+      // (same id, raw phrase, created_at — the no-duplicate proof clarify.yaml
+      // asserts). Resolved via re-submission → the genuinely-new second event.
+      return json([
+        resolvedVia === 'answer' ? E2E_CLARIFY_RESOLVED_EVENT : E2E_RESOLVED_EVENT,
+      ]);
+    }
+
+    // /clarification/answers — the first-class clarify resolve (FTY-170). A
+    // POST applies the answer to the SAME event in place, advances to the
+    // resolved phase, and returns that event now `processing` (its id and raw
+    // phrase unchanged — no duplicate, no phrase mutation). GET /log-events then
+    // reflects the resolved, counting entry.
+    if (pathEnd.endsWith('/clarification/answers')) {
+      if (method === 'POST') {
+        phase = 2;
+        resolvedVia = 'answer';
+        return json(E2E_CLARIFY_PROCESSING_EVENT, 201);
+      }
     }
 
     // /clarification — the clarify sheet's lazy question-read.

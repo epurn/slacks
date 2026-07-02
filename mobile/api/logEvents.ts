@@ -40,19 +40,25 @@ export interface LogEventDTO {
 }
 
 /**
- * A single clarification question Fatty needs answered (FTY-152). v1 surfaces
- * the question `text` only — the estimator produces no quick-pick options today,
- * so the clarify sheet answers via free-text. The shape is forward-compatible:
- * an `options` array can be added additively if the estimator later generates one.
+ * A single clarification question Fatty needs answered (FTY-170). Each question
+ * carries a stable `id` — the key an answer submission references — the specific
+ * question `text`, and an `options` array of candidate quick-pick values the
+ * clarify sheet renders as one-tap chips. `options` MAY be empty (deterministic
+ * backend-raised questions carry none); the sheet then shows the free-text
+ * affordance only. Options are display candidates, never an enum — free text is
+ * always an allowed answer (see `docs/contracts/log-events.md`).
  */
 export interface ClarificationQuestionDTO {
+  readonly id: string;
   readonly text: string;
+  readonly options: readonly string[];
 }
 
 /**
- * Response body for the owner-scoped clarification read (FTY-152). Carries the
- * event's persisted clarification questions ordered by `position`; an event with
- * no clarification rows yields `{ questions: [] }` (there is no status oracle).
+ * Response body for the owner-scoped clarification read (FTY-152/170). Carries
+ * the event's persisted, still-unanswered clarification questions ordered by
+ * `position`; an event not in `needs_clarification` (or with no unanswered rows)
+ * yields `{ questions: [] }` (there is no status oracle).
  */
 export interface ClarificationDTO {
   readonly questions: readonly ClarificationQuestionDTO[];
@@ -159,6 +165,44 @@ export async function getLogEventClarification(
       method: "GET",
       headers: authHeaders(session),
       action: "load the question",
+      onError: logEventError,
+      fetchImpl,
+    },
+  );
+}
+
+/**
+ * Answer one clarification question on a `needs_clarification` event (FTY-170).
+ * The `answer` — a tapped quick-pick option's value or free text — is applied as
+ * a **structured detail to the same event**, which the backend re-estimates in
+ * place. This is the first-class resolve that replaces the retired create-path
+ * re-submission (FTY-149): it never mutates `raw_text`, never creates a second
+ * event, and never appends the answer into the raw phrase (audit A3/A5).
+ *
+ * The response is the **same** event's DTO. A fresh answer returns it at
+ * `status: "processing"` (`201`); an idempotent replay of an already-answered
+ * question returns the event's current status (`200`). This client treats both
+ * `2xx` responses identically and returns the event so the caller updates the
+ * entry in place and polls to terminal.
+ *
+ * `answer` is untrusted user input and sensitive: it is sent in the body and
+ * never logged. The caller trims it; the backend also trims and rejects an
+ * empty/whitespace answer (`422`) as the trust boundary.
+ */
+export async function answerClarification(
+  session: LogEventSession,
+  eventId: string,
+  questionId: string,
+  answer: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<LogEventDTO> {
+  return request<LogEventDTO>(
+    userScopedUrl(session, "log-events", eventId, "clarification", "answers"),
+    {
+      method: "POST",
+      headers: authHeaders(session),
+      body: JSON.stringify({ question_id: questionId, answer }),
+      action: "submit your answer",
       onError: logEventError,
       fetchImpl,
     },
