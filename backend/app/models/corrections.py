@@ -27,7 +27,6 @@ from datetime import UTC, datetime
 
 from sqlalchemy import (
     CheckConstraint,
-    DateTime,
     Float,
     ForeignKey,
     String,
@@ -36,7 +35,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, Mapper, mapped_column
 
-from app.db import Base
+from app.db import Base, UtcDateTime
 from app.enums import CandidateType, CorrectionSource
 
 
@@ -98,9 +97,7 @@ class Correction(Base):
     source: Mapped[str] = mapped_column(
         String(32), nullable=False, default=CorrectionSource.USER_EDIT
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=_utcnow)
 
 
 def _reject_mutation(_mapper: Mapper[Correction], _connection: object, _target: Correction) -> None:

@@ -24,10 +24,10 @@ import uuid
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, Uuid
+from sqlalchemy import JSON, Boolean, Date, Float, ForeignKey, Integer, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db import Base
+from app.db import Base, UtcDateTime
 from app.enums import TargetSource
 
 
@@ -51,11 +51,9 @@ class Goal(Base):
     target_weight_kg: Mapped[float] = mapped_column(Float, nullable=False)
     target_date: Mapped[date] = mapped_column(Date, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+        UtcDateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )
 
     daily_targets: Mapped[list[DailyTarget]] = relationship(
@@ -109,10 +107,8 @@ class DailyTarget(Base):
     override_protein_target_g: Mapped[int | None] = mapped_column(Integer, nullable=True)
     override_carbs_target_g: Mapped[int | None] = mapped_column(Integer, nullable=True)
     override_fat_target_g: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    override_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    override_set_at: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=_utcnow)
 
     goal: Mapped[Goal] = relationship(back_populates="daily_targets")
 

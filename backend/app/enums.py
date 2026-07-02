@@ -224,16 +224,31 @@ class CandidateType(StrEnum):
 
 
 class DerivedItemStatus(StrEnum):
-    """Resolution status of a derived food/exercise item (FTY-042).
+    """Resolution status of a derived food/exercise item (FTY-042, FTY-196).
 
     A candidate is persisted :attr:`UNRESOLVED` — parsed from the log text but not
     yet costed. The calculation steps (FTY-043 exercise burn, FTY-044 food
     resolution) later attach calories/macros and advance it to :attr:`RESOLVED`.
     FTY-042 only ever writes :attr:`UNRESOLVED`.
+
+    :attr:`PROPOSED` (FTY-196) is a costed-but-**unconfirmed** food item: a legible
+    nutrition-label parse holds its computed calories/macros in this state instead
+    of :attr:`RESOLVED`, because "OCR is fallible — Fatty never silently trusts a
+    fallible parse" (``docs/design-philosophy.md``). A ``proposed`` item is excluded
+    from every finalized-state read **by construction** (the daily-summary filter
+    requires :attr:`RESOLVED`, see ``docs/contracts/daily-summary.md``), so it never
+    counts toward totals; confirming the proposal transitions it ``proposed →
+    resolved`` and it then counts. Only the label path writes :attr:`PROPOSED`; a
+    text parse resolves straight to :attr:`RESOLVED` as before.
+
+    ``status`` is persisted as a plain ``VARCHAR`` (not a database ``ENUM``), so
+    adding :attr:`PROPOSED` is an application-only change with **no** schema
+    migration — the value round-trips on both SQLite and Postgres unchanged.
     """
 
     UNRESOLVED = "unresolved"
     RESOLVED = "resolved"
+    PROPOSED = "proposed"
 
 
 class CorrectionSource(StrEnum):

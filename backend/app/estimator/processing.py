@@ -532,14 +532,25 @@ def _persist_resolved_food(
 def _persist_resolved_labels(
     session: Session, run: EstimationRun, context: EstimationContext
 ) -> None:
-    """Persist extracted nutrition-label items with calories/macros and evidence (FTY-061).
+    """Persist extracted nutrition-label items as **uncounted proposals** (FTY-196).
 
-    Each item becomes a ``resolved`` ``derived_food_items`` row (flushed so its id is
-    available) plus a user-owned ``evidence_sources`` row recording the
-    ``user_label`` source type, the image content hash, the extraction timestamp, and
-    the immutable per-100g facts snapshot — **never** the raw image or raw model
-    output. There is no ``product_id``: a label is user-provided evidence, not a
-    global cache row, so the nullable ``product_id`` is left ``None``.
+    Each item becomes a ``derived_food_items`` row (flushed so its id is available)
+    plus a user-owned ``evidence_sources`` row recording the ``user_label`` source
+    type, the image content hash, the extraction timestamp, and the immutable
+    per-100g facts snapshot — **never** the raw image or raw model output. There is
+    no ``product_id``: a label is user-provided evidence, not a global cache row, so
+    the nullable ``product_id`` is left ``None``.
+
+    The deterministic serving math (FTY-061) is unchanged; only the item's
+    committed/counted status changes. The row is written :attr:`~app.enums.
+    DerivedItemStatus.PROPOSED`, **not** ``RESOLVED``: "OCR is fallible — Fatty never
+    silently trusts a fallible parse" (``docs/design-philosophy.md``). A ``proposed``
+    item is excluded from every finalized-state read by construction (the
+    daily-summary filter requires ``resolved``), so it does not count toward totals
+    until the user confirms it (``proposed → resolved``, see
+    :mod:`app.services.label_proposal`). The owning event still reaches terminal
+    ``completed`` — extraction finished — the food item simply does not count while
+    ``proposed``.
     """
 
     for item in context.resolved_label_items:
@@ -550,7 +561,7 @@ def _persist_resolved_labels(
             quantity_text=item.quantity_text,
             unit=item.unit,
             amount=item.amount,
-            status=DerivedItemStatus.RESOLVED,
+            status=DerivedItemStatus.PROPOSED,
             grams=item.grams,
             calories=item.calories,
             protein_g=item.protein_g,

@@ -133,7 +133,9 @@ The worker reuses the FTY-030 `LEGAL_TRANSITIONS` map (it does not redefine it):
 - The event is claimed only from `pending`; a re-entry mid-retry finds it
   `processing` and leaves it. A job already in a terminal status
   (`succeeded` / `failed` / `needs_clarification`) is never reprocessed — that is
-  what makes re-delivery a no-op.
+  what makes re-delivery a no-op. (FTY-171 amends the `needs_clarification`
+  arm of this rule for the user-driven clarification resolve — see
+  Migration / Compatibility.)
 - All step output written to a run is sanitized; raw user text is never copied
   into `trace` or `error`.
 
@@ -190,3 +192,17 @@ POST /api/users/{uid}/log-events  →  201 pending event
   unchanged; FTY-042 additively extended the step-signal vocabulary with the
   terminal `StepFailed` (deterministic, non-retryable) outcome and persists its
   candidates/questions to their own tables (see `parse-candidates.md`).
+- **Pending amendment (FTY-170 → FTY-171).** `log-events.md` v4 defines a
+  first-class clarification answer that drives
+  `needs_clarification → processing` on the same event and mandates a
+  **re-estimate** with the accumulated (question, answer) pairs as structured
+  input. This contract as written (v1) cannot express that re-estimate: the
+  unique `log_event_id` on `estimation_jobs` allows exactly one job per
+  event, and a job terminal in `needs_clarification` is never reprocessed —
+  both rules predate a user-driven resolve and treat `needs_clarification` as
+  the end of the job's life. FTY-171 (which implements the answer round-trip)
+  must evolve this contract with a version bump defining the re-estimate's
+  job/run mechanics — e.g. re-opening the event's job for a fresh
+  answer-triggered attempt/run — while preserving redelivery idempotency for
+  queue-delivered tasks. Until FTY-171 lands, the answer endpoint does not
+  exist, so no running behaviour contradicts v1.

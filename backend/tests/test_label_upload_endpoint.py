@@ -30,7 +30,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.db import create_session_factory
-from app.enums import LogEventStatus
+from app.enums import DerivedItemStatus, LogEventStatus
 from app.estimator import processing
 from app.estimator.label_step import LabelInput, LabelResolveStep
 from app.estimator.pipeline import Pipeline
@@ -141,6 +141,9 @@ def test_upload_resolves_to_a_completed_event_with_deterministic_facts(
     ).one()
     assert food.name == "Trail Mix"
     assert food.user_id == user_id
+    # FTY-196: the item lands as an uncounted *proposal* (the event still completes,
+    # but the food does not count until the user confirms it).
+    assert food.status == DerivedItemStatus.PROPOSED
     # Default consumed quantity is one 40 g serving → the printed per-serving values.
     assert food.calories == 200.0
     assert food.grams == 40.0

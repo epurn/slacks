@@ -131,6 +131,27 @@ def edit_derived_item(
     return EditResult(item=item, corrections=corrections)
 
 
+def apply_item_edit(
+    owner_id: uuid.UUID,
+    item_type: CandidateType,
+    item: DerivedItem,
+    field: str,
+    value: float,
+) -> list[Correction]:
+    """Apply one field edit to an already-owned, session-attached item, no commit.
+
+    Mutates ``item`` in place (value override or servings rescale) and returns the
+    correction row(s) the caller must ``add`` and commit inside its own
+    transaction. This is the same deterministic, provenance-honest logic the edit
+    endpoint uses (:func:`edit_derived_item`), factored out so the label-proposal
+    confirm gate (FTY-196) can adjust proposed values and flip the item to
+    ``resolved`` in a single transaction. Raises :class:`InvalidCorrection` on an
+    unknown field / out-of-range value / invalid quantity, exactly as the endpoint.
+    """
+
+    return _apply_edit(owner_id, item_type, item, field, value)
+
+
 def _apply_edit(
     owner_id: uuid.UUID,
     item_type: CandidateType,

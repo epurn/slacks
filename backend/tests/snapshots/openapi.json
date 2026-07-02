@@ -530,10 +530,11 @@
         "type": "object"
       },
       "DerivedItemStatus": {
-        "description": "Resolution status of a derived food/exercise item (FTY-042).\n\nA candidate is persisted :attr:`UNRESOLVED` \u2014 parsed from the log text but not\nyet costed. The calculation steps (FTY-043 exercise burn, FTY-044 food\nresolution) later attach calories/macros and advance it to :attr:`RESOLVED`.\nFTY-042 only ever writes :attr:`UNRESOLVED`.",
+        "description": "Resolution status of a derived food/exercise item (FTY-042, FTY-196).\n\nA candidate is persisted :attr:`UNRESOLVED` \u2014 parsed from the log text but not\nyet costed. The calculation steps (FTY-043 exercise burn, FTY-044 food\nresolution) later attach calories/macros and advance it to :attr:`RESOLVED`.\nFTY-042 only ever writes :attr:`UNRESOLVED`.\n\n:attr:`PROPOSED` (FTY-196) is a costed-but-**unconfirmed** food item: a legible\nnutrition-label parse holds its computed calories/macros in this state instead\nof :attr:`RESOLVED`, because \"OCR is fallible \u2014 Fatty never silently trusts a\nfallible parse\" (``docs/design-philosophy.md``). A ``proposed`` item is excluded\nfrom every finalized-state read **by construction** (the daily-summary filter\nrequires :attr:`RESOLVED`, see ``docs/contracts/daily-summary.md``), so it never\ncounts toward totals; confirming the proposal transitions it ``proposed \u2192\nresolved`` and it then counts. Only the label path writes :attr:`PROPOSED`; a\ntext parse resolves straight to :attr:`RESOLVED` as before.\n\n``status`` is persisted as a plain ``VARCHAR`` (not a database ``ENUM``), so\nadding :attr:`PROPOSED` is an application-only change with **no** schema\nmigration \u2014 the value round-trips on both SQLite and Postgres unchanged.",
         "enum": [
           "unresolved",
-          "resolved"
+          "resolved",
+          "proposed"
         ],
         "title": "DerivedItemStatus",
         "type": "string"
@@ -790,6 +791,87 @@
           "ref"
         ],
         "title": "ItemSourceDTO",
+        "type": "object"
+      },
+      "LabelProposalConfirmRequest": {
+        "additionalProperties": false,
+        "description": "Optional adjusted values for confirming a label proposal (FTY-196).\n\nEvery field is optional: an empty body confirms the parsed values unchanged.\nA supplied ``calories`` / ``protein_g`` / ``carbs_g`` / ``fat_g`` is a **value\noverride** (recorded ``user_edit``, marks the item edited); a supplied\n``amount`` is the adjusted serving count, applied as the\nprovenance-preserving servings rescale (``amount_adjust``). Each value is the\nsingle untrusted number crossing this boundary and is bounds-checked here\n(finite, non-negative) before the confirm service applies the field-specific\nrange/rescale rules from ``corrections.py``.",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "calories": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calories"
+          },
+          "carbs_g": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carbs G"
+          },
+          "fat_g": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fat G"
+          },
+          "protein_g": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protein G"
+          }
+        },
+        "title": "LabelProposalConfirmRequest",
+        "type": "object"
+      },
+      "LabelProposalResponse": {
+        "additionalProperties": false,
+        "description": "The owner-scoped proposed-values read for a label event (FTY-196).\n\n``proposal`` carries the parsed food item (calories, macros, serving) enriched\nwith the ``user_label`` ``source`` descriptor so the confirm sheet renders the\nvalues and their provenance from one DTO. It is ``None`` when the event has no\nuncounted proposal \u2014 there is no status oracle, so \"already confirmed\",\n\"never a label\", and \"not-a-label / unreadable disposition\" are all an absent\nproposal.",
+        "properties": {
+          "proposal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DerivedFoodItemDTO"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "LabelProposalResponse",
         "type": "object"
       },
       "ListAlternativesRequest": {
@@ -2890,6 +2972,163 @@
           }
         },
         "summary": "Get Log Event Clarification",
+        "tags": [
+          "log-events"
+        ]
+      }
+    },
+    "/api/users/{user_id}/log-events/{event_id}/label-proposal": {
+      "get": {
+        "description": "Return the uncounted proposed values for a label event (FTY-196).\n\nA legible label parse lands as an **uncounted proposal** (a ``proposed`` food\nitem that does not count toward totals) rather than a counted ``resolved`` item,\nbecause \"OCR is fallible \u2014 Fatty never silently trusts a fallible parse\". This\nread backs the mobile confirm sheet (FTY-197): it returns the parsed food values\nplus their ``user_label`` ``source`` descriptor.\n\nOwnership is fail-closed (FTY-030): a cross-user or nonexistent ``event_id`` is\nindistinguishable as ``404`` (no existence oracle). An event with no proposal\n(never had one, or already confirmed) returns ``200`` with ``proposal: null``\n(no status oracle). The nutrition values, like ``raw_text``, are never logged.",
+        "operationId": "get_label_proposal_api_users__user_id__log_events__event_id__label_proposal_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabelProposalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Label Proposal",
+        "tags": [
+          "log-events"
+        ]
+      }
+    },
+    "/api/users/{user_id}/log-events/{event_id}/label-proposal/confirm": {
+      "post": {
+        "description": "Confirm a label proposal so it counts toward the day's totals (FTY-196).\n\nFlips the proposed food item ``proposed \u2192 resolved`` in one transaction, so the\ndaily-summary finalized-state filter (unchanged) then counts it. An optional\nbody carries adjusted values: a changed ``calories``/macro commits as the user's\nnumber (a ``user_edit`` value override \u2014 the item reads ``is_edited``), an\nadjusted ``amount`` (serving count) commits as a provenance-preserving rescale,\nand an omitted body commits the parsed values as-is. The ``user_label``\nprovenance is preserved either way.\n\nOwnership is fail-closed (``404`` cross-user / nonexistent, no existence oracle,\nalso when the owned event carries no proposal). A **double confirm** is\nidempotent \u2014 the already-committed item is returned, never double-counted. An\nout-of-range / invalid adjusted value returns ``422`` with a machine-readable\nerror shape that never echoes the value.",
+        "operationId": "confirm_label_proposal_api_users__user_id__log_events__event_id__label_proposal_confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/LabelProposalConfirmRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DerivedFoodItemDTO"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Label Proposal",
         "tags": [
           "log-events"
         ]

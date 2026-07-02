@@ -1,9 +1,18 @@
-"""Offline parse-calibration evaluation harness (FTY-157).
+"""Offline parse-calibration evaluation harness (FTY-157, extended by FTY-158).
 
 The harness scores a pluggable clarify/estimate signal over the committed
 synthetic calibration set. It is intentionally test-only: no production parse
-code is imported or changed, and the default signal uses recorded fixture fields
-so backend verification stays deterministic and offline.
+code is *changed*, and the default signals use recorded fixture fields so
+backend verification stays deterministic and offline.
+
+FTY-158 adds the self-consistency signals: each fixture example carries N=3
+recorded parse samples (synthetic-by-construction stand-ins for temperature>0
+sampling), and the recorded agreement/hybrid signals score them through the
+*production* metric (``app.estimator.self_consistency``) — including the
+early-stop rule — so the offline evaluation computes exactly what the live
+sampler would. The live, provider-backed variant
+(:func:`live_self_consistency_signal`) is the opt-in mode and is never invoked
+by default verification.
 """
 
 from __future__ import annotations
@@ -17,7 +26,13 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.schemas.parse import ParsedCandidate, ParseDisposition
+from app.estimator.self_consistency import (
+    SelfConsistencySignal,
+    apply_early_stop,
+    evaluate_self_consistency,
+)
+from app.llm.base import Provider
+from app.schemas.parse import ParsedCandidate, ParseDisposition, ParseResult
 
 Decision = Literal["estimate", "needs_clarification"]
 DifficultyBand = Literal["unambiguous", "inferable", "indeterminate"]
@@ -28,8 +43,19 @@ FIXTURE_PATH = (
 BASELINE_SUMMARY_PATH = (
     Path(__file__).resolve().parents[1] / "fixtures" / "parse_calibration" / "baseline_summary.json"
 )
+SELF_CONSISTENCY_SUMMARY_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "parse_calibration"
+    / "self_consistency_summary.json"
+)
 DEFAULT_OPERATING_THRESHOLD = 0.45
 DEFAULT_RISK_THRESHOLDS = (0.0, 0.3, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+
+#: Number of recorded self-consistency samples each committed fixture example
+#: carries — matches the production default N
+#: (``app.estimator.self_consistency.SELF_CONSISTENCY_NUM_SAMPLES``).
+RECORDED_SAMPLE_COUNT = 3
 
 
 class BaselineSignalRecord(BaseModel):
@@ -54,6 +80,13 @@ class LabeledParseExample(BaseModel):
     gold_decision: Decision
     gold_parse: list[ParsedCandidate] = Field(min_length=1, max_length=32)
     baseline: BaselineSignalRecord
+    #: Recorded temperature>0 parse samples for the FTY-158 self-consistency
+    #: signals — synthetic by construction, like everything else in the fixture.
+    #: Each validates as a full ``ParseResult`` so the production agreement
+    #: metric consumes them unchanged. Optional so hand-built examples in metric
+    #: unit tests need not carry samples; the recorded consistency signals
+    #: require them.
+    samples: list[ParseResult] = Field(default_factory=list, max_length=8)
 
 
 @dataclass(frozen=True)
@@ -258,6 +291,60 @@ def verbalized_confidence_baseline(example: LabeledParseExample) -> SignalResult
     return SignalResult(decision="needs_clarification")
 
 
+def recorded_agreement_signal(example: LabeledParseExample) -> SignalResult:
+    """FTY-158 pure sampling-agreement signal over the recorded samples."""
+
+    return _signal_result(_recorded_signal(example), use_hybrid=False)
+
+
+def recorded_hybrid_signal(example: LabeledParseExample) -> SignalResult:
+    """FTY-158 hybrid (agreement + verbalized) signal over the recorded samples."""
+
+    return _signal_result(_recorded_signal(example), use_hybrid=True)
+
+
+def live_self_consistency_signal(provider: Provider, *, use_hybrid: bool = True) -> TextSignal:
+    """Provider-backed self-consistency signal — the opt-in *live* evaluation mode.
+
+    Wire it up with ``build_provider(load_llm_settings())`` and pass the result
+    to :func:`evaluate_signal` via :func:`adapt_text_signal`. Never invoked by
+    default verification: it samples a real model N times per example and costs
+    real tokens. The recorded signals above are the deterministic default.
+    """
+
+    def _signal(raw_text: str) -> SignalResult:
+        return _signal_result(evaluate_self_consistency(provider, raw_text), use_hybrid=use_hybrid)
+
+    return _signal
+
+
+def _recorded_signal(example: LabeledParseExample) -> SelfConsistencySignal:
+    """Compute the production signal over an example's recorded samples.
+
+    Applies the production early-stop rule to the recorded sample list first, so
+    the offline score is exactly what the live sampler would have computed
+    (a unanimous first window never draws — here, never scores — the rest).
+    """
+
+    if not example.samples:
+        msg = f"example {example.id} has no recorded self-consistency samples"
+        raise ValueError(msg)
+    return SelfConsistencySignal.from_samples(apply_early_stop(example.samples))
+
+
+def _signal_result(signal: SelfConsistencySignal, *, use_hybrid: bool) -> SignalResult:
+    """Map the production signal onto the harness's score/decision shape.
+
+    A sample set that never parsed is a direct clarify *decision* (fail closed):
+    its agreement can be a perfect 1.0 — unanimously asking — which must not be
+    read as estimate-confidence by the threshold sweep.
+    """
+
+    if signal.all_non_parsed:
+        return SignalResult(decision="needs_clarification")
+    return SignalResult(score=signal.hybrid if use_hybrid else signal.agreement)
+
+
 def evaluate_signal(
     examples: Sequence[LabeledParseExample],
     signal: ExampleSignal,
@@ -298,36 +385,76 @@ def evaluate_signal(
     )
 
 
-def evaluate_recorded_baseline(path: Path = FIXTURE_PATH) -> EvaluationSummary:
-    """Evaluate the committed recorded baseline fixture signal."""
+#: The recorded signals the harness can evaluate offline, by CLI name.
+RECORDED_SIGNALS: dict[str, tuple[ExampleSignal, str]] = {
+    "baseline": (
+        verbalized_confidence_baseline,
+        "recorded_verbalized_confidence_threshold_0_45",
+    ),
+    "agreement": (
+        recorded_agreement_signal,
+        "recorded_self_consistency_agreement_n3_window2",
+    ),
+    "hybrid": (
+        recorded_hybrid_signal,
+        "recorded_hybrid_consistency_verbalized_n3_window2",
+    ),
+}
 
+
+def evaluate_recorded(signal: str, path: Path = FIXTURE_PATH) -> EvaluationSummary:
+    """Evaluate one of the committed recorded signals over the fixture."""
+
+    example_signal, signal_name = RECORDED_SIGNALS[signal]
     examples = load_examples(path)
     return evaluate_signal(
         examples,
-        verbalized_confidence_baseline,
-        signal_name="recorded_verbalized_confidence_threshold_0_45",
+        example_signal,
+        signal_name=signal_name,
         fixture_name=str(path.relative_to(Path(__file__).resolve().parents[2])),
     )
+
+
+def evaluate_recorded_baseline(path: Path = FIXTURE_PATH) -> EvaluationSummary:
+    """Evaluate the committed recorded baseline fixture signal."""
+
+    return evaluate_recorded("baseline", path)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the parse calibration harness.")
     parser.add_argument("--fixture", type=Path, default=FIXTURE_PATH)
+    parser.add_argument(
+        "--signal",
+        choices=sorted(RECORDED_SIGNALS),
+        default="baseline",
+        help="which recorded signal to evaluate (default: baseline)",
+    )
     parser.add_argument("--json", action="store_true", help="print machine-readable JSON")
     parser.add_argument(
         "--write-baseline",
         type=Path,
         help="write the recorded baseline summary JSON to this path",
     )
+    parser.add_argument(
+        "--write-summary",
+        type=Path,
+        help="write the selected signal's summary JSON to this path",
+    )
     args = parser.parse_args(argv)
 
-    summary = evaluate_recorded_baseline(args.fixture)
+    summary = evaluate_recorded(args.signal, args.fixture)
     if args.write_baseline is not None:
-        args.write_baseline.write_text(summary.to_json(), encoding="utf-8")
-    elif args.json:
-        print(summary.to_json(), end="")
-    else:
-        print(summary.human_table())
+        args.write_baseline.write_text(
+            evaluate_recorded("baseline", args.fixture).to_json(), encoding="utf-8"
+        )
+    if args.write_summary is not None:
+        args.write_summary.write_text(summary.to_json(), encoding="utf-8")
+    if args.write_baseline is None and args.write_summary is None:
+        if args.json:
+            print(summary.to_json(), end="")
+        else:
+            print(summary.human_table())
     return 0
 
 

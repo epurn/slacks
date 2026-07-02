@@ -117,6 +117,18 @@ confident estimate of a typical portion warrants a genuinely high confidence.
 """
 
 
+def build_parse_prompt(raw_text: str) -> str:
+    """Render the production parse prompt for ``raw_text``.
+
+    Shared with the self-consistency sampler (FTY-158,
+    ``app/estimator/self_consistency.py``) so every consistency sample is drawn
+    from *exactly* the prompt the live parse step sends — agreement measured
+    against a different prompt would not describe the production parse.
+    """
+
+    return _PROMPT_TEMPLATE.format(raw_text=raw_text)
+
+
 @dataclass(frozen=True)
 class ParseStep:
     """Parse a log event's text into schema-validated candidates via the provider."""
@@ -148,7 +160,7 @@ class ParseStep:
         never returned to the caller as trusted.
         """
 
-        prompt = _PROMPT_TEMPLATE.format(raw_text=raw_text)
+        prompt = build_parse_prompt(raw_text)
         try:
             return self.provider.structured_completion(prompt, ParseResult)
         except StructuredOutputValidationError as exc:

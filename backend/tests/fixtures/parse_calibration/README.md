@@ -21,9 +21,45 @@ Each line in `examples.jsonl` is one JSON object:
 - `baseline`: the recorded offline stand-in for the current
   verbalized-confidence-vs-`0.45` parse gate. The default harness uses this field
   so verification never calls a live model.
+- `samples` (FTY-158): three recorded parse samples standing in for
+  temperature>0 sampling of the live model. Each validates as a full
+  `ParseResult` (`disposition`, `confidence`, `items`, optional
+  `clarification_questions`), so the production self-consistency metric
+  (`app/estimator/self_consistency.py`) consumes them unchanged. Like the
+  `baseline` field, they keep the consistency signals fully offline and
+  deterministic.
 
 The fixture schema is enforced by `tests.parse_calibration.harness` and
 `tests/test_parse_calibration_harness.py`.
+
+## How the recorded samples are constructed
+
+Samples are synthetic by construction, per difficulty band (see
+`generate_fixture.py` for the exact deterministic schedules):
+
+- `unambiguous`: all three samples are the identical gold parse — an easy input
+  parses stably, so the production early-stop rule (unanimous first window)
+  always fires.
+- `inferable`: mostly unanimous, plus a deterministic minority with a mild
+  amount jitter on one sample (agreement stays high) and another minority with
+  a disposition flip (agreement drops to 1/3 and the input pays the full N).
+- `indeterminate`: samples diverge — guessed portions a factor of two apart
+  plus a disposition flip — except two honest failure classes: a unanimous-ask
+  class (all samples clarify → the direct fail-closed decision) and a
+  consistent-but-wrong class (the same invented portion every sample —
+  self-consistency's documented blind spot, kept so the measured improvement
+  is not fake-perfect).
+
+Divergence always appears inside the first sampling window (sample 2), because
+the production early-stop rule never draws later samples when the first window
+is unanimous — late-only divergence would, correctly, be invisible.
+
+`baseline_summary.json` is the committed baseline metrics
+(`--write-baseline`); `self_consistency_summary.json` is the committed hybrid
+consistency+verbalized metrics (`--signal hybrid --write-summary`). Both are
+regression-pinned by `tests/test_parse_calibration_harness.py`, which also
+asserts the improvement bar: hybrid and agreement-only must measurably beat
+the recorded verbalized baseline at the 0.45 operating point.
 
 ## How examples are made
 
@@ -41,7 +77,13 @@ The difficulty bands mean:
   recoverable from the text, e.g. `crackers and peanut butter`.
 
 Run `cd backend && python -m tests.parse_calibration.harness` to print the
-human-readable table, or pass `--json` for machine-readable metrics.
+human-readable table, or pass `--json` for machine-readable metrics. Pass
+`--signal {baseline,agreement,hybrid}` to pick the recorded signal to evaluate
+(default `baseline`), and `--write-summary PATH` to write the selected
+signal's summary JSON. Live (token-spending) evaluation of the
+self-consistency signal against a real provider is opt-in via
+`tests.parse_calibration.harness.live_self_consistency_signal` — it is never
+run by default verification.
 
 ## Adding examples
 

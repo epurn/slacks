@@ -14,15 +14,62 @@ runtime in the Docker Compose / self-host stack.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 from fastapi import Request
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
+from sqlalchemy import DateTime, create_engine
+from sqlalchemy.engine import Dialect, Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.types import TypeDecorator
 
 
 class Base(DeclarativeBase):
     """Declarative base for all ORM models; carries the schema metadata."""
+
+
+class UtcDateTime(TypeDecorator[datetime]):
+    """A ``timestamptz`` column that always stores and returns UTC-aware datetimes.
+
+    SQLAlchemy's ``DateTime(timezone=True)`` only preserves the offset on backends
+    that support it (Postgres). SQLite has no native timezone type: it discards the
+    offset on write and hands values back **naive** on read. A naive datetime then
+    serializes in a DTO *without* a UTC offset, so a client reads the instant as its
+    own local time — the ambiguity that lets an entry logged the previous evening
+    render under "Today" (audit finding A6). Storing UTC end-to-end is worthless if
+    the wire value is naive.
+
+    This decorator closes the gap uniformly, independent of backend:
+
+    - **on write** the value is normalized to UTC before it is stored (a naive value
+      is assumed to be UTC — matching the app's ``datetime.now(UTC)`` write
+      convention — and an offset-aware value is converted), so no naive or local
+      instant is ever persisted;
+    - **on read** the value is returned tz-aware in UTC — the offset is re-attached
+      on backends (SQLite) that dropped it, and normalized on those that kept it — so
+      every read path and DTO sees an unambiguous instant that serializes with an
+      explicit ``+00:00`` offset.
+
+    The underlying DDL is unchanged (``TIMESTAMP WITH TIME ZONE`` on Postgres,
+    the same text storage on SQLite), so swapping ``DateTime(timezone=True)`` for
+    this type requires **no migration**.
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value: datetime | None, dialect: Dialect) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+    def process_result_value(self, value: datetime | None, dialect: Dialect) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
 
 def create_db_engine(database_url: str) -> Engine:

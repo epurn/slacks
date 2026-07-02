@@ -5,9 +5,9 @@ Drive :func:`app.estimator.processing.process_estimation` with the real
 v2 vision provider, against the migrated SQLite database — proving the acceptance
 criteria across the trust boundary:
 
-- happy path: a label image → schema-validated panel → a ``resolved``
-  ``derived_food_items`` row with **deterministic** calories/macros + a user-owned
-  ``evidence_sources`` row carrying the ``user_label`` source type;
+- happy path: a label image → schema-validated panel → a ``proposed`` (uncounted,
+  FTY-196) ``derived_food_items`` row with **deterministic** calories/macros + a
+  user-owned ``evidence_sources`` row carrying the ``user_label`` source type;
 - an unreadable / low-confidence label routes to ``needs_clarification`` (never a
   guessed estimate); an image that is not a label fails closed; prompt injection in
   the image is not followed; a schema-invalid reply is rejected;
@@ -121,7 +121,10 @@ def test_label_resolves_with_deterministic_calories_and_evidence(
     foods = _foods(session, event_id)
     assert len(foods) == 1
     food = foods[0]
-    assert food.status == DerivedItemStatus.RESOLVED
+    # FTY-196: a legible label parse lands as an uncounted *proposal* (not counted
+    # ``resolved``) until the user confirms it — OCR is fallible. The event still
+    # reaches ``completed`` (extraction finished); the food simply does not count.
+    assert food.status == DerivedItemStatus.PROPOSED
     assert food.name == "Trail Mix"
     assert food.user_id == user_id
     # Default consumed quantity is one 40 g serving → the printed per-serving values.
