@@ -25,6 +25,7 @@ export function DailySummary({
   onRetry?: () => void;
 } = {}) {
   const { colors } = useTheme();
+  const summaryState = summary ? "ready" : error ? "unavailable" : "loading";
 
   return (
     <View style={styles.wrapper}>
@@ -32,6 +33,7 @@ export function DailySummary({
         consumed={summary?.intake.calories ?? 0}
         target={summary?.target?.calories.effective ?? null}
         hasIntake={summary?.has_intake ?? false}
+        summaryState={summaryState}
       />
       {summary ? (
         <MacroTier

@@ -139,8 +139,12 @@ describe("TodayScreen summary states", () => {
     await act(async () => {});
 
     expect(textContent(tree)).toContain("We couldn't load your summary");
+    expect(textContent(tree)).toContain("Summary unavailable");
+    expect(textContent(tree)).not.toContain("No target set");
     expect(textContent(tree)).toContain("Try again");
-    expect(a11yLabels(tree).some((label) => label.includes("no target set"))).toBe(true);
+    expect(a11yLabels(tree).some((label) => label.includes("summary unavailable"))).toBe(
+      true,
+    );
   });
 
   it("renders the empty-day full-budget copy from has_intake false", async () => {

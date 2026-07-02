@@ -17,10 +17,14 @@ function pct(consumed: number, target: number): number {
   return Math.round((consumed / target) * 100);
 }
 
+type SummaryState = "ready" | "loading" | "unavailable";
+
 /**
  * The Today hero: calories consumed vs. target, with a slim progress bar.
  *
  * States:
+ * - Loading/unavailable summary: keeps a neutral status shell without inventing
+ *   calories, target, or no-target meaning.
  * - Under budget: amber fill proportional to consumed/target, "X to go" copy.
  * - Over budget: amber fills budget portion, coral extends past it, "X over" copy.
  * - Null target: shows consumed calories with a calm "No target set" treatment.
@@ -34,12 +38,59 @@ export function CalorieHero({
   consumed,
   target,
   hasIntake = true,
+  summaryState = "ready",
 }: {
   consumed: number;
   target: number | null;
   hasIntake?: boolean;
+  summaryState?: SummaryState;
 }) {
   const { colors } = useTheme();
+
+  if (summaryState !== "ready") {
+    const copy =
+      summaryState === "loading"
+        ? {
+            context: "Loading summary",
+            subLine: "Status will appear here",
+            accessibilityLabel: "Daily summary loading",
+          }
+        : {
+            context: "Summary unavailable",
+            subLine: "Try again below",
+            accessibilityLabel: "Daily summary unavailable",
+          };
+
+    return (
+      <View
+        style={[styles.container, { backgroundColor: colors.surfaceRaised }]}
+        accessible={true}
+        accessibilityLabel={copy.accessibilityLabel}
+      >
+        <Text
+          style={[
+            styles.heroNumber,
+            { color: colors.text, fontFamily: DISPLAY_FONT_FAMILY },
+          ]}
+          accessibilityElementsHidden
+        >
+          —
+        </Text>
+        <Text
+          style={[styles.contextLine, { color: colors.textSecondary }]}
+          accessibilityElementsHidden
+        >
+          {copy.context}
+        </Text>
+        <Text
+          style={[styles.subLine, { color: colors.textMuted }]}
+          accessibilityElementsHidden
+        >
+          {copy.subLine}
+        </Text>
+      </View>
+    );
+  }
 
   if (target === null) {
     return (

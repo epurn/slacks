@@ -175,11 +175,11 @@ describe("DailySummary — error and null states", () => {
     });
 
     const text = allText(tree!);
-    expect(text).toContain("0");
-    expect(text).toContain("No target set");
+    expect(text).toContain("Summary unavailable");
+    expect(text).not.toContain("No target set");
     expect(text).toContain(msg);
     expect(text).toContain("Try again");
-    expect(allA11yLabels(tree!).some((l) => l.includes("no target set"))).toBe(true);
+    expect(allA11yLabels(tree!).some((l) => l.includes("summary unavailable"))).toBe(true);
   });
 
   it("renders a fallback hero shell when no summary and no error", () => {
@@ -187,8 +187,9 @@ describe("DailySummary — error and null states", () => {
     act(() => {
       tree = render(<DailySummary />);
     });
-    expect(allText(tree!)).toContain("No target set");
-    expect(allA11yLabels(tree!).some((l) => l.includes("no target set"))).toBe(true);
+    expect(allText(tree!)).toContain("Loading summary");
+    expect(allText(tree!)).not.toContain("No target set");
+    expect(allA11yLabels(tree!).some((l) => l.includes("summary loading"))).toBe(true);
   });
 
   it("light and dark: hero a11y label is consistent regardless of color scheme", () => {

@@ -96,7 +96,7 @@ session) skip straight to Today.
 The status-first home.
 
 - **Hero: calories consumed vs. target only** — a bold number plus a slim linear
-  bar ("1,240 / of 2,000 kcal · 62%"). One focus.
+  bar ("1,240 / 2,000 kcal · 62%"). One focus.
 - **Secondary tier:** macro chips (P/C/F), then a distinct "🔥 burned" exercise
   line. Exercise is **not** in the hero and **not** a fourth macro.
 - **Timeline:** items-forward, grouped into **time clusters** (entries within a

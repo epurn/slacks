@@ -103,6 +103,40 @@ describe("CalorieHero — null target", () => {
   });
 });
 
+describe("CalorieHero — summary availability", () => {
+  it("does not present an unavailable summary as a real no-target state", () => {
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(
+        <CalorieHero
+          consumed={0}
+          target={null}
+          summaryState="unavailable"
+        />,
+      );
+    });
+
+    const text = allText(tree!);
+    expect(text).toContain("Summary unavailable");
+    expect(text).not.toContain("No target set");
+    expect(allA11yLabels(tree!).some((l) => l.includes("summary unavailable"))).toBe(
+      true,
+    );
+  });
+
+  it("keeps the load-state shell honest while summary data is pending", () => {
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(<CalorieHero consumed={0} target={null} summaryState="loading" />);
+    });
+
+    const text = allText(tree!);
+    expect(text).toContain("Loading summary");
+    expect(text).not.toContain("No target set");
+    expect(allA11yLabels(tree!).some((l) => l.includes("summary loading"))).toBe(true);
+  });
+});
+
 describe("CalorieHero — empty state", () => {
   it("shows 0 consumed with full budget, empty bar track, calm tone", () => {
     let tree: ReactTestRenderer;
