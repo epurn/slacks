@@ -19,6 +19,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.enums import LogEventStatus
+from app.schemas.corrections import DerivedExerciseItemDTO, DerivedFoodItemDTO
 
 #: Maximum accepted length of a single raw log entry. Generous enough for a
 #: natural-language meal/exercise description while capping unbounded input.
@@ -85,6 +86,18 @@ class LogEventDTO(BaseModel):
     status: LogEventStatus
     created_at: datetime
     updated_at: datetime
+
+
+class LogEventEntryDTO(BaseModel):
+    """Today-feed-shaped day-listing row (FTY-198).
+
+    Carries the owning log event plus the derived food/exercise items the Today
+    timeline renders beneath it. Item DTOs reuse the shared correction/item
+    read-model, including per-item ``source`` provenance and ``is_edited``.
+    """
+
+    event: LogEventDTO
+    items: list[DerivedFoodItemDTO | DerivedExerciseItemDTO]
 
 
 class ClarificationQuestionDTO(BaseModel):
