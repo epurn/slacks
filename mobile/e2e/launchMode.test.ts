@@ -61,7 +61,9 @@ import {
   answerClarification,
 } from '@/api/logEvents';
 // eslint-disable-next-line import/first
-import { getDailySummary } from '@/api/dailySummary';
+import { getDailySummary, getDailySummaryRange } from '@/api/dailySummary';
+// eslint-disable-next-line import/first
+import { listWeightEntries, createWeightEntry } from '@/api/weightEntries';
 
 // jest-expo sets __DEV__ = true globally. Use globalThis so TypeScript is happy
 // without needing @types/node (which the project excludes from "types").
@@ -264,6 +266,43 @@ describe('E2E mock serves the URLs the real API clients request', () => {
     const summary = await getDailySummary(apiSession, '2026-01-01', mockFetch);
     expect(summary.has_intake).toBe(false);
     expect(summary.target?.calories.effective).toBe(2000);
+  });
+
+  // FTY-187 Trends reads: the weight series and the adherence range back the
+  // trends.yaml flow. Both are anchored to the requested window so the data
+  // always lands in range — assert entries return and their dates fall in it.
+  it('listWeightEntries resolves to a series inside the requested window', async () => {
+    const from = '2026-06-01';
+    const to = '2026-06-29';
+    const entries = await listWeightEntries(apiSession, from, to, mockFetch);
+    expect(entries.length).toBeGreaterThan(1);
+    for (const e of entries) {
+      expect(e.effective_date >= from && e.effective_date <= to).toBe(true);
+    }
+    // The last entry sits on the window's end (the device's today).
+    expect(entries[entries.length - 1]?.effective_date).toBe(to);
+  });
+
+  it('createWeightEntry echoes the submitted weight and date back', async () => {
+    const created = await createWeightEntry(
+      apiSession,
+      74.2,
+      '2026-06-29',
+      mockFetch,
+    );
+    expect(created.weight_kg).toBe(74.2);
+    expect(created.effective_date).toBe('2026-06-29');
+  });
+
+  it('getDailySummaryRange resolves to one summary per day in the window', async () => {
+    const from = '2026-06-01';
+    const to = '2026-06-29';
+    const range = await getDailySummaryRange(apiSession, from, to, mockFetch);
+    expect(range).toHaveLength(29);
+    expect(range[0]?.date).toBe(from);
+    expect(range[range.length - 1]?.date).toBe(to);
+    // The card is data-present: the recent days carry a target and logged intake.
+    expect(range.some((d) => d.has_intake && d.target !== null)).toBe(true);
   });
 });
 

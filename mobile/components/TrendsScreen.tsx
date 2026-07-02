@@ -303,6 +303,7 @@ export function TrendsScreen({
   return (
     <>
       <ScrollView
+        testID="trends-screen"
         style={[styles.screen, { backgroundColor: colors.surface }]}
         contentContainerStyle={[
           styles.content,
@@ -395,6 +396,7 @@ export function TrendsScreen({
             width={chartWidth}
           />
           <Pressable
+            testID="log-weight-btn"
             accessibilityRole="button"
             accessibilityLabel="Log weight"
             onPress={() => setSheetVisible(true)}
