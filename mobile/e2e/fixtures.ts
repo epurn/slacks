@@ -9,7 +9,13 @@
 import type { SessionRecord } from '@/state/session';
 import type { ProfileDTO } from '@/api/profile';
 import type { DailySummaryDTO, TargetReadModel } from '@/api/dailySummary';
-import type { LogEventDTO, ClarificationDTO } from '@/api/logEvents';
+import type {
+  LogEventDTO,
+  LogEventEntryDTO,
+  ClarificationDTO,
+} from '@/api/logEvents';
+import type { DerivedFoodItemDTO } from '@/api/derivedItems';
+import type { WeightEntryDTO } from '@/api/weightEntries';
 
 export const E2E_SERVER_URL = 'http://localhost:8000';
 
@@ -237,4 +243,192 @@ export const E2E_FAILED_RETRY_EVENT: LogEventDTO = {
   status: 'pending',
   created_at: '2026-01-01T08:01:00Z',
   updated_at: '2026-01-01T08:01:00Z',
+};
+
+// ─── FTY-187 Trends weight + adherence fixtures ───────────────────────────────
+//
+// The Trends screen queries a live date window derived from the device's own
+// clock (rangeBounds(range, new Date())), so these fixtures are built from the
+// requested window rather than pinned to fixed dates — the data always lands
+// inside range and the chart, headline, and adherence card render real content.
+// A data-starved Trends (empty/error cards) is an explicit testing-standards
+// failure, so trends.yaml asserts the populated end state, not a placeholder.
+
+/**
+ * Shift a YYYY-MM-DD string by whole days, UTC-anchored so it never drifts
+ * across a DST boundary. Used to derive the fixture dates from the window the
+ * Trends screen requests.
+ */
+function shiftIsoDate(isoDate: string, days: number): string {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const at = new Date(Date.UTC(y!, m! - 1, d!));
+  at.setUTCDate(at.getUTCDate() + days);
+  return at.toISOString().slice(0, 10);
+}
+
+/**
+ * Every calendar day from `from` through `to` inclusive (oldest first),
+ * mirroring the client's buildDayRange so range summaries key onto the strip.
+ */
+function e2eDayRange(from: string, to: string): string[] {
+  const out: string[] = [];
+  let cur = from;
+  for (let i = 0; i < 400 && cur <= to; i++) {
+    out.push(cur);
+    cur = shiftIsoDate(cur, 1);
+  }
+  return out;
+}
+
+/**
+ * Synthetic weight series for the Trends flow. Dates are anchored to the
+ * window's end (`to` — the device's today), so the entries fall inside the live
+ * range the screen queries and the multi-point chart + headline delta render
+ * real data. A gentle downward EWMA trend keeps the headline delta legible.
+ */
+export function e2eWeightEntries(to: string): WeightEntryDTO[] {
+  const series: readonly (readonly [number, number])[] = [
+    [28, 76.2],
+    [21, 75.9],
+    [14, 75.6],
+    [7, 75.2],
+    [0, 74.8],
+  ];
+  return series.map(([daysAgo, weightKg], i) => {
+    const date = shiftIsoDate(to, -daysAgo);
+    return {
+      id: `e2e-weight-${i}`,
+      user_id: E2E_SESSION.userId,
+      weight_kg: weightKg,
+      effective_date: date,
+      created_at: `${date}T08:00:00Z`,
+      updated_at: `${date}T08:00:00Z`,
+    };
+  });
+}
+
+/**
+ * Synthetic daily-summary range for the Trends adherence card. The range
+ * endpoint returns a row per calendar day, so this returns one per day in the
+ * window: the most recent 12 days carry a target and near-target logged intake
+ * (mostly on-target) so the card shows real on-target days, and earlier days
+ * are unlogged (`has_intake: false`) exactly like days the server has no
+ * finalized data for — dayAdherenceState classifies those as no-data.
+ */
+export function e2eDailySummaryRange(
+  from: string,
+  to: string,
+): DailySummaryDTO[] {
+  const days = e2eDayRange(from, to);
+  const total = days.length;
+  return days.map((date, i) => {
+    const logged = i >= total - 12;
+    if (!logged) {
+      return {
+        date,
+        intake: { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
+        has_intake: false,
+        target: null,
+        exercise: { active_calories: 0 },
+      };
+    }
+    // Mostly on-target (within ±10% of the 2,000 kcal target); every fifth day
+    // off-target, so the card reports a believable on-of-target ratio.
+    const offTarget = i % 5 === 0;
+    const calories = offTarget ? 1500 : 1980;
+    return {
+      date,
+      intake: {
+        calories,
+        protein_g: Math.round(calories * 0.075),
+        carbs_g: Math.round(calories * 0.1),
+        fat_g: Math.round(calories * 0.0325),
+      },
+      has_intake: true,
+      target: E2E_TARGET,
+      exercise: { active_calories: 0 },
+    };
+  });
+}
+
+// ─── FTY-181 entry-resolve (beat 1) item-forward fixtures ─────────────────────
+//
+// The signature entry-resolve beat eases a resolved entry's *value row* in when
+// it transitions pending→completed. That value row only renders when the Today
+// feed carries the entry's derived items — the item-forward `/log-events/by-date`
+// read (FTY-198). These fixtures drive resolve.yaml: a plain text log resolves to
+// a completed entry whose real derived food item (name · kcal · provenance) is
+// served by the by-date feed, so the beat's value row is reachable on the real
+// screen data path — not injected item props. Keyed on its own `raw_text` so it
+// never collides with the clarify flow's "coffee" or the failed flow's gibberish.
+
+/** The input resolve.yaml submits. Distinct from "coffee" and the gibberish text. */
+export const E2E_RESOLVE_RAW_TEXT = 'greek yogurt';
+
+/** Stable id for the resolve flow's completed event. */
+export const E2E_RESOLVE_EVENT_ID =
+  'e2e-resolve-event-00000000-0000-0000-0000-000000000000';
+
+/**
+ * The completed event the resolve flow's POST returns. The client inserts the
+ * submitted text optimistically as `pending`, then reconciles to this completed
+ * event — a genuine pending→completed transition that arms the entry-resolve beat.
+ */
+export const E2E_RESOLVE_EVENT: LogEventDTO = {
+  id: E2E_RESOLVE_EVENT_ID,
+  user_id: E2E_SESSION.userId,
+  raw_text: E2E_RESOLVE_RAW_TEXT,
+  status: 'completed',
+  created_at: '2026-01-01T09:30:00Z',
+  updated_at: '2026-01-01T09:30:00Z',
+};
+
+/**
+ * The resolved derived food item the by-date feed carries for the resolve event.
+ * ItemTimelineRow renders its accessibility label as "Greek yogurt, 140 kcal" —
+ * the exact string resolve.yaml asserts, proving the value row is populated from
+ * real server data.
+ */
+export const E2E_RESOLVE_ITEM: DerivedFoodItemDTO = {
+  item_type: 'food',
+  id: 'e2e-resolve-item-00000000-0000-0000-0000-000000000000',
+  user_id: E2E_SESSION.userId,
+  log_event_id: E2E_RESOLVE_EVENT_ID,
+  name: 'Greek yogurt',
+  quantity_text: '1 cup',
+  unit: 'cup',
+  amount: 1,
+  status: 'resolved',
+  grams: 245,
+  calories: 140,
+  protein_g: 20,
+  carbs_g: 9,
+  fat_g: 4,
+  calories_estimated: 140,
+  protein_g_estimated: 20,
+  carbs_g_estimated: 9,
+  fat_g_estimated: 4,
+  created_at: '2026-01-01T09:30:00Z',
+  updated_at: '2026-01-01T09:30:00Z',
+  source: {
+    source_type: 'trusted_nutrition_database',
+    label: 'USDA',
+    ref: 'usda_fdc:171284',
+  },
+  is_edited: false,
+};
+
+/** The item-forward day row the by-date feed returns once the entry resolves. */
+export const E2E_RESOLVE_ENTRY: LogEventEntryDTO = {
+  event: E2E_RESOLVE_EVENT,
+  items: [E2E_RESOLVE_ITEM],
+};
+
+/** Daily summary reflecting the resolved "greek yogurt" entry (140 kcal). */
+export const E2E_RESOLVE_SUMMARY: DailySummaryDTO = {
+  date: '2026-01-01',
+  intake: { calories: 140, protein_g: 20, carbs_g: 9, fat_g: 4 },
+  has_intake: true,
+  target: E2E_TARGET,
+  exercise: { active_calories: 0 },
 };

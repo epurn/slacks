@@ -573,41 +573,22 @@ describe("TrendsScreen — log weight sheet", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Cadence picker
+// Cadence card removed from Trends (FTY-187): weigh-in cadence is reachable
+// only via Profile → Preferences; Trends must render no cadence controls.
+// Logging a weight still persists the last-weigh-in date via `onWeightLogged`
+// (verified above in "re-fetches entries after a successful save"), since
+// Preferences' own cadence control reads that date to reschedule the reminder.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("TrendsScreen — cadence picker", () => {
-  it("renders all cadence options", async () => {
+describe("TrendsScreen — cadence card removed", () => {
+  it("renders no cadence option controls", async () => {
+    const store = mockStore();
+    const notifications = mockNotifications();
     const tree = mount(
       <TrendsScreen
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
-      />,
-    );
-    await act(async () => {});
-
-    ["weekly", "biweekly", "monthly", "off"].forEach((val) => {
-      const opt = tree.root.find(
-        (n) => n.props.testID === `cadence-option-${val}`,
-      );
-      expect(opt).toBeTruthy();
-    });
-  });
-
-  it("changing cadence to Off cancels the reminder", async () => {
-    const store = mockStore("weekly");
-    const notifications = mockNotifications();
-
-    // Start with a logged entry so we have a last weigh-in date
-    const list = jest.fn().mockResolvedValue([makeEntry("1", 70, "2026-06-20")]);
-
-    const tree = mount(
-      <TrendsScreen
-        session={SESSION}
-        listWeightEntries={list}
-        getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
         store={store}
         notifications={notifications}
         now={NOW}
@@ -615,42 +596,13 @@ describe("TrendsScreen — cadence picker", () => {
     );
     await act(async () => {});
 
-    const offOpt = tree.root.find(
-      (n) => n.props.testID === "cadence-option-off",
+    const cadenceOpts = tree.root.findAll(
+      (n) =>
+        typeof n.props.testID === "string" &&
+        (n.props.testID as string).startsWith("cadence-option-"),
     );
-    act(() => offOpt.props.onPress());
-    await act(async () => {});
-
-    // After setting Off, no scheduled notifications
-    expect(notifications.scheduled).toHaveLength(0);
-  });
-
-  it("due-only: changing cadence to Weekly schedules exactly one notification", async () => {
-    const store = mockStore("off");
-    const notifications = mockNotifications();
-
-    const list = jest.fn().mockResolvedValue([makeEntry("1", 70, "2026-06-20")]);
-
-    const tree = mount(
-      <TrendsScreen
-        session={SESSION}
-        listWeightEntries={list}
-        getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        store={store}
-        notifications={notifications}
-        now={NOW}
-      />,
-    );
-    await act(async () => {});
-
-    const weeklyOpt = tree.root.find(
-      (n) => n.props.testID === "cadence-option-weekly",
-    );
-    act(() => weeklyOpt.props.onPress());
-    await act(async () => {});
-
-    // Exactly one notification scheduled
-    expect(notifications.scheduled).toHaveLength(1);
+    expect(cadenceOpts).toHaveLength(0);
+    expect(textContent(tree)).not.toContain("WEIGH-IN REMINDER");
   });
 });
 
@@ -910,23 +862,6 @@ describe("TrendsScreen — accessibility", () => {
     for (const cell of cells) {
       expect(cell.props.accessibilityLabel).toBeTruthy();
     }
-  });
-
-  it("cadence options have accessibilityRole='radio'", async () => {
-    const tree = mount(
-      <TrendsScreen
-        session={SESSION}
-        listWeightEntries={jest.fn().mockResolvedValue([])}
-        getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
-      />,
-    );
-    await act(async () => {});
-
-    const radioOpts = tree.root.findAll(
-      (n) => n.props.accessibilityRole === "radio",
-    );
-    expect(radioOpts.length).toBeGreaterThanOrEqual(4);
   });
 });
 

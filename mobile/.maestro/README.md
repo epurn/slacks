@@ -66,6 +66,8 @@ app under test reliably. If the app ID changes, update `app.json` and every flow
 | `smoke.yaml` | App launches in E2E mode → Today mounts **and** its timeline reaches the ready, non-error state — data-present, not data-starved (FTY-160) |
 | `clarify.yaml` | Full clarify path: submit an entry → needs-a-detail row appears → tap row → clarify sheet shows the seeded question (data-starved sheet fails here) → free-text answer → entry resolves and counts in Today totals (FTY-162) |
 | `failed-parse.yaml` | Failed-parse UX: submit gibberish → "Couldn't read that" row appears with Retry + Edit-as-text (never a static dead end) → tap Retry → the failed row is superseded in place by a fresh pending attempt, no stale duplicate (FTY-176) |
+| `trends.yaml` | Trends hierarchy: open Trends → weight card renders real data → the cadence card is absent (it moved to Preferences) → tap the compact Log weight control → the weight sheet opens usable, not data-starved (FTY-187) |
+| `resolve.yaml` | Entry-resolve beat real data-path: submit a log → it resolves to a completed entry → Refresh loads the item-forward `/log-events/by-date` feed → the resolved value row ("Greek yogurt, 140 kcal") renders from real derived-item data and counts in the hero (a data-starved Today, items not wired, fails here) (FTY-181) |
 
 ## E2E launch mode (deterministic boot)
 

@@ -20,6 +20,7 @@ import {
   userScopedUrl,
 } from "@/api/client";
 import type { ApiSession } from "@/api/client";
+import type { DerivedItem } from "@/api/derivedItems";
 
 /** The FTY-030 event status state machine vocabulary (full v1 set). */
 export type LogEventStatus =
@@ -37,6 +38,18 @@ export interface LogEventDTO {
   readonly status: LogEventStatus;
   readonly created_at: string;
   readonly updated_at: string;
+}
+
+/**
+ * A Today-feed-shaped day-listing row (FTY-198): one log event plus the derived
+ * food/exercise items the timeline renders beneath it. Item DTOs reuse the
+ * shared correction/item read-model, so each carries its `source` provenance and
+ * `is_edited` flag. `items` is `[]` for an event with no derived items yet
+ * (pending, needs_clarification, failed, or completed-with-no-items).
+ */
+export interface LogEventEntryDTO {
+  readonly event: LogEventDTO;
+  readonly items: readonly DerivedItem[];
 }
 
 /**
@@ -103,6 +116,31 @@ export async function listTodayLogEvents(
   const base = userScopedUrl(session, "log-events");
   const url = query ? `${base}?${query}` : base;
   return request<LogEventDTO[]>(url, {
+    method: "GET",
+    headers: authHeaders(session),
+    action: "load your day",
+    onError: logEventError,
+    fetchImpl,
+  });
+}
+
+/**
+ * List the day's entries in the Today-feed shape (FTY-198): each event with its
+ * derived food/exercise item rows. This is the item-forward read the timeline
+ * uses to render a completed entry's resolved value rows (name · kcal · source)
+ * — the plain `listTodayLogEvents` above carries only event envelopes, so it
+ * cannot populate the item rows. Owner-scoped like every other day read; the
+ * `day` query mirrors the event list.
+ */
+export async function listTodayLogEventEntries(
+  session: LogEventSession,
+  day?: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<readonly LogEventEntryDTO[]> {
+  const query = day ? `day=${encodeURIComponent(day)}` : undefined;
+  const base = userScopedUrl(session, "log-events", "by-date");
+  const url = query ? `${base}?${query}` : base;
+  return request<LogEventEntryDTO[]>(url, {
     method: "GET",
     headers: authHeaders(session),
     action: "load your day",

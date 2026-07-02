@@ -40,6 +40,12 @@ import {
   E2E_FAILED_RAW_TEXT,
   E2E_FAILED_EVENT,
   E2E_FAILED_RETRY_EVENT,
+  E2E_RESOLVE_RAW_TEXT,
+  E2E_RESOLVE_EVENT,
+  E2E_RESOLVE_ENTRY,
+  E2E_RESOLVE_SUMMARY,
+  e2eWeightEntries,
+  e2eDailySummaryRange,
 } from './fixtures';
 
 /**
@@ -115,6 +121,10 @@ export const e2eConnectionStore: ServerConnectionStore = {
 export function createE2EMockFetch(): typeof fetch {
   let phase: 0 | 1 | 2 = 0;
   let failedStage: 0 | 1 | 2 = 0;
+  // FTY-181 entry-resolve flow: 0 before the log, 1 once the resolve entry is
+  // created. Keyed on its own raw_text so it stays independent of the clarify
+  // "coffee" phase machine and the gibberish failed flow.
+  let resolveStage: 0 | 1 = 0;
   // How phase 2 was reached — decides which day-list GET serves (see above).
   let resolvedVia: 'answer' | 'resubmit' | null = null;
 
@@ -133,6 +143,18 @@ export function createE2EMockFetch(): typeof fetch {
       headers: { 'Content-Type': 'application/json' },
     });
 
+  // Read a query-string parameter off a full request URL (the Trends range/weight
+  // reads carry the from/to window the fixtures are anchored to).
+  const queryParam = (u: string, key: string): string | undefined => {
+    const q = u.split('?')[1];
+    if (!q) return undefined;
+    for (const pair of q.split('&')) {
+      const [k, v] = pair.split('=');
+      if (k === key) return decodeURIComponent(v ?? '');
+    }
+    return undefined;
+  };
+
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url =
       typeof input === 'string'
@@ -146,6 +168,31 @@ export function createE2EMockFetch(): typeof fetch {
     ).toUpperCase();
 
     const pathEnd = url.split('?')[0];
+
+    // /log-events/by-date — the item-forward day feed (FTY-198): each event with
+    // its derived items. This is the read the entry-resolve beat (FTY-181) needs,
+    // since the value row only renders when the feed carries the entry's items.
+    // The clarify/smoke/failed flows serve `items: []` so their rows keep
+    // rendering the raw phrase (no value row); only the resolve flow carries a
+    // real item, so resolve.yaml can assert the resolved value row on-device.
+    // Matched before `/log-events` because the URL suffix is more specific.
+    if (pathEnd.endsWith('/log-events/by-date')) {
+      if (failedStage === 1) return json([{ event: E2E_FAILED_EVENT, items: [] }]);
+      if (failedStage === 2)
+        return json([{ event: E2E_FAILED_RETRY_EVENT, items: [] }]);
+      if (resolveStage === 1) return json([E2E_RESOLVE_ENTRY]);
+      if (phase === 0) return json([]);
+      if (phase === 1) return json([{ event: E2E_CLARIFY_EVENT, items: [] }]);
+      return json([
+        {
+          event:
+            resolvedVia === 'answer'
+              ? E2E_CLARIFY_RESOLVED_EVENT
+              : E2E_RESOLVED_EVENT,
+          items: [],
+        },
+      ]);
+    }
 
     // /log-events — POST advances state and returns the next event;
     // GET returns the state-appropriate event list.
@@ -162,6 +209,14 @@ export function createE2EMockFetch(): typeof fetch {
           failedStage = 2;
           return json(E2E_FAILED_RETRY_EVENT, 201);
         }
+        // FTY-181 entry-resolve flow: a plain text log resolves straight to a
+        // completed entry (the client's optimistic `pending`→`completed`
+        // reconcile is the transition that arms the beat). Keyed on its own
+        // raw_text so it never disturbs the clarify phase machine.
+        if (rawTextOf(init) === E2E_RESOLVE_RAW_TEXT) {
+          resolveStage = 1;
+          return json(E2E_RESOLVE_EVENT, 201);
+        }
         if (phase === 0) {
           phase = 1;
           return json(E2E_CLARIFY_EVENT, 201);
@@ -174,6 +229,9 @@ export function createE2EMockFetch(): typeof fetch {
       // the reconciled failed / retry-pending row.
       if (failedStage === 1) return json([E2E_FAILED_EVENT]);
       if (failedStage === 2) return json([E2E_FAILED_RETRY_EVENT]);
+      // The resolve flow's GET lists the completed entry so a Refresh/poll keeps
+      // the reconciled row (its items ride the by-date feed above).
+      if (resolveStage === 1) return json([E2E_RESOLVE_EVENT]);
       if (phase === 0) return json([]);
       if (phase === 1) return json([E2E_CLARIFY_EVENT]);
       // Resolved via the answer round-trip → the SAME event, now completed
@@ -202,9 +260,51 @@ export function createE2EMockFetch(): typeof fetch {
       return json(E2E_CLARIFICATION);
     }
 
-    // /daily-summary — returns non-zero intake once the entry is resolved.
+    // /daily-summary/range — backs the Trends adherence card (FTY-187). Returns
+    // one summary per calendar day in the requested window, anchored to the same
+    // from/to the client derived from the device clock, so the card renders real
+    // on-target days rather than an empty/error state.
+    if (pathEnd.endsWith('/daily-summary/range')) {
+      const from = queryParam(url, 'from');
+      const to = queryParam(url, 'to');
+      return json(from && to ? e2eDailySummaryRange(from, to) : []);
+    }
+
+    // /daily-summary — returns non-zero intake once the entry is resolved
+    // (the resolve flow's 140-kcal item, or the clarify/smoke 120-kcal coffee).
     if (pathEnd.endsWith('/daily-summary')) {
+      if (resolveStage === 1) return json(E2E_RESOLVE_SUMMARY);
       return json(phase === 2 ? E2E_RESOLVED_SUMMARY : E2E_DAILY_SUMMARY);
+    }
+
+    // /weight-entries — backs the Trends weight card (FTY-187). GET returns the
+    // synthetic series anchored to the window's end (`to` = the device's today)
+    // so the chart + headline delta render real data. A POST (a weight save) is
+    // acknowledged by echoing the submitted weight/date back as a stored entry,
+    // though the Trends flow only needs the sheet to open.
+    if (pathEnd.endsWith('/weight-entries')) {
+      if (method === 'POST') {
+        const body =
+          typeof init?.body === 'string'
+            ? (JSON.parse(init.body) as {
+                weight?: number;
+                effective_date?: string;
+              })
+            : {};
+        const date = body.effective_date ?? '2026-01-01';
+        return json(
+          {
+            id: 'e2e-weight-created',
+            user_id: E2E_SESSION.userId,
+            weight_kg: body.weight ?? 75,
+            effective_date: date,
+            created_at: `${date}T08:00:00Z`,
+            updated_at: `${date}T08:00:00Z`,
+          },
+          201,
+        );
+      }
+      return json(e2eWeightEntries(queryParam(url, 'to') ?? '2026-01-01'));
     }
 
     // Static fixtures (profile, target).

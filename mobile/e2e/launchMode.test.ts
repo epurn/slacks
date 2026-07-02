@@ -40,6 +40,9 @@ import {
   E2E_FAILED_RAW_TEXT,
   E2E_FAILED_EVENT,
   E2E_FAILED_RETRY_EVENT,
+  E2E_RESOLVE_RAW_TEXT,
+  E2E_RESOLVE_EVENT_ID,
+  E2E_RESOLVE_ITEM,
 } from './fixtures';
 // eslint-disable-next-line import/first
 import { formatWallClockTime } from '@/state/today';
@@ -56,12 +59,15 @@ import { getTarget } from '@/api/goals';
 // eslint-disable-next-line import/first
 import {
   listTodayLogEvents,
+  listTodayLogEventEntries,
   createLogEvent,
   getLogEventClarification,
   answerClarification,
 } from '@/api/logEvents';
 // eslint-disable-next-line import/first
-import { getDailySummary } from '@/api/dailySummary';
+import { getDailySummary, getDailySummaryRange } from '@/api/dailySummary';
+// eslint-disable-next-line import/first
+import { listWeightEntries, createWeightEntry } from '@/api/weightEntries';
 
 // jest-expo sets __DEV__ = true globally. Use globalThis so TypeScript is happy
 // without needing @types/node (which the project excludes from "types").
@@ -260,10 +266,56 @@ describe('E2E mock serves the URLs the real API clients request', () => {
     expect(events).toHaveLength(0);
   });
 
+  it('listTodayLogEventEntries resolves to an empty item-forward feed on the empty day', async () => {
+    // The Today screen reads the FTY-198 by-date feed alongside the event list;
+    // the fixture suffix must match the real `/log-events/by-date` URL the client
+    // builds, or the mock 404s and this throws — the drift guard for the item feed.
+    const entries = await listTodayLogEventEntries(apiSession, '2026-01-01', mockFetch);
+    expect(Array.isArray(entries)).toBe(true);
+    expect(entries).toHaveLength(0);
+  });
+
   it('getDailySummary resolves to the zero-intake fixture', async () => {
     const summary = await getDailySummary(apiSession, '2026-01-01', mockFetch);
     expect(summary.has_intake).toBe(false);
     expect(summary.target?.calories.effective).toBe(2000);
+  });
+
+  // FTY-187 Trends reads: the weight series and the adherence range back the
+  // trends.yaml flow. Both are anchored to the requested window so the data
+  // always lands in range — assert entries return and their dates fall in it.
+  it('listWeightEntries resolves to a series inside the requested window', async () => {
+    const from = '2026-06-01';
+    const to = '2026-06-29';
+    const entries = await listWeightEntries(apiSession, from, to, mockFetch);
+    expect(entries.length).toBeGreaterThan(1);
+    for (const e of entries) {
+      expect(e.effective_date >= from && e.effective_date <= to).toBe(true);
+    }
+    // The last entry sits on the window's end (the device's today).
+    expect(entries[entries.length - 1]?.effective_date).toBe(to);
+  });
+
+  it('createWeightEntry echoes the submitted weight and date back', async () => {
+    const created = await createWeightEntry(
+      apiSession,
+      74.2,
+      '2026-06-29',
+      mockFetch,
+    );
+    expect(created.weight_kg).toBe(74.2);
+    expect(created.effective_date).toBe('2026-06-29');
+  });
+
+  it('getDailySummaryRange resolves to one summary per day in the window', async () => {
+    const from = '2026-06-01';
+    const to = '2026-06-29';
+    const range = await getDailySummaryRange(apiSession, from, to, mockFetch);
+    expect(range).toHaveLength(29);
+    expect(range[0]?.date).toBe(from);
+    expect(range[range.length - 1]?.date).toBe(to);
+    // The card is data-present: the recent days carry a target and logged intake.
+    expect(range.some((d) => d.has_intake && d.target !== null)).toBe(true);
   });
 });
 
@@ -448,6 +500,59 @@ describe('FTY-176 failed-parse flow: stateful mock transitions', () => {
   it('the failed-parse branch does not disturb the clarify phase machine', async () => {
     const mockFetch = createE2EMockFetch();
     // "coffee" still runs the clarify phase machine, untouched by the gibberish key.
+    const created = await createLogEvent(apiSession, 'coffee', undefined, mockFetch);
+    expect(created.status).toBe('needs_clarification');
+  });
+});
+
+// ─── FTY-181 entry-resolve-flow stateful mock ────────────────────────────────
+//
+// Proves the resolve.yaml Maestro flow's data path: a log resolves to a completed
+// entry whose real derived item rides the item-forward by-date feed, so the
+// entry-resolve beat's value row is reachable on the real screen data. Keyed on
+// its own raw_text, independent of the clarify and failed phase machines.
+
+describe('FTY-181 entry-resolve flow: stateful mock transitions', () => {
+  const apiSession = toApiSession(E2E_SESSION);
+
+  it('POST the resolve text returns a completed entry', async () => {
+    const mockFetch = createE2EMockFetch();
+    const created = await createLogEvent(
+      apiSession,
+      E2E_RESOLVE_RAW_TEXT,
+      undefined,
+      mockFetch,
+    );
+    expect(created.id).toBe(E2E_RESOLVE_EVENT_ID);
+    expect(created.status).toBe('completed');
+  });
+
+  it('the by-date feed carries the resolved derived item once the entry resolves', async () => {
+    const mockFetch = createE2EMockFetch();
+    // Before the log the item-forward feed is empty (empty day).
+    expect(
+      await listTodayLogEventEntries(apiSession, '2026-01-01', mockFetch),
+    ).toHaveLength(0);
+    await createLogEvent(apiSession, E2E_RESOLVE_RAW_TEXT, undefined, mockFetch);
+    // After the log the feed carries the completed entry WITH its derived value
+    // row — the real data source ItemTimelineRow renders for the resolve beat.
+    const entries = await listTodayLogEventEntries(apiSession, '2026-01-01', mockFetch);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.event.id).toBe(E2E_RESOLVE_EVENT_ID);
+    expect(entries[0]?.items).toHaveLength(1);
+    expect(entries[0]?.items[0]?.name).toBe(E2E_RESOLVE_ITEM.name);
+    // The plain event list also lists the completed entry so a Refresh/poll keeps
+    // the reconciled row while its items ride the feed above.
+    const events = await listTodayLogEvents(apiSession, '2026-01-01', mockFetch);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.id).toBe(E2E_RESOLVE_EVENT_ID);
+    // The day totals count the resolved item's 140 kcal.
+    const summary = await getDailySummary(apiSession, '2026-01-01', mockFetch);
+    expect(summary.intake.calories).toBe(140);
+  });
+
+  it('the resolve branch does not disturb the clarify phase machine', async () => {
+    const mockFetch = createE2EMockFetch();
     const created = await createLogEvent(apiSession, 'coffee', undefined, mockFetch);
     expect(created.status).toBe('needs_clarification');
   });
