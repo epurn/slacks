@@ -20,6 +20,7 @@ import {
 } from "@/api/dailySummary";
 import { DailySummary } from "@/components/DailySummary";
 import { useSession, toApiSession } from "@/state/session";
+import { formatDate, formatHumanDate } from "@/state/weightEntries";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
 
 function messageFor(error: unknown): string {
@@ -99,7 +100,7 @@ export default function DayScreen() {
           style={[styles.dateTitle, { color: colors.text }]}
           accessibilityRole="header"
         >
-          {date ?? ""}
+          {date ? formatHumanDate(date, formatDate(new Date())) : ""}
         </Text>
       </View>
 

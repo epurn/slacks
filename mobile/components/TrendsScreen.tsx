@@ -43,9 +43,11 @@ import {
   type DailySummaryDTO,
   type DailySummarySession,
 } from "@/api/dailySummary";
+import type { GoalDirection } from "@/api/goals";
 import { AdherenceStrip } from "@/components/AdherenceStrip";
 import { EWMATrendChart } from "@/components/EWMATrendChart";
 import { WeightLogSheet } from "@/components/WeightLogSheet";
+import { useGoalDirection } from "@/state/goalDirection";
 import type { UnitsPreference } from "@/state/profile";
 import { useSession, toApiSession, type Session, type ApiSession } from "@/state/session";
 import { formatDate } from "@/state/weightEntries";
@@ -56,6 +58,8 @@ import {
   computeHeadlineDelta,
   computeAdherence,
   rangeBounds,
+  rangeProse,
+  resolveDeltaGoalState,
   buildDayRange,
   type DateRangeKey,
   type AdherenceSummary,
@@ -86,6 +90,14 @@ function weightMessageFor(error: unknown): string {
 interface TrendsScreenProps {
   session?: Session;
   unitsPreference?: UnitsPreference;
+  /**
+   * Injectable for tests; falls back to the live session-scoped value
+   * (state/goalDirection.tsx), which the provider hydrates from the authoritative
+   * `GET /goal` read on launch and Settings/Onboarding refresh on a goal save. It
+   * is `null`/unknown only when no goal can be read (offline, or none set), which
+   * reads as a neutral delta (no toward/away claim).
+   */
+  goalDirection?: GoalDirection;
   now?: Date;
   /** Injectable for tests. */
   listWeightEntries?: typeof listWeightEntriesApi;
@@ -110,6 +122,7 @@ interface TrendsScreenProps {
 export function TrendsScreen({
   session: sessionOverride,
   unitsPreference = "metric",
+  goalDirection: goalDirectionOverride,
   now = new Date(),
   listWeightEntries = listWeightEntriesApi,
   getDailySummaryRange = getDailySummaryRangeApi,
@@ -126,6 +139,15 @@ export function TrendsScreen({
     () => (session ? toApiSession(session) : null),
     [session],
   );
+
+  // The goal direction, or `null` when unknown. The provider hydrates it from the
+  // authoritative `GET /goal` read on launch (and Settings/Onboarding refresh it on
+  // a goal save), so a returning user's existing goal is known after a cold launch.
+  // `resolveDeltaGoalState` treats `null` as neutral so a user whose goal can't be
+  // read is never mis-colored "away" by a guessed default (state/goalDirection.tsx).
+  const liveGoalDirection = useGoalDirection();
+  const goalDirection: GoalDirection | null =
+    goalDirectionOverride ?? liveGoalDirection ?? null;
 
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -178,6 +200,11 @@ export function TrendsScreen({
   const headline = useMemo(
     () => computeHeadlineDelta(ewmaKg, unitsPreference),
     [ewmaKg, unitsPreference],
+  );
+  // Goal-aware, not "down = good" (ux-design §4b, FTY-189).
+  const deltaGoalState = useMemo(
+    () => (headline ? resolveDeltaGoalState(headline.direction, goalDirection) : "neutral"),
+    [headline, goalDirection],
   );
 
   // ── Adherence summaries ──────────────────────────────────────────────────
@@ -325,7 +352,13 @@ export function TrendsScreen({
         {headline ? (
           <View
             style={styles.headlineRow}
-            accessibilityLabel={`Current weight trend: ${headline.current} ${headline.unit}, ${headline.direction === "↑" ? "up" : headline.direction === "↓" ? "down" : "stable"} ${Math.abs(headline.delta)} ${headline.unit} this ${range === "1M" ? "month" : range === "3M" ? "three months" : "six months"}`}
+            accessibilityLabel={`Current weight trend: ${headline.current} ${headline.unit}, ${headline.direction === "↑" ? "up" : headline.direction === "↓" ? "down" : "stable"} ${Math.abs(headline.delta)} ${headline.unit} ${rangeProse(range)}${
+              deltaGoalState === "toward"
+                ? ", toward your goal"
+                : deltaGoalState === "away"
+                  ? ", away from your goal"
+                  : ""
+            }`}
           >
             <Text style={[styles.headlineValue, { color: colors.text }]}>
               {`${headline.current} ${headline.unit}`}
@@ -334,16 +367,19 @@ export function TrendsScreen({
               style={[
                 styles.headlineDelta,
                 {
+                  // Goal-aware: keyed off progress toward the user's goal
+                  // direction, not "down = good" (ux-design §4b, FTY-189).
+                  // `accentText` (not `accent`) is the AA-safe token for text.
                   color:
-                    headline.direction === "↓"
-                      ? colors.accent
-                      : headline.direction === "↑"
+                    deltaGoalState === "toward"
+                      ? colors.accentText
+                      : deltaGoalState === "away"
                         ? colors.coral
                         : colors.textSecondary,
                 },
               ]}
             >
-              {` ${headline.direction}${Math.abs(headline.delta)} this ${range === "1M" ? "month" : range}`}
+              {` ${headline.direction}${Math.abs(headline.delta)} ${rangeProse(range)}`}
             </Text>
           </View>
         ) : null}
@@ -375,6 +411,7 @@ export function TrendsScreen({
             loading={weightPhase === "loading"}
             error={weightPhase === "error" ? weightError : null}
             onRetry={reloadWeight}
+            today={todayStr}
             width={chartWidth}
           />
           <Pressable
@@ -431,6 +468,7 @@ export function TrendsScreen({
               />
               <AdherenceStrip
                 days={adherence.days}
+                today={todayStr}
                 onDayPress={onDayPress}
               />
             </>
@@ -498,7 +536,7 @@ function RangeSelector({
             key={opt.key}
             testID={`range-btn-${opt.key}`}
             accessibilityRole="button"
-            accessibilityLabel={`${opt.label} range`}
+            accessibilityLabel={opt.accessibilityLabel}
             accessibilityState={{ selected: isSelected }}
             onPress={() => onChange(opt.key)}
             style={[

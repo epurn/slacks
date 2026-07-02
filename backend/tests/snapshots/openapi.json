@@ -1,6 +1,20 @@
 {
   "components": {
     "schemas": {
+      "ActiveGoalDirection": {
+        "additionalProperties": false,
+        "description": "The direction of the caller's current active goal (FTY-189 read model).\n\nA goal stores only its trajectory (``start_weight_kg`` / ``target_weight_kg``),\nnot a direction column, so ``direction`` is **recovered** from that trajectory\n(``target > start`` \u2192 ``gain``, ``target < start`` \u2192 ``loss``, equal \u2192\n``maintain``). Trends reads this to color the weight delta by progress toward\nthe goal rather than \"down = good\", so a returning user with an existing goal\nis coloured correctly after a cold launch \u2014 no direction is carried in weight,\nRMR, TDEE, or the calorie target, so this read leaks nothing sensitive.",
+        "properties": {
+          "direction": {
+            "$ref": "#/components/schemas/GoalDirection"
+          }
+        },
+        "required": [
+          "direction"
+        ],
+        "title": "ActiveGoalDirection",
+        "type": "object"
+      },
       "AlternativesResponse": {
         "additionalProperties": false,
         "description": "The bounded list of alternative source candidates for a food item.",
@@ -2593,6 +2607,64 @@
       }
     },
     "/api/users/{user_id}/goal": {
+      "get": {
+        "description": "Read the direction of the caller's active goal (FTY-189).\n\nTrends colours the weight delta by progress toward the goal, so it needs the\nactive goal's direction for a returning user after a cold launch \u2014 the only\nauthoritative source, since no read-model otherwise carries it. Fails closed\n``404`` on cross-user access *and* when the caller simply has no active goal:\nthe two are indistinguishable (no existence oracle). The recovered direction\nis the only field returned; no weight/target number is exposed or logged.",
+        "operationId": "read_active_goal_direction_api_users__user_id__goal_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveGoalDirection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Active Goal Direction",
+        "tags": [
+          "goals"
+        ]
+      },
       "post": {
         "description": "Create/replace the caller's active goal and reveal its computed target.\n\nThe new goal deactivates any prior active goal (one active goal per user) and\ntoday's ``daily_targets`` row is persisted as a side effect, so the reveal \u2014 and\na subsequent ``GET daily-summary`` for today \u2014 shows a real number. Fails closed\n``404`` on cross-user access; ``409`` when the profile is incomplete; ``422`` when\nthe pace is not offered for the direction (or the request body is malformed).",
         "operationId": "create_goal_api_users__user_id__goal_post",

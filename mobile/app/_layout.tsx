@@ -24,6 +24,10 @@ import {
 } from '@/state/onboardingComplete';
 import { isProfileComplete } from '@/state/onboarding';
 import {
+  GoalDirectionProvider,
+  useGoalDirectionController,
+} from '@/state/goalDirection';
+import {
   SessionProvider,
   toApiSession,
   useSessionController,
@@ -66,6 +70,7 @@ function ThemedStatusBar() {
 function AuthGate() {
   const { status: connectionStatus, connection } = useConnection();
   const { status: sessionStatus, session } = useSessionController();
+  const { clearGoalDirection } = useGoalDirectionController();
   const segments = useSegments();
   const router = useRouter();
   const navState = useRootNavigationState();
@@ -132,6 +137,9 @@ function AuthGate() {
       // Signed out: clear the module-level flag and reset the segment ref.
       // No setState needed — onboardingStatus derives to 'checking' when userId is null.
       clearOnboardingComplete();
+      // A different account may sign in next; never carry a stale goal
+      // direction across accounts (state/goalDirection.tsx).
+      clearGoalDirection();
       prevAtOnboardingRef.current = false;
       return;
     }
@@ -147,7 +155,7 @@ function AuthGate() {
     if (checkedForUserId !== userId || justLeftOnboarding) {
       void checkOnboarding(userId);
     }
-  }, [session?.userId, atOnboarding, checkOnboarding, checkedForUserId]);
+  }, [session?.userId, atOnboarding, checkOnboarding, checkedForUserId, clearGoalDirection]);
 
   useEffect(() => {
     // Wait until the root navigator is mounted before navigating.
@@ -188,7 +196,8 @@ function AuthGate() {
  * weight). StatusBar style is resolved from the active theme. `ConnectionProvider`
  * hydrates the persisted server connection on launch; `SessionProvider` hydrates
  * the persisted session; `AppearanceProvider` hydrates the Light / Dark / System
- * preference.
+ * preference; `GoalDirectionProvider` holds the session-scoped goal direction
+ * (state/goalDirection.tsx) that Settings/Onboarding set and Trends reads.
  */
 export default function RootLayout() {
   const e2e = isE2EMode();
@@ -196,11 +205,13 @@ export default function RootLayout() {
     <AppearanceProvider>
       <ConnectionProvider store={e2e ? e2eConnectionStore : undefined}>
         <SessionProvider store={e2e ? e2eSessionStore : undefined}>
-          <SafeAreaProvider>
-            <ThemedStatusBar />
-            <AuthGate />
-            <Stack screenOptions={{ headerShown: false }} />
-          </SafeAreaProvider>
+          <GoalDirectionProvider>
+            <SafeAreaProvider>
+              <ThemedStatusBar />
+              <AuthGate />
+              <Stack screenOptions={{ headerShown: false }} />
+            </SafeAreaProvider>
+          </GoalDirectionProvider>
         </SessionProvider>
       </ConnectionProvider>
     </AppearanceProvider>

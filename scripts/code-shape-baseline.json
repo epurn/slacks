@@ -38,8 +38,8 @@
     "mobile/components/OnboardingScreen.tsx": {
       "kind": "source",
       "lane": "mobile",
-      "lines": 982,
-      "reason": "Existing over-threshold first-party source file at FTY-200 baseline."
+      "lines": 986,
+      "reason": "Existing over-threshold first-party source file at FTY-200 baseline; +4 in FTY-189 publishing the created goal's direction to the cross-screen goalDirection controller so Trends' headline delta can be goal-aware."
     },
     "mobile/components/SettingsScreen.test.tsx": {
       "kind": "test",
@@ -50,8 +50,14 @@
     "mobile/components/SettingsScreen.tsx": {
       "kind": "source",
       "lane": "mobile",
-      "lines": 1987,
-      "reason": "Existing over-threshold first-party source file at FTY-200 baseline."
+      "lines": 1991,
+      "reason": "Existing over-threshold first-party source file at FTY-200 baseline; +4 in FTY-189 publishing the saved goal's direction to the cross-screen goalDirection controller so Trends' headline delta can be goal-aware."
+    },
+    "mobile/components/TrendsScreen.test.tsx": {
+      "kind": "test",
+      "lane": "mobile",
+      "lines": 1328,
+      "reason": "FTY-189 adds coverage for the goal-aware headline delta (color + narration across loss/gain/maintain, plus the unknown/no-goal-this-session case rendering neutral rather than a guessed default), range prose, human-formatted dates, and the non-color adherence cue, crossing the 1000-line test threshold; +54 in the FTY-189 review fix for the live-path test that mounts the real screen inside a session + GoalDirectionProvider hydrated from the authoritative GET /goal read, proving a returning user's existing goal colors the delta with no in-session set."
     },
     "mobile/components/TodayScreen.test.tsx": {
       "kind": "test",

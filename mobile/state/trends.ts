@@ -8,6 +8,7 @@
 
 import type { WeightEntryDTO } from "@/api/weightEntries";
 import type { DailySummaryDTO } from "@/api/dailySummary";
+import type { GoalDirection } from "@/api/goals";
 import type { UnitsPreference } from "@/state/profile";
 import {
   kgToDisplay,
@@ -59,21 +60,41 @@ export type DateRangeKey = "1M" | "3M" | "6M";
 
 export interface DateRangeOption {
   readonly key: DateRangeKey;
+  /** Visible chip label — human prose, never the raw range key ("1M"/"3M"/"6M"). */
   readonly label: string;
+  /** Spoken label for the toggle — prose, never the raw range key. */
+  readonly accessibilityLabel: string;
   readonly days: number;
 }
 
-/** Configurable range list — add new options here without a contract change. */
+/**
+ * Configurable range list — add new options here without a contract change.
+ * `key` is the internal/test-ID identifier; `label`/`accessibilityLabel` are the
+ * user-facing prose and must never expose the raw key (ux-design §4b, FTY-189).
+ */
 export const DATE_RANGE_OPTIONS: readonly DateRangeOption[] = [
-  { key: "1M", label: "1M", days: 30 },
-  { key: "3M", label: "3M", days: 90 },
-  { key: "6M", label: "6M", days: 180 },
+  { key: "1M", label: "1 month", accessibilityLabel: "Last month", days: 30 },
+  { key: "3M", label: "3 months", accessibilityLabel: "Last 3 months", days: 90 },
+  { key: "6M", label: "6 months", accessibilityLabel: "Last 6 months", days: 180 },
 ];
 
 export const DEFAULT_DATE_RANGE: DateRangeKey = "1M";
 
 export function rangeDays(key: DateRangeKey): number {
   return DATE_RANGE_OPTIONS.find((r) => r.key === key)!.days;
+}
+
+/** Prose for a range key, e.g. "this month" / "these three months". Used by
+ * both the visible headline delta and its accessibility label so neither ever
+ * leaks a raw range key ("1M"/"3M"/"6M") into user-facing copy. */
+const RANGE_PROSE: Record<DateRangeKey, string> = {
+  "1M": "this month",
+  "3M": "these three months",
+  "6M": "these six months",
+};
+
+export function rangeProse(range: DateRangeKey): string {
+  return RANGE_PROSE[range];
 }
 
 /** Compute the from/to date strings for a range, relative to today. */
@@ -138,6 +159,35 @@ export function computeHeadlineDelta(
   const direction: "↑" | "↓" | "→" =
     delta > 0.05 ? "↑" : delta < -0.05 ? "↓" : "→";
   return { current, delta, unit, direction };
+}
+
+/** How the headline delta relates to the user's goal: colored/narrated accordingly. */
+export type DeltaGoalState = "toward" | "away" | "neutral";
+
+/**
+ * Classify a headline delta against the goal direction (ux-design §4b,
+ * FTY-189): a change *toward* the goal reads positive, a change *away* reads
+ * as a warning, and a stable trend is always neutral regardless of goal.
+ * `maintain` has no directional target, so any real drift (any non-"→" arrow —
+ * `computeHeadlineDelta` already zeroes out sub-0.05 noise into "→") counts as
+ * away from goal; only a genuinely stable trend is neutral.
+ *
+ * When the goal direction is **unknown** (`null` — e.g. a cold launch before
+ * Settings/Onboarding has reported one this session; there is no `GET /goal`
+ * read model to hydrate it from — see state/goalDirection.tsx), the delta is
+ * neutral: with no authoritative direction we neither celebrate nor warn, so a
+ * returning gain/maintain user is never mis-colored "away" by a guessed `loss`
+ * default. The delta still shows the real magnitude and arrow, just without a
+ * toward/away claim.
+ */
+export function resolveDeltaGoalState(
+  direction: HeadlineDelta["direction"],
+  goal: GoalDirection | null,
+): DeltaGoalState {
+  if (direction === "→" || goal === null) return "neutral";
+  if (goal === "maintain") return "away";
+  const goodArrow = goal === "gain" ? "↑" : "↓";
+  return direction === goodArrow ? "toward" : "away";
 }
 
 /**

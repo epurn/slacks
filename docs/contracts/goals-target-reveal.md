@@ -26,7 +26,9 @@ backend-core / contracts lane (`backend/app/routers/goals.py`,
 
 ## Version
 
-1 (introduced in FTY-106).
+2. v1 introduced the write (`POST /goal`) in FTY-106; v2 adds the read-only
+`GET /goal` active-goal-direction read model in FTY-189 (additive, no change to
+the write path).
 
 ## Inputs
 
@@ -44,6 +46,19 @@ every access. Request body (`GoalTargetRequest`, `extra="forbid"`):
 
 Free-form numeric rates are **not** accepted — only the enumerated safe presets —
 so an unsafe rate is structurally impossible at the boundary.
+
+### `GET /api/users/{user_id}/goal`
+
+Authenticated (bearer token); the `{user_id}` path is explicit and checked on
+every access. No request body. Returns the **direction** of the caller's current
+active goal so a returning user's Trends weight delta can be coloured by progress
+toward the goal after a cold launch — the only authoritative source of the
+direction, since neither the daily-summary nor the target read-model carries it.
+
+A goal has no stored `direction` column; the direction is **recovered** from the
+persisted trajectory: `target_weight_kg > start_weight_kg` → `gain`,
+`target_weight_kg < start_weight_kg` → `loss`, equal → `maintain` (the exact
+`maintain` path always yields `target == start`).
 
 ### Pace presets and the evidence-based bands
 
@@ -98,6 +113,13 @@ inputs → identical persisted goal and target.
   `calories` is that boundary value, honestly flagged — not presented as the
   achievable plan.
 
+### `GET /api/users/{user_id}/goal`
+
+`200 OK` with `ActiveGoalDirection`: `{ "direction": "loss" | "gain" | "maintain" }`
+— the single recovered direction, nothing else. No weight, RMR, TDEE, or target
+number is exposed. When the caller has no active goal, the response is `404`
+(fail closed; indistinguishable from a cross-user attempt — no existence oracle).
+
 ### Side effects
 
 - Creating a goal **deactivates any prior active goal** (`is_active = False`) and
@@ -139,6 +161,7 @@ they live until the goal is replaced/edited or the account is deleted
 | Condition | Status |
 | --- | --- |
 | Cross-user / unowned `{user_id}` | `404` (fail closed, no oracle) |
+| `GET /goal` when the caller has no active goal | `404` (fail closed, no oracle) |
 | Incomplete profile (no resolvable weight, missing height/birth year, or formula still the unspecified `mifflin_st_jeor` family default) | `409` (complete the profile first; non-leaking) |
 | `loss`/`gain` without a pace, `faster` for `gain` | `422` |
 | Malformed body (bad enum, out-of-range weight, unknown field, free-form rate) | `422` |

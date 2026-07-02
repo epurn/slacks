@@ -1,5 +1,6 @@
 import {
   formatDate,
+  formatHumanDate,
   kgToDisplay,
   parseWeightInput,
   subtractDays,
@@ -87,5 +88,32 @@ describe("subtractDays", () => {
     const from = new Date(2026, 5, 27);
     subtractDays(from, 10);
     expect(formatDate(from)).toBe("2026-06-27");
+  });
+});
+
+describe("formatHumanDate", () => {
+  it("renders the same day as 'Today'", () => {
+    expect(formatHumanDate("2026-07-01", "2026-07-01")).toBe("Today");
+  });
+
+  it("renders the day before as 'Yesterday'", () => {
+    expect(formatHumanDate("2026-06-30", "2026-07-01")).toBe("Yesterday");
+  });
+
+  it("renders an earlier day this year as 'Month Day'", () => {
+    expect(formatHumanDate("2026-06-01", "2026-07-02")).toBe("June 1");
+  });
+
+  it("renders a single-digit day without zero-padding", () => {
+    expect(formatHumanDate("2026-01-05", "2026-07-02")).toBe("January 5");
+  });
+
+  it("handles the year boundary: yesterday of Jan 1 is Dec 31", () => {
+    expect(formatHumanDate("2025-12-31", "2026-01-01")).toBe("Yesterday");
+  });
+
+  it("never returns a raw ISO date string", () => {
+    const result = formatHumanDate("2026-06-15", "2026-07-02");
+    expect(result).not.toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });

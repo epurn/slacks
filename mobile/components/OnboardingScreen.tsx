@@ -61,6 +61,7 @@ import {
   type ProfileFormErrors,
   type UnitsPreference,
 } from '@/state/profile';
+import { useGoalDirectionController } from '@/state/goalDirection';
 import type { Session } from '@/state/session';
 import { toApiSession } from '@/state/session';
 import {
@@ -104,6 +105,7 @@ export function OnboardingScreen({
 }: OnboardingScreenProps) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const goalDirectionController = useGoalDirectionController();
 
   // ── Step tracking ──────────────────────────────────────────────────────────
   const [step, setStep] = useState<OnboardingStep>(1);
@@ -224,6 +226,7 @@ export function OnboardingScreen({
       const goalResponse = await createGoalFn(apiSession, goalPayload);
 
       setReveal(goalResponse);
+      goalDirectionController.setGoalDirection(goalResponse.target.direction);
 
       // Fade in the reveal card.
       revealOpacity.setValue(0);
@@ -253,6 +256,7 @@ export function OnboardingScreen({
     putProfileFn,
     currentYearFn,
     revealOpacity,
+    goalDirectionController,
   ]);
 
   // ─────────────────────────────────────────────────────────────────────────

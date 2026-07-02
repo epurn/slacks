@@ -21,7 +21,7 @@ import {
 } from "@/api/weightEntries";
 import { WeightEntryInput } from "@/components/WeightEntryInput";
 import type { UnitsPreference } from "@/state/profile";
-import { kgToDisplay } from "@/state/weightEntries";
+import { formatHumanDate, kgToDisplay } from "@/state/weightEntries";
 import type { ApiSession } from "@/state/session";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
 
@@ -116,7 +116,7 @@ export function WeightLogSheet({
         </View>
 
         <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>
-          {today}
+          {formatHumanDate(today, today)}
         </Text>
 
         <View

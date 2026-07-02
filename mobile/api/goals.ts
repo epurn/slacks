@@ -30,6 +30,19 @@ export type PacePreset = 'gentle' | 'steady' | 'faster';
 /** One independently overridable target key. */
 export type OverridableTargetKey = 'calories' | 'protein' | 'carbs' | 'fat';
 
+/**
+ * The direction of the caller's current active goal (`GET /goal`, FTY-189).
+ *
+ * The single authoritative source of a returning user's goal direction: neither
+ * the daily-summary nor the target read-model carries it, and the in-memory
+ * cross-screen seam only knows a direction created/edited *this* session. Trends
+ * reads this on mount so an existing goal colours the weight delta by progress
+ * toward the goal after a cold launch instead of reading as neutral.
+ */
+export interface ActiveGoalDirection {
+  readonly direction: GoalDirection;
+}
+
 /** Persisted goal representation returned by the goal endpoint. */
 export interface GoalDTO {
   readonly id: string;
@@ -126,6 +139,38 @@ export async function createGoal(
       fetchImpl,
     },
   );
+}
+
+/**
+ * Read the direction of the caller's current active goal, or `null` when there
+ * is none (FTY-189). A `404` — the fail-closed "no active goal" (or cross-user)
+ * response — is mapped to `null` rather than thrown: an absent goal is an
+ * expected state (a user who has not set one), and the caller treats `null` as an
+ * unknown/neutral direction, never a guessed default. Any other status still
+ * throws a `GoalsApiError`.
+ */
+export async function getActiveGoalDirection(
+  session: GoalsSession,
+  fetchImpl: typeof fetch = fetch,
+): Promise<GoalDirection | null> {
+  try {
+    const model = await request<ActiveGoalDirection>(
+      userScopedUrl(session, 'goal'),
+      {
+        method: 'GET',
+        headers: authHeaders(session),
+        action: 'load your goal',
+        onError: goalsError,
+        fetchImpl,
+      },
+    );
+    return model.direction;
+  } catch (error) {
+    if (error instanceof GoalsApiError && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 /**

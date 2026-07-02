@@ -212,6 +212,37 @@ def create_goal_with_target(
     return goal, target
 
 
+def direction_of(goal: Goal) -> GoalDirection:
+    """Recover a goal's direction from its persisted trajectory (FTY-189).
+
+    A goal has no stored ``direction`` column — it is a pure function of the start
+    vs. target weight the trajectory was derived from: ``target > start`` is a
+    ``gain`` plan, ``target < start`` a ``loss`` plan, and ``target == start`` (the
+    exact ``maintain`` path in :func:`derive_trajectory`) a ``maintain`` plan.
+    """
+
+    if goal.target_weight_kg > goal.start_weight_kg:
+        return GoalDirection.GAIN
+    if goal.target_weight_kg < goal.start_weight_kg:
+        return GoalDirection.LOSS
+    return GoalDirection.MAINTAIN
+
+
+def read_active_goal(session: Session, owner_id: uuid.UUID, current_user: User) -> Goal | None:
+    """Return the caller's single active goal, or ``None`` when there is none.
+
+    Object-level authorized and fail-closed: a caller may only read *their own*
+    active goal. Raises :class:`GoalForbidden` on cross-user access (the router
+    maps both that and "no active goal" to ``404`` so the two are indistinguishable
+    — no existence oracle, exactly as goal creation fails closed).
+    """
+
+    _authorize(owner_id, current_user)
+    return session.scalars(
+        select(Goal).where(Goal.user_id == owner_id, Goal.is_active.is_(True))
+    ).one_or_none()
+
+
 def build_goal_target_response(
     goal: Goal, target: DailyTarget, direction: GoalDirection
 ) -> GoalTargetResponse:

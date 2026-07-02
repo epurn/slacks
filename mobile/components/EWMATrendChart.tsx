@@ -17,7 +17,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-nati
 
 import type { WeightEntryDTO } from "@/api/weightEntries";
 import type { UnitsPreference } from "@/state/profile";
-import { kgToDisplay, weightUnitLabel } from "@/state/weightEntries";
+import { formatHumanDate, kgToDisplay, weightUnitLabel } from "@/state/weightEntries";
 import { useTheme } from "@/theme";
 
 const CHART_H = 180;
@@ -34,6 +34,8 @@ interface EWMATrendChartProps {
   loading: boolean;
   error: string | null;
   onRetry?: () => void;
+  /** Today as `YYYY-MM-DD`; used to human-format user-facing axis/summary dates. */
+  today: string;
   /**
    * Canvas width from parent's onLayout. Pass 0 when unmeasured;
    * the chart is hidden until a positive width arrives.
@@ -48,6 +50,7 @@ export function EWMATrendChart({
   loading,
   error,
   onRetry,
+  today,
   width,
 }: EWMATrendChartProps) {
   const { colors } = useTheme();
@@ -98,7 +101,7 @@ export function EWMATrendChart({
 
   const rawDisplay = entries.map((e) => kgToDisplay(e.weight_kg, unitsPreference));
   const ewmaDisplay = ewmaKg.map((v) => kgToDisplay(v, unitsPreference));
-  const summaryLabel = buildSummary(entries, rawDisplay, ewmaDisplay, unit);
+  const summaryLabel = buildSummary(entries, ewmaDisplay, unit, today);
 
   if (entries.length === 1) {
     return (
@@ -111,7 +114,7 @@ export function EWMATrendChart({
           {`${ewmaDisplay[0]} ${unit}`}
         </Text>
         <Text style={[styles.singleDate, { color: colors.textSecondary }]}>
-          {entries[0]!.effective_date}
+          {formatHumanDate(entries[0]!.effective_date, today)}
         </Text>
       </View>
     );
@@ -126,6 +129,7 @@ export function EWMATrendChart({
           ewmaDisplay={ewmaDisplay}
           width={width}
           unit={unit}
+          today={today}
           colors={colors}
         />
       ) : (
@@ -137,12 +141,12 @@ export function EWMATrendChart({
 
 function buildSummary(
   entries: readonly WeightEntryDTO[],
-  rawDisplay: number[],
   ewmaDisplay: number[],
   unit: string,
+  today: string,
 ): string {
   if (entries.length === 1) {
-    return `Weight trend: ${ewmaDisplay[0]} ${unit} on ${entries[0]!.effective_date}`;
+    return `Weight trend: ${ewmaDisplay[0]} ${unit} on ${formatHumanDate(entries[0]!.effective_date, today)}`;
   }
   const first = entries[0]!;
   const last = entries[entries.length - 1]!;
@@ -152,7 +156,7 @@ function buildSummary(
   const dir = delta > 0 ? "up" : delta < 0 ? "down" : "stable";
   return (
     `Smoothed weight trend: ${entries.length} readings from ` +
-    `${first.effective_date} to ${last.effective_date}. ` +
+    `${formatHumanDate(first.effective_date, today)} to ${formatHumanDate(last.effective_date, today)}. ` +
     `Trend moved ${dir} by ${Math.abs(delta)} ${unit}. ` +
     `Current smoothed value: ${currentTrend} ${unit}.`
   );
@@ -171,6 +175,7 @@ function ChartCanvas({
   ewmaDisplay,
   width,
   unit,
+  today,
   colors,
 }: {
   entries: readonly WeightEntryDTO[];
@@ -178,6 +183,7 @@ function ChartCanvas({
   ewmaDisplay: number[];
   width: number;
   unit: string;
+  today: string;
   colors: CanvasColors;
 }) {
   const plotW = width - PAD.left - PAD.right;
@@ -308,7 +314,7 @@ function ChartCanvas({
         ]}
         numberOfLines={1}
       >
-        {entries[0]!.effective_date}
+        {formatHumanDate(entries[0]!.effective_date, today)}
       </Text>
       <Text
         style={[
@@ -322,7 +328,7 @@ function ChartCanvas({
         ]}
         numberOfLines={1}
       >
-        {entries[n - 1]!.effective_date}
+        {formatHumanDate(entries[n - 1]!.effective_date, today)}
       </Text>
     </View>
   );

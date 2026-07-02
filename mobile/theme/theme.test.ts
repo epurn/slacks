@@ -163,3 +163,41 @@ describe('darkPalette — WCAG AA token contrast on surface', () => {
     ).toBeGreaterThanOrEqual(WCAG_AA);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Trends headline delta + adherence cue — WCAG AA (FTY-189)
+//
+// The goal-aware headline delta (TrendsScreen.tsx) renders as `accentText`
+// (already covered above — the "toward goal" state), `coral` (the "away from
+// goal" state), or `textSecondary` (already covered — the neutral state), all
+// as body text on `surface`. The adherence strip's off-target cue
+// (AdherenceStrip.tsx) is a `surface`-colored ring on a `coral` fill — a
+// graphical (non-text) distinguishing mark, so it is held to the WCAG 1.4.11
+// non-text 3:1 threshold rather than the 4.5:1 text threshold.
+// ---------------------------------------------------------------------------
+
+const WCAG_NON_TEXT = 3;
+
+describe('lightPalette — WCAG AA: headline delta "away from goal" state', () => {
+  it('coral (#C0392B) on surface (#F2F2F7) meets 4.5:1', () => {
+    expect(contrastRatio(lightPalette.coral, lightPalette.surface)).toBeGreaterThanOrEqual(WCAG_AA);
+  });
+});
+
+describe('darkPalette — WCAG AA: headline delta "away from goal" state', () => {
+  it('coral (#FF6B6B) on surface (#1C1C1E) meets 4.5:1', () => {
+    expect(contrastRatio(darkPalette.coral, darkPalette.surface)).toBeGreaterThanOrEqual(WCAG_AA);
+  });
+});
+
+describe('lightPalette — WCAG AA: off-target adherence cue (non-color ring)', () => {
+  it('surface ring (#F2F2F7) on the coral off-target fill meets 3:1', () => {
+    expect(contrastRatio(lightPalette.surface, lightPalette.coral)).toBeGreaterThanOrEqual(WCAG_NON_TEXT);
+  });
+});
+
+describe('darkPalette — WCAG AA: off-target adherence cue (non-color ring)', () => {
+  it('surface ring (#1C1C1E) on the coral off-target fill meets 3:1', () => {
+    expect(contrastRatio(darkPalette.surface, darkPalette.coral)).toBeGreaterThanOrEqual(WCAG_NON_TEXT);
+  });
+});

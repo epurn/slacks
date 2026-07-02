@@ -5,6 +5,9 @@ import type { WeightEntryDTO } from "@/api/weightEntries";
 import { computeEWMAFromEntries } from "@/state/trends";
 
 const TEST_WIDTH = 320;
+// A fixed "today" well after every fixture date, so all dates human-format to
+// "{Month} {Day}" (never "Today"/"Yesterday") for stable assertions.
+const TEST_TODAY = "2026-07-01";
 
 function entry(
   id: string,
@@ -56,6 +59,7 @@ describe("EWMATrendChart — loading", () => {
         unitsPreference="metric"
         loading
         error={null}
+        today={TEST_TODAY}
         width={TEST_WIDTH}
       />,
     );
@@ -79,6 +83,7 @@ describe("EWMATrendChart — error", () => {
         unitsPreference="metric"
         loading={false}
         error="Could not load trend"
+        today={TEST_TODAY}
         width={TEST_WIDTH}
       />,
     );
@@ -97,6 +102,7 @@ describe("EWMATrendChart — error", () => {
         loading={false}
         error="Error"
         onRetry={onRetry}
+        today={TEST_TODAY}
         width={TEST_WIDTH}
       />,
     );
@@ -121,6 +127,7 @@ describe("EWMATrendChart — empty", () => {
         unitsPreference="metric"
         loading={false}
         error={null}
+        today={TEST_TODAY}
         width={TEST_WIDTH}
       />,
     );
@@ -144,12 +151,15 @@ describe("EWMATrendChart — single point", () => {
         unitsPreference="metric"
         loading={false}
         error={null}
+        today={TEST_TODAY}
         width={TEST_WIDTH}
       />,
     );
     expect(textContent(tree)).toContain("70");
     expect(textContent(tree)).toContain("kg");
-    expect(textContent(tree)).toContain("2026-06-27");
+    // User-facing date is human-formatted, never raw ISO (FTY-189).
+    expect(textContent(tree)).toContain("June 27");
+    expect(textContent(tree)).not.toContain("2026-06-27");
   });
 
   it("converts to lb for imperial users", () => {
@@ -160,6 +170,7 @@ describe("EWMATrendChart — single point", () => {
         unitsPreference="imperial"
         loading={false}
         error={null}
+        today={TEST_TODAY}
         width={TEST_WIDTH}
       />,
     );
@@ -175,12 +186,14 @@ describe("EWMATrendChart — single point", () => {
         unitsPreference="metric"
         loading={false}
         error={null}
+        today={TEST_TODAY}
         width={TEST_WIDTH}
       />,
     );
     const img = tree.root.find((n) => n.props.accessibilityRole === "image");
     expect(img.props.accessibilityLabel).toBeTruthy();
-    expect(img.props.accessibilityLabel).toContain("2026-06-27");
+    expect(img.props.accessibilityLabel).toContain("June 27");
+    expect(img.props.accessibilityLabel).not.toContain("2026-06-27");
   });
 
   it("renders without crash for sparse single-point range (no startup artifact)", () => {
@@ -192,6 +205,7 @@ describe("EWMATrendChart — single point", () => {
           unitsPreference="metric"
           loading={false}
           error={null}
+          today={TEST_TODAY}
           width={TEST_WIDTH}
         />,
       ),
@@ -212,6 +226,7 @@ describe("EWMATrendChart — multiple entries", () => {
         unitsPreference="metric"
         loading={false}
         error={null}
+        today={TEST_TODAY}
         width={TEST_WIDTH}
       />,
     );
@@ -236,6 +251,7 @@ describe("EWMATrendChart — multiple entries", () => {
         unitsPreference="metric"
         loading={false}
         error={null}
+        today={TEST_TODAY}
         width={TEST_WIDTH}
       />,
     );
@@ -259,6 +275,7 @@ describe("EWMATrendChart — multiple entries", () => {
         unitsPreference="metric"
         loading={false}
         error={null}
+        today={TEST_TODAY}
         width={TEST_WIDTH}
       />,
     );
@@ -266,8 +283,10 @@ describe("EWMATrendChart — multiple entries", () => {
     const label = img.props.accessibilityLabel as string;
     // Must describe the trend, not just the number
     expect(label).toContain("trend");
-    expect(label).toContain("2026-06-01");
-    expect(label).toContain("2026-06-20");
+    // Dates read as human prose, never raw ISO (FTY-189).
+    expect(label).toContain("June 1");
+    expect(label).toContain("June 20");
+    expect(label).not.toContain("2026-06-01");
   });
 
   it("does not render the chart canvas when width is 0 (unmeasured)", () => {
@@ -278,6 +297,7 @@ describe("EWMATrendChart — multiple entries", () => {
         unitsPreference="metric"
         loading={false}
         error={null}
+        today={TEST_TODAY}
         width={0}
       />,
     );
@@ -297,6 +317,7 @@ describe("EWMATrendChart — multiple entries", () => {
         unitsPreference="metric"
         loading={false}
         error={null}
+        today={TEST_TODAY}
         width={TEST_WIDTH}
       />,
     );
@@ -327,6 +348,7 @@ describe("EWMATrendChart — trend smoothing render", () => {
           unitsPreference="metric"
           loading={false}
           error={null}
+          today={TEST_TODAY}
           width={TEST_WIDTH}
         />,
       ),

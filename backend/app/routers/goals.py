@@ -25,7 +25,11 @@ from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.deps import CurrentUser
-from app.schemas.goals import GoalTargetRequest, GoalTargetResponse
+from app.schemas.goals import (
+    ActiveGoalDirection,
+    GoalTargetRequest,
+    GoalTargetResponse,
+)
 from app.services import goals as goals_service
 from app.services.goals import InvalidPace
 from app.services.targets import GoalForbidden, IncompleteProfileError
@@ -71,3 +75,28 @@ def create_goal(
             detail="profile must be completed before a target can be computed",
         ) from exc
     return goals_service.build_goal_target_response(goal, target, payload.direction)
+
+
+@router.get("/{user_id}/goal", response_model=ActiveGoalDirection)
+def read_active_goal_direction(
+    user_id: uuid.UUID,
+    current_user: CurrentUser,
+    session: Annotated[Session, Depends(get_session)],
+) -> ActiveGoalDirection:
+    """Read the direction of the caller's active goal (FTY-189).
+
+    Trends colours the weight delta by progress toward the goal, so it needs the
+    active goal's direction for a returning user after a cold launch — the only
+    authoritative source, since no read-model otherwise carries it. Fails closed
+    ``404`` on cross-user access *and* when the caller simply has no active goal:
+    the two are indistinguishable (no existence oracle). The recovered direction
+    is the only field returned; no weight/target number is exposed or logged.
+    """
+
+    try:
+        goal = goals_service.read_active_goal(session, user_id, current_user)
+    except GoalForbidden as exc:
+        raise _NOT_FOUND from exc
+    if goal is None:
+        raise _NOT_FOUND
+    return ActiveGoalDirection(direction=goals_service.direction_of(goal))

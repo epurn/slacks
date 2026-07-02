@@ -12,6 +12,8 @@ import {
   DEFAULT_DATE_RANGE,
   rangeDays,
   rangeBounds,
+  rangeProse,
+  resolveDeltaGoalState,
   buildDayRange,
 } from "./trends";
 
@@ -146,6 +148,13 @@ describe("DATE_RANGE_OPTIONS", () => {
     expect(keys).toContain("1M");
     expect(keys).toContain("3M");
     expect(keys).toContain("6M");
+  });
+
+  it("never exposes a raw range key in a visible or spoken label (FTY-189)", () => {
+    for (const opt of DATE_RANGE_OPTIONS) {
+      expect(opt.label).not.toMatch(/\b[136]M\b/);
+      expect(opt.accessibilityLabel).not.toMatch(/\b[136]M\b/);
+    }
   });
 });
 
@@ -377,5 +386,63 @@ describe("computeAdherence", () => {
   it("days array length equals allDates length", () => {
     const result = computeAdherence([], allDates);
     expect(result.days).toHaveLength(allDates.length);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Range prose (FTY-189)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("rangeProse", () => {
+  it("maps 1M to 'this month'", () => {
+    expect(rangeProse("1M")).toBe("this month");
+  });
+
+  it("maps 3M to 'these three months'", () => {
+    expect(rangeProse("3M")).toBe("these three months");
+  });
+
+  it("maps 6M to 'these six months'", () => {
+    expect(rangeProse("6M")).toBe("these six months");
+  });
+
+  it("never contains a raw range key for any option", () => {
+    for (const opt of DATE_RANGE_OPTIONS) {
+      const prose = rangeProse(opt.key);
+      expect(prose).not.toMatch(/\b[136]M\b/);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Goal-aware delta state (FTY-189)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("resolveDeltaGoalState", () => {
+  it("a stable trend ('→') is always neutral, regardless of goal", () => {
+    expect(resolveDeltaGoalState("→", "loss")).toBe("neutral");
+    expect(resolveDeltaGoalState("→", "gain")).toBe("neutral");
+    expect(resolveDeltaGoalState("→", "maintain")).toBe("neutral");
+  });
+
+  it("loss goal: a decrease is toward, an increase is away", () => {
+    expect(resolveDeltaGoalState("↓", "loss")).toBe("toward");
+    expect(resolveDeltaGoalState("↑", "loss")).toBe("away");
+  });
+
+  it("gain goal: an increase is toward, a decrease is away", () => {
+    expect(resolveDeltaGoalState("↑", "gain")).toBe("toward");
+    expect(resolveDeltaGoalState("↓", "gain")).toBe("away");
+  });
+
+  it("maintain goal: any real drift (up or down) is away", () => {
+    expect(resolveDeltaGoalState("↑", "maintain")).toBe("away");
+    expect(resolveDeltaGoalState("↓", "maintain")).toBe("away");
+  });
+
+  it("unknown goal direction (null) is neutral — no toward/away claim, never a guessed default", () => {
+    expect(resolveDeltaGoalState("↓", null)).toBe("neutral");
+    expect(resolveDeltaGoalState("↑", null)).toBe("neutral");
+    expect(resolveDeltaGoalState("→", null)).toBe("neutral");
   });
 });

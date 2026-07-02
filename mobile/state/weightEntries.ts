@@ -55,3 +55,39 @@ export function subtractDays(from: Date, days: number): Date {
   result.setDate(result.getDate() - days);
   return result;
 }
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+] as const;
+
+/**
+ * Human-format a `YYYY-MM-DD` calendar date for user-facing display: "Today" /
+ * "Yesterday" relative to `todayStr` (also `YYYY-MM-DD`), else "{Month} {Day}"
+ * (e.g. "June 1", no year — Trends ranges never span more than six months).
+ *
+ * Deliberately avoids `toLocaleDateString`/`Intl.DateTimeFormat` for this: both
+ * dates are already resolved calendar days (no timezone left to apply), and a
+ * plain lookup sidesteps the Hermes locale bugs `formatWallClockTime`
+ * (state/today.ts) works around for wall-clock time. Machine date strings (DTO
+ * fields, testIDs) stay ISO — this is presentation only.
+ */
+export function formatHumanDate(dateStr: string, todayStr: string): string {
+  if (dateStr === todayStr) return "Today";
+
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const [ty, tm, td] = todayStr.split("-").map(Number);
+  const date = new Date(y!, m! - 1, d!);
+  const yesterday = new Date(ty!, tm! - 1, td!);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  if (
+    date.getFullYear() === yesterday.getFullYear() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getDate() === yesterday.getDate()
+  ) {
+    return "Yesterday";
+  }
+
+  return `${MONTH_NAMES[m! - 1]} ${d}`;
+}

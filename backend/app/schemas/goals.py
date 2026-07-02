@@ -58,6 +58,23 @@ class GoalDTO(BaseModel):
     updated_at: datetime
 
 
+class ActiveGoalDirection(BaseModel):
+    """The direction of the caller's current active goal (FTY-189 read model).
+
+    A goal stores only its trajectory (``start_weight_kg`` / ``target_weight_kg``),
+    not a direction column, so ``direction`` is **recovered** from that trajectory
+    (``target > start`` → ``gain``, ``target < start`` → ``loss``, equal →
+    ``maintain``). Trends reads this to color the weight delta by progress toward
+    the goal rather than "down = good", so a returning user with an existing goal
+    is coloured correctly after a cold launch — no direction is carried in weight,
+    RMR, TDEE, or the calorie target, so this read leaks nothing sensitive.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    direction: GoalDirection
+
+
 class GoalTargetRequest(BaseModel):
     """Create/replace the active goal from a direction + pace preset (FTY-106).
 

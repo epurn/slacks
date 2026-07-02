@@ -1,4 +1,5 @@
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { TrendsScreen } from "./TrendsScreen";
@@ -8,8 +9,13 @@ import {
 } from "@/api/weightEntries";
 import { DailySummaryApiError } from "@/api/dailySummary";
 import type { DailySummaryDTO, TargetReadModel } from "@/api/dailySummary";
-import type { Session } from "@/state/session";
+import { SessionProvider, type Session, type SessionRecord } from "@/state/session";
+import type { SessionStore } from "@/state/sessionStore";
+import { GoalDirectionProvider } from "@/state/goalDirection";
+import type { GoalDirection } from "@/api/goals";
 import type { CadenceStore, NotificationsAdapter, WeighInCadence } from "@/state/reminderScheduler";
+import { rangeProse, type DateRangeKey } from "@/state/trends";
+import { lightPalette } from "@/theme";
 
 // TrendsScreen now uses ScreenHeader → AppIcon (expo-symbols); stub the native
 // module so tests run without a native runtime.
@@ -75,6 +81,20 @@ function makeSummary(
   };
 }
 
+/** A session store that hydrates the signed-in SESSION for the live-path test. */
+function sessionStore(): SessionStore {
+  let value: SessionRecord | null = { ...SESSION! };
+  return {
+    load: async () => value,
+    save: async (s: SessionRecord) => {
+      value = s;
+    },
+    clear: async () => {
+      value = null;
+    },
+  } satisfies SessionStore;
+}
+
 function mockStore(
   cadence: WeighInCadence = "weekly",
 ): CadenceStore {
@@ -120,6 +140,33 @@ function textContent(tree: ReactTestRenderer): string {
     .findAll((n) => typeof n.props.children === "string")
     .map((n) => n.props.children as string)
     .join(" ");
+}
+
+/** The headline delta `Text` node (e.g. " ↓0.4 this month"). */
+function findHeadlineDeltaNode(tree: ReactTestRenderer) {
+  return tree.root.findAll(
+    (n) =>
+      (n.type as unknown) === "Text" &&
+      typeof n.props.children === "string" &&
+      /[↑↓→]/.test(n.props.children as string),
+  )[0];
+}
+
+/** The resolved `color` style of a rendered node (style is `[base, {color}]`). */
+function styleColor(node: { props: { style?: unknown } }): string | undefined {
+  const style = node.props.style;
+  const arr = Array.isArray(style) ? style : [style];
+  const withColor = arr.find(
+    (s): s is { color: string } =>
+      typeof s === "object" && s !== null && "color" in s,
+  );
+  return withColor?.color;
+}
+
+/** The strip cell's fill `View` (index 1: index 0 is the 44×44 tap-target wrapper). */
+function findCellFillNode(tree: ReactTestRenderer, date: string) {
+  const cell = tree.root.find((n) => n.props.testID === `adherence-cell-${date}`);
+  return cell.findAllByType(View)[1]!;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -950,5 +997,332 @@ describe("TrendsScreen — single-title regression (FTY-151)", () => {
       (n) => n.props.accessibilityLabel === "Open profile",
     );
     expect(gearButtons).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Goal-aware headline delta (FTY-189): color + narration key off the user's
+// goal direction, not "down = good".
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("TrendsScreen — goal-aware headline delta", () => {
+  const DECREASING = [
+    makeEntry("1", 72, "2026-06-01"),
+    makeEntry("2", 70, "2026-06-20"),
+  ];
+  const INCREASING = [
+    makeEntry("1", 70, "2026-06-01"),
+    makeEntry("2", 72, "2026-06-20"),
+  ];
+
+  it("loss goal + a decrease renders accentText and 'toward your goal'", async () => {
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue(DECREASING)}
+        getDailySummaryRange={jest.fn().mockResolvedValue([])}
+        now={NOW}
+        unitsPreference="metric"
+        goalDirection="loss"
+      />,
+    );
+    await act(async () => {});
+
+    const delta = findHeadlineDeltaNode(tree);
+    expect(styleColor(delta)).toBe(lightPalette.accentText);
+    const headline = tree.root.findAll(
+      (n) =>
+        typeof n.props.accessibilityLabel === "string" &&
+        (n.props.accessibilityLabel as string).includes("weight trend"),
+    )[0]!;
+    expect(headline.props.accessibilityLabel).toContain("toward your goal");
+  });
+
+  it("loss goal + an increase renders coral and 'away from your goal'", async () => {
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue(INCREASING)}
+        getDailySummaryRange={jest.fn().mockResolvedValue([])}
+        now={NOW}
+        unitsPreference="metric"
+        goalDirection="loss"
+      />,
+    );
+    await act(async () => {});
+
+    const delta = findHeadlineDeltaNode(tree);
+    expect(styleColor(delta)).toBe(lightPalette.coral);
+    const headline = tree.root.findAll(
+      (n) =>
+        typeof n.props.accessibilityLabel === "string" &&
+        (n.props.accessibilityLabel as string).includes("weight trend"),
+    )[0]!;
+    expect(headline.props.accessibilityLabel).toContain("away from your goal");
+  });
+
+  it("gain goal + an increase renders accentText and 'toward your goal'", async () => {
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue(INCREASING)}
+        getDailySummaryRange={jest.fn().mockResolvedValue([])}
+        now={NOW}
+        unitsPreference="metric"
+        goalDirection="gain"
+      />,
+    );
+    await act(async () => {});
+
+    const delta = findHeadlineDeltaNode(tree);
+    expect(styleColor(delta)).toBe(lightPalette.accentText);
+    const headline = tree.root.findAll(
+      (n) =>
+        typeof n.props.accessibilityLabel === "string" &&
+        (n.props.accessibilityLabel as string).includes("weight trend"),
+    )[0]!;
+    expect(headline.props.accessibilityLabel).toContain("toward your goal");
+  });
+
+  it("gain goal + a decrease renders coral and 'away from your goal' (symmetric to the loss case)", async () => {
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue(DECREASING)}
+        getDailySummaryRange={jest.fn().mockResolvedValue([])}
+        now={NOW}
+        unitsPreference="metric"
+        goalDirection="gain"
+      />,
+    );
+    await act(async () => {});
+
+    const delta = findHeadlineDeltaNode(tree);
+    expect(styleColor(delta)).toBe(lightPalette.coral);
+    const headline = tree.root.findAll(
+      (n) =>
+        typeof n.props.accessibilityLabel === "string" &&
+        (n.props.accessibilityLabel as string).includes("weight trend"),
+    )[0]!;
+    expect(headline.props.accessibilityLabel).toContain("away from your goal");
+  });
+
+  it("maintain goal + any real drift renders coral, not accentText", async () => {
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue(INCREASING)}
+        getDailySummaryRange={jest.fn().mockResolvedValue([])}
+        now={NOW}
+        unitsPreference="metric"
+        goalDirection="maintain"
+      />,
+    );
+    await act(async () => {});
+
+    const delta = findHeadlineDeltaNode(tree);
+    expect(styleColor(delta)).toBe(lightPalette.coral);
+  });
+
+  it("live path: an existing goal hydrated from GET /goal colors the delta with no in-session set", async () => {
+    // The reviewer's core case: a returning user who never touched Settings/
+    // Onboarding this session. The provider hydrates the direction from the
+    // authoritative GET /goal read, so the real mounted screen (reading the live
+    // provider, no injected `goalDirection` prop) colors an increase for a gain
+    // goal as "toward" — not the data-starved neutral it used to show.
+    const reader = jest.fn(async () => "gain" as GoalDirection);
+    const tree = mount(
+      <SessionProvider store={sessionStore()}>
+        <GoalDirectionProvider readActiveGoalDirection={reader}>
+          <TrendsScreen
+            session={SESSION}
+            listWeightEntries={jest.fn().mockResolvedValue(INCREASING)}
+            getDailySummaryRange={jest.fn().mockResolvedValue([])}
+            now={NOW}
+            unitsPreference="metric"
+          />
+        </GoalDirectionProvider>
+      </SessionProvider>,
+    );
+    // Flush session hydration (which the provider's goal read waits on) plus the
+    // screen's own fetches; each resolves on a later tick, so drain a few.
+    for (let i = 0; i < 4; i++) {
+      await act(async () => {});
+    }
+
+    expect(reader).toHaveBeenCalledTimes(1);
+    const delta = findHeadlineDeltaNode(tree);
+    expect(styleColor(delta)).toBe(lightPalette.accentText);
+    const headline = tree.root.findAll(
+      (n) =>
+        typeof n.props.accessibilityLabel === "string" &&
+        (n.props.accessibilityLabel as string).includes("weight trend"),
+    )[0]!;
+    expect(headline.props.accessibilityLabel).toContain("toward your goal");
+  });
+
+  it("unknown goal direction (none reported this session) is neutral, never mis-colored 'away'", async () => {
+    // No `goalDirection` prop and no provider mounted: a returning gain/maintain
+    // user's increase must not be guessed as a loss-goal "away"/coral. With no
+    // authoritative direction reachable the delta is neutral.
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue(INCREASING)}
+        getDailySummaryRange={jest.fn().mockResolvedValue([])}
+        now={NOW}
+        unitsPreference="metric"
+      />,
+    );
+    await act(async () => {});
+
+    const delta = findHeadlineDeltaNode(tree);
+    expect(styleColor(delta)).toBe(lightPalette.textSecondary);
+    expect(styleColor(delta)).not.toBe(lightPalette.coral);
+    const headline = tree.root.findAll(
+      (n) =>
+        typeof n.props.accessibilityLabel === "string" &&
+        (n.props.accessibilityLabel as string).includes("weight trend"),
+    )[0]!;
+    expect(headline.props.accessibilityLabel).not.toContain("toward your goal");
+    expect(headline.props.accessibilityLabel).not.toContain("away from your goal");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Range prose (FTY-189): no raw range key ("3M"/"6M") ever leaks into the
+// headline delta copy or its accessibility label. (The range *selector*'s own
+// "1M"/"3M"/"6M" button labels are the control itself, not prose describing a
+// range — untouched here; restyling that control is FTY-186's scope.)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("TrendsScreen — range prose", () => {
+  it("the headline delta text and its a11y label never contain a raw range key", async () => {
+    const entries = [
+      makeEntry("1", 72, "2026-06-01"),
+      makeEntry("2", 70, "2026-06-20"),
+    ];
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue(entries)}
+        getDailySummaryRange={jest.fn().mockResolvedValue([])}
+        now={NOW}
+        unitsPreference="metric"
+      />,
+    );
+    await act(async () => {});
+
+    // Switch through every range so each one's copy renders at least once.
+    for (const key of ["3M", "6M", "1M"]) {
+      const btn = tree.root.find((n) => n.props.testID === `range-btn-${key}`);
+      act(() => btn.props.onPress());
+      await act(async () => {});
+
+      const delta = findHeadlineDeltaNode(tree);
+      expect(delta.props.children as string).not.toMatch(/\b[136]M\b/);
+      expect(delta.props.children as string).toContain(rangeProse(key as DateRangeKey));
+
+      const headline = tree.root.findAll(
+        (n) =>
+          typeof n.props.accessibilityLabel === "string" &&
+          (n.props.accessibilityLabel as string).includes("weight trend"),
+      )[0]!;
+      expect(headline.props.accessibilityLabel as string).not.toMatch(/\b[136]M\b/);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Human dates (FTY-189): day-cell a11y labels and the weight-sheet date title
+// are human-formatted; no user-facing ISO date string remains.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("TrendsScreen — human dates", () => {
+  it("day-cell accessibility labels are human-formatted, not raw ISO", async () => {
+    const getSum = jest.fn().mockResolvedValue([
+      makeSummary("2026-06-27", 2000, 2000), // today
+      makeSummary("2026-06-26", 500, 2000), // yesterday
+    ]);
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={getSum}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+
+    const today = tree.root.find(
+      (n) => n.props.testID === "adherence-cell-2026-06-27",
+    );
+    const yesterday = tree.root.find(
+      (n) => n.props.testID === "adherence-cell-2026-06-26",
+    );
+    expect(today.props.accessibilityLabel).toBe("Today: on target");
+    expect(yesterday.props.accessibilityLabel).toBe("Yesterday: off target");
+
+    // No cell label anywhere is a raw ISO date.
+    const cellLabels = tree.root
+      .findAll((n) => typeof n.props.testID === "string" && (n.props.testID as string).startsWith("adherence-cell-"))
+      .map((n) => n.props.accessibilityLabel as string);
+    for (const label of cellLabels) {
+      expect(label).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+    }
+  });
+
+  it("the weight-log sheet's date title reads 'Today', not a raw ISO date", async () => {
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+
+    const logBtn = tree.root.find(
+      (n) => n.props.accessibilityLabel === "Log weight",
+    );
+    act(() => logBtn.props.onPress());
+
+    expect(textContent(tree)).toContain("Today");
+    expect(textContent(tree)).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Non-color adherence cue (FTY-189): on-target vs. off-target is
+// distinguishable without color (a redundant shape cue), not color alone.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("TrendsScreen — non-color adherence cue", () => {
+  it("off-target cells carry a border the on-target fill does not", async () => {
+    const getSum = jest.fn().mockResolvedValue([
+      makeSummary("2026-06-26", 2000, 2000), // on-target
+      makeSummary("2026-06-27", 500, 2000), // off-target
+    ]);
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={getSum}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+
+    const onTargetFill = findCellFillNode(tree, "2026-06-26");
+    const offTargetFill = findCellFillNode(tree, "2026-06-27");
+
+    const onStyle = Object.assign({}, ...(onTargetFill.props.style as object[]));
+    const offStyle = Object.assign({}, ...(offTargetFill.props.style as object[]));
+
+    expect(onStyle.borderWidth ?? 0).toBe(0);
+    expect(offStyle.borderWidth).toBeGreaterThan(0);
+    // The fill hue still differs too (redundant, not a replacement).
+    expect(onStyle.backgroundColor).not.toBe(offStyle.backgroundColor);
   });
 });

@@ -4,28 +4,36 @@
  * Renders a horizontal scrollable row of cells, one per day in the range.
  * Each cell shows on-target / off-target / no-target / no-data state.
  *
- * Accessibility: color is never the sole signal — each cell carries an
- * accessibilityLabel and uses shape (filled vs. hollow) alongside color
- * so the strip is readable with VoiceOver and in non-color modes.
+ * Accessibility: color is never the sole signal. Every cell carries an
+ * accessibilityLabel (with a human-formatted date, FTY-189) for VoiceOver, and
+ * on-target vs. off-target — the pair a sighted colorblind user is most likely
+ * to confuse, since both render as a solid fill — carries a redundant
+ * non-color cue too: off-target adds a ringed border so its *shape* differs
+ * from on-target's plain fill, not just its hue. `no-target` keeps its
+ * existing hollow-border shape; `no-data` stays a muted, borderless fill.
  */
 
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 
 import type { AdherenceDay } from "@/state/trends";
+import { formatHumanDate } from "@/state/weightEntries";
 import { useTheme } from "@/theme";
 
 const CELL_W = 10;
 const CELL_H = 24;
 const CELL_R = 3;
 const CELL_GAP = 2;
+const OFF_TARGET_BORDER_W = 2;
 
 interface AdherenceStripProps {
   days: readonly AdherenceDay[];
+  /** Today's date (`YYYY-MM-DD`), for humanizing cell labels ("Today"/"Yesterday"). */
+  today: string;
   /** Called when the user taps a cell to open that day's timeline. */
   onDayPress?: (date: string) => void;
 }
 
-export function AdherenceStrip({ days, onDayPress }: AdherenceStripProps) {
+export function AdherenceStrip({ days, today, onDayPress }: AdherenceStripProps) {
   const { colors } = useTheme();
 
   if (days.length === 0) {
@@ -42,7 +50,7 @@ export function AdherenceStrip({ days, onDayPress }: AdherenceStripProps) {
     >
       {days.map((day) => {
         const cellStyle = resolveCellStyle(day, colors);
-        const label = buildCellLabel(day);
+        const label = buildCellLabel(day, today);
 
         return (
           <Pressable
@@ -64,13 +72,19 @@ export function AdherenceStrip({ days, onDayPress }: AdherenceStripProps) {
 
 function resolveCellStyle(
   day: AdherenceDay,
-  colors: { accent: string; coral: string; textMuted: string; separator: string },
+  colors: { accent: string; coral: string; textMuted: string; separator: string; surface: string },
 ): { backgroundColor: string; borderWidth?: number; borderColor?: string; opacity?: number } {
   switch (day.state) {
     case "on-target":
       return { backgroundColor: colors.accent };
     case "off-target":
-      return { backgroundColor: colors.coral };
+      // Ringed border — a non-color cue distinguishing it from on-target's
+      // plain fill (see the module comment).
+      return {
+        backgroundColor: colors.coral,
+        borderWidth: OFF_TARGET_BORDER_W,
+        borderColor: colors.surface,
+      };
     case "no-target":
       return {
         backgroundColor: "transparent",
@@ -84,8 +98,8 @@ function resolveCellStyle(
   }
 }
 
-function buildCellLabel(day: AdherenceDay): string {
-  const date = day.date;
+function buildCellLabel(day: AdherenceDay, today: string): string {
+  const date = formatHumanDate(day.date, today);
   switch (day.state) {
     case "on-target":
       return `${date}: on target`;
