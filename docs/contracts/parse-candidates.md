@@ -37,16 +37,27 @@ estimator / contracts / backend-core lane:
 
 ## Version
 
+4 (FTY-172): the estimator now **produces** the FTY-170 clarification-with-options
+shape and records schema version `parse/v2`. Model-raised clarification output is
+treated as low-quality and fails closed unless each question has specific
+question text plus 2–5 bounded, display-only candidate options. The old generic
+default-question fallback is retired for provider output; backend-routed
+low-confidence `parsed` samples and deterministic parse plausibility questions
+synthesize targeted amount/duration/unit questions with 2–5 fixed quick-pick
+options. Other non-parse deterministic backend questions (for example
+food/exercise/label gates) still carry targeted text with `options: []` when no
+meaningful quick-pick set exists. The `0017` migration adds the persisted
+`options` column.
+
 3 (FTY-159): **pre-v1 breaking behaviour change** (no shim) — the clarify
 decision becomes the **data-calibrated policy** (ADR 0003 Layer C). The step
 draws N=3 parse samples through the FTY-158 self-consistency sampler (parallel,
 unanimous-first-window early stop) and gates on the **hybrid**
 agreement+verbalized score against a calibrated operating point
 (`app/estimator/clarify_policy.py`), replacing the retired single-call
-`confidence < 0.45` comparison. The `ParseResult` schema and persistence
-schemas are unchanged (`parse/v1` stays recorded on runs until FTY-172 lands
-`parse/v2`); the routing table below is what changed. See "Calibrated clarify
-decision (FTY-159)".
+`confidence < 0.45` comparison. FTY-159 did not change the `ParseResult` schema
+or persistence schemas; the routing table below is what changed. See
+"Calibrated clarify decision (FTY-159)".
 
 2 (FTY-170): **pre-v1 breaking change** (no shim) — the `ParseResult`
 clarification carrier becomes structured: `clarification_questions` changes
@@ -54,7 +65,7 @@ from `list[str]` to a list of `ClarificationQuestion` objects, each carrying
 the specific question `text` plus candidate quick-pick `options` the clarify
 sheet renders as tappable chips (audit finding A2). Schema version string
 `parse/v2`. The `clarification_questions` table gains an `options` column
-(shape specified here; the migration lands with the first producer, FTY-172),
+(shape specified here; the migration landed with the first producer, FTY-172),
 and a fresh clarification round on a re-estimate **replaces** the event's
 unanswered question rows. Consumers landing against the new shape: FTY-172
 (produce), FTY-171 (serve via the clarification read and resolve via the
@@ -97,18 +108,21 @@ sandwiches?") and `options` (candidate quick-pick answer strings; ≤ 5 per
 question, each 1–80 chars). Options are **display candidates** the client
 renders as one-tap chips — never an enum the server validates an answer
 against; free text is always an allowed answer (see `log-events.md`,
-Clarification read / Clarification answer). The estimator produces either no
-options (the client then shows free-text only) or **2–5 meaningful
-candidates** — an FTY-172 prompt requirement; the schema enforces only the
-hard count/length caps, so a reply outside the 2–5 guidance is persisted
-as-is rather than terminally failing the parse.
+Clarification read / Clarification answer). The parse estimator produces **2–5
+meaningful candidates** for model-raised parse clarifications,
+backend-routed low-confidence parsed clarifications, and deterministic parse
+plausibility clarifications. Other backend steps may still produce no options
+for deterministic questions without meaningful quick-pick choices. The schema
+enforces the hard count/length caps; FTY-172's parse producer adds a stricter
+quality gate for provider output, rejecting missing, generic, or under-optioned
+clarification questions before persistence.
 
 String length and list count bounds cap an adversarial or runaway reply.
 
 ### Persistence
 
-The `0005` migration creates three user-owned tables (additive; no prior table is
-altered):
+The `0005` migration creates three user-owned tables, and `0017` adds
+clarification quick-pick options (additive; no prior user data is required):
 
 - **`derived_food_items`** / **`derived_exercise_items`** — one row per parsed
   candidate. Columns: `id` (UUID PK), `log_event_id` (FK → `log_events.id`,
@@ -121,12 +135,12 @@ altered):
   `log_event_id` (FK, cascade, indexed), `user_id` (FK, cascade, indexed),
   `question_text`, `options` (JSON array of strings, not null, default `[]` —
   the question's quick-pick candidates, stored exactly as schema-validated;
-  added by FTY-170, migration lands with FTY-172), `position` (int, stable
+  added by FTY-172's `0017` migration), `position` (int, stable
   order), `created_at`/`updated_at`. The stored `question_text` + `options`
   are what the clarification read serves (`log-events.md`), so the producer
   (this step) and the reader share one shape field-for-field. Questions the
   backend synthesises deterministically — the plausibility gate's targeted
-  question and the persisted default question — carry `options: []`.
+  question — carry 2–5 quick-pick options.
 
 ## Outputs / Routing
 
@@ -244,8 +258,16 @@ and persists no candidates.
   FTY-043 (`exercise-burn.md`). Running an exercise duration through this gate
   would falsely reject ordinary workouts (e.g. `walking, 60 minutes`).
 
-A `needs_clarification` reply with no questions persists one default question
-(`options: []`) so the event always has at least one for the answer flow.
+Provider `needs_clarification` output with no usable specific question, a
+generic fallback question, or fewer than two quick-pick options fails closed
+(`StepFailed("clarification_quality_failed")`) and persists nothing. A
+`needs_clarification` event therefore never reaches the answer flow with a
+model-raised generic placeholder. If the calibrated policy routes a low-confidence
+`parsed` sample to clarification and no provider question was supplied, the parse
+step synthesizes one targeted backend question naming the first item without a
+detail signal and persists 2–5 bounded quick-pick options. Deterministic backend
+gates that synthesize their own targeted question without meaningful quick-picks
+persist that question with `options: []`.
 Candidates and questions are committed in the **same transaction** as the
 terminal status, so a completed/clarification outcome and its rows are atomic.
 When a **re-estimate** of an answered event (`log-events.md`, Clarification
@@ -298,6 +320,9 @@ calories/macros remain the calculator layers' responsibility (FTY-043/044/062).
   and **never persisted** — the step fails closed.
 - Closed vocabularies (`disposition`, `CandidateType`) and `extra="forbid"` mean a
   reply cannot smuggle fields or free-form instructions.
+- Provider-raised clarification output must carry specific question text and
+  2–5 options per question; a missing/generic/under-optioned question fails
+  closed as `clarification_quality_failed` before persistence.
 - A `parsed` reply with zero items fails closed rather than completing empty.
 
 ## Authorization
@@ -316,8 +341,8 @@ both `users` and `log_events` enforces object-level ownership.
 - **No raw text in logs or runs.** The prompt and raw model output are never
   logged (provider contract) and never copied into the estimation run's `trace`
   or `error`; only sanitized labels (`empty_input`, `unparseable_input`,
-  `schema_validation_failed`, `provider_error`, `provider_transient_error`) are
-  persisted on the run.
+  `schema_validation_failed`, `clarification_quality_failed`, `provider_error`,
+  `provider_transient_error`) are persisted on the run.
 - **Retention** follows the owning log event: derived items and clarification
   questions live until the event, user, or account is deleted (`ON DELETE CASCADE`),
   matching the food/exercise-log retention rule in
@@ -330,6 +355,7 @@ both `users` and `log_events` enforces object-level ownership.
 | Empty/whitespace text | Terminal `failed` (`empty_input`); no LLM call, nothing persisted. |
 | Unanimously `unparseable` / no-item trusted set | Terminal `failed`; nothing persisted. |
 | Schema-invalid model output (any sample) | Rejected; terminal `failed` (`schema_validation_failed`); nothing persisted. |
+| Provider clarification output missing a specific question or 2–5 options | Rejected; terminal `failed` (`clarification_quality_failed`); nothing persisted. |
 | Non-retryable provider error (`LLMResponseError`/`LLMConfigurationError`) | Terminal `failed` (`provider_error`). |
 | Transient provider error (`LLMTransientError`) | Retryable; worker retries within its bound. |
 | Ambiguous / below the calibrated operating point | `needs_clarification`; questions (text + options) persisted; the user resolves via the clarification answer (`log-events.md`). |
@@ -364,8 +390,10 @@ event.raw_text = "crackers and peanut butter"        # count genuinely indetermi
 
 - The `0005` migration applies (`alembic upgrade head`) on top of the estimation
   schema and is fully reversible (`alembic downgrade 0004`), verified by an
-  apply/rollback test against a throwaway database.
-- Additive: no prior table or column is changed.
+  apply/rollback test against a throwaway database. The `0017` migration adds
+  `clarification_questions.options` and is reversible to `0016`.
+- Additive: existing rows backfill `options: []`; no existing column semantics
+  change.
 - FTY-042 replaces FTY-040's stub parse step with this real step and adds a
   terminal `StepFailed` signal to the pipeline interface (see `estimation-jobs.md`);
   the worker's claim → run → transition contract is unchanged.
@@ -376,10 +404,10 @@ event.raw_text = "crackers and peanut butter"        # count genuinely indetermi
   `ClarificationQuestion` objects (`parse/v2`), and the
   `clarification_questions` table gains the `options` column. The v1
   string-list shape is retired with no back-compat shim — pre-v1, it has no
-  consumers to preserve. The `options` migration lands with FTY-172 (the
-  first producer); FTY-171 serves the options through the clarification read
-  and implements the answer resolve (`log-events.md` v4); FTY-153 renders the
-  chips and free-text fallback.
+  consumers to preserve. The `options` migration landed with FTY-172 (`0017`,
+  the first producer); FTY-171 serves the options through the clarification
+  read and implements the answer resolve (`log-events.md` v4); FTY-153 renders
+  the chips and free-text fallback.
 - **FTY-159 (breaking behaviour, pre-v1, no shim).** The clarify decision
   becomes the calibrated policy over the FTY-158 hybrid self-consistency
   signal, and the parse step samples the provider N=3 times (early-stopped)

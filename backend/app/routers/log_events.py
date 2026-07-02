@@ -43,6 +43,7 @@ from app.schemas.log_events import (
     ClarificationResponse,
     LogEventCreateRequest,
     LogEventDTO,
+    LogEventEntryDTO,
 )
 from app.services import clarification as clarification_service
 from app.services import item_read_model
@@ -199,6 +200,28 @@ def list_log_events(
     return [LogEventDTO.model_validate(event) for event in events]
 
 
+@router.get("/{user_id}/log-events/by-date", response_model=list[LogEventEntryDTO])
+def list_log_event_entries_by_date(
+    user_id: uuid.UUID,
+    current_user: CurrentUser,
+    session: Annotated[Session, Depends(get_session)],
+    day: Annotated[
+        date | None,
+        Query(description="Calendar day (YYYY-MM-DD) in the user's timezone; defaults to today."),
+    ] = None,
+) -> list[LogEventEntryDTO]:
+    """List the caller's day entries with Today-feed item rows (FTY-198)."""
+
+    try:
+        entries = log_event_service.list_entries_for_day(session, user_id, current_user, day)
+    except LogEventForbidden as exc:
+        raise _NOT_FOUND from exc
+    return [
+        LogEventEntryDTO(event=LogEventDTO.model_validate(entry.event), items=entry.items)
+        for entry in entries
+    ]
+
+
 @router.get("/{user_id}/log-events/{event_id}", response_model=LogEventDTO)
 def get_log_event(
     user_id: uuid.UUID,
@@ -230,8 +253,9 @@ def get_log_event_clarification(
     The mobile clarify sheet (FTY-153) fetches this lazily when it opens, so the
     Today list/poll DTO stays lean. Questions are ordered by ``position`` and
     carry their stable ``id`` (the key an answer submission references), their
-    ``text``, and their quick-pick ``options`` (empty until the estimator
-    persists options — FTY-172; the client then shows free-text only).
+    ``text``, and their quick-pick ``options``. Model-raised parse
+    clarifications carry options; deterministic backend-raised questions may
+    carry an empty list, in which case the client shows free-text only.
 
     The read is status-gated (``log-events.md`` v4): only a
     ``needs_clarification`` event serves questions, and only its **unanswered**
@@ -249,7 +273,10 @@ def get_log_event_clarification(
     except (LogEventForbidden, LogEventNotFound) as exc:
         raise _NOT_FOUND from exc
     return ClarificationResponse(
-        questions=[ClarificationQuestionDTO(id=q.id, text=q.question_text) for q in questions]
+        questions=[
+            ClarificationQuestionDTO(id=q.id, text=q.question_text, options=q.options or [])
+            for q in questions
+        ]
     )
 
 

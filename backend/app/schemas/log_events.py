@@ -19,6 +19,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.enums import LogEventStatus
+from app.schemas.corrections import DerivedExerciseItemDTO, DerivedFoodItemDTO
 
 #: Maximum accepted length of a single raw log entry. Generous enough for a
 #: natural-language meal/exercise description while capping unbounded input.
@@ -87,6 +88,18 @@ class LogEventDTO(BaseModel):
     updated_at: datetime
 
 
+class LogEventEntryDTO(BaseModel):
+    """Today-feed-shaped day-listing row (FTY-198).
+
+    Carries the owning log event plus the derived food/exercise items the Today
+    timeline renders beneath it. Item DTOs reuse the shared correction/item
+    read-model, including per-item ``source`` provenance and ``is_edited``.
+    """
+
+    event: LogEventDTO
+    items: list[DerivedFoodItemDTO | DerivedExerciseItemDTO]
+
+
 class ClarificationQuestionDTO(BaseModel):
     """A single persisted clarification question (FTY-152, FTY-170/171).
 
@@ -94,9 +107,9 @@ class ClarificationQuestionDTO(BaseModel):
     references), the question ``text``, and the quick-pick ``options`` the
     clarify sheet renders as one-tap chips. Options are display candidates only —
     never an enum the server validates an answer against; free text is always an
-    allowed answer. The list may be empty (the client then shows the free-text
-    affordance only); it stays empty until the estimator persists options
-    (``parse-candidates.md`` v2, produced by FTY-172).
+    allowed answer. The list may be empty only for deterministic backend-raised
+    questions that have no meaningful quick-pick set; model-raised parse
+    clarifications carry producer-generated options (``parse-candidates.md`` v2).
     """
 
     id: uuid.UUID

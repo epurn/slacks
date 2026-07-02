@@ -364,7 +364,12 @@ def _clarify_sample(parse: list[dict[str, Any]], confidence: float) -> dict[str,
         "disposition": "needs_clarification",
         "confidence": round(confidence, 2),
         "items": items,
-        "clarification_questions": ["How much was it?"],
+        "clarification_questions": [
+            {
+                "text": "What amount did you have?",
+                "options": ["1 serving", "2 servings", "3 servings"],
+            }
+        ],
     }
 
 

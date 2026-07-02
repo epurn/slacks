@@ -8,7 +8,7 @@ pending raw log event and read their Today events back. This gives the mobile
 timeline (FTY-031) and polling (FTY-032) a real backend, and gives the estimator
 (Milestone 4) the row it later processes.
 
-This contract covers four things:
+This contract covers five things:
 
 1. the `log_events` persistence schema and its migration;
 2. the **event status state machine** — the full v1 status vocabulary and the
@@ -19,11 +19,15 @@ This contract covers four things:
 4. the **clarify-loop API** for a `needs_clarification` event — the
    clarification read (question text + quick-pick options) and the
    clarification answer (resolve) that applies a structured detail to the
-   same event and re-estimates it.
+   same event and re-estimates it;
+5. the **day-listing read** (FTY-198) — an owner-scoped, Today-feed-shaped read
+   for an arbitrary calendar day, returning each event plus the shared derived
+   item read-model (`source` provenance + `is_edited`).
 
 It deliberately excludes estimation, job enqueue, and worker processing
-(FTY-040+); derived food/exercise items; and editing or deleting events (later
-stories). Saved image attachments are owned by their own contract
+(FTY-040+); editing or deleting events (later stories); and new derived-item
+persistence. The day-listing read composes the existing derived food/exercise
+item read-model without changing its storage contract. Saved image attachments are owned by their own contract
 (`log-attachments.md`, FTY-077): a `log_attachments` row references a log event but
 is written only when the user explicitly saves an uploaded image.
 
@@ -34,6 +38,14 @@ backend-core / contracts lane (`backend/app/models/log_events.py`,
 `backend/app/routers/log_events.py`, `backend/alembic/`).
 
 ## Version
+
+5 (FTY-198): adds the **day-listing read** —
+`GET /api/users/{user_id}/log-events/by-date?day=YYYY-MM-DD` — which returns an
+oldest-first list of entries for one profile-timezone calendar day. Each entry
+carries the log event envelope plus the same derived item DTOs the Today timeline
+renders, including per-item `source` provenance and `is_edited` from the shared
+item read-model (`daily-summary.md` / `corrections.md`). Existing create,
+list-events, get-by-id, clarification, and label endpoints are unchanged.
 
 4 (FTY-170): a **pre-v1 breaking change** to the clarify loop (no back-compat
 shim). The clarification read's per-question shape grows from `{ text }` to
@@ -108,6 +120,12 @@ authenticated user's own `{user_id}`.
 - `GET /api/users/{user_id}/log-events?day=YYYY-MM-DD` — lists the user's events
   whose `created_at` falls on `day`, resolved in the user's profile timezone.
   `day` is optional and defaults to the current day in that timezone.
+- `GET /api/users/{user_id}/log-events/by-date?day=YYYY-MM-DD` — lists the user's
+  day entries in the Today-feed shape: each row has `event` (the event DTO) and
+  `items` (derived food/exercise item DTOs with `source` and `is_edited`). The
+  same profile-timezone day bounds and oldest-first event ordering as
+  `GET .../log-events?day=` apply. `day` is optional and defaults to the current
+  day in that timezone.
 - `GET /api/users/{user_id}/log-events/{event_id}` — returns one of the user's
   events by id (for polling).
 - `GET /api/users/{user_id}/log-events/{event_id}/clarification` — returns the
@@ -143,6 +161,63 @@ clarification answer):
 - **Create (idempotent replay)** → `200` with the **existing** event's DTO at its
   current status (see [Idempotent create](#idempotent-create-201-vs-200)).
 - **List-today** → `200` with a JSON array of event DTOs, ordered oldest-first.
+- **Day-listing read** → `200` with a JSON array of entry DTOs, ordered
+  oldest-first by the owning event:
+
+```json
+[
+  {
+    "event": {
+      "id": "UUID",
+      "user_id": "UUID",
+      "raw_text": "rice and a walk",
+      "status": "completed",
+      "created_at": "datetime",
+      "updated_at": "datetime"
+    },
+    "items": [
+      {
+        "item_type": "food",
+        "id": "UUID",
+        "user_id": "UUID",
+        "log_event_id": "UUID",
+        "name": "white rice",
+        "quantity_text": "1 serving",
+        "unit": null,
+        "amount": 1.0,
+        "status": "resolved",
+        "grams": 150.0,
+        "calories": 205.0,
+        "protein_g": 4.3,
+        "carbs_g": 44.5,
+        "fat_g": 0.4,
+        "calories_estimated": 205.0,
+        "protein_g_estimated": 4.3,
+        "carbs_g_estimated": 44.5,
+        "fat_g_estimated": 0.4,
+        "source": {
+          "source_type": "trusted_nutrition_database",
+          "label": "USDA",
+          "ref": "usda_fdc:168880"
+        },
+        "is_edited": false,
+        "created_at": "datetime",
+        "updated_at": "datetime"
+      }
+    ]
+  }
+]
+```
+
+`items` uses the shared `DerivedFoodItemDTO | DerivedExerciseItemDTO` shape from
+`corrections.md` / `daily-summary.md`, but only for finalized item detail: the
+owning event must be `completed`, the item must be `resolved`, and its costed
+value must be present (`calories` for food, `active_calories` for exercise). A
+pending, processing, failed, needs_clarification, or completed-with-no-finalized-item
+event is still returned with `items: []`, matching the Today timeline's status-row
+fallback. Non-finalized item rows remain persisted with their own `status`
+(`unresolved` / `proposed`) and nullable values, but they are not included in this
+read until they become finalized.
 - **Get-by-id** → `200` with the event DTO.
 
 The DTO does **not** echo `idempotency_key`: it is a write-only request token with
@@ -230,14 +305,13 @@ quick-pick values:
   can render one-tap chips; the server never validates an answer against
   them. **Free-text is always an allowed answer**, whether or not options are
   present.
-- **When present, options are up to 5 short candidates** (2–5 by producer
-  guidance — the parse schema enforces only the hard caps, so a persisted
-  list outside that guidance is served as-is), each length-bounded — the
+- **When present, options are up to 5 short candidates** (2–5 for model-raised
+  parse clarifications; deterministic backend-raised questions may have none),
+  each length-bounded — the
   bounds and the persistence shape are the parse contract's
   (`parse-candidates.md` v2, `ClarificationQuestion`). The list MAY be empty;
   the client then shows the free-text affordance only (e.g. the deterministic
-  plausibility gate's targeted question and the persisted default question
-  carry no options).
+  plausibility/food/exercise/label gates' targeted questions carry no options).
 
 The read is **status-gated, not row-driven**: questions are served only while
 the event is in `needs_clarification` — the only status in which a fresh
@@ -430,7 +504,7 @@ label event still reaches terminal `completed`; only its food item is held
   own** events. `{user_id}` must equal the authenticated user's id, and
   get-by-id is scoped to the owner so a cross-user id is indistinguishable from a
   missing one. A mismatch fails closed as `404` (no existence oracle). Negative
-  tests prove create, list, and get-by-id all fail closed.
+  tests prove create, list, get-by-id, and the day-listing read all fail closed.
 - The clarification read reuses the same object-level scoping: a cross-user or
   nonexistent `event_id` returns `404` with no existence oracle, proven by a
   cross-user negative test.
@@ -448,6 +522,10 @@ label event still reaches terminal `completed`; only its food item is held
 
 - `raw_text` is sensitive personal data: it is user-owned, never logged, and
   never returned to a non-owner.
+- Day-listing item names, calories/macros/burn values, and provenance are
+  sensitive nutrition data: they are returned only to the owner through the
+  scoped read, are not logged, and are derived server-side so the client never
+  joins `evidence_sources` / `corrections`.
 - `clarification_questions.question_text`, its quick-pick `options`, and
   `clarification_answers.answer_text` are likewise tied to the user's
   sensitive log: they are returned only to the owning client, never logged,
@@ -467,7 +545,7 @@ label event still reaches terminal `completed`; only its food item is held
 | Status | When |
 | --- | --- |
 | `401` | Missing/invalid/expired bearer token. |
-| `404` | Creating, listing, or reading events for an account the caller does not own; a get-by-id, clarification read, or clarification answer whose event does not exist for the owner; an answer whose `question_id` is not one of the owned event's questions (all fail closed). |
+| `404` | Creating, listing, day-listing, or reading events for an account the caller does not own; a get-by-id, clarification read, or clarification answer whose event does not exist for the owner; an answer whose `question_id` is not one of the owned event's questions (all fail closed). |
 | `409` | A fresh (non-replay) answer for an event not in `needs_clarification` — `{"error": "not_awaiting_clarification"}`; nothing persisted or mutated. |
 | `422` | Empty/whitespace/oversized `raw_text`, empty/whitespace/oversized/wrong-type `idempotency_key`, unknown body key, malformed `day`, missing/malformed `question_id`, or empty/whitespace/oversized/wrong-type `answer`. |
 
@@ -493,6 +571,13 @@ curl -sX POST :8000/api/users/<uid>/log-events \
 # List today's events
 curl -s ':8000/api/users/<uid>/log-events?day=2026-06-26' -H 'authorization: Bearer <t>'
 # → 200 [ { "id": "...", "status": "pending", ... } ]
+
+# List a day's Today-feed-shaped entries with derived item provenance
+curl -s ':8000/api/users/<uid>/log-events/by-date?day=2026-06-26' \
+  -H 'authorization: Bearer <t>'
+# → 200 [ { "event": { "id": "...", "status": "completed", ... },
+#           "items": [ { "item_type": "food", "source": { ... },
+#                        "is_edited": false, ... } ] } ]
 
 # Poll one event
 curl -s :8000/api/users/<uid>/log-events/<event_id> -H 'authorization: Bearer <t>'
@@ -543,6 +628,11 @@ curl -sX POST :8000/api/users/<uid>/log-events/<event_id>/clarification/answers 
   `0015` and rolls back cleanly (`alembic downgrade 0015`), verified by an
   apply/rollback test and exercised against Postgres by the FTY-143 migration
   guard.
+- The `0017` migration (FTY-172) is **additive**: it adds the not-null
+  `options` JSON column to `clarification_questions`, backfilled/defaulted to
+  `[]` for existing deterministic questions. It applies on top of `0016` and
+  rolls back cleanly (`alembic downgrade 0016`), verified by an
+  apply/rollback test.
 - **FTY-170 (breaking, pre-v1, no shim).** The clarification read's
   per-question shape changes from `{ text }` to `{ id, text, options }`, the
   read is scoped to unanswered questions, and the clarification answer
@@ -551,6 +641,6 @@ curl -sX POST :8000/api/users/<uid>/log-events/<event_id>/clarification/answers 
   the raw phrase and duplicated entries (audit findings A3/A5). No back-compat
   shim is kept: pre-v1, the old shape has no consumers to preserve. Landing
   order for implementers: the `options` persistence and produce side is the
-  parse contract's (`parse-candidates.md` v2, migration with FTY-172); the
+  parse contract's (`parse-candidates.md` v2, `0017` with FTY-172); the
   `clarification_answers` table, the new read shape, and the answer round-trip
   are FTY-171; the mobile clarify sheet (FTY-153) consumes both new shapes.

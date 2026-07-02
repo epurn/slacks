@@ -57,6 +57,7 @@ from app.estimator.food_serving import (
     serving_size_grams,
 )
 from app.estimator.pipeline import (
+    ClarificationDraft,
     EstimationContext,
     NeedsClarification,
     ResolvedLabelItem,
@@ -215,7 +216,7 @@ class LabelResolveStep:
             or LABEL_CLARIFY_POLICY.should_clarify(panel.confidence)
             or facts is None
         ):
-            context.clarification_questions = [UNREADABLE_LABEL_QUESTION]
+            context.clarification_questions = [ClarificationDraft(text=UNREADABLE_LABEL_QUESTION)]
             raise NeedsClarification("label_unreadable")
 
         item = self._build_item(context, label, facts)
@@ -237,7 +238,7 @@ class LabelResolveStep:
 
         serving_g = serving_size_grams(facts.serving_size_amount, facts.serving_size_unit)
         if serving_g is None:
-            context.clarification_questions = [SERVING_QUESTION]
+            context.clarification_questions = [ClarificationDraft(text=SERVING_QUESTION)]
             raise NeedsClarification("unresolvable_serving_size")
 
         per_serving = NutritionFacts(
@@ -255,7 +256,7 @@ class LabelResolveStep:
             default_serving_g=serving_g,
         )
         if grams is None:
-            context.clarification_questions = [QUANTITY_QUESTION]
+            context.clarification_questions = [ClarificationDraft(text=QUANTITY_QUESTION)]
             raise NeedsClarification("unresolvable_quantity")
 
         scaled = scale_facts(per_100g, grams)

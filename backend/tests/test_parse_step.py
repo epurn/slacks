@@ -22,10 +22,7 @@ from typing import Any
 import pytest
 
 from app.estimator.clarify_policy import NL_PARSE_CLARIFY_POLICY
-from app.estimator.parse import (
-    DEFAULT_CLARIFICATION_QUESTION,
-    ParseStep,
-)
+from app.estimator.parse import ParseStep
 from app.estimator.pipeline import (
     EstimationContext,
     NeedsClarification,
@@ -47,6 +44,18 @@ def _context(raw_text: str = "two eggs and a 30 minute run") -> EstimationContex
 
 def _parsed(items: list[dict[str, object]], confidence: float = 0.9) -> dict[str, object]:
     return {"disposition": "parsed", "confidence": confidence, "items": items}
+
+
+def _clarify(text: str, options: list[str] | None = None) -> dict[str, object]:
+    return {"text": text, "options": options or ["1 serving", "2 servings", "3 servings"]}
+
+
+def _question_texts(context: EstimationContext) -> list[str]:
+    return [question.text for question in context.clarification_questions]
+
+
+def _question_options(context: EstimationContext) -> list[list[str]]:
+    return [question.options for question in context.clarification_questions]
 
 
 def _sampled(
@@ -138,38 +147,6 @@ def test_parsed_but_no_items_fails_closed() -> None:
     assert exc.value.reason == "no_candidates"
 
 
-def test_needs_clarification_disposition_collects_questions() -> None:
-    provider = FakeProvider(
-        responses=_sampled(
-            {
-                "disposition": "needs_clarification",
-                "confidence": 0.8,
-                "clarification_questions": ["How much rice?", "  "],
-            }
-        )
-    )
-    context = _context()
-
-    with pytest.raises(NeedsClarification):
-        _run(provider, context)
-
-    # Blank questions are dropped and cross-sample duplicates are pooled once;
-    # the real one is kept for persistence.
-    assert context.clarification_questions == ["How much rice?"]
-
-
-def test_needs_clarification_without_questions_uses_default() -> None:
-    provider = FakeProvider(
-        responses=_sampled({"disposition": "needs_clarification", "confidence": 0.8})
-    )
-    context = _context()
-
-    with pytest.raises(NeedsClarification):
-        _run(provider, context)
-
-    assert context.clarification_questions == [DEFAULT_CLARIFICATION_QUESTION]
-
-
 def test_schema_invalid_output_is_rejected_and_fails_closed() -> None:
     # "confidence" is the wrong type; the untrusted reply must be rejected, never
     # coerced-and-trusted, and never returned.
@@ -246,22 +223,6 @@ def test_unanimous_samples_rescue_a_timid_verbalized_confidence() -> None:
     assert context.clarification_questions == []
 
 
-def test_unanimous_but_rock_bottom_verbalized_still_clarifies() -> None:
-    # Agreement alone cannot buy an estimate: with the verbalized component near
-    # zero the hybrid stays below the calibrated point, and a vague reply (no
-    # detail signal) routes to clarification.
-    reply = _parsed([{"type": "food", "name": "rice", "quantity_text": "some"}], confidence=0.1)
-    provider = FakeProvider(responses=_sampled(reply))
-    context = _context(raw_text="some rice")
-
-    with pytest.raises(NeedsClarification) as exc:
-        _run(provider, context)
-
-    assert exc.value.reason == "low_confidence_or_ambiguous"
-    assert context.food_candidates == []
-    assert context.clarification_questions == [DEFAULT_CLARIFICATION_QUESTION]
-
-
 def test_disagreeing_samples_clarify_despite_total_verbalized_confidence() -> None:
     # Fail closed: a disposition flip inside the window caps the hybrid at
     # 0.4 × verbalized < threshold, so even a model verbalizing certainty asks.
@@ -273,7 +234,7 @@ def test_disagreeing_samples_clarify_despite_total_verbalized_confidence() -> No
         "disposition": "needs_clarification",
         "confidence": 0.4,
         "items": [{"type": "food", "name": "curry", "quantity_text": ""}],
-        "clarification_questions": ["How much curry?"],
+        "clarification_questions": [_clarify("How much curry?", ["1 cup", "2 cups", "3 cups"])],
     }
     provider = FakeProvider(responses=[confident, flip, confident])
     context = _context(raw_text="leftover curry")
@@ -284,7 +245,8 @@ def test_disagreeing_samples_clarify_despite_total_verbalized_confidence() -> No
     assert exc.value.reason == "low_confidence_or_ambiguous"
     assert len(provider.prompts) == SELF_CONSISTENCY_NUM_SAMPLES
     assert context.food_candidates == []
-    assert context.clarification_questions == ["How much curry?"]
+    assert _question_texts(context) == ["How much curry?"]
+    assert _question_options(context) == [["1 cup", "2 cups", "3 cups"]]
 
 
 def test_mixed_unparseable_and_parsed_samples_clarify_not_fail() -> None:
@@ -292,7 +254,10 @@ def test_mixed_unparseable_and_parsed_samples_clarify_not_fail() -> None:
     # genuine ambiguity: the disagreement drags the hybrid down and the event
     # asks instead of silently failing or estimating.
     garbage = {"disposition": "unparseable", "confidence": 0.9, "reason": "not a log"}
-    vague = _parsed([{"type": "food", "name": "rice", "quantity_text": "some"}], confidence=0.9)
+    vague = {
+        **_parsed([{"type": "food", "name": "rice", "quantity_text": "some"}], confidence=0.9),
+        "clarification_questions": [_clarify("How much rice?", ["1/2 cup", "1 cup", "2 cups"])],
+    }
     provider = FakeProvider(responses=[garbage, vague, vague])
     context = _context(raw_text="rice???")
 
@@ -406,8 +371,11 @@ def test_genuinely_indeterminate_still_routes_to_clarification() -> None:
                 "disposition": "needs_clarification",
                 "confidence": 0.3,
                 "clarification_questions": [
-                    "How many crackers did you have?",
-                    "How much peanut butter — a teaspoon, tablespoon, or more?",
+                    _clarify("How many crackers did you have?", ["4", "8", "12"]),
+                    _clarify(
+                        "How much peanut butter?",
+                        ["1 tsp", "1 tbsp", "2 tbsp"],
+                    ),
                 ],
             }
         )
@@ -417,8 +385,11 @@ def test_genuinely_indeterminate_still_routes_to_clarification() -> None:
     with pytest.raises(NeedsClarification):
         _run(provider, context)
 
-    assert len(context.clarification_questions) == 2
-    assert "crackers" in context.clarification_questions[0].lower()
+    assert _question_texts(context) == [
+        "How many crackers did you have?",
+        "How much peanut butter?",
+    ]
+    assert _question_options(context) == [["4", "8", "12"], ["1 tsp", "1 tbsp", "2 tbsp"]]
     assert context.food_candidates == []
 
 
@@ -493,7 +464,8 @@ def test_implausible_count_routes_to_clarification() -> None:
     assert context.food_candidates == []
     # A targeted question naming the item is set.
     assert len(context.clarification_questions) == 1
-    assert "eggs" in context.clarification_questions[0]
+    assert "eggs" in _question_texts(context)[0]
+    assert _question_options(context) == [["1", "2", "3"]]
 
 
 def test_implausible_mass_routes_to_clarification() -> None:
@@ -522,7 +494,8 @@ def test_implausible_mass_routes_to_clarification() -> None:
     assert exc.value.reason == "implausible_candidate"
     assert context.food_candidates == []
     assert len(context.clarification_questions) == 1
-    assert "chicken" in context.clarification_questions[0]
+    assert "chicken" in _question_texts(context)[0]
+    assert _question_options(context) == [["1 serving", "2 servings", "3 servings"]]
 
 
 def test_implausible_mass_only_in_quantity_text_routes_to_clarification() -> None:
@@ -544,7 +517,8 @@ def test_implausible_mass_only_in_quantity_text_routes_to_clarification() -> Non
     assert exc.value.reason == "implausible_candidate"
     assert context.food_candidates == []
     assert len(context.clarification_questions) == 1
-    assert "chicken" in context.clarification_questions[0]
+    assert "chicken" in _question_texts(context)[0]
+    assert _question_options(context) == [["1 serving", "2 servings", "3 servings"]]
 
 
 def test_implausible_quantity_text_mass_with_structured_count_clarifies() -> None:
@@ -575,7 +549,8 @@ def test_implausible_quantity_text_mass_with_structured_count_clarifies() -> Non
     assert exc.value.reason == "implausible_candidate"
     assert context.food_candidates == []
     assert len(context.clarification_questions) == 1
-    assert "chicken" in context.clarification_questions[0]
+    assert "chicken" in _question_texts(context)[0]
+    assert _question_options(context) == [["1 serving", "2 servings", "3 servings"]]
 
 
 def test_unknown_unit_large_amount_routes_to_clarification() -> None:
@@ -604,7 +579,8 @@ def test_unknown_unit_large_amount_routes_to_clarification() -> None:
     assert exc.value.reason == "implausible_candidate"
     assert context.food_candidates == []
     assert len(context.clarification_questions) == 1
-    assert "rice" in context.clarification_questions[0]
+    assert "rice" in _question_texts(context)[0]
+    assert _question_options(context) == [["grams", "cups", "servings"]]
 
 
 def test_realistic_small_food_count_routes_to_parsed() -> None:
@@ -722,7 +698,8 @@ def test_implausible_food_still_gated_when_exercise_present() -> None:
     assert context.food_candidates == []
     assert context.exercise_candidates == []
     assert len(context.clarification_questions) == 1
-    assert "eggs" in context.clarification_questions[0]
+    assert "eggs" in _question_texts(context)[0]
+    assert _question_options(context) == [["1", "2", "3"]]
 
 
 # ---------------------------------------------------------------------------
@@ -833,7 +810,8 @@ def test_implausible_range_midpoint_routes_to_clarification() -> None:
     assert context.food_candidates == []
     assert context.assumptions == []
     assert len(context.clarification_questions) == 1
-    assert "onion rings" in context.clarification_questions[0]
+    assert "onion rings" in _question_texts(context)[0]
+    assert _question_options(context) == [["1", "2", "3"]]
 
 
 def test_needs_clarification_disposition_with_detail_is_estimated() -> None:
@@ -914,10 +892,15 @@ def test_vague_food_without_detail_still_clarifies() -> None:
     # indeterminate, so a conservative signal still routes to clarification.
     provider = FakeProvider(
         responses=_sampled(
-            _parsed(
-                [{"type": "food", "name": "crackers", "quantity_text": "some"}],
-                confidence=_low(),
-            )
+            {
+                **_parsed(
+                    [{"type": "food", "name": "crackers", "quantity_text": "some"}],
+                    confidence=_low(),
+                ),
+                "clarification_questions": [
+                    _clarify("How many crackers did you have?", ["4", "8", "12"])
+                ],
+            }
         )
     )
     context = _context(raw_text="some crackers")
@@ -932,10 +915,15 @@ def test_vague_exercise_without_detail_still_clarifies() -> None:
     # "played sports": no duration/distance/steps/games signal — still clarifies.
     provider = FakeProvider(
         responses=_sampled(
-            _parsed(
-                [{"type": "exercise", "name": "sports", "quantity_text": "played sports"}],
-                confidence=_low(),
-            )
+            {
+                **_parsed(
+                    [{"type": "exercise", "name": "sports", "quantity_text": "played sports"}],
+                    confidence=_low(),
+                ),
+                "clarification_questions": [
+                    _clarify("What exercise did you do?", ["Run", "Walk", "Bike"])
+                ],
+            }
         )
     )
     context = _context(raw_text="played sports")
@@ -951,13 +939,18 @@ def test_mixed_detail_and_vague_items_clarifies() -> None:
     # unknown, so the whole event clarifies rather than half-guessing.
     provider = FakeProvider(
         responses=_sampled(
-            _parsed(
-                [
-                    {"type": "food", "name": "eggs", "quantity_text": "2", "amount": 2},
-                    {"type": "food", "name": "toast", "quantity_text": "some"},
+            {
+                **_parsed(
+                    [
+                        {"type": "food", "name": "eggs", "quantity_text": "2", "amount": 2},
+                        {"type": "food", "name": "toast", "quantity_text": "some"},
+                    ],
+                    confidence=_low(),
+                ),
+                "clarification_questions": [
+                    _clarify("How much toast did you have?", ["1 slice", "2 slices", "3 slices"])
                 ],
-                confidence=_low(),
-            )
+            }
         )
     )
     context = _context(raw_text="2 eggs and some toast")

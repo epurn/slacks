@@ -23,14 +23,15 @@ this is executed — it is data the step validates, classifies, and stores.
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.enums import CandidateType
 
 #: Schema version recorded on the estimation run for reproducibility. Bump when
 #: the candidate shape changes so old runs remain interpretable.
-PARSE_SCHEMA_VERSION = "parse/v1"
+PARSE_SCHEMA_VERSION = "parse/v2"
 
 #: Upper bounds that cap an adversarial or runaway model reply. Generous enough
 #: for real logs ("eggs, toast, coffee, a run") yet small enough that a malicious
@@ -42,8 +43,12 @@ MAX_BRAND_LEN = 120
 MAX_QUANTITY_LEN = 120
 MAX_UNIT_LEN = 32
 MAX_QUESTION_LEN = 300
+MAX_OPTIONS = 5
+MAX_OPTION_LEN = 80
 MAX_REASON_LEN = 120
 MAX_BARCODE_LEN = 14
+
+OptionText = Annotated[str, Field(min_length=1, max_length=MAX_OPTION_LEN)]
 
 
 class ParseDisposition(StrEnum):
@@ -92,6 +97,36 @@ class ParsedCandidate(BaseModel):
     barcode: str | None = Field(default=None, max_length=MAX_BARCODE_LEN, pattern=r"^\d+$")
 
 
+class ClarificationQuestion(BaseModel):
+    """One targeted clarification question plus display-only quick-pick options.
+
+    The model output remains untrusted data. ``text`` names the missing detail,
+    and ``options`` are candidate answers the client may render as chips. Options
+    are not an enum: the answer endpoint always accepts free text.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=MAX_QUESTION_LEN)
+    options: list[OptionText] = Field(default_factory=list, max_length=MAX_OPTIONS)
+
+    @field_validator("text")
+    @classmethod
+    def _strip_text(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("clarification question text must not be blank")
+        return stripped
+
+    @field_validator("options")
+    @classmethod
+    def _strip_options(cls, value: list[str]) -> list[str]:
+        stripped = [option.strip() for option in value]
+        if any(not option for option in stripped):
+            raise ValueError("clarification options must not be blank")
+        return stripped
+
+
 class ParseResult(BaseModel):
     """The strict structured reply the parse step validates before trusting it.
 
@@ -104,7 +139,9 @@ class ParseResult(BaseModel):
     disposition: ParseDisposition
     confidence: float = Field(ge=0.0, le=1.0)
     items: list[ParsedCandidate] = Field(default_factory=list, max_length=MAX_CANDIDATES)
-    clarification_questions: list[str] = Field(default_factory=list, max_length=MAX_QUESTIONS)
+    clarification_questions: list[ClarificationQuestion] = Field(
+        default_factory=list, max_length=MAX_QUESTIONS
+    )
     #: Short, sanitized label set when ``disposition`` is ``unparseable`` — never
     #: echoed raw user text; used only for the run's failure reason.
     reason: str | None = Field(default=None, max_length=MAX_REASON_LEN)

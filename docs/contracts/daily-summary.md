@@ -211,8 +211,9 @@ Each derived food/exercise item the Today timeline renders carries two fields,
 **"✎ edited"** marker from one DTO rather than joining `evidence_sources` /
 `derived_items` / `corrections` itself. They appear on the shared item DTO
 (`DerivedFoodItemDTO` / `DerivedExerciseItemDTO`) returned by every read path that
-surfaces a Today item — the corrections `PATCH` response today, and any future
-day-listing read — so all read paths inherit them.
+surfaces a Today item — the corrections `PATCH` response and the FTY-198
+day-listing read (`GET /api/users/{user_id}/log-events/by-date?day=YYYY-MM-DD`) —
+so all read paths inherit them.
 
 ```json
 {

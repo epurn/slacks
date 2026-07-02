@@ -87,7 +87,7 @@
         "type": "object"
       },
       "ClarificationQuestionDTO": {
-        "description": "A single persisted clarification question (FTY-152, FTY-170/171).\n\nCarries the stored row's stable ``id`` (the key an answer submission\nreferences), the question ``text``, and the quick-pick ``options`` the\nclarify sheet renders as one-tap chips. Options are display candidates only \u2014\nnever an enum the server validates an answer against; free text is always an\nallowed answer. The list may be empty (the client then shows the free-text\naffordance only); it stays empty until the estimator persists options\n(``parse-candidates.md`` v2, produced by FTY-172).",
+        "description": "A single persisted clarification question (FTY-152, FTY-170/171).\n\nCarries the stored row's stable ``id`` (the key an answer submission\nreferences), the question ``text``, and the quick-pick ``options`` the\nclarify sheet renders as one-tap chips. Options are display candidates only \u2014\nnever an enum the server validates an answer against; free text is always an\nallowed answer. The list may be empty only for deterministic backend-raised\nquestions that have no meaningful quick-pick set; model-raised parse\nclarifications carry producer-generated options (``parse-candidates.md`` v2).",
         "properties": {
           "id": {
             "format": "uuid",
@@ -999,6 +999,34 @@
           "updated_at"
         ],
         "title": "LogEventDTO",
+        "type": "object"
+      },
+      "LogEventEntryDTO": {
+        "description": "Today-feed-shaped day-listing row (FTY-198).\n\nCarries the owning log event plus the derived food/exercise items the Today\ntimeline renders beneath it. Item DTOs reuse the shared correction/item\nread-model, including per-item ``source`` provenance and ``is_edited``.",
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/LogEventDTO"
+          },
+          "items": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DerivedFoodItemDTO"
+                },
+                {
+                  "$ref": "#/components/schemas/DerivedExerciseItemDTO"
+                }
+              ]
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "event",
+          "items"
+        ],
+        "title": "LogEventEntryDTO",
         "type": "object"
       },
       "LogEventStatus": {
@@ -2785,6 +2813,89 @@
         ]
       }
     },
+    "/api/users/{user_id}/log-events/by-date": {
+      "get": {
+        "description": "List the caller's day entries with Today-feed item rows (FTY-198).",
+        "operationId": "list_log_event_entries_by_date_api_users__user_id__log_events_by_date_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Calendar day (YYYY-MM-DD) in the user's timezone; defaults to today.",
+            "in": "query",
+            "name": "day",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Calendar day (YYYY-MM-DD) in the user's timezone; defaults to today.",
+              "title": "Day"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LogEventEntryDTO"
+                  },
+                  "title": "Response List Log Event Entries By Date Api Users  User Id  Log Events By Date Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Log Event Entries By Date",
+        "tags": [
+          "log-events"
+        ]
+      }
+    },
     "/api/users/{user_id}/log-events/label": {
       "post": {
         "description": "Create a label event from an uploaded image and extract it in-request (FTY-064).\n\nThe image is the raw request body; its declared type is the ``Content-Type``\nheader. It is validated as **data** (size, content-type allowlist, magic-number\nsignature) at the trust boundary before any work \u2014 an invalid upload fails\nclosed with ``413``/``415`` and no event is created. A valid upload creates a\n``pending`` event, then the FTY-061 label pipeline resolves it synchronously:\nthe raw image only ever lives in this request (it is never enqueued), and is\nretained as a ``log_attachment`` only when ``save`` is set, discarded by\ndefault. Returns the event at its post-extraction status. Errors carry only an\nHTTP status \u2014 never image bytes or extracted content.",
@@ -2945,7 +3056,7 @@
     },
     "/api/users/{user_id}/log-events/{event_id}/clarification": {
       "get": {
-        "description": "Return the open clarification questions for one of the caller's events.\n\nThe mobile clarify sheet (FTY-153) fetches this lazily when it opens, so the\nToday list/poll DTO stays lean. Questions are ordered by ``position`` and\ncarry their stable ``id`` (the key an answer submission references), their\n``text``, and their quick-pick ``options`` (empty until the estimator\npersists options \u2014 FTY-172; the client then shows free-text only).\n\nThe read is status-gated (``log-events.md`` v4): only a\n``needs_clarification`` event serves questions, and only its **unanswered**\nones, so a served question is always freshly answerable. Ownership is\nfail-closed (FTY-030): a cross-user or nonexistent ``event_id`` is\nindistinguishable as ``404`` (no existence oracle); a wrong-status event and\none with no rows both return an empty list (no status oracle). The question\ntext, like raw text, is never logged.",
+        "description": "Return the open clarification questions for one of the caller's events.\n\nThe mobile clarify sheet (FTY-153) fetches this lazily when it opens, so the\nToday list/poll DTO stays lean. Questions are ordered by ``position`` and\ncarry their stable ``id`` (the key an answer submission references), their\n``text``, and their quick-pick ``options``. Model-raised parse\nclarifications carry options; deterministic backend-raised questions may\ncarry an empty list, in which case the client shows free-text only.\n\nThe read is status-gated (``log-events.md`` v4): only a\n``needs_clarification`` event serves questions, and only its **unanswered**\nones, so a served question is always freshly answerable. Ownership is\nfail-closed (FTY-030): a cross-user or nonexistent ``event_id`` is\nindistinguishable as ``404`` (no existence oracle); a wrong-status event and\none with no rows both return an empty list (no status oracle). The question\ntext, like raw text, is never logged.",
         "operationId": "get_log_event_clarification_api_users__user_id__log_events__event_id__clarification_get",
         "parameters": [
           {

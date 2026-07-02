@@ -41,7 +41,7 @@ def _seed_event(
     user_id: str,
     *,
     status: LogEventStatus = LogEventStatus.NEEDS_CLARIFICATION,
-    questions: list[str] | None = None,
+    questions: list[str | tuple[str, list[str]]] | None = None,
     raw_text: str = "had some peanut butter",
 ) -> tuple[str, list[str]]:
     """Insert an owned event (and optional clarification rows).
@@ -60,10 +60,16 @@ def _seed_event(
         if questions:
             # Insert out of position order; the read must sort by ``position``.
             for position in reversed(range(len(questions))):
+                question = questions[position]
+                if isinstance(question, tuple):
+                    question_text, options = question
+                else:
+                    question_text, options = question, []
                 row = ClarificationQuestion(
                     log_event_id=event.id,
                     user_id=uuid.UUID(user_id),
-                    question_text=questions[position],
+                    question_text=question_text,
+                    options=options,
                     position=position,
                 )
                 session.add(row)
@@ -94,7 +100,10 @@ def test_returns_questions_ordered_by_position(client: TestClient, db_engine: En
     event_id, question_ids = _seed_event(
         db_engine,
         user_id,
-        questions=["How much peanut butter?", "Smooth or crunchy?"],
+        questions=[
+            ("How much peanut butter?", ["1 tsp", "1 tbsp", "2 tbsp"]),
+            ("Smooth or crunchy?", ["Smooth", "Crunchy"]),
+        ],
     )
 
     resp = client.get(
@@ -104,11 +113,19 @@ def test_returns_questions_ordered_by_position(client: TestClient, db_engine: En
 
     assert resp.status_code == 200
     # Each question carries its stable persisted id (the answer-submission key),
-    # its text, and its quick-pick options (empty until FTY-172 produces them).
+    # its text, and its quick-pick options.
     assert resp.json() == {
         "questions": [
-            {"id": question_ids[0], "text": "How much peanut butter?", "options": []},
-            {"id": question_ids[1], "text": "Smooth or crunchy?", "options": []},
+            {
+                "id": question_ids[0],
+                "text": "How much peanut butter?",
+                "options": ["1 tsp", "1 tbsp", "2 tbsp"],
+            },
+            {
+                "id": question_ids[1],
+                "text": "Smooth or crunchy?",
+                "options": ["Smooth", "Crunchy"],
+            },
         ]
     }
 

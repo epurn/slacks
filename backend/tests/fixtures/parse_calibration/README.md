@@ -55,9 +55,9 @@ Each line in `examples.jsonl` / `naturalistic_examples.jsonl` is one JSON object
 - `samples` (FTY-158, extended to the naturalistic band by FTY-159): three
   recorded parse samples standing in for temperature>0 sampling of the live
   model. Each validates as a full `ParseResult` (`disposition`, `confidence`,
-  `items`, optional `clarification_questions`), so the production
-  self-consistency metric (`app/estimator/self_consistency.py`) consumes them
-  unchanged. Like the `baseline` field, they keep the consistency signals fully
+  `items`, optional `clarification_questions` objects with `text` and `options`),
+  so the production self-consistency metric (`app/estimator/self_consistency.py`)
+  consumes them unchanged. Like the `baseline` field, they keep the consistency signals fully
   offline and deterministic. Both bands carry them (the naturalistic band's are
   author-constructed stand-ins declared per case in
   `generate_naturalistic_seed.py`, mirroring the synthetic schedules below), so
