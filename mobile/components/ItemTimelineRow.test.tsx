@@ -3,6 +3,31 @@ import { act, create as render, type ReactTestRenderer } from "react-test-render
 import { ItemTimelineRow } from "./ItemTimelineRow";
 import type { DerivedFoodItemDTO, DerivedExerciseItemDTO, ItemSourceDTO } from "@/api/derivedItems";
 
+// expo-symbols is a native module — replace SymbolView with a View stub that
+// exposes the symbol name via testID (same pattern as AppIcon.test.tsx); the
+// ProvenanceIcon inside the row renders through it.
+jest.mock("expo-symbols", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const React = require("react");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { View } = require("react-native");
+  return {
+    SymbolView: ({
+      name,
+      accessibilityLabel,
+    }: {
+      name: string;
+      tintColor?: string;
+      size?: number;
+      accessibilityLabel?: string;
+    }) =>
+      React.createElement(View, {
+        testID: `sf-symbol-${String(name)}`,
+        accessibilityLabel,
+      }),
+  };
+});
+
 function usdaSource(): ItemSourceDTO {
   return { source_type: "trusted_nutrition_database", label: "USDA", ref: "usda_fdc:168880" };
 }

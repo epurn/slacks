@@ -8,6 +8,34 @@ import type { ItemSourceDTO } from '@/api/derivedItems';
 // jest-expo's preset already mocks useColorScheme as a jest.fn() returning 'light'.
 const mockUseColorScheme = useColorScheme as jest.MockedFunction<typeof useColorScheme>;
 
+// expo-symbols is a native module — replace SymbolView with a View stub that
+// exposes the symbol name via testID so tests can assert which glyph was
+// requested (same pattern as AppIcon.test.tsx).
+jest.mock('expo-symbols', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const React = require('react');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { View } = require('react-native');
+  return {
+    SymbolView: ({
+      name,
+      accessibilityLabel,
+      accessibilityRole,
+    }: {
+      name: string;
+      tintColor?: string;
+      size?: number;
+      accessibilityLabel?: string;
+      accessibilityRole?: string;
+    }) =>
+      React.createElement(View, {
+        testID: `sf-symbol-${String(name)}`,
+        accessibilityLabel,
+        accessibilityRole,
+      }),
+  };
+});
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -114,6 +142,16 @@ describe('ProvenanceIcon', () => {
     });
   });
 
+  it('renders the source glyph as an SF Symbol via AppIcon, not text', () => {
+    const tree = mount(
+      React.createElement(ProvenanceIcon, {
+        source: sourceOf('reference_source'),
+      }),
+    );
+    const node = tree.root.find((n) => n.props.testID === 'sf-symbol-book.closed');
+    expect(node).toBeTruthy();
+  });
+
   it('has accessibilityRole="image"', () => {
     const tree = mount(
       React.createElement(ProvenanceIcon, {
@@ -130,13 +168,17 @@ describe('ProvenanceIcon', () => {
 // ---------------------------------------------------------------------------
 
 describe('provenancePresentation()', () => {
-  it('returns a non-empty glyph for every source type, null, and edited', () => {
+  it('returns a non-empty SF Symbol name for every source type, null, and edited', () => {
     const sourceTypes = Object.keys(SOURCE_LABELS) as ItemSourceDTO['source_type'][];
     for (const sourceType of sourceTypes) {
-      expect(provenancePresentation(sourceOf(sourceType)).glyph.length).toBeGreaterThan(0);
+      expect(provenancePresentation(sourceOf(sourceType)).icon.length).toBeGreaterThan(0);
     }
-    expect(provenancePresentation(null).glyph.length).toBeGreaterThan(0);
-    expect(provenancePresentation(sourceOf('user_label'), true).glyph.length).toBeGreaterThan(0);
+    expect(provenancePresentation(null).icon.length).toBeGreaterThan(0);
+    expect(provenancePresentation(sourceOf('user_label'), true).icon.length).toBeGreaterThan(0);
+  });
+
+  it('maps reference_source to the book.closed SF Symbol', () => {
+    expect(provenancePresentation(sourceOf('reference_source')).icon).toBe('book.closed');
   });
 
   it('is_edited takes precedence over the source type', () => {

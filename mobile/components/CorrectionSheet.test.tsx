@@ -33,6 +33,31 @@ import {
 import { SavedFoodApiError, type SavedFoodDTO } from "@/api/savedFoods";
 import type { ApiSession } from "@/state/session";
 
+// expo-symbols is a native module — replace SymbolView with a View stub that
+// exposes the symbol name via testID (same pattern as AppIcon.test.tsx); the
+// provenance block renders its SF Symbol through it.
+jest.mock("expo-symbols", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const React = require("react");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { View } = require("react-native");
+  return {
+    SymbolView: ({
+      name,
+      accessibilityLabel,
+    }: {
+      name: string;
+      tintColor?: string;
+      size?: number;
+      accessibilityLabel?: string;
+    }) =>
+      React.createElement(View, {
+        testID: `sf-symbol-${String(name)}`,
+        accessibilityLabel,
+      }),
+  };
+});
+
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
 const SESSION: ApiSession = {

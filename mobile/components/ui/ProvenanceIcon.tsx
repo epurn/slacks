@@ -1,14 +1,16 @@
-import { Text, StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import type { ItemSourceDTO } from '@/api/derivedItems';
 import { useTheme } from '@/theme';
 
+import { AppIcon, type AppIconName } from './AppIcon';
+
 /**
- * Compact glyph + VoiceOver label for a value's provenance, so screen-reader
+ * SF Symbol + VoiceOver label for a value's provenance, so screen-reader
  * users receive the same source signal as sighted users.
  */
 export interface ProvenancePresentation {
-  readonly glyph: string;
+  readonly icon: AppIconName;
   readonly accessibilityLabel: string;
 }
 
@@ -17,40 +19,40 @@ export interface ProvenancePresentation {
  * (FTY-092 `ItemSourceDTO`, the evidence-hierarchy `source_type`). A direct
  * user edit (`is_edited`) is treated as just another provenance and takes
  * precedence over the underlying source type per the UX spec; a missing source
- * falls back to an "unknown" glyph rather than crashing.
+ * falls back to an "unknown" icon rather than crashing.
  */
 export function provenancePresentation(
   source: ItemSourceDTO | null | undefined,
   is_edited = false,
 ): ProvenancePresentation {
   if (is_edited) {
-    return { glyph: '✎', accessibilityLabel: 'Edited by you' };
+    return { icon: 'pencil', accessibilityLabel: 'Edited by you' };
   }
   if (!source) {
-    return { glyph: '·', accessibilityLabel: 'Source unknown' };
+    return { icon: 'questionmark.circle', accessibilityLabel: 'Source unknown' };
   }
   switch (source.source_type) {
     case 'trusted_nutrition_database':
-      return { glyph: '🔍', accessibilityLabel: `Source: ${source.label}` };
+      return { icon: 'magnifyingglass', accessibilityLabel: `Source: ${source.label}` };
     case 'product_database':
-      return { glyph: '📊', accessibilityLabel: `Source: ${source.label}` };
+      return { icon: 'barcode', accessibilityLabel: `Source: ${source.label}` };
     case 'user_label':
-      return { glyph: '📷', accessibilityLabel: `Source: ${source.label}` };
+      return { icon: 'camera', accessibilityLabel: `Source: ${source.label}` };
     case 'official_source':
-      return { glyph: '🌐', accessibilityLabel: `Source: ${source.label}` };
+      return { icon: 'globe', accessibilityLabel: `Source: ${source.label}` };
     case 'reference_source':
-      return { glyph: '📖', accessibilityLabel: `Source: ${source.label}` };
+      return { icon: 'book.closed', accessibilityLabel: `Source: ${source.label}` };
     case 'model_prior':
-      return { glyph: '≈', accessibilityLabel: 'Rough estimate' };
+      return { icon: 'plus.forwardslash.minus', accessibilityLabel: 'Rough estimate' };
   }
 }
 
 /**
  * The single, always-on provenance icon for a food item's nutritional data,
- * keyed off the real server `ItemSourceDTO` (FTY-092). Shows a small glyph for
- * the source type with a built-in VoiceOver label. Quiet by default — icon
+ * keyed off the real server `ItemSourceDTO` (FTY-092). Shows a small SF Symbol
+ * for the source type with a built-in VoiceOver label. Quiet by default — icon
  * only; the full evidence is one tap away (handled by the parent sheet or item
- * row). When `is_edited` is true it renders the edited glyph regardless of the
+ * row). When `is_edited` is true it renders the edited icon regardless of the
  * underlying source type.
  */
 export function ProvenanceIcon({
@@ -61,23 +63,23 @@ export function ProvenanceIcon({
   is_edited?: boolean;
 }) {
   const { colors } = useTheme();
-  const { glyph, accessibilityLabel } = provenancePresentation(source, is_edited);
+  const { icon, accessibilityLabel } = provenancePresentation(source, is_edited);
 
   return (
-    <Text
-      style={[styles.icon, { color: colors.textMuted }]}
-      accessibilityRole="image"
-      accessibilityLabel={accessibilityLabel}
-    >
-      {glyph}
-    </Text>
+    <View style={styles.icon}>
+      <AppIcon
+        name={icon}
+        size={16}
+        color={colors.textMuted}
+        accessibilityLabel={accessibilityLabel}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   icon: {
-    fontSize: 16,
     width: 22,
-    textAlign: 'center',
+    alignItems: 'center',
   },
 });

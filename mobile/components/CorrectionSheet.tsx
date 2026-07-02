@@ -51,7 +51,11 @@ import {
   type NutritionSnapshot,
 } from "@/api/savedFoods";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { provenancePresentation } from "@/components/ui/ProvenanceIcon";
+import { AppIcon } from "@/components/ui/AppIcon";
+import {
+  provenancePresentation,
+  type ProvenancePresentation,
+} from "@/components/ui/ProvenanceIcon";
 import type { ApiSession } from "@/state/session";
 import { formatValue } from "@/state/derivedItems";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
@@ -651,7 +655,7 @@ function ProvenanceBlock({
 }: {
   source: DerivedFoodItemDTO["source"];
   isEdited: boolean;
-  provenancePres: { glyph: string; accessibilityLabel: string };
+  provenancePres: ProvenancePresentation;
   isRoughEstimate: boolean;
   logPhrase?: string;
   onMakeExact: () => void;
@@ -665,13 +669,14 @@ function ProvenanceBlock({
     <View style={styles.provenanceBlock} accessibilityRole="summary">
       {/* Source line */}
       <View style={styles.provenanceRow}>
-        <Text
-          style={[styles.provenanceGlyph, { color: colors.textMuted }]}
-          accessibilityRole="image"
-          accessibilityLabel={provenancePres.accessibilityLabel}
-        >
-          {provenancePres.glyph}
-        </Text>
+        <View style={styles.provenanceGlyph}>
+          <AppIcon
+            name={provenancePres.icon}
+            size={16}
+            color={colors.textMuted}
+            accessibilityLabel={provenancePres.accessibilityLabel}
+          />
+        </View>
         <Text style={[styles.provenanceLabel, { color: colors.textSecondary }]}>
           {isRoughEstimate ? "≈ Rough estimate" : sourceLabel}
         </Text>
@@ -1283,9 +1288,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   provenanceGlyph: {
-    fontSize: 16,
     width: 22,
-    textAlign: "center",
+    alignItems: "center",
   },
   provenanceLabel: {
     fontSize: typeScale.subhead,
