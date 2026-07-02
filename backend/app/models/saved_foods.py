@@ -29,10 +29,10 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, Uuid
+from sqlalchemy import Float, ForeignKey, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db import Base
+from app.db import Base, UtcDateTime
 from app.enums import SavedFoodSource
 
 
@@ -74,11 +74,9 @@ class SavedFood(Base):
     source: Mapped[str] = mapped_column(
         String(32), nullable=False, default=SavedFoodSource.SAVED_FROM_CORRECTION
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+        UtcDateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )
 
 
@@ -102,9 +100,7 @@ class FoodAlias(Base):
     alias: Mapped[str] = mapped_column(String(200), nullable=False)
     #: Normalized form of :attr:`alias` for deterministic prefix/contains matching.
     alias_normalized: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+        UtcDateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )
