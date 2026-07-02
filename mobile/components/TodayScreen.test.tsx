@@ -1592,3 +1592,34 @@ describe("TodayScreen offline-queue logging", () => {
     }
   });
 });
+
+describe("TodayScreen timeline timestamps (FTY-174 / audit A6)", () => {
+  it("renders a known morning entry with the correct AM meridiem, never PM", async () => {
+    // The exact regression: an 11:14 AM local instant must show "11:14 AM" in the
+    // real timeline cluster header — not "11:14 PM" (the observed Hermes bug).
+    //
+    // Build the instant from *local* wall-clock components (11:14 on the machine's
+    // own zone) so the assertion is deterministic on any CI timezone: the header
+    // renders in the device zone, so it must read back the same 11:14 AM. The
+    // stored `created_at` is that instant serialized to UTC, exactly as the
+    // tz-aware backend (FTY-173) would send it.
+    const localMorning = new Date(2026, 5, 27, 11, 14, 0); // 11:14 AM, device zone
+    const load = jest.fn().mockResolvedValue([
+      event({
+        id: "morning",
+        raw_text: "Oatmeal",
+        status: "completed",
+        created_at: localMorning.toISOString(),
+      }),
+    ]);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
+    await act(async () => {});
+
+    const content = textContent(tree);
+    expect(content).toContain("Oatmeal");
+    expect(content).toContain("11:14 AM");
+    expect(content).not.toContain("11:14 PM");
+  });
+});
