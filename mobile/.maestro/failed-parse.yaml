@@ -1,0 +1,76 @@
+# FTY-176: Failed-parse row is actionable — Retry, never a dead end.
+#
+# Drives the failure UX to completion: a parse that couldn't be estimated must
+# render as a tappable "Couldn't read that" row with Retry + Edit as text — the
+# exact inert-dead-end outcome the *Acknowledge every action* principle forbids.
+#
+# Flow:
+#   Today (empty day) → submit gibberish → failed row appears with the calm
+#   "Couldn't read that" copy and Retry / Edit-as-text affordances → tap Retry →
+#   the failed row is superseded in place by a fresh pending attempt
+#   ("Waiting to estimate"), with no stale duplicate.
+#
+# Load-bearing assertion (step 7): after Retry the row is a *pending attempt*,
+# not the static failed row — proving the failed row is a genuine retry path and
+# not a dead end. The mock returns a distinct pending event for the Retry POST
+# (E2E_FAILED_RETRY_EVENT), keyed on the gibberish raw_text so this flow drives
+# state independent of the clarify flow.
+#
+# Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
+# directory-level Maestro runs launch the installed app under test reliably.
+appId: com.fatty
+---
+# Step 1: Launch in E2E mode (empty day).
+- launchApp:
+    clearState: false
+
+# Step 2: Reach Today in the ready, empty-day state.
+- extendedWaitUntil:
+    visible:
+      id: today-screen
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-ready
+    timeout: 15000
+
+# Step 3: Submit gibberish — the mock's failed-parse branch returns a `failed`
+#         event for this exact raw_text.
+- tapOn:
+    text: "Log food or exercise"
+- inputText: "zxqwvb"
+- tapOn:
+    text: "Add entry"
+
+# Step 4: The timeline shows entries (optimistic pending, then the failed event).
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-with-entries
+    timeout: 10000
+
+# Step 5: Assert the failed parse renders as the calm, actionable row — the
+#         captured text and the "Couldn't read that" copy, not a silent zero.
+- extendedWaitUntil:
+    visible:
+      id: failed-parse-row
+    timeout: 10000
+- assertVisible:
+    text: ".*Couldn't read that.*"
+
+# Step 6: Both affordances are present — a real retry path, never a dead end.
+- assertVisible:
+    id: failed-retry
+- assertVisible:
+    id: failed-edit-as-text
+
+# Step 7: Tap Retry — the failed row is superseded in place by a fresh pending
+#         attempt. The row becomes "Waiting to estimate" (the pending status
+#         label) and the failed row is gone (no stale duplicate).
+- tapOn:
+    id: failed-retry
+- extendedWaitUntil:
+    visible:
+      text: "Waiting to estimate"
+    timeout: 10000
+- assertNotVisible:
+    id: failed-parse-row

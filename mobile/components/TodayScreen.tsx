@@ -296,6 +296,9 @@ export function TodayScreen({
   // Monotonic counter for optimistic placeholder ids; never collides with a
   // server UUID and stays stable across renders.
   const tempId = useRef(0);
+  // Composer input handle so "Edit as text" (FTY-176) can focus it after
+  // prefilling the failed entry's wording — the keyboard rises in place.
+  const inputRef = useRef<TextInput>(null);
   // The single mounted correction/detail sheet (FTY-100, wired here in FTY-148).
   // `target` holds the tapped item + its log phrase; `visible` drives the slide
   // animation. We keep `target` set across a close so the sheet can animate out
@@ -321,6 +324,15 @@ export function TodayScreen({
   // the timeline even though the server still lists it as needs_clarification
   // until a future backend resolve path lands.
   const [resolvedClarificationIds, setResolvedClarificationIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
+  // Failed events the user has retried / handed to the composer this session
+  // (FTY-176). Like `resolvedClarificationIds`, this is render state only: a
+  // retried failed row is superseded in place by the fresh attempt (or by the
+  // composer resubmission), so it is filtered from the timeline even though the
+  // server still lists the original as `failed`. A create-call error un-hides
+  // the original so the failed row stays actionable — never a dead end.
+  const [supersededFailedIds, setSupersededFailedIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
 
@@ -647,6 +659,61 @@ export function TodayScreen({
     [apiSession, create, closeItemSheet, setSubmitError],
   );
 
+  // Retry a failed parse as a fresh attempt (FTY-176). There is no server-side
+  // resubmit endpoint (a non-goal), so this reuses the existing create path: the
+  // same `raw_text` is re-submitted with a NEW idempotency key, so it is a
+  // genuine new attempt — not a dedup replay of the failed one. It reuses the
+  // composer's optimistic-insert + poll-to-terminal pattern: the failed row is
+  // superseded in place by the new pending attempt (no stale duplicate), and a
+  // create-call error un-hides the original so it stays actionable — never a
+  // dead end, never a fabricated number.
+  const handleRetryFailed = useCallback(
+    async (failedEvent: LogEventDTO) => {
+      if (!apiSession) return;
+      const rawText = failedEvent.raw_text;
+      setSupersededFailedIds((prev) => new Set(prev).add(failedEvent.id));
+      const id = `${OPTIMISTIC_ID_PREFIX}${tempId.current++}`;
+      const optimistic = optimisticLogEvent({
+        id,
+        userId: apiSession.userId,
+        rawText,
+        createdAt: new Date().toISOString(),
+      });
+      setEvents((prev) => sortByNewest([optimistic, ...prev]));
+      try {
+        const created = await create(apiSession, rawText, generateKey());
+        setEvents((prev) =>
+          sortByNewest(prev.map((e) => (e.id === id ? created : e))),
+        );
+      } catch (error) {
+        setEvents((prev) => prev.filter((e) => e.id !== id));
+        // Un-hide the original failed row so a retry that couldn't even reach a
+        // fresh attempt leaves the user a reachable path (no silent dead end).
+        setSupersededFailedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(failedEvent.id);
+          return next;
+        });
+        setSubmitError(messageFor(error, "save"));
+      }
+    },
+    [apiSession, create, generateKey, setSubmitError],
+  );
+
+  // Edit a failed parse as text (FTY-176). Prefill the composer with the failed
+  // entry's `raw_text` so the user can fix the wording, then resubmit through the
+  // same create path (the composer's submit machine mints a fresh idempotency
+  // key). The failed row is superseded in place — no stale duplicate — and the
+  // text is safe in the composer; a resubmission is a genuine new attempt.
+  const handleEditFailedAsText = useCallback(
+    (failedEvent: LogEventDTO) => {
+      setText(failedEvent.raw_text);
+      setSupersededFailedIds((prev) => new Set(prev).add(failedEvent.id));
+      inputRef.current?.focus();
+    },
+    [setText],
+  );
+
   // Reconcile a confirmed edit (the server's current item) back into the map,
   // replacing the prior item for its event by id so the timeline re-renders the
   // server values — including any servings-rescaled calories/macros.
@@ -690,13 +757,18 @@ export function TodayScreen({
   // (not `events`) so the timeline clusters them newest-first alongside server
   // rows; ClusterView renders them through OfflineEntryRow by their id.
   const displayEvents = useMemo(() => {
-    // Drop entries the user has answered this session — they are superseded in
-    // place by the now-counting re-submission, even after a poll re-fetches the
-    // still-needs_clarification server row (FTY-149).
+    // Drop entries the user has answered (needs_clarification, FTY-149) or
+    // retried / handed to the composer (failed, FTY-176) this session — they are
+    // superseded in place by the fresh attempt, even after a poll re-fetches the
+    // original server row in its pre-resolve status.
     const visible =
-      resolvedClarificationIds.size === 0
+      resolvedClarificationIds.size === 0 && supersededFailedIds.size === 0
         ? events
-        : events.filter((event) => !resolvedClarificationIds.has(event.id));
+        : events.filter(
+            (event) =>
+              !resolvedClarificationIds.has(event.id) &&
+              !supersededFailedIds.has(event.id),
+          );
     if (offlineEntries.length === 0) return visible;
     const offlineEvents = offlineEntries
       .filter((entry) => entry.syncState !== "accepted")
@@ -709,7 +781,7 @@ export function TodayScreen({
         }),
       );
     return sortByNewest([...visible, ...offlineEvents]);
-  }, [events, offlineEntries, resolvedClarificationIds]);
+  }, [events, offlineEntries, resolvedClarificationIds, supersededFailedIds]);
 
   if (!session) {
     return <SignInRequired insetTop={insets.top + 24} />;
@@ -801,6 +873,7 @@ export function TodayScreen({
 
         <View style={styles.composer}>
           <TextInput
+            ref={inputRef}
             accessibilityLabel="Log food or exercise"
             placeholder="Add food or exercise…"
             placeholderTextColor={colors.textMuted}
@@ -883,6 +956,8 @@ export function TodayScreen({
           onItemChange={handleItemChange}
           onOpenItem={openItemSheet}
           onOpenClarify={openClarifySheet}
+          onRetryFailed={(event) => void handleRetryFailed(event)}
+          onEditFailedAsText={handleEditFailedAsText}
           phase={phase}
           loadError={loadError}
           onRetry={() => void refresh()}
@@ -949,6 +1024,8 @@ function Timeline({
   onItemChange,
   onOpenItem,
   onOpenClarify,
+  onRetryFailed,
+  onEditFailedAsText,
   phase,
   loadError,
   onRetry,
@@ -965,6 +1042,10 @@ function Timeline({
   onItemChange: (item: DerivedItem) => void;
   onOpenItem: (item: DerivedItem, logPhrase: string) => void;
   onOpenClarify: (event: LogEventDTO) => void;
+  /** Retry a failed parse as a fresh attempt (FTY-176). */
+  onRetryFailed: (event: LogEventDTO) => void;
+  /** Prefill the composer with a failed entry's text to fix + resubmit (FTY-176). */
+  onEditFailedAsText: (event: LogEventDTO) => void;
   phase: Phase;
   loadError: string | null;
   onRetry: () => void;
@@ -1034,6 +1115,8 @@ function Timeline({
           onItemChange={onItemChange}
           onOpenItem={onOpenItem}
           onOpenClarify={onOpenClarify}
+          onRetryFailed={onRetryFailed}
+          onEditFailedAsText={onEditFailedAsText}
           saveFood={saveFood}
           colors={colors}
         />
@@ -1051,6 +1134,8 @@ function ClusterView({
   onItemChange,
   onOpenItem,
   onOpenClarify,
+  onRetryFailed,
+  onEditFailedAsText,
   saveFood,
   colors,
 }: {
@@ -1062,6 +1147,8 @@ function ClusterView({
   onItemChange: (item: DerivedItem) => void;
   onOpenItem: (item: DerivedItem, logPhrase: string) => void;
   onOpenClarify: (event: LogEventDTO) => void;
+  onRetryFailed: (event: LogEventDTO) => void;
+  onEditFailedAsText: (event: LogEventDTO) => void;
   saveFood: typeof saveFoodApi;
   colors: ReturnType<typeof useTheme>["colors"];
 }) {
@@ -1130,7 +1217,25 @@ function ClusterView({
             );
           }
 
-          // pending / processing / failed / completed-with-no-items → status placeholder
+          // failed → calm, actionable "couldn't read that" row with Retry +
+          // Edit as text; never a static dead-end (FTY-176).
+          if (event.status === "failed") {
+            return (
+              <EntryRow
+                key={event.id}
+                event={event}
+                items={[]}
+                session={session}
+                editItem={editItem}
+                onItemChange={onItemChange}
+                saveFoodFn={saveFood}
+                onRetry={() => onRetryFailed(event)}
+                onEditAsText={() => onEditFailedAsText(event)}
+              />
+            );
+          }
+
+          // pending / processing / completed-with-no-items → status placeholder
           return (
             <EntryRow
               key={event.id}

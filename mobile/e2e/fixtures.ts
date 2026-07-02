@@ -142,3 +142,41 @@ export const E2E_RESOLVED_SUMMARY: DailySummaryDTO = {
   target: E2E_TARGET,
   exercise: { active_calories: 0 },
 };
+
+// ─── FTY-176 failed-parse fixtures ────────────────────────────────────────────
+
+/**
+ * The gibberish input the failed-parse flow (failed.yaml) submits. The E2E mock
+ * keys the failed-parse branch off this exact `raw_text`, so it never collides
+ * with the clarify flow's "coffee" — the two flows share one binary and one mock
+ * but drive independent state.
+ */
+export const E2E_FAILED_RAW_TEXT = 'zxqwvb';
+
+/**
+ * Synthetic `failed` event returned for the first submission of the gibberish
+ * text. The timeline must render it as the actionable "Couldn't read that" row
+ * (Retry + Edit as text), never a static dead end (FTY-176).
+ */
+export const E2E_FAILED_EVENT: LogEventDTO = {
+  id: 'e2e-failed-event-00000000-0000-0000-0000-000000000000',
+  user_id: E2E_SESSION.userId,
+  raw_text: E2E_FAILED_RAW_TEXT,
+  status: 'failed',
+  created_at: '2026-01-01T08:00:00Z',
+  updated_at: '2026-01-01T08:00:00Z',
+};
+
+/**
+ * The `pending` event a Retry produces — a genuine fresh attempt (a distinct id
+ * from the failed one). The failed row is superseded in place by this pending
+ * attempt, so failed.yaml asserts the row becomes "Waiting to estimate".
+ */
+export const E2E_FAILED_RETRY_EVENT: LogEventDTO = {
+  id: 'e2e-failed-retry-00000000-0000-0000-0000-000000000000',
+  user_id: E2E_SESSION.userId,
+  raw_text: E2E_FAILED_RAW_TEXT,
+  status: 'pending',
+  created_at: '2026-01-01T08:01:00Z',
+  updated_at: '2026-01-01T08:01:00Z',
+};
