@@ -19,8 +19,10 @@ This contract covers four things:
 4. the **pluggable pipeline step interface** the estimator step stories implement.
 
 It deliberately excludes actual NL parsing (FTY-042), exercise math (FTY-043),
-food resolution (FTY-044), LLM provider integration (FTY-041), the clarification
-answer flow, and any derived-item / evidence tables (owned by the step stories).
+food resolution (FTY-044), LLM provider integration (FTY-041), and any
+derived-item / evidence tables (owned by the step stories). The clarification
+answer **endpoint and persistence** are `log-events.md`'s (v4); this contract
+owns the job/run mechanics of the answer-triggered re-estimate (v2, below).
 
 ## Owner
 
@@ -32,6 +34,19 @@ estimator / backend-core / contracts lane:
 `backend/app/routers/log_events.py`, `backend/alembic/`.
 
 ## Version
+
+2 (FTY-171): the **answer-triggered re-estimate**. The clarification answer
+(`log-events.md` v4) re-opens a job terminal in `needs_clarification` so the
+same event can be estimated again with the user's accumulated answers as
+structured input. v1's "one job per event" anchor is unchanged; its "a job
+terminal in `needs_clarification` is never reprocessed" rule is **amended**:
+the *resolve* — never the worker — re-opens such a job (`needs_clarification →
+queued`, in the same transaction that persists the answer and drives the event
+`needs_clarification → processing`) and enqueues a fresh task with the same
+payload. Redelivery idempotency for queue-delivered tasks is preserved: the
+worker still treats a terminal job as a no-op, so only a first-write-wins
+answer (unique per question) can re-open it. See
+[Answer-triggered re-estimate](#answer-triggered-re-estimate-fty-171).
 
 1 (FTY-040): introduces `estimation_jobs` / `estimation_runs`, the enqueue
 trigger, the worker, the retry policy, and the stub pipeline. The pipeline's
@@ -77,7 +92,11 @@ A step carries a stable `name` and a `run(context)` that mutates an
 `assumptions`, `validation_errors`, and `trace` entries; setting
 `provider` / `model` / `schema_version`; and, for the parse step, accumulating
 `food_candidates` / `exercise_candidates` / `clarification_questions` the worker
-persists). A step signals a non-success outcome by raising:
+persists). As input the context carries the event's untrusted `raw_text` and —
+on an answer-triggered re-estimate (v2) — `answered_clarifications`, every
+answered (question, answer) pair the parse step folds in as delimited,
+untrusted structured detail (never copied into `trace`/`error`). A step signals
+a non-success outcome by raising:
 
 - `NeedsClarification(reason)` — terminal, **not** retried (only the user can
   resolve ambiguous input);
@@ -112,6 +131,37 @@ The worker reuses the FTY-030 `LEGAL_TRANSITIONS` map (it does not redefine it):
 | failed (retryable), bound reached | `failed` | `failed` | `processing → failed` |
 | failed (deterministic, `StepFailed`) | `failed` | `failed` | `processing → failed` (immediate, no retry) |
 
+### Answer-triggered re-estimate (FTY-171)
+
+A valid, fresh clarification answer (`log-events.md` v4) re-estimates the
+**same** event. The resolve endpoint — not the worker — prepares the job, all
+in the one transaction that persists the `clarification_answers` row:
+
+- **Re-open:** the job goes `needs_clarification → queued`, and `max_attempts`
+  is extended to `attempts + DEFAULT_MAX_ATTEMPTS`, granting the re-estimate a
+  fresh bounded retry budget. `attempts` stays **cumulative** — run `attempt`
+  numbers keep increasing monotonically, so the run history remains one honest,
+  ordered audit trail across rounds.
+- **Event transition:** the resolve drives `needs_clarification → processing`
+  (the transition already legal in the FTY-030 map) *before* publishing, so the
+  worker finds an already-`processing` event with a non-terminal job and simply
+  runs the pipeline — the claim rule is unchanged.
+- **Enqueue:** a fresh task is published with the same `EstimationJobPayload`
+  (ids only), commit-first like create.
+- **Structured answers in the pipeline:** the worker loads every answered
+  (question, answer) pair for the event onto the `EstimationContext`
+  (`answered_clarifications`), and the parse step folds them into the prompt as
+  delimited, untrusted structured detail. `raw_text` is passed through
+  unchanged — the answer never rewrites the phrase. If the enriched input is
+  still genuinely indeterminate, the fresh clarification round **replaces** the
+  event's unanswered question rows in the terminal transaction
+  (`parse-candidates.md`); answered questions and their answers are kept.
+- **Redelivery idempotency preserved:** the worker never re-opens a terminal
+  job, so a redelivered task for a job that has gone terminal (again) is still
+  a no-op. The re-open itself is idempotent per question — the unique
+  `question_id` on `clarification_answers` is the anchor; a replayed answer
+  neither re-opens nor re-enqueues.
+
 ## Retry policy
 
 - **Bounded retries.** `DEFAULT_MAX_ATTEMPTS = 3` (the initial attempt plus two
@@ -131,11 +181,13 @@ The worker reuses the FTY-030 `LEGAL_TRANSITIONS` map (it does not redefine it):
 - The job payload is schema-validated at the worker boundary; unknown keys are
   rejected.
 - The event is claimed only from `pending`; a re-entry mid-retry finds it
-  `processing` and leaves it. A job already in a terminal status
-  (`succeeded` / `failed` / `needs_clarification`) is never reprocessed — that is
-  what makes re-delivery a no-op. (FTY-171 amends the `needs_clarification`
-  arm of this rule for the user-driven clarification resolve — see
-  Migration / Compatibility.)
+  `processing` and leaves it — the same path an answer-triggered re-estimate
+  takes, since the resolve drives the event to `processing` before enqueueing.
+  A job in a terminal status (`succeeded` / `failed` / `needs_clarification`)
+  is never reprocessed **by the worker** — that is what makes re-delivery a
+  no-op. The only way out of terminal `needs_clarification` is the user-driven
+  clarification resolve, which re-opens the job to `queued` at answer time
+  (v2; see [Answer-triggered re-estimate](#answer-triggered-re-estimate-fty-171)).
 - All step output written to a run is sanitized; raw user text is never copied
   into `trace` or `error`.
 
@@ -168,7 +220,7 @@ The worker reuses the FTY-030 `LEGAL_TRANSITIONS` map (it does not redefine it):
 | Transient step failure (`StepError`), retries remain | Run `failed`; job stays `running`; task retried with backoff. |
 | Transient step failure (`StepError`), bound reached | Run + job + event `failed`. |
 | Deterministic step failure (`StepFailed`) | Run + job + event `failed` immediately (no retry). |
-| Ambiguous input (`NeedsClarification`) | Run + job + event `needs_clarification` (terminal). |
+| Ambiguous input (`NeedsClarification`) | Run + job + event `needs_clarification` (terminal for the worker; only the clarification resolve re-opens it — v2). |
 
 ## Examples
 
@@ -192,17 +244,15 @@ POST /api/users/{uid}/log-events  →  201 pending event
   unchanged; FTY-042 additively extended the step-signal vocabulary with the
   terminal `StepFailed` (deterministic, non-retryable) outcome and persists its
   candidates/questions to their own tables (see `parse-candidates.md`).
-- **Pending amendment (FTY-170 → FTY-171).** `log-events.md` v4 defines a
-  first-class clarification answer that drives
-  `needs_clarification → processing` on the same event and mandates a
-  **re-estimate** with the accumulated (question, answer) pairs as structured
-  input. This contract as written (v1) cannot express that re-estimate: the
-  unique `log_event_id` on `estimation_jobs` allows exactly one job per
-  event, and a job terminal in `needs_clarification` is never reprocessed —
-  both rules predate a user-driven resolve and treat `needs_clarification` as
-  the end of the job's life. FTY-171 (which implements the answer round-trip)
-  must evolve this contract with a version bump defining the re-estimate's
-  job/run mechanics — e.g. re-opening the event's job for a fresh
-  answer-triggered attempt/run — while preserving redelivery idempotency for
-  queue-delivered tasks. Until FTY-171 lands, the answer endpoint does not
-  exist, so no running behaviour contradicts v1.
+- **v2 (FTY-171, no migration).** The answer-triggered re-estimate lands the
+  amendment FTY-170 recorded here: the clarification resolve re-opens a job
+  terminal in `needs_clarification` (`→ queued`, `max_attempts` extended to
+  `attempts + DEFAULT_MAX_ATTEMPTS`) in the same transaction as the answer and
+  the `needs_clarification → processing` transition, then enqueues a fresh
+  task. No schema change: `estimation_jobs` / `estimation_runs` are untouched
+  (the additive `clarification_answers` table is `log-events.md`'s, migration
+  `0016`). The unique `log_event_id` (one job per event) still holds — a
+  re-estimate is a new attempt/run on the *same* job, not a second job — and
+  redelivery idempotency for queue-delivered tasks is preserved because the
+  worker itself never re-opens a terminal job. See
+  [Answer-triggered re-estimate](#answer-triggered-re-estimate-fty-171).

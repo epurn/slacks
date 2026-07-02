@@ -50,10 +50,9 @@ duplicate-entry audit findings (A3/A5); the missing question/options in the
 read were finding A2. Consumers landing against the new shapes: FTY-172
 (estimator produces question + options — see `parse-candidates.md` v2),
 FTY-171 (backend serves the new read shape and implements the answer
-round-trip — which requires **evolving `estimation-jobs.md`** beyond its v1
-one-job-per-event / never-reprocessed rules to express the answer-triggered
-re-estimate; the pending amendment is recorded there), FTY-153 (mobile
-clarify sheet).
+round-trip — evolving `estimation-jobs.md` beyond its v1 one-job-per-event /
+never-reprocessed rules to express the answer-triggered re-estimate; that
+amendment landed as `estimation-jobs.md` v2), FTY-153 (mobile clarify sheet).
 
 3 (FTY-152): adds an **owner-scoped clarification read** —
 `GET /api/users/{user_id}/log-events/{event_id}/clarification` — that returns the
@@ -297,14 +296,11 @@ A fresh, valid answer:
 2. transitions the **same** event `needs_clarification → processing` — the
    transition already legal in the state machine below — and re-estimates it
    with the raw phrase plus **every answered (question, answer) pair** as
-   structured input. The job/run mechanics of that re-estimate are FTY-171's
-   implementation, and they **evolve `estimation-jobs.md`** (a version bump,
-   not a drop-in): that contract's v1 rules — a unique `log_event_id` on
-   `estimation_jobs` (exactly one job per event) and "a job terminal in
-   `needs_clarification` is never reprocessed" — predate a user-driven
-   resolve and cannot express this re-estimate as written. The required
-   amendment is recorded in `estimation-jobs.md`
-   (Migration / Compatibility);
+   structured input. The job/run mechanics of that re-estimate are
+   `estimation-jobs.md` v2 (FTY-171): the resolve re-opens the event's
+   terminal job for a fresh answer-triggered attempt in the same transaction,
+   then enqueues; the worker itself never re-opens a terminal job, preserving
+   redelivery idempotency;
 3. returns `201` with the event DTO at `status: "processing"`, so the client
    updates the entry in place and polls as usual.
 
@@ -540,6 +536,13 @@ curl -sX POST :8000/api/users/<uid>/log-events/<event_id>/clarification/answers 
   safe-to-retry submit semantics and the `201`/`200` distinction.
 - The FTY-152 clarification read is additive and needs no migration: the
   `clarification_questions` table already exists (migration `0005`, FTY-042).
+- The `0016` migration (FTY-171) is **additive**: it creates the
+  `clarification_answers` table (see **Answer persistence** above) with its
+  unique `question_id` idempotency anchor and cascading ownership FKs; no prior
+  table or column is altered and no backfill is needed. It applies on top of
+  `0015` and rolls back cleanly (`alembic downgrade 0015`), verified by an
+  apply/rollback test and exercised against Postgres by the FTY-143 migration
+  guard.
 - **FTY-170 (breaking, pre-v1, no shim).** The clarification read's
   per-question shape changes from `{ text }` to `{ id, text, options }`, the
   read is scoped to unanswered questions, and the clarification answer

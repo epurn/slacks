@@ -63,22 +63,58 @@
         "title": "ClampStatus",
         "type": "object"
       },
-      "ClarificationQuestionDTO": {
-        "description": "A single persisted clarification question (FTY-152).\n\nv1 surfaces the question ``text`` only. The estimator does not produce\nquick-pick options today, so the client answers via free-text; the shape is\nforward-compatible \u2014 an additive ``options`` array can be added later without\nbreaking this contract.",
+      "ClarificationAnswerRequest": {
+        "additionalProperties": false,
+        "description": "Request body for ``POST .../log-events/{event_id}/clarification/answers``.\n\n``question_id`` references one of the event's persisted clarification\nquestions (from the clarification read). ``answer`` is the user's answer as\nopaque text \u2014 a tapped quick-pick option's value or free text. It is\nuntrusted user input validated as bounded **data** at this single trust\nboundary: trimmed, non-empty after trimming (an empty/whitespace answer is\nrejected ``422`` before any work \u2014 finding A5), and at most\n:data:`MAX_ANSWER_LENGTH` characters. It is never validated against the\nquestion's options and never interpreted.",
         "properties": {
+          "answer": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Answer",
+            "type": "string"
+          },
+          "question_id": {
+            "format": "uuid",
+            "title": "Question Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question_id",
+          "answer"
+        ],
+        "title": "ClarificationAnswerRequest",
+        "type": "object"
+      },
+      "ClarificationQuestionDTO": {
+        "description": "A single persisted clarification question (FTY-152, FTY-170/171).\n\nCarries the stored row's stable ``id`` (the key an answer submission\nreferences), the question ``text``, and the quick-pick ``options`` the\nclarify sheet renders as one-tap chips. Options are display candidates only \u2014\nnever an enum the server validates an answer against; free text is always an\nallowed answer. The list may be empty (the client then shows the free-text\naffordance only); it stays empty until the estimator persists options\n(``parse-candidates.md`` v2, produced by FTY-172).",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
+          },
           "text": {
             "title": "Text",
             "type": "string"
           }
         },
         "required": [
+          "id",
           "text"
         ],
         "title": "ClarificationQuestionDTO",
         "type": "object"
       },
       "ClarificationResponse": {
-        "description": "Response body for the owner-scoped clarification read (FTY-152).\n\nCarries the event's persisted clarification questions ordered by ``position``.\nAn event with no clarification rows (any non-``needs_clarification`` event, or\none with none persisted) yields an empty list \u2014 there is no status oracle.",
+        "description": "Response body for the owner-scoped clarification read (FTY-152, FTY-170).\n\nCarries a ``needs_clarification`` event's **unanswered** clarification\nquestions ordered by ``position``. The read is status-gated: an owned event\nin any other status \u2014 or one with no unanswered rows \u2014 yields an empty list,\nand the two cases are indistinguishable (no status oracle).",
         "properties": {
           "questions": {
             "items": {
@@ -2909,7 +2945,7 @@
     },
     "/api/users/{user_id}/log-events/{event_id}/clarification": {
       "get": {
-        "description": "Return the persisted clarification questions for one of the caller's events.\n\nThe mobile clarify sheet (FTY-153) fetches this lazily when it opens, so the\nToday list/poll DTO stays lean. Questions are ordered by ``position`` and carry\nonly their ``text`` \u2014 the estimator produces no quick-pick options today.\n\nOwnership is fail-closed (FTY-030): a cross-user or nonexistent ``event_id`` is\nindistinguishable as ``404`` (no existence oracle). An event with no\nclarification rows returns ``200`` with an empty list (no status oracle). The\nquestion text, like raw text, is never logged.",
+        "description": "Return the open clarification questions for one of the caller's events.\n\nThe mobile clarify sheet (FTY-153) fetches this lazily when it opens, so the\nToday list/poll DTO stays lean. Questions are ordered by ``position`` and\ncarry their stable ``id`` (the key an answer submission references), their\n``text``, and their quick-pick ``options`` (empty until the estimator\npersists options \u2014 FTY-172; the client then shows free-text only).\n\nThe read is status-gated (``log-events.md`` v4): only a\n``needs_clarification`` event serves questions, and only its **unanswered**\nones, so a served question is always freshly answerable. Ownership is\nfail-closed (FTY-030): a cross-user or nonexistent ``event_id`` is\nindistinguishable as ``404`` (no existence oracle); a wrong-status event and\none with no rows both return an empty list (no status oracle). The question\ntext, like raw text, is never logged.",
         "operationId": "get_log_event_clarification_api_users__user_id__log_events__event_id__clarification_get",
         "parameters": [
           {
@@ -2972,6 +3008,86 @@
           }
         },
         "summary": "Get Log Event Clarification",
+        "tags": [
+          "log-events"
+        ]
+      }
+    },
+    "/api/users/{user_id}/log-events/{event_id}/clarification/answers": {
+      "post": {
+        "description": "Resolve one clarification question on the caller's own event (FTY-171).\n\nThe answer \u2014 a tapped quick-pick option's value or free text \u2014 is applied as\na structured detail to the **same** event, which is re-estimated with every\ndetail answered so far (``needs_clarification \u2192 processing``; the client\npolls as usual). The raw phrase is never mutated and no second event is ever\ncreated (audit findings A3/A5); an empty/whitespace answer is rejected\n``422`` at the request boundary before any work.\n\nA fresh resolve returns ``201`` and enqueues the re-estimate only after the\nanswer, the re-opened job, and the transition are committed \u2014 the worker\nnever races an unpersisted resolve. An idempotent replay of an\nalready-answered question returns ``200`` with the event's current DTO and\nenqueues nothing. A fresh answer for an event that has since moved on\nreturns ``409 {\"error\": \"not_awaiting_clarification\"}`` and mutates nothing.\nOwnership fails closed (``404``, no existence oracle) for a cross-user or\nnonexistent event or a question that is not the event's own. The answer\ntext, like raw text, is never logged.",
+        "operationId": "answer_log_event_clarification_api_users__user_id__log_events__event_id__clarification_answers_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClarificationAnswerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogEventDTO"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Answer Log Event Clarification",
         "tags": [
           "log-events"
         ]

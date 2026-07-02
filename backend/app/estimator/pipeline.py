@@ -121,6 +121,21 @@ class CandidateDraft:
 
 
 @dataclass(frozen=True)
+class AnsweredClarification:
+    """One answered (question, answer) pair carried into a re-estimate (FTY-171).
+
+    The clarification answer flow (``log-events.md`` v4) re-estimates a
+    ``needs_clarification`` event with every detail answered so far as
+    **structured input** — the raw phrase is never mutated. Both fields are
+    untrusted user-tied text: the parse step folds them into the prompt as
+    delimited data, and they are never copied into the sanitized run ``trace``.
+    """
+
+    question_text: str
+    answer_text: str
+
+
+@dataclass(frozen=True)
 class ResolvedExerciseItem:
     """A costed exercise candidate produced by the exercise calculator (FTY-043).
 
@@ -241,6 +256,11 @@ class EstimationContext:
     #: (FTY-061) extracts from, when this event carries one. ``None`` for a plain
     #: text estimation; the label step is a no-op without it.
     label_input: LabelInput | None = None
+    #: Every answered (question, answer) pair persisted for this event, oldest
+    #: first (FTY-171). Empty on a first estimate; on an answer-triggered
+    #: re-estimate the parse step applies these as structured detail alongside the
+    #: unchanged ``raw_text``. Untrusted user text — never copied into ``trace``.
+    answered_clarifications: list[AnsweredClarification] = field(default_factory=list)
     provider: str | None = None
     model: str | None = None
     schema_version: str | None = None
