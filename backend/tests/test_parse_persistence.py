@@ -248,6 +248,50 @@ def test_representative_gated_entries_persist_specific_question_options_and_read
     }
 
 
+def test_low_confidence_parsed_entry_persists_backend_clarification_options(
+    client: TestClient, session: Session
+) -> None:
+    user_id, event_id, auth = _seed_event_with_auth(
+        client, "parse-low-confidence-clarify@example.com", "some rice"
+    )
+    pipeline = _pipeline(
+        [
+            {
+                "disposition": "parsed",
+                "confidence": 0.1,
+                "items": [{"type": "food", "name": "rice", "quantity_text": "some"}],
+            }
+        ]
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.job_status is EstimationJobStatus.NEEDS_CLARIFICATION
+    assert result.event_status is LogEventStatus.NEEDS_CLARIFICATION
+    assert _food(session, event_id) == []
+    assert _exercise(session, event_id) == []
+    questions = _questions(session, event_id)
+    assert [(q.question_text, q.options) for q in questions] == [
+        ("How much rice did you have?", ["1/2 cup", "1 cup", "2 cups"])
+    ]
+
+    read = client.get(
+        f"/api/users/{user_id}/log-events/{event_id}/clarification",
+        headers={"Authorization": auth},
+    )
+
+    assert read.status_code == 200
+    assert read.json() == {
+        "questions": [
+            {
+                "id": str(questions[0].id),
+                "text": "How much rice did you have?",
+                "options": ["1/2 cup", "1 cup", "2 cups"],
+            }
+        ]
+    }
+
+
 def test_unparseable_input_fails_closed_terminally(client: TestClient, session: Session) -> None:
     user_id, event_id = _seed_event(client, "parse-garbage@example.com", "qwoeiruzxcv")
     pipeline = _pipeline([{"disposition": "unparseable", "confidence": 0.0, "reason": "garbage"}])

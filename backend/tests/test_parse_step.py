@@ -299,20 +299,22 @@ def test_unanimous_samples_rescue_a_timid_verbalized_confidence() -> None:
     assert context.clarification_questions == []
 
 
-def test_unanimous_but_rock_bottom_verbalized_without_question_fails_closed() -> None:
+def test_unanimous_but_rock_bottom_verbalized_synthesizes_clarification() -> None:
     # Agreement alone cannot buy an estimate: with the verbalized component near
     # zero the hybrid stays below the calibrated point, and a vague reply (no
-    # detail signal) routes to clarification.
+    # detail signal) routes to a backend-generated clarification even when the
+    # parsed sample did not include provider-raised questions.
     reply = _parsed([{"type": "food", "name": "rice", "quantity_text": "some"}], confidence=0.1)
     provider = FakeProvider(responses=_sampled(reply))
     context = _context(raw_text="some rice")
 
-    with pytest.raises(StepFailed) as exc:
+    with pytest.raises(NeedsClarification) as exc:
         _run(provider, context)
 
-    assert exc.value.reason == "clarification_quality_failed"
+    assert exc.value.reason == "low_confidence_or_ambiguous"
     assert context.food_candidates == []
-    assert context.clarification_questions == []
+    assert _question_texts(context) == ["How much rice did you have?"]
+    assert _question_options(context) == [["1/2 cup", "1 cup", "2 cups"]]
 
 
 def test_disagreeing_samples_clarify_despite_total_verbalized_confidence() -> None:

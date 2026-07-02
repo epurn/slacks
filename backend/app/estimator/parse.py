@@ -88,6 +88,30 @@ DEFAULT_CLARIFICATION_QUESTION = "Could you clarify what you logged and how much
 
 _MIN_CLARIFICATION_OPTIONS = 2
 _MAX_CLARIFICATION_OPTIONS = 5
+_FOOD_AMOUNT_OPTIONS = ["1 serving", "2 servings", "3 servings"]
+_CUP_AMOUNT_OPTIONS = ["1/2 cup", "1 cup", "2 cups"]
+_SPREAD_AMOUNT_OPTIONS = ["1 tsp", "1 tbsp", "2 tbsp"]
+_EXERCISE_DURATION_OPTIONS = ["15 minutes", "30 minutes", "60 minutes"]
+_CUP_OPTION_FOODS = {
+    "cereal",
+    "chili",
+    "curry",
+    "ice cream",
+    "oatmeal",
+    "pasta",
+    "rice",
+    "soup",
+}
+_SPREAD_OPTION_FOODS = {
+    "butter",
+    "cream cheese",
+    "hummus",
+    "jam",
+    "jelly",
+    "margarine",
+    "nutella",
+    "peanut butter",
+}
 _GENERIC_QUESTIONS = {
     "could you clarify what you logged and how much?",
     "how much was it?",
@@ -172,7 +196,10 @@ class ParseStep:
             signal.hybrid
         )
         if conservative and not _reply_has_sufficient_detail(result.items):
-            context.clarification_questions = _clarification_questions(samples)
+            context.clarification_questions = _clarification_questions(
+                samples,
+                fallback_items=result.items if not signal.all_non_parsed else (),
+            )
             raise NeedsClarification("low_confidence_or_ambiguous")
 
         # A sample set that claims "parsed" yet routes nothing to persist is
@@ -284,7 +311,9 @@ def _candidate_has_detail(item: ParsedCandidate) -> bool:
     return has_food_detail(item.amount, item.quantity_text)
 
 
-def _clarification_questions(samples: Sequence[ParseResult]) -> list[ClarificationDraft]:
+def _clarification_questions(
+    samples: Sequence[ParseResult], *, fallback_items: Sequence[ParsedCandidate] = ()
+) -> list[ClarificationDraft]:
     """Return distinct high-quality clarification questions across samples.
 
     Every sample expresses the same event's ambiguity, so their questions are
@@ -292,7 +321,10 @@ def _clarification_questions(samples: Sequence[ParseResult]) -> list[Clarificati
     case) rather than taken from one arbitrary sample. FTY-172 makes a provider
     clarification with a missing/generic question or fewer than two options a
     low-quality structured output: fail closed instead of persisting a generic
-    fallback the user cannot act on.
+    fallback the user cannot act on. A low-confidence ``parsed`` result without
+    provider questions is a backend-routed clarification, not provider-raised
+    clarification output, so it gets a deterministic targeted question derived
+    from the first item that lacks a detail signal.
     """
 
     questions: list[ClarificationDraft] = []
@@ -307,8 +339,46 @@ def _clarification_questions(samples: Sequence[ParseResult]) -> list[Clarificati
                 seen.add(key)
                 questions.append(ClarificationDraft(text=text, options=options))
     if not questions:
+        if fallback_items:
+            return [_backend_clarification_question(fallback_items)]
         raise StepFailed("clarification_quality_failed")
     return questions
+
+
+def _backend_clarification_question(items: Sequence[ParsedCandidate]) -> ClarificationDraft:
+    """Build a bounded question for backend-routed low-confidence parses.
+
+    The item name comes from the schema-validated parse reply (bounded data, not
+    raw log text). The options are fixed short suggestions; the answer endpoint
+    still accepts arbitrary free text.
+    """
+
+    item = next((candidate for candidate in items if not _candidate_has_detail(candidate)), None)
+    if item is None:
+        raise StepFailed("clarification_quality_failed")
+    if item.type is CandidateType.EXERCISE:
+        return ClarificationDraft(
+            text=f"How long did you do {item.name}?",
+            options=list(_EXERCISE_DURATION_OPTIONS),
+        )
+    return ClarificationDraft(
+        text=f"How much {item.name} did you have?",
+        options=_backend_food_options(item),
+    )
+
+
+def _backend_food_options(item: ParsedCandidate) -> list[str]:
+    """Return quick-pick options for backend-routed food amount questions."""
+
+    unit = (item.unit or "").casefold()
+    name = item.name.casefold()
+    if unit in {"cup", "cups"} or any(food in name for food in _CUP_OPTION_FOODS):
+        return list(_CUP_AMOUNT_OPTIONS)
+    if unit in {"tsp", "tbsp", "teaspoon", "teaspoons", "tablespoon", "tablespoons"} or any(
+        food in name for food in _SPREAD_OPTION_FOODS
+    ):
+        return list(_SPREAD_AMOUNT_OPTIONS)
+    return list(_FOOD_AMOUNT_OPTIONS)
 
 
 def _validate_provider_clarification(text: str, options: Sequence[str]) -> None:

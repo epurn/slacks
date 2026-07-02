@@ -41,10 +41,12 @@ estimator / contracts / backend-core lane:
 shape and records schema version `parse/v2`. Model-raised clarification output is
 treated as low-quality and fails closed unless each question has specific
 question text plus 2–5 bounded, display-only candidate options. The old generic
-default-question fallback is retired for provider output; deterministic backend
-questions (for example plausibility/food/exercise/label gates) still carry
-targeted text with `options: []` when no meaningful quick-pick set exists. The
-`0017` migration adds the persisted `options` column.
+default-question fallback is retired for provider output; backend-routed
+low-confidence `parsed` samples synthesize a targeted amount/duration question
+with 2–5 fixed quick-pick options. Other deterministic backend questions (for
+example plausibility/food/exercise/label gates) still carry targeted text with
+`options: []` when no meaningful quick-pick set exists. The `0017` migration
+adds the persisted `options` column.
 
 3 (FTY-159): **pre-v1 breaking behaviour change** (no shim) — the clarify
 decision becomes the **data-calibrated policy** (ADR 0003 Layer C). The step
@@ -106,8 +108,9 @@ question, each 1–80 chars). Options are **display candidates** the client
 renders as one-tap chips — never an enum the server validates an answer
 against; free text is always an allowed answer (see `log-events.md`,
 Clarification read / Clarification answer). The estimator produces either no
-options for deterministic backend-raised questions (the client then shows
-free-text only) or **2–5 meaningful candidates** for model-raised parse
+options for deterministic backend-raised questions without meaningful quick-pick
+choices (the client then shows free-text only) or **2–5 meaningful candidates**
+for model-raised parse clarifications and backend-routed low-confidence parsed
 clarifications. The schema enforces the hard count/length caps; FTY-172's parse
 producer adds a stricter quality gate for provider output, rejecting missing,
 generic, or under-optioned clarification questions before persistence.
@@ -257,8 +260,12 @@ Provider `needs_clarification` output with no usable specific question, a
 generic fallback question, or fewer than two quick-pick options fails closed
 (`StepFailed("clarification_quality_failed")`) and persists nothing. A
 `needs_clarification` event therefore never reaches the answer flow with a
-model-raised generic placeholder. Deterministic backend gates that synthesize
-their own targeted question persist that question with `options: []`.
+model-raised generic placeholder. If the calibrated policy routes a low-confidence
+`parsed` sample to clarification and no provider question was supplied, the parse
+step synthesizes one targeted backend question naming the first item without a
+detail signal and persists 2–5 bounded quick-pick options. Deterministic backend
+gates that synthesize their own targeted question without meaningful quick-picks
+persist that question with `options: []`.
 Candidates and questions are committed in the **same transaction** as the
 terminal status, so a completed/clarification outcome and its rows are atomic.
 When a **re-estimate** of an answered event (`log-events.md`, Clarification
