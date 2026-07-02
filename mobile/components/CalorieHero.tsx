@@ -272,6 +272,7 @@ const styles = StyleSheet.create({
   contextLine: {
     fontSize: typeScale.callout,
     fontWeight: "500",
+    fontVariant: ["tabular-nums"],
   },
   subLine: {
     fontSize: typeScale.subhead,

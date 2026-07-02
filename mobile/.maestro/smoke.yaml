@@ -33,8 +33,14 @@ appId: com.fatty
     visible:
       id: today-timeline-ready
     timeout: 15000
+# Hero assertions match the combined accessibility label, not the visual
+# status-line text: the hero container is accessible={true} with its children
+# hidden from the accessibility tree, so on iOS only the collapsed label
+# ("0 of 2,000 kcal, 2,000 remaining") is exposed to Maestro. Android exposes
+# the same label as contentDescription, so the label match passes on both
+# platforms (same approach as clarify.yaml step 11).
 - assertVisible:
-    text: ".*0 / 2,000 kcal · 2,000 to go.*"
+    text: ".*0 of 2,000 kcal, 2,000 remaining.*"
 
 # Submit once to advance the E2E mock into its needs-detail phase, then submit a
 # concrete follow-up. The second POST resolves the synthetic entry; Refresh
@@ -57,5 +63,5 @@ appId: com.fatty
     text: "Refresh"
 - extendedWaitUntil:
     visible:
-      text: ".*120 / 2,000 kcal · 6%.*"
+      text: ".*120 of 2,000 kcal, 6 percent, 1,880 remaining.*"
     timeout: 10000
