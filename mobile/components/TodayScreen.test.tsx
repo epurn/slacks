@@ -547,10 +547,9 @@ describe("TodayScreen needs-clarification entries", () => {
     );
     await act(async () => {});
 
-    // The gentle "needs a detail" affordance + inviting call-to-action are
-    // present — not a bare dashed "—" silent row.
+    // The single "Add a detail" affordance is present — not a bare dashed "—"
+    // silent row, and not the old duplicated tag + CTA.
     const text = textContent(tree);
-    expect(text).toContain("needs a detail");
     expect(text).toContain("Add a detail");
     // The typed phrase still reads in the row.
     expect(text).toContain("milk");
@@ -574,7 +573,7 @@ describe("TodayScreen needs-clarification entries", () => {
     );
     expect(row.props.accessibilityRole).toBe("button");
     expect(row.props.accessibilityHint).toBe(
-      "Tap to add the missing detail so Fatty can count it",
+      "Tap to see the full phrase and add the missing detail",
     );
     expect(resolvedStyle(row).minHeight).toBeGreaterThanOrEqual(44);
   });

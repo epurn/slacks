@@ -12,6 +12,19 @@ import { useTheme } from "@/theme/ThemeContext";
 import type { ColorPalette } from "@/theme/colors";
 
 /**
+ * Practical proxy for whether a needs-a-detail row's phrase will clip at
+ * `numberOfLines={2}`. RN's `onTextLayout` does not reliably report the
+ * untruncated line count once `numberOfLines` is set (behaviour differs by
+ * platform), so a character-count threshold approximating two lines of body
+ * text in the row's text column stands in.
+ */
+const TRUNCATION_CHAR_THRESHOLD = 60;
+
+function isLikelyTruncated(text: string): boolean {
+  return text.length > TRUNCATION_CHAR_THRESHOLD;
+}
+
+/**
  * A single timeline row: a compact status icon, the natural-language text the
  * user logged, and a short status label.
  *
@@ -27,11 +40,16 @@ import type { ColorPalette } from "@/theme/colors";
  * injectable for tests.
  *
  * A `needs_clarification` event renders the legible, *inviting* variant
- * (FTY-149): muted text with a gentle "needs a detail" tag and an explicit
- * "Add a detail" call-to-action, visibly uncounted (a trailing "—"), never a
- * bare/silent row. The whole row is one tap target that opens the clarify sheet
- * via `onPress`; a screen reader hears the needs-a-detail state and that tapping
- * resolves it. This honours "acknowledge every action / no inert outcomes".
+ * (FTY-149): muted text with a single "Add a detail ›" affordance chip,
+ * visibly uncounted (a trailing "—"), never a bare/silent row. FTY-177
+ * collapsed what was previously two controls saying the same thing (a "needs a
+ * detail" tag *and* a separate CTA) into that one chip. The whole row is one
+ * tap target that opens the clarify sheet via `onPress`, whose header shows the
+ * full, untruncated phrase — a truncated phrase in the row carries a "more…"
+ * cue plus an accessibility hint saying as much, so a mid-word cut is never a
+ * silent dead end. A screen reader hears the needs-a-detail state and that
+ * tapping resolves it. This honours "acknowledge every action / no inert
+ * outcomes".
  *
  * A `failed` event (the parse couldn't be estimated) renders the calm, actionable
  * variant (FTY-176): muted text with a gentle "Couldn't read that" line and two
@@ -140,8 +158,10 @@ export function EntryRow({
 
   // Legible, inviting "needs a detail" row (FTY-149). The status is terminal
   // and uncounted (the daily-summary filter excludes it), but the row makes the
-  // missing-detail state and the resolve path unmistakable.
+  // missing-detail state and the resolve path unmistakable. FTY-177 collapses
+  // the tag+CTA duplication into one chip and adds a truncation hint.
   if (event.status === "needs_clarification") {
+    const truncated = isLikelyTruncated(event.raw_text);
     return (
       <Pressable
         testID="add-a-detail-row"
@@ -153,7 +173,7 @@ export function EntryRow({
         disabled={!onPress}
         accessibilityRole="button"
         accessibilityLabel={`${event.raw_text}, needs a detail, uncounted`}
-        accessibilityHint="Tap to add the missing detail so Fatty can count it"
+        accessibilityHint="Tap to see the full phrase and add the missing detail"
       >
         <StatusIcon status={event.status} />
         <View style={styles.body}>
@@ -165,21 +185,24 @@ export function EntryRow({
           >
             {event.raw_text}
           </Text>
-          <View style={styles.clarifyMetaRow}>
-            <View
-              style={[styles.needsDetailTag, { backgroundColor: colors.controlBackground }]}
-              accessibilityElementsHidden
-              importantForAccessibility="no-hide-descendants"
-            >
-              <Text style={[styles.needsDetailText, { color: colors.textMuted }]}>
-                needs a detail
-              </Text>
-            </View>
+          {truncated ? (
             <Text
-              style={[styles.addDetailCta, { color: colors.accent }]}
+              testID="add-a-detail-more-hint"
+              style={[styles.truncationHint, { color: colors.textMuted }]}
               accessibilityElementsHidden
               importantForAccessibility="no-hide-descendants"
             >
+              more…
+            </Text>
+          ) : null}
+          {/* Single affordance — replaces the old duplicated "needs a detail"
+              tag + separate "Add a detail" CTA with one clear chip. */}
+          <View
+            style={[styles.addDetailChip, { backgroundColor: colors.controlBackground }]}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            <Text style={[styles.addDetailChipText, { color: colors.accent }]}>
               Add a detail ›
             </Text>
           </View>
@@ -286,22 +309,18 @@ function makeStyles(colors: ColorPalette) {
     clarifyText: {
       color: colors.textMuted,
     },
-    clarifyMetaRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8,
-      marginTop: 4,
+    truncationHint: {
+      fontSize: 12,
+      marginTop: 2,
     },
-    needsDetailTag: {
+    addDetailChip: {
+      alignSelf: "flex-start",
       borderRadius: 6,
       paddingHorizontal: 8,
       paddingVertical: 2,
+      marginTop: 4,
     },
-    needsDetailText: {
-      fontSize: 12,
-      fontWeight: "500",
-    },
-    addDetailCta: {
+    addDetailChipText: {
       fontSize: 13,
       fontWeight: "600",
     },
