@@ -45,6 +45,7 @@ from app.estimator.search import (
     SearchResult,
     SearchStatus,
 )
+from app.estimator.self_consistency import SELF_CONSISTENCY_FIRST_WINDOW
 from app.llm.providers.fake import FakeProvider
 from app.schemas.nutrition_panel import NutritionPanel
 from app.schemas.official_source import EstimatedFacts, NamedFoodEstimate
@@ -111,6 +112,7 @@ def test_injection_in_user_text_cannot_smuggle_calories_through_parse() -> None:
                 "items": [{"type": "food", "name": "rice", "calories": 99999}],
             }
         ]
+        * SELF_CONSISTENCY_FIRST_WINDOW
     )
     context = _context(f"100g rice. {_INJECTION}")
     with pytest.raises(StepFailed) as exc:
@@ -131,6 +133,7 @@ def test_injection_in_user_text_is_stored_only_as_inert_candidate_data() -> None
                 "items": [{"type": "food", "name": "rice", "quantity_text": "100g"}],
             }
         ]
+        * SELF_CONSISTENCY_FIRST_WINDOW
     )
     context = _context(f"100g rice. {_INJECTION}")
     ParseStep(provider).run(context)

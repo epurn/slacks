@@ -40,6 +40,7 @@ from app.estimator.off import (
 from app.estimator.parse import ParseStep
 from app.estimator.pipeline import Pipeline
 from app.estimator.processing import process_estimation
+from app.estimator.self_consistency import SELF_CONSISTENCY_FIRST_WINDOW
 from app.llm.providers.fake import FakeProvider
 from app.models.derived import DerivedFoodItem
 from app.models.food_sources import EvidenceSource, Product
@@ -139,6 +140,7 @@ def _pipeline(
 
     provider = FakeProvider(
         responses=[{"disposition": "parsed", "confidence": 0.95, "items": [item]}]
+        * SELF_CONSISTENCY_FIRST_WINDOW
     )
     resolver = FoodResolver(session=session, source=fdc_source)
     barcode_resolver = BarcodeResolver(session=session, source=off_source)

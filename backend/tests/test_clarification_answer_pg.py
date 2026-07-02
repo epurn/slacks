@@ -28,6 +28,7 @@ from app.estimator.exercise_step import ExerciseCalculateStep
 from app.estimator.parse import ParseStep
 from app.estimator.pipeline import Pipeline
 from app.estimator.processing import process_estimation
+from app.estimator.self_consistency import SELF_CONSISTENCY_FIRST_WINDOW
 from app.llm.providers.fake import FakeProvider
 from app.models.derived import ClarificationAnswer, ClarificationQuestion, DerivedExerciseItem
 from app.models.estimation import EstimationJob
@@ -61,6 +62,8 @@ def _seed_pending_event(engine: Engine, user_id: uuid.UUID) -> uuid.UUID:
 
 
 def _clarify_pipeline(questions: list[str]) -> Pipeline:
+    # The parse step samples through the FTY-158/159 self-consistency sampler
+    # (first window 2, unanimous early stop): one scripted reply per sample.
     provider = FakeProvider(
         responses=[
             {
@@ -70,6 +73,7 @@ def _clarify_pipeline(questions: list[str]) -> Pipeline:
                 "clarification_questions": questions,
             }
         ]
+        * SELF_CONSISTENCY_FIRST_WINDOW
     )
     return Pipeline([ParseStep(provider), ExerciseCalculateStep()])
 
@@ -91,6 +95,7 @@ def _resolve_pipeline() -> tuple[Pipeline, FakeProvider]:
                 ],
             }
         ]
+        * SELF_CONSISTENCY_FIRST_WINDOW
     )
     return Pipeline([ParseStep(provider), ExerciseCalculateStep()]), provider
 

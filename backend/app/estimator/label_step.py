@@ -20,7 +20,10 @@ Flow (every stage fails closed):
 3. **Route on the validated disposition.**
    - ``extracted`` (legible, confident) → compute and record a
      :class:`~app.estimator.pipeline.ResolvedLabelItem`.
-   - ``unreadable`` / low confidence / missing facts / a serving size that cannot
+   - ``unreadable`` / a confidence below the clarify policy's operating point
+     (:data:`app.estimator.clarify_policy.LABEL_CLARIFY_POLICY` — the shared
+     FTY-159 decision mechanism; the label point is a documented tunable until a
+     label-image eval slice exists) / missing facts / a serving size that cannot
      be resolved to grams → :class:`~app.estimator.pipeline.NeedsClarification`
      (the label is recognisable but cannot be costed confidently; never guessed).
    - ``not_a_label`` (unusable input) → :class:`~app.estimator.pipeline.StepFailed`
@@ -44,6 +47,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from app.estimator.clarify_policy import LABEL_CLARIFY_POLICY
 from app.estimator.evidence_utils import _record_source_ref
 from app.estimator.food_serving import (
     NutritionFacts,
@@ -77,11 +81,6 @@ from app.services.attachments import AttachmentError, validate_upload
 #: Source-hierarchy classification for user-provided label evidence: rank 1, above
 #: any database lookup (``docs/contracts/evidence-retrieval.md``).
 USER_LABEL_SOURCE_TYPE = "user_label"
-
-#: Confidence at or above which an ``extracted`` panel is trusted as-is. Below it,
-#: the step routes to ``needs_clarification`` even if the model said ``extracted`` —
-#: a conservative default (better to ask than guess a label's numbers).
-LABEL_CONFIDENCE_CLARIFY_THRESHOLD = 0.5
 
 #: Default display name when the panel carries no product name.
 DEFAULT_LABEL_NAME = "Nutrition label item"
@@ -213,7 +212,7 @@ class LabelResolveStep:
         facts = panel.facts
         if (
             panel.disposition is PanelDisposition.UNREADABLE
-            or panel.confidence < LABEL_CONFIDENCE_CLARIFY_THRESHOLD
+            or LABEL_CLARIFY_POLICY.should_clarify(panel.confidence)
             or facts is None
         ):
             context.clarification_questions = [UNREADABLE_LABEL_QUESTION]

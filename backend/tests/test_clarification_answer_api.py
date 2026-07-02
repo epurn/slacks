@@ -38,6 +38,7 @@ from app.estimator.exercise_step import ExerciseCalculateStep
 from app.estimator.parse import ParseStep
 from app.estimator.pipeline import Pipeline
 from app.estimator.processing import process_estimation
+from app.estimator.self_consistency import SELF_CONSISTENCY_FIRST_WINDOW
 from app.llm.providers.fake import FakeProvider
 from app.models.derived import ClarificationAnswer, ClarificationQuestion, DerivedExerciseItem
 from app.models.estimation import EstimationJob, EstimationRun
@@ -81,7 +82,12 @@ def _create_event(client: TestClient, user_id: str, auth: str, raw_text: str = R
 
 
 def _clarify_pipeline(questions: list[str]) -> Pipeline:
-    """A real parse pipeline whose provider routes to needs_clarification."""
+    """A real parse pipeline whose provider routes to needs_clarification.
+
+    The parse step draws its replies through the FTY-158/159 self-consistency
+    sampler (first window 2, unanimous early stop), so the scripted reply is
+    duplicated once per window sample.
+    """
 
     provider = FakeProvider(
         responses=[
@@ -92,6 +98,7 @@ def _clarify_pipeline(questions: list[str]) -> Pipeline:
                 "clarification_questions": questions,
             }
         ]
+        * SELF_CONSISTENCY_FIRST_WINDOW
     )
     return Pipeline([ParseStep(provider), ExerciseCalculateStep()])
 
@@ -101,6 +108,7 @@ def _resolve_pipeline(item: dict[str, object]) -> tuple[Pipeline, FakeProvider]:
 
     provider = FakeProvider(
         responses=[{"disposition": "parsed", "confidence": 0.95, "items": [item]}]
+        * SELF_CONSISTENCY_FIRST_WINDOW
     )
     return Pipeline([ParseStep(provider), ExerciseCalculateStep()]), provider
 

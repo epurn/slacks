@@ -39,6 +39,30 @@ Provenance per case:
 - ``contested`` — the stand-in judges disagree; **not** committed to the seed;
   in the judge run and the queue.
 
+FTY-159: each committed case also carries ``samples`` — N=3 recorded parse
+samples standing in for temperature>0 sampling of the live model, exactly like
+the synthetic band's (``generate_fixture.py``), so the FTY-159 signal bake-off
+(verbalized vs self-consistency vs hybrid) can be scored over the **combined**
+labeled set, not just the synthetic band. Each case names its deterministic
+``sampling`` schedule:
+
+- ``unanimous`` — three identical parses of the gold label (a stable input).
+- ``jitter`` — sample 2 carries a mild amount jitter on the first item
+  (agreement stays high; the contested window pays the full N).
+- ``flip`` — one sample flips to ``needs_clarification`` (agreement 1/3): an
+  honest over-ask case for the consistency signals on an estimable input.
+- ``divergent`` — guessed portions a factor of two apart plus a disposition
+  flip: the indeterminate shape self-consistency is built to catch.
+- ``unanimous_ask`` — every sample asks: the direct fail-closed decision.
+- ``consistent_wrong`` — the same invented portion every sample:
+  self-consistency's documented blind spot, kept so the measured improvement
+  over the messy band is not fake-perfect.
+
+Like everything else in this seed the samples are author-constructed stand-ins,
+never live model output; divergence always appears inside the first sampling
+window (sample 2) because the production early-stop rule never draws later
+samples when the first window is unanimous.
+
 ``source_kind: cross_provider_judge`` is **reserved** for labels the live
 protocol actually produced. This generator never emits it: when the maintainer's
 live dual-judge pass lands, its agreed/adjudicated labels replace the stand-in
@@ -59,6 +83,13 @@ QUEUE_PATH = HERE / "naturalistic_adjudication_queue.jsonl"
 Decision = Literal["estimate", "needs_clarification"]
 Difficulty = Literal["unambiguous", "inferable", "indeterminate"]
 Provenance = Literal["authored", "judged", "contested"]
+Sampling = Literal["unanimous", "jitter", "flip", "divergent", "unanimous_ask", "consistent_wrong"]
+
+# Deterministic guessed portions for divergent/consistent-wrong indeterminate
+# samples — the same factor-of-two shape as the synthetic band's
+# (``generate_fixture.py``).
+FOOD_GUESS_LOW, FOOD_GUESS_HIGH = 2.0, 4.0
+EXERCISE_GUESS_LOW, EXERCISE_GUESS_HIGH = 30.0, 60.0
 
 
 def _c(
@@ -85,6 +116,95 @@ def _ind(kind: str, name: str) -> dict[str, Any]:
     return {"type": kind, "name": name, "quantity_text": ""}
 
 
+def _parsed_sample(parse: list[dict[str, Any]], confidence: float) -> dict[str, Any]:
+    return {
+        "disposition": "parsed",
+        "confidence": round(max(0.0, min(1.0, confidence)), 2),
+        "items": parse,
+    }
+
+
+def _clarify_sample(parse: list[dict[str, Any]], confidence: float) -> dict[str, Any]:
+    """A needs_clarification sample: same item names, no amounts, one question."""
+
+    items = [_ind(item["type"], item["name"]) for item in parse]
+    return {
+        "disposition": "needs_clarification",
+        "confidence": round(confidence, 2),
+        "items": items,
+        "clarification_questions": ["How much was it?"],
+    }
+
+
+def _jitter_first_amount(parse: list[dict[str, Any]], factor: float) -> list[dict[str, Any]]:
+    jittered = [dict(item) for item in parse]
+    if "amount" in jittered[0]:
+        jittered[0]["amount"] = round(jittered[0]["amount"] * factor, 3)
+    return jittered
+
+
+def _guess_parse(parse: list[dict[str, Any]], *, high: bool) -> list[dict[str, Any]]:
+    """An invented-portion parse for an indeterminate input."""
+
+    guessed: list[dict[str, Any]] = []
+    for item in parse:
+        if item["type"] == "exercise":
+            amount = EXERCISE_GUESS_HIGH if high else EXERCISE_GUESS_LOW
+            unit = "min"
+        else:
+            amount = FOOD_GUESS_HIGH if high else FOOD_GUESS_LOW
+            unit = "serving"
+        guessed.append(_c(item["type"], item["name"], f"{amount:g} {unit}", amount, unit))
+    return guessed
+
+
+def _samples(case: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build a case's recorded samples from its declared ``sampling`` schedule.
+
+    Divergence always sits inside the first sampling window (sample 2): the
+    production early-stop rule skips later samples when the first window is
+    unanimous, so late-only divergence would — correctly — never be observed.
+    """
+
+    schedule: Sampling = case["sampling"]
+    parse = case["parse"]
+    _, confidence = case["baseline"]
+    if schedule == "unanimous":
+        return [
+            _parsed_sample(parse, confidence),
+            _parsed_sample(parse, confidence - 0.02),
+            _parsed_sample(parse, confidence + 0.02),
+        ]
+    if schedule == "jitter":
+        return [
+            _parsed_sample(parse, confidence),
+            _parsed_sample(_jitter_first_amount(parse, 1.25), max(0.0, confidence - 0.02)),
+            _parsed_sample(parse, min(1.0, confidence + 0.02)),
+        ]
+    if schedule == "flip":
+        return [
+            _parsed_sample(parse, confidence),
+            _clarify_sample(parse, 0.35),
+            _parsed_sample(parse, confidence),
+        ]
+    if schedule == "divergent":
+        return [
+            _parsed_sample(_guess_parse(parse, high=False), confidence),
+            _clarify_sample(parse, 0.3),
+            _parsed_sample(_guess_parse(parse, high=True), confidence),
+        ]
+    if schedule == "unanimous_ask":
+        return [_clarify_sample(parse, 0.85) for _ in range(3)]
+    # consistent_wrong: the model invents the *same* portion every sample —
+    # self-consistency's documented blind spot.
+    guess = _guess_parse(parse, high=False)
+    return [
+        _parsed_sample(guess, confidence),
+        _parsed_sample(guess, confidence - 0.02),
+        _parsed_sample(guess, confidence + 0.02),
+    ]
+
+
 # Each case: the authored gold label (returned by the stand-in "claude" judge)
 # plus baseline (the recorded verbalized-gate stand-in) and, for judged/contested
 # cases, how the stand-in "codex" label differs. Both judge outputs are authored
@@ -100,6 +220,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "unambiguous",
         "template": "casual_explicit",
         "input": "had 2 eggs n a slice of wheat toast this morning",
+        "sampling": "unanimous",
         "decision": "estimate",
         "parse": [
             _c("food", "eggs", "2", 2.0, "count"),
@@ -112,6 +233,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "unambiguous",
         "template": "brand_shorthand",
         "input": "1 tbsp kraft PB on a rice cake",
+        "sampling": "unanimous",
         "decision": "estimate",
         "parse": [
             _c("food", "peanut butter", "1 tbsp", 1.0, "tbsp", brand="Kraft"),
@@ -128,6 +250,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "unambiguous",
         "template": "typo_measure",
         "input": "170g greek yoghurt + a drizzle of honey",
+        "sampling": "unanimous",
         "decision": "estimate",
         "parse": [
             _c("food", "greek yogurt", "170g", 170.0, "g"),
@@ -145,6 +268,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "unambiguous",
         "template": "casual_explicit",
         "input": "ran 5k then a 20 min cooldown walk",
+        "sampling": "unanimous",
         "decision": "estimate",
         "parse": [
             _c("exercise", "run", "5k", 5.0, "km"),
@@ -157,6 +281,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "unambiguous",
         "template": "casual_explicit",
         "input": "grande oat milk latte, 16oz",
+        "sampling": "unanimous",
         "decision": "estimate",
         "parse": [_c("food", "oat milk latte", "16oz", 16.0, "oz")],
         "baseline": ("parsed", 0.71),
@@ -166,6 +291,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "unambiguous",
         "template": "typo_measure",
         "input": "chicken breast ~150 g grilled, no oil",
+        "sampling": "unanimous",
         "decision": "estimate",
         "parse": [_c("food", "chicken breast", "~150 g", 150.0, "g")],
         "baseline": ("parsed", 0.83),
@@ -175,6 +301,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "unambiguous",
         "template": "multi_item",
         "input": "2 slices pepperoni pizza and a can of coke",
+        "sampling": "unanimous",
         "decision": "estimate",
         "parse": [
             _c("food", "pepperoni pizza", "2 slices", 2.0, "slice"),
@@ -187,6 +314,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "unambiguous",
         "template": "casual_explicit",
         "input": "did 45 mins on the elliptical at the gym",
+        "sampling": "unanimous",
         "decision": "estimate",
         "parse": [_c("exercise", "elliptical", "45 mins", 45.0, "min")],
         "baseline": ("parsed", 0.88),
@@ -197,6 +325,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "inferable",
         "template": "casual_range",
         "input": "had a handful (5-10) of deep fried onion rings",
+        "sampling": "unanimous",
         "decision": "estimate",
         "parse": [_c("food", "onion rings", "5-10", 7.5, "count")],
         # baseline over-asks: the old verbalized gate goes low on a hedged range.
@@ -207,6 +336,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "inferable",
         "template": "brand_shorthand",
         "input": "3 PB cracker sandwiches",
+        "sampling": "unanimous",
         "decision": "estimate",
         "parse": [
             _c("food", "crackers", "6", 6.0, "count"),
@@ -219,6 +349,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "inferable",
         "template": "casual_hedge",
         "input": "a bowl of cereal w/ milk, prob a normal serving",
+        "sampling": "unanimous",
         "decision": "estimate",
         "parse": [
             _c("food", "cereal", "a bowl", 1.0, "bowl"),
@@ -235,6 +366,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "inferable",
         "template": "casual_range",
         "input": "grabbed like 2-3 slices of cheese",
+        "sampling": "jitter",
         "decision": "estimate",
         "parse": [_c("food", "cheese", "2-3 slices", 2.5, "slice")],
         "baseline": ("parsed", 0.58),
@@ -246,6 +378,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "inferable",
         "template": "casual_hedge",
         "input": "half a leftover burrito for lunch",
+        "sampling": "unanimous",
         "decision": "estimate",
         "parse": [_c("food", "burrito", "half", 0.5, "burrito")],
         "baseline": ("parsed", 0.63),
@@ -255,6 +388,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "inferable",
         "template": "casual_range",
         "input": "played 3 games of badminton after work",
+        "sampling": "unanimous",
         "decision": "estimate",
         "parse": [_c("exercise", "badminton", "3 games", 3.0, "game")],
         "baseline": ("needs_clarification", 0.37),
@@ -264,6 +398,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "inferable",
         "template": "brand_shorthand",
         "input": "a clif bar on the drive over",
+        "sampling": "unanimous",
         "decision": "estimate",
         "parse": [_c("food", "protein bar", "1 bar", 1.0, "bar", brand="Clif")],
         "baseline": ("parsed", 0.6),
@@ -273,6 +408,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "inferable",
         "template": "casual_hedge",
         "input": "a couple scoops of vanilla ice cream",
+        "sampling": "jitter",
         "decision": "estimate",
         "parse": [_c("food", "ice cream", "a couple scoops", 2.0, "scoop")],
         "baseline": ("parsed", 0.55),
@@ -282,6 +418,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "inferable",
         "template": "casual_hedge",
         "input": "big salad with grilled chicken and some ranch",
+        "sampling": "flip",
         "decision": "estimate",
         "parse": [
             _c("food", "salad", "big", 1.0, "serving"),
@@ -296,6 +433,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "indeterminate",
         "template": "bare_items",
         "input": "crackers and peanut butter",
+        "sampling": "divergent",
         "decision": "needs_clarification",
         "parse": [_ind("food", "crackers"), _ind("food", "peanut butter")],
         "baseline": ("needs_clarification", 0.22),
@@ -305,6 +443,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "indeterminate",
         "template": "leftovers",
         "input": "some leftover thai curry",
+        "sampling": "divergent",
         "decision": "needs_clarification",
         "parse": [_ind("food", "thai curry")],
         "baseline": ("needs_clarification", 0.28),
@@ -314,6 +453,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "indeterminate",
         "template": "vague_snack",
         "input": "snacked on chips while watching tv",
+        "sampling": "unanimous_ask",
         "decision": "needs_clarification",
         "parse": [_ind("food", "chips")],
         "baseline": ("needs_clarification", 0.25),
@@ -326,6 +466,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "indeterminate",
         "template": "vague_exercise",
         "input": "worked out at the gym",
+        "sampling": "divergent",
         "decision": "needs_clarification",
         "parse": [_ind("exercise", "workout")],
         "baseline": ("needs_clarification", 0.3),
@@ -335,6 +476,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "indeterminate",
         "template": "bare_items",
         "input": "rice and chicken for dinner",
+        "sampling": "divergent",
         "decision": "needs_clarification",
         "parse": [_ind("food", "rice"), _ind("food", "chicken")],
         "baseline": ("needs_clarification", 0.24),
@@ -344,6 +486,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "indeterminate",
         "template": "vague_snack",
         "input": "handful of trail mix",
+        "sampling": "consistent_wrong",
         "decision": "needs_clarification",
         "parse": [_ind("food", "trail mix")],
         "baseline": ("needs_clarification", 0.33),
@@ -353,6 +496,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "indeterminate",
         "template": "leftovers",
         "input": "grazed on cheese and crackers at the party",
+        "sampling": "unanimous_ask",
         "decision": "needs_clarification",
         "parse": [_ind("food", "cheese"), _ind("food", "crackers")],
         "baseline": ("needs_clarification", 0.21),
@@ -362,6 +506,7 @@ _CASES: list[dict[str, Any]] = [
         "difficulty": "indeterminate",
         "template": "vague_exercise",
         "input": "went for a bike ride",
+        "sampling": "divergent",
         "decision": "needs_clarification",
         "parse": [_ind("exercise", "cycling")],
         "baseline": ("needs_clarification", 0.29),
@@ -417,6 +562,7 @@ def _example_record(index: int, case: dict[str, Any]) -> dict[str, Any]:
         "gold_decision": case["decision"],
         "gold_parse": case["parse"],
         "baseline": {"disposition": disposition, "confidence": round(confidence, 2)},
+        "samples": _samples(case),
     }
 
 

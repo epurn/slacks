@@ -12,8 +12,11 @@ ambiguous and the safe route is a clarifying question (fail closed). See
 and citations (SelfCheckGPT; Xiong et al., ICLR 2024; Li et al., ICLR 2024).
 
 This module produces the *signal only*. It is validated offline against the
-FTY-157 calibration harness (``tests/parse_calibration``); wiring it into the
-live clarify gate and calibrating its operating threshold is FTY-159.
+FTY-157 calibration harness (``tests/parse_calibration``). FTY-159 wired it
+into the live clarify gate: the parse step samples through
+:func:`collect_parse_samples` and compares the hybrid score against the
+data-calibrated operating point
+(:data:`app.estimator.clarify_policy.NL_PARSE_CLARIFY_POLICY`).
 
 Design notes:
 
@@ -26,7 +29,7 @@ Design notes:
   of samples is unanimous, no further samples are drawn.
 - **Fail closed.** Disagreement can only *lower* the emitted scores, and the
   hybrid weighting guarantees a fully-disagreeing sample set scores below the
-  parse step's default operating threshold no matter how confident the model
+  parse gate's calibrated operating threshold no matter how confident the model
   claims to be (see :data:`HYBRID_AGREEMENT_WEIGHT`). A sample set that is
   unanimously non-``parsed`` is exposed as a direct clarify decision
   (:attr:`SelfConsistencySignal.all_non_parsed`), never as a score.
@@ -39,7 +42,8 @@ from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
-from app.estimator.parse import build_parse_prompt
+from app.estimator.parse_prompt import build_parse_prompt
+from app.estimator.pipeline import AnsweredClarification
 from app.llm.base import Provider
 from app.schemas.parse import ParsedCandidate, ParseDisposition, ParseResult
 
@@ -60,14 +64,17 @@ SELF_CONSISTENCY_NUM_SAMPLES = 3
 SELF_CONSISTENCY_FIRST_WINDOW = 2
 
 #: Weight of the agreement score in the hybrid signal (the verbalized mean gets
-#: the complement). 0.6 is chosen for a fail-closed property at the parse step's
-#: documented default operating threshold (0.45, ``parse.py``): a fully
+#: the complement). 0.6 is chosen for a fail-closed property at the parse
+#: gate's calibrated operating threshold
+#: (``app.estimator.clarify_policy.NL_PARSE_CLARIFY_POLICY``): a fully
 #: disagreeing sample set (agreement 0.0) caps the hybrid at
-#: ``0.4 × verbalized ≤ 0.4 < 0.45`` even when the model verbalizes total
-#: confidence, so structural disagreement always clarifies; a unanimous set
-#: (agreement 1.0) lifts a timidly-verbalized easy input (e.g. 0.38) to 0.752,
-#: so unanimity rescues the over-ask cases. Justified against the FTY-157
-#: harness (see ``tests/fixtures/parse_calibration/self_consistency_summary.json``).
+#: ``0.4 × verbalized ≤ 0.4``, well below the operating point, even when the
+#: model verbalizes total confidence — so structural disagreement always
+#: clarifies; a unanimous set (agreement 1.0) lifts a timidly-verbalized easy
+#: input (e.g. 0.38) to 0.752, so unanimity rescues the over-ask cases.
+#: Justified against the FTY-157 harness (see
+#: ``tests/fixtures/parse_calibration/self_consistency_summary.json`` and the
+#: FTY-159 bake-off, ``calibration_summary.json``).
 HYBRID_AGREEMENT_WEIGHT = 0.6
 
 
@@ -134,6 +141,7 @@ def evaluate_self_consistency(
     provider: Provider,
     raw_text: str,
     *,
+    answered: Sequence[AnsweredClarification] = (),
     num_samples: int = SELF_CONSISTENCY_NUM_SAMPLES,
     first_window: int = SELF_CONSISTENCY_FIRST_WINDOW,
 ) -> SelfConsistencySignal:
@@ -141,13 +149,14 @@ def evaluate_self_consistency(
 
     Samples run in parallel (latency ~flat vs one call); when the first
     ``first_window`` samples are unanimous the rest are skipped (cost guard for
-    easy inputs). Any sample failure propagates the provider/validation error
-    unchanged — the parse step's existing error mapping owns routing it, and a
-    partially-failed sample set is never silently scored.
+    easy inputs). ``answered`` is forwarded to every sample's prompt (FTY-171).
+    Any sample failure propagates the provider/validation error unchanged — the
+    parse step's existing error mapping owns routing it, and a partially-failed
+    sample set is never silently scored.
     """
 
     samples = collect_parse_samples(
-        provider, raw_text, num_samples=num_samples, first_window=first_window
+        provider, raw_text, answered=answered, num_samples=num_samples, first_window=first_window
     )
     return SelfConsistencySignal.from_samples(samples)
 
@@ -156,10 +165,16 @@ def collect_parse_samples(
     provider: Provider,
     raw_text: str,
     *,
+    answered: Sequence[AnsweredClarification] = (),
     num_samples: int = SELF_CONSISTENCY_NUM_SAMPLES,
     first_window: int = SELF_CONSISTENCY_FIRST_WINDOW,
 ) -> tuple[ParseResult, ...]:
     """Draw parse samples with parallel execution and unanimity early-stopping.
+
+    ``answered`` folds the accumulated clarification answers into every
+    sample's prompt as structured detail on an answer-triggered re-estimate
+    (FTY-171) — each sample must see the same production prompt, answers
+    included, or agreement would be measured against a different parse.
 
     The stop rule (documented tunable): draw ``min(first_window, num_samples)``
     samples in parallel; if that window is unanimous (agreement exactly 1.0,
@@ -175,7 +190,7 @@ def collect_parse_samples(
         msg = "first_window must be >= 1"
         raise ValueError(msg)
 
-    prompt = build_parse_prompt(raw_text)
+    prompt = build_parse_prompt(raw_text, answered)
     window = min(first_window, num_samples)
     samples = _sample_parallel(provider, prompt, window)
     if len(samples) < num_samples and not _is_unanimous(samples):
