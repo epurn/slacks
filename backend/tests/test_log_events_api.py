@@ -22,6 +22,7 @@ from app.models.food_sources import EvidenceSource
 from app.models.identity import User, UserProfile
 from app.models.log_events import LogEvent
 from app.services import log_events as log_event_service
+from tests.conftest import upgrade
 
 
 def _register(client: TestClient, email: str) -> tuple[str, str]:
@@ -650,6 +651,7 @@ def test_entries_by_date_rejects_malformed_day(client: TestClient) -> None:
 def test_entries_by_date_round_trips_on_postgres(pg_engine: Engine) -> None:
     """Shape + timezone day bounds exercise the production datastore when configured."""
 
+    upgrade(pg_engine, "head")
     factory = create_session_factory(pg_engine)
     with factory() as session:
         user = User()
