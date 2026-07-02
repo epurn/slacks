@@ -135,9 +135,9 @@
     },
     {
       "direction": "service_to_estimator_internal",
-      "path": "backend/app/services/targets.py",
+      "path": "backend/app/services/targets/override_rules.py",
       "module": "app.estimator.constants",
-      "reason": "Existing target service calculator-constant dependency at FTY-200 baseline."
+      "reason": "Target override band reuses estimator Atwater constants; from the FTY-200 baseline (moved into the override_rules module by the FTY-202 target service decomposition)."
     }
   ]
 }
