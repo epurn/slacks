@@ -36,8 +36,11 @@ appId: com.fatty
 
 # Step 3: Submit gibberish — the mock's failed-parse branch returns a `failed`
 #         event for this exact raw_text.
+#         The trailing `.*` keeps the selector cross-platform: iOS exposes the
+#         input as "<label> <placeholder>" in the accessibility tree, Android
+#         as the bare label; Maestro text matching is a full-string regex.
 - tapOn:
-    text: "Log food or exercise"
+    text: "Log food or exercise.*"
 - inputText: "zxqwvb"
 - tapOn:
     text: "Add entry"
