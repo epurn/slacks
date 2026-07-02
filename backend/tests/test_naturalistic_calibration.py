@@ -16,6 +16,7 @@ import re
 
 from tests.parse_calibration.harness import (
     NATURALISTIC_FIXTURE_PATH,
+    RECORDED_SAMPLE_COUNT,
     LabeledParseExample,
     evaluate_recorded_band,
     load_band,
@@ -102,6 +103,24 @@ def test_harness_scores_naturalistic_band_with_baseline_signal() -> None:
     # inferable-but-estimable inputs (the dogfooding failure the band captures).
     assert summary.operating.over_ask > 0
     assert "naturalistic" in summary.signal_name
+
+
+def test_naturalistic_band_carries_recorded_consistency_samples() -> None:
+    """FTY-159: every committed case carries the N recorded stand-in samples.
+
+    The signal bake-off calibrates over the combined set, so the naturalistic
+    band must be scorable by the consistency signals, not just the baseline.
+    """
+
+    examples = load_band("naturalistic")
+
+    assert all(len(example.samples) == RECORDED_SAMPLE_COUNT for example in examples)
+
+
+def test_harness_scores_naturalistic_band_with_consistency_signals() -> None:
+    for signal in ("agreement", "hybrid"):
+        summary = evaluate_recorded_band(signal, "naturalistic")
+        assert summary.operating.total == len(load_band("naturalistic"))
 
 
 def test_harness_reports_combined_band() -> None:

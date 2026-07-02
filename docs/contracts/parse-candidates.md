@@ -29,10 +29,24 @@ UI is FTY-153.
 
 estimator / contracts / backend-core lane:
 `backend/app/schemas/parse.py`, `backend/app/estimator/parse.py`,
+`backend/app/estimator/parse_prompt.py`,
+`backend/app/estimator/self_consistency.py`,
+`backend/app/estimator/clarify_policy.py`,
 `backend/app/models/derived.py`, `backend/app/enums.py`
 (`CandidateType`, `DerivedItemStatus`), `backend/alembic/`.
 
 ## Version
+
+3 (FTY-159): **pre-v1 breaking behaviour change** (no shim) — the clarify
+decision becomes the **data-calibrated policy** (ADR 0003 Layer C). The step
+draws N=3 parse samples through the FTY-158 self-consistency sampler (parallel,
+unanimous-first-window early stop) and gates on the **hybrid**
+agreement+verbalized score against a calibrated operating point
+(`app/estimator/clarify_policy.py`), replacing the retired single-call
+`confidence < 0.45` comparison. The `ParseResult` schema and persistence
+schemas are unchanged (`parse/v1` stays recorded on runs until FTY-172 lands
+`parse/v2`); the routing table below is what changed. See "Calibrated clarify
+decision (FTY-159)".
 
 2 (FTY-170): **pre-v1 breaking change** (no shim) — the `ParseResult`
 clarification carrier becomes structured: `clarification_questions` changes
@@ -58,7 +72,7 @@ object — smuggled keys are rejected, not ignored):
 | Field | Type | Notes |
 | --- | --- | --- |
 | `disposition` | `parsed` \| `needs_clarification` \| `unparseable` | Closed vocabulary; how the model classified the whole entry. |
-| `confidence` | float `[0, 1]` | Gated against a documented threshold. |
+| `confidence` | float `[0, 1]` | The verbalized component of the calibrated clarify decision (see Outputs / Routing) — never gated alone. |
 | `items` | `ParsedCandidate[]` (≤ 32) | Extracted candidates. |
 | `clarification_questions` | `ClarificationQuestion[]` (≤ 8) | Present on the ambiguous path; each question carries its quick-pick options. |
 | `reason` | string \| null (≤ 120) | Short label when `unparseable`. |
@@ -116,19 +130,75 @@ altered):
 
 ## Outputs / Routing
 
-The step validates the reply, then routes on the schema-validated disposition and
-confidence (threshold `PARSE_CONFIDENCE_CLARIFY_THRESHOLD`, default `0.45`, a
-documented tunable — below it the step clarifies even on a `parsed` reply):
+The step draws **N = 3 parse samples** of the entry through the FTY-158
+self-consistency sampler (`app/estimator/self_consistency.py`; samples run in
+parallel, and a unanimous first window of 2 stops early, so stable inputs pay
+two calls and contested inputs pay three). Every sample is schema-validated
+independently; the step then routes on the sample set and its **calibrated
+clarify decision** (below). When the set is trusted, the routed candidates are
+the most self-confident `parsed` sample's items.
 
-| Validated reply | Pipeline signal | Persisted | Event transition |
+| Validated sample set | Pipeline signal | Persisted | Event transition |
 | --- | --- | --- | --- |
-| `parsed`, confident, ≥1 item, all food candidates plausible | _(completes)_ | candidates `unresolved` | `processing → completed` |
-| `parsed`, confident, ≥1 item, but a food candidate is implausible | `NeedsClarification` (`implausible_candidate`) | clarification question | `processing → needs_clarification` |
-| `needs_clarification`, or confidence below threshold | `NeedsClarification` | clarification questions | `processing → needs_clarification` |
-| `unparseable`, or `parsed` with no items | `StepFailed` (terminal) | nothing | `processing → failed` |
+| calibrated-confident, ≥1 item, all food candidates plausible | _(completes)_ | candidates `unresolved` | `processing → completed` |
+| calibrated-confident, ≥1 item, but a food candidate is implausible | `NeedsClarification` (`implausible_candidate`) | clarification question | `processing → needs_clarification` |
+| no sample `parsed`, or the hybrid score is below the calibrated operating point (and no detail-signal override) | `NeedsClarification` | clarification questions (pooled across samples, deduplicated) | `processing → needs_clarification` |
+| unanimously `unparseable`, or a trusted set with no items | `StepFailed` (terminal) | nothing | `processing → failed` |
 | empty/whitespace input | `StepFailed` (terminal, no LLM call) | nothing | `processing → failed` |
-| schema-invalid / non-retryable provider error | `StepFailed` (terminal) | nothing | `processing → failed` |
+| schema-invalid sample / non-retryable provider error | `StepFailed` (terminal) | nothing | `processing → failed` |
 | transient provider error | `StepError` (retryable) | nothing | _(stays `processing`, retried)_ |
+
+A **mixed** set (e.g. one `unparseable` sample alongside `parsed` ones) is
+genuine ambiguity, not a terminal failure: the disagreement drags the hybrid
+score down and the event clarifies — fail closed toward asking, never toward a
+silent guess.
+
+### Calibrated clarify decision (FTY-159, ADR 0003 Layer C)
+
+The estimate-vs-ask decision is a **measured operating point over a measured
+signal**, not a hand-picked constant (the retired
+`PARSE_CONFIDENCE_CLARIFY_THRESHOLD = 0.45` was an unprincipled guess; a fixed
+uncalibrated threshold is fragile under distribution shift — Kamath, Jia &
+Liang, ACL 2020, via `docs/adr/0003-estimator-confidence-clarification.md`,
+which owns the architecture decision this implements):
+
+- **Signal — the bake-off winner.** Over the labeled calibration sets (the
+  FTY-157 synthetic band + the FTY-169 naturalistic band, scored `combined` by
+  the FTY-157 harness), three signals were compared on risk-coverage curves:
+  the verbalized confidence, the FTY-158 sampling-agreement score, and their
+  hybrid (`0.6 × agreement + 0.4 × verbalized`). The **hybrid won** and is what
+  the gate consumes: at the target precision the verbalized baseline reaches
+  only 40% coverage and agreement-only never reaches it at all. A sample set
+  with **no `parsed` sample** is a direct clarify decision, never scored (its
+  agreement can be a perfect 1.0 *about asking*).
+- **Operating point — derived, with a margin.** The threshold is chosen on the
+  winning signal's risk-coverage curve for a **target answered precision of
+  0.99** (of the events the gate estimates, ≥ 99% must be gold-estimate —
+  under-asking silently corrupts an honest count, so precision is the
+  calibration target; maximizing coverage under it then minimizes over-asking),
+  and committed as the midpoint of the empirical margin band around the
+  selected point. Measured on the combined set: over-ask 12.4% → 6.5%,
+  under-ask 19.4% → 1.9%, correct decisions 85.2% → 95.1% versus the retired
+  gate. The constant lives in `app/estimator/clarify_policy.py`
+  (`NL_PARSE_CLARIFY_POLICY`); the committed derivation is
+  `backend/tests/fixtures/parse_calibration/calibration_summary.json`.
+- **Regression gate.** `backend/tests/test_clarify_calibration.py` re-derives
+  the bake-off on every verification run: the production constant must equal
+  the derived point, the calibrated decision must keep beating the
+  verbalized-vs-0.45 baseline, and absolute floors (correct-decision rate,
+  precision, over-/under-ask, coverage) must hold — a prompt or model change
+  that degrades the operating point fails CI and requires recalibration
+  against the harness before it can land.
+- **The label path shares the mechanism.** The nutrition-label gate
+  (`label-extraction.md`) routes through the same `ClarifyPolicy` type
+  (`LABEL_CLARIFY_POLICY`). Its operating point is a **documented tunable**
+  (the conservative pre-FTY-159 value, 0.5, over the panel's verbalized
+  confidence): the calibration sets are NL descriptions, not label-image scans,
+  so a data-derived label point would be fabricated — a dedicated label-image
+  eval slice is the recorded follow-up that earns one.
+- **Cost.** Sampling costs ~N× the tokens of a single parse call; latency stays
+  near-flat (parallel samples), and the early stop keeps stable inputs at 2
+  calls (ADR 0003, Consequences).
 
 ### Deterministic plausibility gate (FTY-156)
 
@@ -189,15 +259,16 @@ detail signal** (`app/estimator/detail_signals.py`):
 - **exercise** — an explicit duration, a **distance**, a **step count**, or a **game
   count**.
 
-When the model's reply would otherwise clarify (low confidence or a
-`needs_clarification` disposition) **but every extracted item carries a detail signal**,
-the step routes to `parsed` instead and lets the calculator layers estimate — a
-detail-rich casual log should be estimated, not asked about. Clarification is *sharpened*,
-not removed: an empty item list, or **any** item lacking a detail signal ("some crackers",
-"played sports"), still routes the whole event to clarification, because that item's
-portion is genuinely missing. A high-confidence `parsed` reply is unaffected (it never
-entered the clarify branch), and the deterministic plausibility gate above still runs on
-the accepted items.
+When the sample set would otherwise clarify (a hybrid score below the calibrated
+operating point, or a set that never parsed) **but every extracted item carries a
+detail signal**, the step routes to `parsed` instead and lets the calculator layers
+estimate — a detail-rich casual log should be estimated, not asked about.
+Clarification is *sharpened*, not removed: an empty item list, or **any** item
+lacking a detail signal ("some crackers", "played sports"), still routes the whole
+event to clarification, because that item's portion is genuinely missing. A
+calibrated-confident sample set is unaffected (it never entered the clarify
+branch), and the deterministic plausibility gate above still runs on the accepted
+items.
 
 **Range midpoint.** When a food item has no structured `amount` but its `quantity_text`
 states a numeric range, the step fills the arithmetic **midpoint** as the count
@@ -246,27 +317,29 @@ both `users` and `log_events` enforces object-level ownership.
 | Condition | Result |
 | --- | --- |
 | Empty/whitespace text | Terminal `failed` (`empty_input`); no LLM call, nothing persisted. |
-| `unparseable` / no-item `parsed` | Terminal `failed`; nothing persisted. |
-| Schema-invalid model output | Rejected; terminal `failed` (`schema_validation_failed`); nothing persisted. |
+| Unanimously `unparseable` / no-item trusted set | Terminal `failed`; nothing persisted. |
+| Schema-invalid model output (any sample) | Rejected; terminal `failed` (`schema_validation_failed`); nothing persisted. |
 | Non-retryable provider error (`LLMResponseError`/`LLMConfigurationError`) | Terminal `failed` (`provider_error`). |
 | Transient provider error (`LLMTransientError`) | Retryable; worker retries within its bound. |
-| Ambiguous / low confidence | `needs_clarification`; questions (text + options) persisted; the user resolves via the clarification answer (`log-events.md`). |
+| Ambiguous / below the calibrated operating point | `needs_clarification`; questions (text + options) persisted; the user resolves via the clarification answer (`log-events.md`). |
 
 ## Examples
 
 ```
 event.raw_text = "two eggs and a 30 min run"
-  → structured_completion(prompt, ParseResult)
-  → { disposition: parsed, confidence: 0.95, items: [
+  → 2 parallel structured_completion samples (first window; unanimous → early stop)
+  → both: { disposition: parsed, confidence: 0.95, items: [
         {type: food, name: "eggs", quantity_text: "two", amount: 2},
         {type: exercise, name: "run", quantity_text: "30 min"} ] }
+  → agreement 1.0, hybrid 0.98 ≥ calibrated operating point → trusted
   → derived_food_items += eggs (unresolved); derived_exercise_items += run (unresolved)
   → event: processing → completed
 ```
 
 ```
 event.raw_text = "crackers and peanut butter"        # count genuinely indeterminate
-  → structured_completion(prompt, ParseResult)
+  → samples disagree (window not unanimous → full N drawn; guessed portions
+    diverge / dispositions flip) → hybrid below the calibrated operating point
   → { disposition: needs_clarification, confidence: 0.3, items: [ … ],
       clarification_questions: [
         { text: "How many cracker sandwiches?", options: ["2", "4", "6"] } ] }
@@ -296,6 +369,15 @@ event.raw_text = "crackers and peanut butter"        # count genuinely indetermi
   first producer); FTY-171 serves the options through the clarification read
   and implements the answer resolve (`log-events.md` v4); FTY-153 renders the
   chips and free-text fallback.
+- **FTY-159 (breaking behaviour, pre-v1, no shim).** The clarify decision
+  becomes the calibrated policy over the FTY-158 hybrid self-consistency
+  signal, and the parse step samples the provider N=3 times (early-stopped)
+  instead of once. `PARSE_CONFIDENCE_CLARIFY_THRESHOLD` (0.45) and
+  `LABEL_CONFIDENCE_CLARIFY_THRESHOLD` (0.5) are retired as bare constants;
+  both gates route through `app/estimator/clarify_policy.py`. No schema,
+  persistence, or API change; token cost is ~N× per parse with near-flat
+  latency. Recalibration (re-running the harness bake-off) is required after
+  any parse-prompt or model change.
 - FTY-060 (`barcode`) and FTY-062 (`brand`) add optional, length-bounded
   `ParsedCandidate` fields. Both are additive and backward-compatible: a reply that
   omits them validates unchanged (they default to `null`), and they are stored as data

@@ -15,7 +15,8 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from app.estimator.parse import PARSE_CONFIDENCE_CLARIFY_THRESHOLD, build_parse_prompt
+from app.estimator.clarify_policy import NL_PARSE_CLARIFY_POLICY
+from app.estimator.parse_prompt import build_parse_prompt
 from app.estimator.self_consistency import (
     HYBRID_AGREEMENT_WEIGHT,
     SelfConsistencySignal,
@@ -166,17 +167,17 @@ def test_single_sample_agreement_is_degenerate_one() -> None:
 
 def test_hybrid_weighting_fails_closed_on_total_disagreement() -> None:
     # The documented rationale for HYBRID_AGREEMENT_WEIGHT: a fully disagreeing
-    # sample set must score below the parse step's default operating threshold
-    # even when the model verbalizes total confidence. If the weight changes,
-    # this property must be re-justified against the harness.
+    # sample set must score below the parse gate's calibrated operating
+    # threshold even when the model verbalizes total confidence. If the weight
+    # changes, this property must be re-justified against the harness.
     assert hybrid_score(0.0, 1.0) == pytest.approx(1.0 - HYBRID_AGREEMENT_WEIGHT)
-    assert hybrid_score(0.0, 1.0) < PARSE_CONFIDENCE_CLARIFY_THRESHOLD
+    assert hybrid_score(0.0, 1.0) < NL_PARSE_CLARIFY_POLICY.threshold
 
 
 def test_hybrid_unanimity_rescues_a_timid_verbalized_score() -> None:
     # The over-ask fix: unanimous sampling lifts a low self-reported confidence
-    # over the default operating threshold.
-    assert hybrid_score(1.0, 0.38) > PARSE_CONFIDENCE_CLARIFY_THRESHOLD
+    # over the calibrated operating threshold.
+    assert hybrid_score(1.0, 0.38) > NL_PARSE_CLARIFY_POLICY.threshold
 
 
 def test_signal_fields_hand_checked() -> None:

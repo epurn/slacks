@@ -25,6 +25,7 @@ from app.enums import DerivedItemStatus, EstimationJobStatus, LogEventStatus
 from app.estimator.parse import ParseStep
 from app.estimator.pipeline import Pipeline, StubCalculateStep
 from app.estimator.processing import process_estimation
+from app.estimator.self_consistency import SELF_CONSISTENCY_FIRST_WINDOW
 from app.llm.errors import LLMError
 from app.llm.providers.fake import FakeProvider
 from app.models.derived import (
@@ -43,9 +44,15 @@ def session(db_engine: Engine) -> Iterator[Session]:
 
 
 def _pipeline(responses: list[dict[str, object] | LLMError]) -> Pipeline:
-    """A parse pipeline whose provider returns the given scripted replies."""
+    """A parse pipeline whose provider returns the given reply for every sample.
 
-    provider = FakeProvider(responses=responses)
+    The parse step draws its replies through the FTY-158/159 self-consistency
+    sampler (first window 2, unanimous early stop), so the scripted reply is
+    duplicated once per window sample. These tests pin the worker/persistence
+    contract; sampling-divergence routing is ``tests/test_parse_step.py``'s job.
+    """
+
+    provider = FakeProvider(responses=list(responses) * SELF_CONSISTENCY_FIRST_WINDOW)
     return Pipeline([ParseStep(provider), StubCalculateStep()])
 
 

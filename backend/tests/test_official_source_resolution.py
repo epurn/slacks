@@ -59,6 +59,7 @@ from app.estimator.search import (
     SearchResult,
     SearchStatus,
 )
+from app.estimator.self_consistency import SELF_CONSISTENCY_FIRST_WINDOW
 from app.llm.errors import LLMError
 from app.llm.providers.fake import FakeProvider
 from app.models.derived import DerivedFoodItem
@@ -206,6 +207,7 @@ def _pipeline(
 
     parse_provider = FakeProvider(
         responses=[{"disposition": "parsed", "confidence": 0.95, "items": [parsed_item]}]
+        * SELF_CONSISTENCY_FIRST_WINDOW
     )
     official_provider = FakeProvider(responses=estimates)
     resolver = FoodResolver(session=session, source=food_source)

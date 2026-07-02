@@ -52,16 +52,16 @@ Each line in `examples.jsonl` / `naturalistic_examples.jsonl` is one JSON object
 - `baseline`: the recorded offline stand-in for the current
   verbalized-confidence-vs-`0.45` parse gate. The default harness uses this field
   so verification never calls a live model.
-- `samples` (FTY-158): three recorded parse samples standing in for
-  temperature>0 sampling of the live model. Each validates as a full
-  `ParseResult` (`disposition`, `confidence`, `items`, optional
-  `clarification_questions`), so the production self-consistency metric
-  (`app/estimator/self_consistency.py`) consumes them unchanged. Like the
-  `baseline` field, they keep the consistency signals fully offline and
-  deterministic. The naturalistic band omits `samples` (defaulting to `[]`): its
-  gold labels come from the judge-protocol path, not a temperature>0 sampler, so
-  it is scored by the calibration-relevant `baseline` signal — the consistency
-  signals raise a clear error on a band with no samples.
+- `samples` (FTY-158, extended to the naturalistic band by FTY-159): three
+  recorded parse samples standing in for temperature>0 sampling of the live
+  model. Each validates as a full `ParseResult` (`disposition`, `confidence`,
+  `items`, optional `clarification_questions`), so the production
+  self-consistency metric (`app/estimator/self_consistency.py`) consumes them
+  unchanged. Like the `baseline` field, they keep the consistency signals fully
+  offline and deterministic. Both bands carry them (the naturalistic band's are
+  author-constructed stand-ins declared per case in
+  `generate_naturalistic_seed.py`, mirroring the synthetic schedules below), so
+  the FTY-159 bake-off can score every signal over the `combined` set.
 
 The fixture schema is enforced by `tests.parse_calibration.harness`,
 `tests/test_parse_calibration_harness.py`, and (naturalistic band)
@@ -96,6 +96,21 @@ regression-pinned by `tests/test_parse_calibration_harness.py`, which also
 asserts the improvement bar: hybrid and agreement-only must measurably beat
 the recorded verbalized baseline at the 0.45 operating point.
 
+## FTY-159 bake-off and the calibrated operating point
+
+`calibration_summary.json` is the committed FTY-159 signal bake-off over the
+**combined** band (`python -m tests.parse_calibration.harness --bake-off
+--write-summary …`): every recorded signal gets an operating point derived at
+the target answered precision (0.99 — see `TARGET_ANSWERED_PRECISION` in the
+harness for why precision, not raw correct rate, is the target), and the winner
+(the **hybrid**) supplies the production clarify threshold
+(`app/estimator/clarify_policy.py`, `NL_PARSE_CLARIFY_POLICY`). The committed
+threshold is the midpoint of the empirical margin band around the selected
+operating point, so it never sits exactly on an observed score.
+`tests/test_clarify_calibration.py` is the regression gate: it re-derives the
+bake-off, pins the artifact, asserts the production constant equals the derived
+point, and enforces the improvement-over-baseline bar plus absolute floors.
+
 ## How examples are made
 
 Committed examples are synthetic by construction. The generator starts from a
@@ -121,9 +136,9 @@ self-consistency signal against a real provider is opt-in via
 run by default verification.
 
 Pass `--band {synthetic,naturalistic,combined}` to score a whole band instead of
-`--fixture` (e.g. `python -m tests.parse_calibration.harness --band naturalistic`).
-The naturalistic band is scored by the `baseline` signal (it carries no
-consistency `samples`).
+`--fixture` (e.g. `python -m tests.parse_calibration.harness --band naturalistic`);
+every recorded signal scores every band. Pass `--bake-off` to run the FTY-159
+signal bake-off and operating-point derivation instead of a single-signal run.
 
 ## Cross-provider judge protocol (FTY-169)
 
@@ -206,7 +221,11 @@ candidate shapes, and records not marked `synthetic_by_construction`.
 
 **Naturalistic band:** add authored inputs to `generate_naturalistic_seed.py`
 and regenerate (`python -m tests.fixtures.parse_calibration.generate_naturalistic_seed`),
-which rewrites the seed, the judge run, and the queue consistently. A judged case
+which rewrites the seed, the judge run, and the queue consistently. Each
+committed case declares its recorded-sample `sampling` schedule (`unanimous`,
+`jitter`, `flip`, `divergent`, `unanimous_ask`, `consistent_wrong` — see the
+generator docstring); after regenerating, re-run the bake-off write
+(`--bake-off --write-summary`) so `calibration_summary.json` stays consistent. A judged case
 (`recorded_stand_in`) must carry agreeing stand-in judge outputs; a `contested`
 case goes to the queue and is excluded from the seed; an `authored_naturalistic`
 case is an author-constructed unambiguous label. The generator never emits

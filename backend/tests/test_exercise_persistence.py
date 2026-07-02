@@ -27,6 +27,7 @@ from app.estimator.met_table import MET_TABLE_VERSION
 from app.estimator.parse import ParseStep
 from app.estimator.pipeline import Pipeline
 from app.estimator.processing import process_estimation
+from app.estimator.self_consistency import SELF_CONSISTENCY_FIRST_WINDOW
 from app.llm.providers.fake import FakeProvider
 from app.models.derived import DerivedExerciseItem
 from app.models.estimation import EstimationRun
@@ -45,6 +46,7 @@ def _pipeline(item: dict[str, object]) -> Pipeline:
 
     provider = FakeProvider(
         responses=[{"disposition": "parsed", "confidence": 0.95, "items": [item]}]
+        * SELF_CONSISTENCY_FIRST_WINDOW
     )
     return Pipeline([ParseStep(provider), ExerciseCalculateStep()])
 

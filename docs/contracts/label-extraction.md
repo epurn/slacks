@@ -74,7 +74,7 @@ string fields length-bounded, and a closed `disposition` vocabulary.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `disposition` | enum | `extracted` \| `unreadable` \| `not_a_label`. |
-| `confidence` | float [0,1] | Extraction confidence; gated on a documented threshold (0.5). |
+| `confidence` | float [0,1] | Extraction confidence; gated by the shared FTY-159 clarify-policy mechanism (`app/estimator/clarify_policy.py`, `LABEL_CLARIFY_POLICY`). The label operating point (0.5) is a **documented tunable**, not data-derived — no label-image eval set exists yet; a dedicated label-image eval slice is the recorded follow-up (see `parse-candidates.md`, "Calibrated clarify decision"). |
 | `facts` | `PanelFacts \| null` | Required when `extracted`; ignored otherwise. |
 | `reason` | string? | Short sanitized label for `not_a_label`; never echoed image text. |
 
@@ -143,8 +143,9 @@ panel facts: serving 40 g, 200 kcal / 10 P / 20 C / 8 F per serving
 - **Untrusted analyst.** The reply is trusted only after it validates against
   `NutritionPanel`; a schema-invalid reply is rejected (`StepFailed`), never
   persisted.
-- **Legibility.** `unreadable`, confidence below threshold, or missing facts →
-  `needs_clarification` (never a guessed estimate).
+- **Legibility.** `unreadable`, confidence below the clarify policy's operating
+  point (`LABEL_CLARIFY_POLICY`), or missing facts → `needs_clarification`
+  (never a guessed estimate).
 - **Serving / quantity.** A serving size or consumed quantity that does not resolve
   to grams → `needs_clarification`.
 

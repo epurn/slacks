@@ -1,4 +1,4 @@
-"""Offline parse-calibration evaluation harness (FTY-157, extended by FTY-158).
+"""Offline parse-calibration evaluation harness (FTY-157, extended by FTY-158/159).
 
 The harness scores a pluggable clarify/estimate signal over the committed
 synthetic calibration set. It is intentionally test-only: no production parse
@@ -13,6 +13,15 @@ early-stop rule — so the offline evaluation computes exactly what the live
 sampler would. The live, provider-backed variant
 (:func:`live_self_consistency_signal`) is the opt-in mode and is never invoked
 by default verification.
+
+FTY-159 adds the signal **bake-off** and the **data-calibrated operating
+point**: :func:`run_bake_off` scores every recorded signal over the combined
+(synthetic + naturalistic) labeled set, selects the winner on the
+risk-coverage curve at the target answered precision, and derives the clarify
+threshold the production gate uses (:func:`select_operating_point`). The
+committed result is ``calibration_summary.json``; the production constant
+(``app.estimator.clarify_policy.NL_PARSE_CLARIFY_POLICY``) must equal the
+derived point — ``tests/test_clarify_calibration.py`` is the regression gate.
 """
 
 from __future__ import annotations
@@ -78,8 +87,31 @@ SELF_CONSISTENCY_SUMMARY_PATH = (
     / "parse_calibration"
     / "self_consistency_summary.json"
 )
+CALIBRATION_SUMMARY_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "parse_calibration"
+    / "calibration_summary.json"
+)
+
+#: The retired pre-FTY-159 production gate (verbalized confidence vs 0.45).
+#: Kept as the harness's *baseline reference* operating point: the FTY-157/158
+#: committed summaries pin their metrics at it, and the FTY-159 calibrated
+#: decision's measured improvement is reported against it.
 DEFAULT_OPERATING_THRESHOLD = 0.45
 DEFAULT_RISK_THRESHOLDS = (0.0, 0.3, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+
+#: The answered-precision target the FTY-159 operating point is derived for: of
+#: the events the gate estimates, at least this fraction must be gold-estimate.
+#: Precision (not raw correct-decision rate) is the calibration target because
+#: under-asking — confidently estimating an input that genuinely needed a
+#: question — is the worse failure for an honest-count app (a silently wrong
+#: total), while an over-ask costs one avoidable question. Maximising coverage
+#: subject to this floor then minimises over-asking. 0.99 is the tightest floor
+#: the combined labeled set supports with a real margin band; the residual
+#: answered errors are the consistent-but-wrong sampling class, self-
+#: consistency's documented blind spot.
+TARGET_ANSWERED_PRECISION = 0.99
 
 #: Number of recorded self-consistency samples each committed fixture example
 #: carries — matches the production default N
@@ -476,14 +508,18 @@ def evaluate_recorded(signal: str, path: Path = FIXTURE_PATH) -> EvaluationSumma
     )
 
 
-def evaluate_recorded_band(signal: str, band: BandSelector) -> EvaluationSummary:
+def evaluate_recorded_band(
+    signal: str,
+    band: BandSelector,
+    *,
+    operating_threshold: float = DEFAULT_OPERATING_THRESHOLD,
+) -> EvaluationSummary:
     """Evaluate a committed recorded signal over one band (or the combined set).
 
-    The naturalistic band (FTY-169) carries no recorded self-consistency
-    ``samples`` — its gold labels come from the cross-provider judge, not a
-    temperature>0 sampler — so the consistency signals raise a clear error there;
-    the calibration-relevant ``baseline`` signal (the recorded verbalized gate)
-    scores every band. FTY-159 calibrates the operating point over ``combined``.
+    Both bands carry recorded self-consistency ``samples`` (the naturalistic
+    band's are FTY-159 author-constructed stand-ins, like the rest of that
+    seed), so every recorded signal scores every band. FTY-159 calibrates the
+    operating point over ``combined``.
     """
 
     example_signal, signal_name = RECORDED_SIGNALS[signal]
@@ -493,7 +529,153 @@ def evaluate_recorded_band(signal: str, band: BandSelector) -> EvaluationSummary
         example_signal,
         signal_name=f"{signal_name}[{band}]",
         fixture_name=f"parse_calibration:{band}",
+        operating_threshold=operating_threshold,
     )
+
+
+@dataclass(frozen=True)
+class OperatingPointSelection:
+    """A signal's derived clarify threshold at the target answered precision.
+
+    ``feasible_score`` is the lowest observed signal score whose
+    threshold-sweep metrics meet the precision target at maximal coverage;
+    ``margin_low`` is the highest observed score strictly below it. The
+    operating ``threshold`` is their midpoint, so the committed cutoff sits in
+    the middle of the empirical margin band rather than exactly on an observed
+    score (a knife-edge a float wiggle could cross).
+    """
+
+    signal: str
+    target_precision: float
+    threshold: float
+    feasible_score: float
+    margin_low: float
+    metrics: OperatingMetrics
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "signal": self.signal,
+            "target_precision": self.target_precision,
+            "threshold": self.threshold,
+            "feasible_score": self.feasible_score,
+            "margin_low": self.margin_low,
+            "operating": self.metrics.to_dict(),
+        }
+
+
+def select_operating_point(
+    examples: Sequence[LabeledParseExample],
+    signal: ExampleSignal,
+    *,
+    signal_name: str,
+    target_precision: float = TARGET_ANSWERED_PRECISION,
+) -> OperatingPointSelection | None:
+    """Derive a signal's clarify threshold for the target answered precision.
+
+    Sweeps every observed score as a candidate threshold, keeps the candidates
+    whose answered precision meets the target (with at least one answered
+    example), and picks the one with maximal coverage — i.e. the fewest
+    questions the signal can ask while keeping estimates this reliable. The
+    returned threshold is the midpoint between that score and the next observed
+    score below it (see :class:`OperatingPointSelection`). Returns ``None``
+    when no observed threshold meets the target — an infeasible signal cannot
+    be wired at this target, which the bake-off treats as losing.
+    """
+
+    results = [(example, signal(example)) for example in examples]
+    observed = sorted({result.score for _, result in results if result.score is not None})
+    feasible: list[tuple[float, OperatingMetrics]] = []
+    for candidate in observed:
+        metrics = _metrics_at_threshold(results, candidate)
+        accuracy = metrics.answered_accuracy
+        if metrics.answered > 0 and accuracy is not None and accuracy >= target_precision:
+            feasible.append((candidate, metrics))
+    if not feasible:
+        return None
+
+    score, _ = max(feasible, key=lambda pair: (pair[1].coverage, -pair[0]))
+    below = [value for value in observed if value < score]
+    margin_low = max(below) if below else 0.0
+    threshold = round((score + margin_low) / 2, 6)
+    return OperatingPointSelection(
+        signal=signal_name,
+        target_precision=target_precision,
+        threshold=threshold,
+        feasible_score=round(score, 6),
+        margin_low=round(margin_low, 6),
+        metrics=_metrics_at_threshold(results, threshold),
+    )
+
+
+def run_bake_off(
+    band: BandSelector = "combined",
+    *,
+    target_precision: float = TARGET_ANSWERED_PRECISION,
+) -> dict[str, Any]:
+    """Run the FTY-159 signal bake-off and derive the calibrated operating point.
+
+    Every recorded signal (verbalized baseline, FTY-158 self-consistency
+    agreement, hybrid) is scored over ``band`` and gets an operating point
+    derived at the target precision (:func:`select_operating_point`). The
+    winner is the feasible signal with the highest correct-decision rate at its
+    derived point (coverage breaks ties). The result also reports the winner's
+    full summary at the calibrated threshold, its per-band operating metrics,
+    and the measured improvement over the retired production gate (recorded
+    verbalized confidence vs ``DEFAULT_OPERATING_THRESHOLD``).
+    """
+
+    examples = load_band(band)
+    selections: dict[str, OperatingPointSelection | None] = {}
+    for key, (example_signal, signal_name) in RECORDED_SIGNALS.items():
+        selections[key] = select_operating_point(
+            examples,
+            example_signal,
+            signal_name=signal_name,
+            target_precision=target_precision,
+        )
+
+    feasible = {key: sel for key, sel in selections.items() if sel is not None}
+    if not feasible:
+        msg = f"no recorded signal meets answered precision {target_precision} on {band}"
+        raise ValueError(msg)
+    winner_key = max(
+        feasible,
+        key=lambda key: (
+            feasible[key].metrics.correct_decision_rate,
+            feasible[key].metrics.coverage,
+        ),
+    )
+    winner = feasible[winner_key]
+
+    baseline_reference = evaluate_recorded_band("baseline", band).operating
+    winner_summary = evaluate_recorded_band(winner_key, band, operating_threshold=winner.threshold)
+    per_band: dict[str, Any] = {}
+    if band == "combined":
+        for sub_band in ("synthetic", "naturalistic"):
+            per_band[sub_band] = evaluate_recorded_band(
+                winner_key, sub_band, operating_threshold=winner.threshold
+            ).operating.to_dict()
+
+    return {
+        "band": band,
+        "total_examples": len(examples),
+        "target_answered_precision": target_precision,
+        "baseline_reference": {
+            "signal": RECORDED_SIGNALS["baseline"][1],
+            "threshold": DEFAULT_OPERATING_THRESHOLD,
+            "operating": baseline_reference.to_dict(),
+        },
+        "selections": {
+            key: (None if sel is None else sel.to_dict()) for key, sel in selections.items()
+        },
+        "winner": {
+            "signal": winner_key,
+            "signal_name": winner.signal,
+            "threshold": winner.threshold,
+            "summary": winner_summary.to_dict(),
+            "per_band": per_band,
+        },
+    }
 
 
 def evaluate_recorded_baseline(path: Path = FIXTURE_PATH) -> EvaluationSummary:
@@ -522,6 +704,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--json", action="store_true", help="print machine-readable JSON")
     parser.add_argument(
+        "--bake-off",
+        action="store_true",
+        help=(
+            "run the FTY-159 signal bake-off over --band (default combined): "
+            "derive each signal's operating point at the target precision, pick "
+            "the winner, and print (or --write-summary) the calibration JSON"
+        ),
+    )
+    parser.add_argument(
         "--write-baseline",
         type=Path,
         help="write the recorded baseline summary JSON to this path",
@@ -529,9 +720,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--write-summary",
         type=Path,
-        help="write the selected signal's summary JSON to this path",
+        help="write the selected signal's (or bake-off's) summary JSON to this path",
     )
     args = parser.parse_args(argv)
+
+    if args.bake_off:
+        bake_off = run_bake_off(args.band or "combined")
+        payload = json.dumps(bake_off, indent=2, sort_keys=True) + "\n"
+        if args.write_summary is not None:
+            args.write_summary.write_text(payload, encoding="utf-8")
+        else:
+            print(payload, end="")
+        return 0
 
     if args.band is not None:
         summary = evaluate_recorded_band(args.signal, args.band)
