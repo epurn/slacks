@@ -59,17 +59,23 @@
       "lines": 1328,
       "reason": "FTY-189 adds coverage for the goal-aware headline delta (color + narration across loss/gain/maintain, plus the unknown/no-goal-this-session case rendering neutral rather than a guessed default), range prose, human-formatted dates, and the non-color adherence cue, crossing the 1000-line test threshold; +54 in the FTY-189 review fix for the live-path test that mounts the real screen inside a session + GoalDirectionProvider hydrated from the authoritative GET /goal read, proving a returning user's existing goal colors the delta with no in-session set."
     },
+    "mobile/components/CorrectionSheet.test.tsx": {
+      "kind": "test",
+      "lane": "mobile",
+      "lines": 1023,
+      "reason": "FTY-181 adds beat-2 (correction-saved haptic) coverage — fires once per successful commit (amount step, re-resolve, override), not on a server failure or a validation error — crossing the 1000-line test threshold."
+    },
     "mobile/components/TodayScreen.test.tsx": {
       "kind": "test",
       "lane": "mobile",
-      "lines": 2013,
-      "reason": "Existing over-threshold first-party test file at FTY-200 baseline; +82 in FTY-175 for clarify answer-round-trip coverage (chip resolve, free-text resolve, error path, in-place poll, chip render from payload); +123 in the FTY-175 review fix covering the submit-time question-id re-read (fallback answer resolves after a failed read, re-read failure surfaced, empty-payload honesty)."
+      "lines": 2125,
+      "reason": "Existing over-threshold first-party test file at FTY-200 baseline; +82 in FTY-175 for clarify answer-round-trip coverage (chip resolve, free-text resolve, error path, in-place poll, chip render from payload); +123 in the FTY-175 review fix covering the submit-time question-id re-read (fallback answer resolves after a failed read, re-read failure surfaced, empty-payload honesty); +112 in FTY-181 for the signature-beat flow tests: beat-1 (entry-resolve haptic — no beat on initial load, exactly one on a pending→completed poll with no re-fire) and beat-3 (target-reached haptic fires once when a summary poll crosses the calorie target through the real mounted hero)."
     },
     "mobile/components/TodayScreen.tsx": {
       "kind": "source",
       "lane": "mobile",
-      "lines": 1415,
-      "reason": "Existing over-threshold first-party source file at FTY-200 baseline; +13 in FTY-178 to mount the hero above the composer and the macro tier separately beneath it (macro rework is FTY-179); +6 in FTY-175 wiring the FTY-170 clarify payload (question id + chips) and the answer round-trip that resolves the same entry in place; +16 in the FTY-175 review fix re-reading the question id at submit time so the free-text fallback stays non-blocking; +1 in FTY-179 passing the daily-summary target read-model into MacroTier so the macro chips measure against their effective targets."
+      "lines": 1480,
+      "reason": "Existing over-threshold first-party source file at FTY-200 baseline; +13 in FTY-178 to mount the hero above the composer and the macro tier separately beneath it (macro rework is FTY-179); +6 in FTY-175 wiring the FTY-170 clarify payload (question id + chips) and the answer round-trip that resolves the same entry in place; +16 in the FTY-175 review fix re-reading the question id at submit time so the free-text fallback stays non-blocking; +1 in FTY-179 passing the daily-summary target read-model into MacroTier so the macro chips measure against their effective targets; +65 in FTY-181 detecting pending→completed transitions to fire the entry-resolve beat once (soft tap + row fade) and never on initial load."
     }
   },
   "boundary_imports": [

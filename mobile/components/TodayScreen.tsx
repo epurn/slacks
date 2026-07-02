@@ -82,6 +82,7 @@ import {
 import { useScreenActive } from "@/state/useScreenActive";
 import { useSubmitLog, type SubmitLogBridge } from "@/state/useSubmitLog";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
+import { entryResolvedHaptic } from "@/theme/haptics";
 
 /** Maximum raw-text length, mirrored from the FTY-030 contract. */
 const MAX_RAW_TEXT_LENGTH = 2000;
@@ -340,6 +341,21 @@ export function TodayScreen({
     ReadonlySet<string>
   >(() => new Set());
 
+  // Beat 1 — entry resolve. Detect pending→`completed` (counted) transitions so a
+  // resolve fires the soft-tap haptic exactly once and eases the resolved value's
+  // row in. `seenCompleted` is `null` until the first events load seeds it, so an
+  // already-completed entry present on initial load never beats on mount. The
+  // detection runs in render (the "adjust state on prop change" pattern used
+  // elsewhere in this file), and a monotonic `resolveBeatSignal` hands the actual
+  // haptic to an effect — a side effect must not run during render.
+  const [seenCompleted, setSeenCompleted] = useState<ReadonlySet<string> | null>(
+    null,
+  );
+  const [resolveAnimIds, setResolveAnimIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [resolveBeatSignal, setResolveBeatSignal] = useState(0);
+
   // The submit machine reads the latest selected saved food at submit time, and
   // each in-flight submit stashes its saved food by optimistic id so the right
   // one is re-keyed on success / restored on a server-error rollback. The ref is
@@ -490,6 +506,46 @@ export function TodayScreen({
       active = false;
     };
   }, [apiSession, getDailySummary, reloadKey]);
+
+  // Beat 1 detection (render phase). Compute the set of completed event ids and,
+  // once seeded, diff it against the last-seen set: any newly-completed id is a
+  // pending→resolved transition. Detection only starts once the first load has
+  // landed (`phase === "ready"`); the seed then captures the initially-loaded
+  // completed entries, so an entry already completed on load is never treated as a
+  // fresh resolve — no beat on mount.
+  const completedIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const event of events) {
+      if (event.status === "completed") ids.add(event.id);
+    }
+    return ids;
+  }, [events]);
+  if (phase === "ready") {
+    if (seenCompleted === null) {
+      setSeenCompleted(completedIds);
+    } else {
+      const fresh: string[] = [];
+      for (const id of completedIds) {
+        if (!seenCompleted.has(id)) fresh.push(id);
+      }
+      if (fresh.length > 0) {
+        setSeenCompleted(completedIds);
+        setResolveAnimIds((prev) => {
+          const next = new Set(prev);
+          for (const id of fresh) next.add(id);
+          return next;
+        });
+        // Bump the signal so the effect below fires one soft tap for this resolve.
+        setResolveBeatSignal((n) => n + 1);
+      }
+    }
+  }
+
+  // Fire the entry-resolve haptic when the signal advances. Kept in an effect so
+  // the side effect never runs during render; the >0 guard skips the mount tick.
+  useEffect(() => {
+    if (resolveBeatSignal > 0) entryResolvedHaptic();
+  }, [resolveBeatSignal]);
 
   // Barcode scan entry point (FTY-063). Mirrors the text-composer submit flow:
   // dismiss the scanner, show the barcode as a pending optimistic entry, then
@@ -989,6 +1045,7 @@ export function TodayScreen({
           events={displayEvents}
           itemsByEvent={itemsByEvent}
           offlineStateById={offlineStateById}
+          resolveAnimIds={resolveAnimIds}
           session={apiSession}
           editItem={editItem}
           onItemChange={handleItemChange}
@@ -1055,6 +1112,7 @@ function Timeline({
   events,
   itemsByEvent,
   offlineStateById,
+  resolveAnimIds,
   session,
   editItem,
   onItemChange,
@@ -1071,6 +1129,8 @@ function Timeline({
   itemsByEvent: Readonly<Record<string, readonly DerivedItem[]>>;
   /** Idempotency key → offline sync state for offline-queued rows (FTY-147). */
   offlineStateById: ReadonlyMap<string, OutboxSyncState>;
+  /** Event ids whose value row should ease in — the entry-resolve beat (FTY-181). */
+  resolveAnimIds: ReadonlySet<string>;
   session: ApiSession | null;
   editItem: typeof editDerivedItemApi;
   onItemChange: (item: DerivedItem) => void;
@@ -1146,6 +1206,7 @@ function Timeline({
           cluster={cluster}
           itemsByEvent={itemsByEvent}
           offlineStateById={offlineStateById}
+          resolveAnimIds={resolveAnimIds}
           session={session}
           editItem={editItem}
           onItemChange={onItemChange}
@@ -1165,6 +1226,7 @@ function ClusterView({
   cluster,
   itemsByEvent,
   offlineStateById,
+  resolveAnimIds,
   session,
   editItem,
   onItemChange,
@@ -1178,6 +1240,7 @@ function ClusterView({
   cluster: { anchorTime: string; events: readonly LogEventDTO[] };
   itemsByEvent: Readonly<Record<string, readonly DerivedItem[]>>;
   offlineStateById: ReadonlyMap<string, OutboxSyncState>;
+  resolveAnimIds: ReadonlySet<string>;
   session: ApiSession | null;
   editItem: typeof editDerivedItemApi;
   onItemChange: (item: DerivedItem) => void;
@@ -1214,12 +1277,14 @@ function ClusterView({
           // Completed event with resolved items → show item rows (items-forward).
           // Tapping a row opens the correction/detail sheet for that item.
           if (event.status === "completed" && items.length > 0) {
+            const animateResolve = resolveAnimIds.has(event.id);
             return items.map((item) => (
               <ItemTimelineRow
                 key={item.id}
                 item={item}
                 needsClarification={false}
                 onPress={() => onOpenItem(item, event.raw_text)}
+                animateResolve={animateResolve}
               />
             ));
           }

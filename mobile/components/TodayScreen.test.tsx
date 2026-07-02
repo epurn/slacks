@@ -9,6 +9,22 @@ import type { SavedFoodDTO } from "@/api/savedFoods";
 import type { OutboxEntry, OutboxStore } from "@/state/outbox";
 import type { Session } from "@/state/session";
 import { mockReduceMotion } from "@/testUtils/reduceMotion";
+import { entryResolvedHaptic, targetReachedHaptic } from "@/theme/haptics";
+
+// The beat haptics are mocked so transitions can be asserted through the real
+// screen without a native Taptic Engine.
+jest.mock("@/theme/haptics", () => ({
+  entryResolvedHaptic: jest.fn(),
+  correctionSavedHaptic: jest.fn(),
+  targetReachedHaptic: jest.fn(),
+}));
+
+const mockEntryResolvedHaptic = entryResolvedHaptic as jest.MockedFunction<
+  typeof entryResolvedHaptic
+>;
+const mockTargetReachedHaptic = targetReachedHaptic as jest.MockedFunction<
+  typeof targetReachedHaptic
+>;
 
 // TodayScreen imports BarcodeScannerScreen which imports expo-camera native
 // modules; mock those before any tests run.
@@ -88,7 +104,11 @@ const INACTIVE = () => false;
 // component.
 const activeTrees: ReactTestRenderer[] = [];
 
-beforeEach(() => mockReduceMotion(false));
+beforeEach(() => {
+  mockReduceMotion(false);
+  mockEntryResolvedHaptic.mockClear();
+  mockTargetReachedHaptic.mockClear();
+});
 
 afterEach(() => {
   for (const tree of activeTrees) {
@@ -2009,5 +2029,97 @@ describe("TodayScreen timeline timestamps (FTY-174 / audit A6)", () => {
     expect(content).toContain("Oatmeal");
     expect(content).toContain("11:14 AM");
     expect(content).not.toContain("11:14 PM");
+  });
+});
+
+describe("TodayScreen — beat 1: entry resolve (FTY-181)", () => {
+  it("does not fire on initial load of an already-completed entry (no beat on mount)", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: "a", raw_text: "Oatmeal", status: "completed" }),
+      ]);
+    mount(<TodayScreen session={SESSION} load={load} useActive={INACTIVE} />);
+    await act(async () => {});
+    expect(mockEntryResolvedHaptic).not.toHaveBeenCalled();
+  });
+
+  it("fires once when a pending entry resolves to completed on a poll", async () => {
+    jest.useFakeTimers();
+    try {
+      const pending = event({ id: "a", raw_text: "Oatmeal", status: "pending" });
+      const completed = event({
+        id: "a",
+        raw_text: "Oatmeal",
+        status: "completed",
+      });
+      // First load: pending (nothing resolved yet). Every poll after: completed.
+      const load = jest
+        .fn()
+        .mockResolvedValueOnce([pending])
+        .mockResolvedValue([completed]);
+      mount(
+        <TodayScreen
+          session={SESSION}
+          load={load}
+          useActive={() => true}
+          pollIntervalMs={1000}
+        />,
+      );
+      await act(async () => {});
+      // Seeded on the pending load — no resolve yet.
+      expect(mockEntryResolvedHaptic).not.toHaveBeenCalled();
+
+      // Poll reconciles the same event as completed → the resolve beat fires once.
+      act(() => jest.advanceTimersByTime(1000));
+      await act(async () => {});
+      expect(mockEntryResolvedHaptic).toHaveBeenCalledTimes(1);
+
+      // A further poll returning the same completed event must not re-fire.
+      act(() => jest.advanceTimersByTime(1000));
+      await act(async () => {});
+      expect(mockEntryResolvedHaptic).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+describe("TodayScreen — beat 3: target reached through the real screen (FTY-181)", () => {
+  it("fires the target-reached beat when a summary poll crosses the calorie target", async () => {
+    jest.useFakeTimers();
+    try {
+      // A pending event keeps polling active; the summary crosses the target on
+      // the poll (under budget → over budget) so the mounted hero beats once.
+      const load = jest
+        .fn()
+        .mockResolvedValue([event({ id: "a", raw_text: "Oatmeal", status: "pending" })]);
+      const getDailySummary = jest
+        .fn()
+        .mockResolvedValueOnce(
+          summary({ intake: { calories: 1600, protein_g: 70, carbs_g: 120, fat_g: 40 } }),
+        )
+        .mockResolvedValue(
+          summary({ intake: { calories: 2100, protein_g: 90, carbs_g: 160, fat_g: 55 } }),
+        );
+      mount(
+        <TodayScreen
+          session={SESSION}
+          load={load}
+          getDailySummary={getDailySummary}
+          useActive={() => true}
+          pollIntervalMs={1000}
+        />,
+      );
+      await act(async () => {});
+      // Seeded under budget on the first summary — no beat yet.
+      expect(mockTargetReachedHaptic).not.toHaveBeenCalled();
+
+      act(() => jest.advanceTimersByTime(1000));
+      await act(async () => {});
+      expect(mockTargetReachedHaptic).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
