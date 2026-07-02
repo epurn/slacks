@@ -50,8 +50,8 @@
     "mobile/components/SettingsScreen.tsx": {
       "kind": "source",
       "lane": "mobile",
-      "lines": 1991,
-      "reason": "Existing over-threshold first-party source file at FTY-200 baseline; +4 in FTY-189 publishing the saved goal's direction to the cross-screen goalDirection controller so Trends' headline delta can be goal-aware."
+      "lines": 1995,
+      "reason": "Existing over-threshold first-party source file at FTY-200 baseline; +4 in FTY-189 publishing the saved goal's direction to the cross-screen goalDirection controller so Trends' headline delta can be goal-aware; +4 in FTY-182 switching the scroll view to the native large-title header's automatic content inset (dropping the hand-padded status-bar magic number) with a comment explaining why."
     },
     "mobile/components/TrendsScreen.test.tsx": {
       "kind": "test",

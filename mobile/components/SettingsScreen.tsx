@@ -646,8 +646,12 @@ export function SettingsScreen({
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.surface }}
+      // The native large-title header (configured on the /profile route) owns the
+      // top inset: `automatic` insets content below the bar and drives the
+      // large-title collapse + frost-on-scroll, so we never hand-pad the status-bar
+      // height here (that magic number breaks across devices — FTY-182).
+      contentInsetAdjustmentBehavior="automatic"
       contentContainerStyle={{
-        paddingTop: insets.top + 16,
         paddingBottom: insets.bottom + 32,
         paddingHorizontal: spacing.base,
       }}
