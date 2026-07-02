@@ -1,0 +1,474 @@
+{
+  "note": "Recorded/representative cross-provider judge outputs used to build and verify the naturalistic seed offline (a deterministic stand-in, mirroring FTY-158's recorded samples). NOT real user data and NOT a claim of specific live model output; the maintainer's live run (tests.parse_calibration.judge) refreshes it.",
+  "protocol_version": 1,
+  "records": [
+    {
+      "claude": {
+        "gold_decision": "estimate",
+        "gold_parse": [
+          {
+            "amount": 2.0,
+            "name": "eggs",
+            "quantity_text": "2",
+            "type": "food",
+            "unit": "count"
+          },
+          {
+            "amount": 1.0,
+            "name": "wheat toast",
+            "quantity_text": "a slice",
+            "type": "food",
+            "unit": "slice"
+          }
+        ]
+      },
+      "codex": {
+        "gold_decision": "estimate",
+        "gold_parse": [
+          {
+            "amount": 2.0,
+            "name": "eggs",
+            "quantity_text": "2",
+            "type": "food",
+            "unit": "count"
+          },
+          {
+            "amount": 1.0,
+            "name": "wheat toast",
+            "quantity_text": "a slice",
+            "type": "food",
+            "unit": "slice"
+          }
+        ]
+      },
+      "input": "had 2 eggs n a slice of wheat toast this morning"
+    },
+    {
+      "claude": {
+        "gold_decision": "estimate",
+        "gold_parse": [
+          {
+            "amount": 1.0,
+            "brand": "Kraft",
+            "name": "peanut butter",
+            "quantity_text": "1 tbsp",
+            "type": "food",
+            "unit": "tbsp"
+          },
+          {
+            "amount": 1.0,
+            "name": "rice cake",
+            "quantity_text": "1",
+            "type": "food",
+            "unit": "count"
+          }
+        ]
+      },
+      "codex": {
+        "gold_decision": "estimate",
+        "gold_parse": [
+          {
+            "amount": 1.0,
+            "brand": "Kraft",
+            "name": "peanut butter",
+            "quantity_text": "1 tbsp",
+            "type": "food",
+            "unit": "tbsp"
+          },
+          {
+            "amount": 1.0,
+            "name": "rice cake",
+            "quantity_text": "1",
+            "type": "food",
+            "unit": "count"
+          }
+        ]
+      },
+      "input": "1 tbsp kraft PB on a rice cake"
+    },
+    {
+      "claude": {
+        "gold_decision": "estimate",
+        "gold_parse": [
+          {
+            "amount": 170.0,
+            "name": "greek yogurt",
+            "quantity_text": "170g",
+            "type": "food",
+            "unit": "g"
+          },
+          {
+            "amount": 1.0,
+            "name": "honey",
+            "quantity_text": "a drizzle",
+            "type": "food",
+            "unit": "tsp"
+          }
+        ]
+      },
+      "codex": {
+        "gold_decision": "estimate",
+        "gold_parse": [
+          {
+            "amount": 180.0,
+            "name": "greek yogurt",
+            "quantity_text": "180g",
+            "type": "food",
+            "unit": "g"
+          },
+          {
+            "amount": 1.0,
+            "name": "honey",
+            "quantity_text": "a drizzle",
+            "type": "food",
+            "unit": "tsp"
+          }
+        ]
+      },
+      "input": "170g greek yoghurt + a drizzle of honey"
+    },
+    {
+      "claude": {
+        "gold_decision": "estimate",
+        "gold_parse": [
+          {
+            "amount": 5.0,
+            "name": "run",
+            "quantity_text": "5k",
+            "type": "exercise",
+            "unit": "km"
+          },
+          {
+            "amount": 20.0,
+            "name": "walk",
+            "quantity_text": "20 min",
+            "type": "exercise",
+            "unit": "min"
+          }
+        ]
+      },
+      "codex": {
+        "gold_decision": "estimate",
+        "gold_parse": [
+          {
+            "amount": 5.0,
+            "name": "run",
+            "quantity_text": "5k",
+            "type": "exercise",
+            "unit": "km"
+          },
+          {
+            "amount": 20.0,
+            "name": "walk",
+            "quantity_text": "20 min",
+            "type": "exercise",
+            "unit": "min"
+          }
+        ]
+      },
+      "input": "ran 5k then a 20 min cooldown walk"
+    },
+    {
+      "claude": {
+        "gold_decision": "estimate",
+        "gold_parse": [
+          {
+            "amount": 7.5,
+            "name": "onion rings",
+            "quantity_text": "5-10",
+            "type": "food",
+            "unit": "count"
+          }
+        ]
+      },
+      "codex": {
+        "gold_decision": "estimate",
+        "gold_parse": [
+          {
+            "amount": 7.5,
+            "name": "onion rings",
+            "quantity_text": "5-10",
+            "type": "food",
+            "unit": "count"
+          }
+        ]
+      },
+      "input": "had a handful (5-10) of deep fried onion rings"
+    },
+    {
+      "claude": {
+        "gold_decision": "estimate",
+        "gold_parse": [
+          {
+            "amount": 6.0,
+            "name": "crackers",
+            "quantity_text": "6",
+            "type": "food",
+            "unit": "count"
+          },
+          {
+            "amount": 3.0,
+            "name": "peanut butter",
+            "quantity_text": "about 1 tbsp each",
+            "type": "food",
+            "unit": "tbsp"
+          }
+        ]
+      },
+      "codex": {
+        "gold_decision": "estimate",
+        "gold_parse": [
+          {
+            "amount": 6.0,
+            "name": "crackers",
+            "quantity_text": "6",
+            "type": "food",
+            "unit": "count"
+          },
+          {
+            "amount": 3.0,
+            "name": "peanut butter",
+            "quantity_text": "about 1 tbsp each",
+            "type": "food",
+            "unit": "tbsp"
+          }
+        ]
+      },
+      "input": "3 PB cracker sandwiches"
+    },
+    {
+      "claude": {
+        "gold_decision": "estimate",
+        "gold_parse": [
+          {
+            "amount": 1.0,
+            "name": "cereal",
+            "quantity_text": "a bowl",
+            "type": "food",
+            "unit": "bowl"
+          },
+          {
+            "amount": 0.5,
+            "name": "milk",
+            "quantity_text": "a splash",
+            "type": "food",
+            "unit": "cup"
+          }
+        ]
+      },
+      "codex": {
+        "gold_decision": "estimate",
+        "gold_parse": [
+          {
+            "amount": 1.0,
+            "name": "cereal",
+            "quantity_text": "a bowl",
+            "type": "food",
+            "unit": "bowl"
+          },
+          {
+            "amount": 0.5,
+            "name": "milk",
+            "quantity_text": "a splash",
+            "type": "food",
+            "unit": "cup"
+          }
+        ]
+      },
+      "input": "a bowl of cereal w/ milk, prob a normal serving"
+    },
+    {
+      "claude": {
+        "gold_decision": "estimate",
+        "gold_parse": [
+          {
+            "amount": 2.5,
+            "name": "cheese",
+            "quantity_text": "2-3 slices",
+            "type": "food",
+            "unit": "slice"
+          }
+        ]
+      },
+      "codex": {
+        "gold_decision": "estimate",
+        "gold_parse": [
+          {
+            "amount": 2.0,
+            "name": "cheese",
+            "quantity_text": "2 slices",
+            "type": "food",
+            "unit": "slice"
+          }
+        ]
+      },
+      "input": "grabbed like 2-3 slices of cheese"
+    },
+    {
+      "claude": {
+        "gold_decision": "needs_clarification",
+        "gold_parse": [
+          {
+            "name": "crackers",
+            "quantity_text": "",
+            "type": "food"
+          },
+          {
+            "name": "peanut butter",
+            "quantity_text": "",
+            "type": "food"
+          }
+        ]
+      },
+      "codex": {
+        "gold_decision": "needs_clarification",
+        "gold_parse": [
+          {
+            "name": "crackers",
+            "quantity_text": "",
+            "type": "food"
+          },
+          {
+            "name": "peanut butter",
+            "quantity_text": "",
+            "type": "food"
+          }
+        ]
+      },
+      "input": "crackers and peanut butter"
+    },
+    {
+      "claude": {
+        "gold_decision": "needs_clarification",
+        "gold_parse": [
+          {
+            "name": "thai curry",
+            "quantity_text": "",
+            "type": "food"
+          }
+        ]
+      },
+      "codex": {
+        "gold_decision": "needs_clarification",
+        "gold_parse": [
+          {
+            "name": "thai curry",
+            "quantity_text": "",
+            "type": "food"
+          }
+        ]
+      },
+      "input": "some leftover thai curry"
+    },
+    {
+      "claude": {
+        "gold_decision": "needs_clarification",
+        "gold_parse": [
+          {
+            "name": "chips",
+            "quantity_text": "",
+            "type": "food"
+          }
+        ]
+      },
+      "codex": {
+        "gold_decision": "needs_clarification",
+        "gold_parse": [
+          {
+            "name": "chips",
+            "quantity_text": "",
+            "type": "food"
+          }
+        ]
+      },
+      "input": "snacked on chips while watching tv"
+    },
+    {
+      "claude": {
+        "gold_decision": "needs_clarification",
+        "gold_parse": [
+          {
+            "name": "workout",
+            "quantity_text": "",
+            "type": "exercise"
+          }
+        ]
+      },
+      "codex": {
+        "gold_decision": "needs_clarification",
+        "gold_parse": [
+          {
+            "name": "workout",
+            "quantity_text": "",
+            "type": "exercise"
+          }
+        ]
+      },
+      "input": "worked out at the gym"
+    },
+    {
+      "claude": {
+        "gold_decision": "estimate",
+        "gold_parse": [
+          {
+            "amount": 1.0,
+            "name": "pasta",
+            "quantity_text": "some",
+            "type": "food",
+            "unit": "serving"
+          },
+          {
+            "amount": 0.5,
+            "name": "sauce",
+            "quantity_text": "a bit",
+            "type": "food",
+            "unit": "cup"
+          }
+        ]
+      },
+      "codex": {
+        "gold_decision": "needs_clarification",
+        "gold_parse": [
+          {
+            "name": "pasta",
+            "quantity_text": "",
+            "type": "food"
+          },
+          {
+            "name": "sauce",
+            "quantity_text": "",
+            "type": "food"
+          }
+        ]
+      },
+      "input": "some pasta with a bit of sauce"
+    },
+    {
+      "claude": {
+        "gold_decision": "estimate",
+        "gold_parse": [
+          {
+            "amount": 3.0,
+            "name": "beer",
+            "quantity_text": "a few",
+            "type": "food",
+            "unit": "bottle"
+          }
+        ]
+      },
+      "codex": {
+        "gold_decision": "estimate",
+        "gold_parse": [
+          {
+            "amount": 6.0,
+            "name": "beer",
+            "quantity_text": "a few",
+            "type": "food",
+            "unit": "bottle"
+          }
+        ]
+      },
+      "input": "a few beers last night"
+    }
+  ]
+}

@@ -37,8 +37,31 @@ from app.schemas.parse import ParsedCandidate, ParseDisposition, ParseResult
 Decision = Literal["estimate", "needs_clarification"]
 DifficultyBand = Literal["unambiguous", "inferable", "indeterminate"]
 
+#: Which distribution band an example belongs to. ``synthetic`` is the FTY-157
+#: clean-by-construction set; ``naturalistic`` (FTY-169) is the messy,
+#: real-world-*style* band whose gold labels are cross-provider-judge verified.
+DistributionBand = Literal["synthetic", "naturalistic"]
+
+#: How an example's gold label was produced. ``synthetic_by_construction`` is the
+#: FTY-157 known-parse-then-render path; the naturalistic bands (FTY-169) are
+#: either ``authored_naturalistic`` (an author-constructed unambiguous case,
+#: agreement-trivial by construction) or ``cross_provider_judge`` (an
+#: independent Claude + GPT-5.5 agreement, per ``README.md``). No committed
+#: label is ever derived from real user data.
+LabelSourceKind = Literal[
+    "synthetic_by_construction",
+    "authored_naturalistic",
+    "cross_provider_judge",
+]
+
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[1] / "fixtures" / "parse_calibration" / "examples.jsonl"
+)
+NATURALISTIC_FIXTURE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "parse_calibration"
+    / "naturalistic_examples.jsonl"
 )
 BASELINE_SUMMARY_PATH = (
     Path(__file__).resolve().parents[1] / "fixtures" / "parse_calibration" / "baseline_summary.json"
@@ -74,7 +97,11 @@ class LabeledParseExample(BaseModel):
 
     id: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9][a-z0-9-]*$")
     difficulty: DifficultyBand
-    source_kind: Literal["synthetic_by_construction"]
+    #: Distribution band. Defaults to ``synthetic`` so the FTY-157 fixture (which
+    #: predates the field) validates unchanged; the FTY-169 naturalistic fixture
+    #: sets it explicitly.
+    band: DistributionBand = "synthetic"
+    source_kind: LabelSourceKind
     source_template: str = Field(min_length=1, max_length=80)
     input: str = Field(min_length=1, max_length=240)
     gold_decision: Decision
@@ -274,6 +301,34 @@ def load_examples(path: Path = FIXTURE_PATH) -> list[LabeledParseExample]:
     return examples
 
 
+#: The band selector accepted by band-aware evaluation: one committed fixture,
+#: or ``combined`` for the synthetic + naturalistic union FTY-159 calibrates on.
+BandSelector = Literal["synthetic", "naturalistic", "combined"]
+
+_BAND_FIXTURES: dict[str, Path] = {
+    "synthetic": FIXTURE_PATH,
+    "naturalistic": NATURALISTIC_FIXTURE_PATH,
+}
+
+
+def load_band(band: BandSelector) -> list[LabeledParseExample]:
+    """Load the committed examples for a band (``combined`` unions both fixtures).
+
+    Each fixture is validated by :func:`load_examples`; the combined set is
+    checked for cross-fixture id collisions so a run can report synthetic vs
+    naturalistic vs combined without silently dropping a shadowed example.
+    """
+
+    if band == "combined":
+        examples = load_examples(FIXTURE_PATH) + load_examples(NATURALISTIC_FIXTURE_PATH)
+        ids = [example.id for example in examples]
+        if len(set(ids)) != len(ids):
+            msg = "combined calibration set contains duplicate ids across bands"
+            raise ValueError(msg)
+        return examples
+    return load_examples(_BAND_FIXTURES[band])
+
+
 def adapt_text_signal(signal: TextSignal) -> ExampleSignal:
     """Wrap a raw-text signal so it can be evaluated against labeled examples."""
 
@@ -415,6 +470,26 @@ def evaluate_recorded(signal: str, path: Path = FIXTURE_PATH) -> EvaluationSumma
     )
 
 
+def evaluate_recorded_band(signal: str, band: BandSelector) -> EvaluationSummary:
+    """Evaluate a committed recorded signal over one band (or the combined set).
+
+    The naturalistic band (FTY-169) carries no recorded self-consistency
+    ``samples`` — its gold labels come from the cross-provider judge, not a
+    temperature>0 sampler — so the consistency signals raise a clear error there;
+    the calibration-relevant ``baseline`` signal (the recorded verbalized gate)
+    scores every band. FTY-159 calibrates the operating point over ``combined``.
+    """
+
+    example_signal, signal_name = RECORDED_SIGNALS[signal]
+    examples = load_band(band)
+    return evaluate_signal(
+        examples,
+        example_signal,
+        signal_name=f"{signal_name}[{band}]",
+        fixture_name=f"parse_calibration:{band}",
+    )
+
+
 def evaluate_recorded_baseline(path: Path = FIXTURE_PATH) -> EvaluationSummary:
     """Evaluate the committed recorded baseline fixture signal."""
 
@@ -424,6 +499,15 @@ def evaluate_recorded_baseline(path: Path = FIXTURE_PATH) -> EvaluationSummary:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the parse calibration harness.")
     parser.add_argument("--fixture", type=Path, default=FIXTURE_PATH)
+    parser.add_argument(
+        "--band",
+        choices=("synthetic", "naturalistic", "combined"),
+        default=None,
+        help=(
+            "score a committed band instead of --fixture: synthetic (FTY-157), "
+            "naturalistic (FTY-169), or combined. Overrides --fixture."
+        ),
+    )
     parser.add_argument(
         "--signal",
         choices=sorted(RECORDED_SIGNALS),
@@ -443,7 +527,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    summary = evaluate_recorded(args.signal, args.fixture)
+    if args.band is not None:
+        summary = evaluate_recorded_band(args.signal, args.band)
+    else:
+        summary = evaluate_recorded(args.signal, args.fixture)
     if args.write_baseline is not None:
         args.write_baseline.write_text(
             evaluate_recorded("baseline", args.fixture).to_json(), encoding="utf-8"
