@@ -48,6 +48,7 @@ from app.estimator.detail_signals import has_food_detail, parse_range_midpoint
 from app.estimator.exercise import has_exercise_detail
 from app.estimator.parse_prompt import build_parse_prompt
 from app.estimator.pipeline import (
+    AnsweredClarification,
     CandidateDraft,
     EstimationContext,
     NeedsClarification,
@@ -103,15 +104,20 @@ class ParseStep:
             # spend an LLM call on it.
             raise StepFailed("empty_input")
 
-        signal = self._signal(raw)
+        signal = self._signal(raw, context.answered_clarifications)
         self._route(context, signal)
         context.record_step(self.name, "ok")
 
-    def _signal(self, raw_text: str) -> SelfConsistencySignal:
+    def _signal(
+        self, raw_text: str, answered: Sequence[AnsweredClarification]
+    ) -> SelfConsistencySignal:
         """Sample the parse and compute the consistency signal, mapping failures.
 
         Draws the FTY-158 sample set (parallel, early-stopped when the first
-        window is unanimous). Transient transport failures are retryable
+        window is unanimous). ``answered`` folds the accumulated clarification
+        answers into every sample's prompt as structured detail on an
+        answer-triggered re-estimate (FTY-171); the raw text itself is passed
+        through unchanged. Transient transport failures are retryable
         (:class:`StepError`); a schema-validation rejection or any other
         deterministic provider error is terminal and fails closed
         (:class:`StepFailed`) — a partially-failed sample set is never scored,
@@ -119,7 +125,7 @@ class ParseStep:
         """
 
         try:
-            samples = collect_parse_samples(self.provider, raw_text)
+            samples = collect_parse_samples(self.provider, raw_text, answered=answered)
         except StructuredOutputValidationError as exc:
             # Untrusted-analyst trust boundary: reject and fail closed. The label
             # is content-free — no raw output is surfaced.
