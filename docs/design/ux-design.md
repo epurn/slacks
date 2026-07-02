@@ -39,8 +39,9 @@ tracker**. The wedge is two things competitors don't do well together:
   composer and drifted, and added a navigation hop to the core loop for no benefit).
 - **Profile / Settings is a persistent gear** in the header on every screen — not a
   tab.
-- Logging is always one tap away: the **composer lives at the top of Today**, so
-  capture happens on the status-home itself without a navigation hop.
+- Logging is always one tap away: the **composer sits directly beneath the Today
+  hero** (status leads — see §1; order set in FTY-178), so capture happens on the
+  status-home itself without a navigation hop.
 
 ---
 
@@ -48,8 +49,9 @@ tracker**. The wedge is two things competitors don't do well together:
 
 ### Logging loop
 
-- **Composer at the top of Today = a natural-language composer.** You describe the
-  food; a saved-food typeahead surfaces reactively as you type. Barcode and label
+- **Today's composer — directly beneath the hero — is a natural-language
+  composer.** You describe the food; a saved-food typeahead surfaces reactively
+  as you type. Barcode and label
   capture sit alongside as SF Symbol affordances. (No proactive "recents" list in
   v1.) The composer does **not** auto-raise the keyboard — Today is the
   status-home; tapping the composer raises it (auto-focusing a dashboard is
@@ -96,9 +98,11 @@ session) skip straight to Today.
 The status-first home.
 
 - **Hero: calories consumed vs. target only** — a bold number plus a slim linear
-  bar ("1,240 / of 2,000 kcal · 62%"). One focus.
-- **Secondary tier:** macro chips (P/C/F), then a distinct "🔥 burned" exercise
-  line. Exercise is **not** in the hero and **not** a fourth macro.
+  bar ("1,240 / 2,000 kcal · 62%"). One focus. The hero leads the screen
+  (status-first), with the composer directly beneath it (§3; FTY-178).
+- **Secondary tier (below the composer):** macro chips (P/C/F), then a distinct
+  "🔥 burned" exercise line. Exercise is **not** in the hero and **not** a
+  fourth macro.
 - **Timeline:** items-forward, grouped into **time clusters** (entries within a
   ~10–15 minute grace window combine, text-message-chain style). Each item shows
   name · kcal · an **always-on source icon**. The raw phrase appears only on tap

@@ -88,7 +88,8 @@ export const e2eConnectionStore: ServerConnectionStore = {
  *   phase 1 — needs_clarification entry visible (after first POST)
  *   phase 2 — entry resolved and counting (after second POST / re-submission)
  *
- * The smoke flow never POSTs, so it always sees the phase-0 empty-day fixture.
+ * The smoke flow (FTY-178) asserts the phase-0 empty-day hero first, then
+ * POSTs twice to walk the phase machine to the resolved, counting summary.
  *
  * The FTY-176 failed-parse flow runs off a separate `failedStage` keyed on the
  * gibberish `raw_text` (never "coffee"), so it drives independent state in the
