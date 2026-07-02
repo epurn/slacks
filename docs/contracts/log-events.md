@@ -117,6 +117,15 @@ The event DTO (returned by create, each list element, and get-by-id):
 The DTO does **not** echo `idempotency_key`: it is a write-only request token with
 no consumer need in the response (a client already holds the key it sent).
 
+**Timestamps are UTC, serialized timezone-aware.** `created_at` and `updated_at`
+are stored as UTC (`timestamptz`) and serialized as **timezone-aware ISO-8601 with
+an explicit UTC offset** (e.g. `2026-06-16T01:00:00Z`) — never a naive datetime a
+client would misread as its own local time. This is what lets the client convert an
+instant to the device zone unambiguously, so an entry logged the previous local
+evening renders — and buckets — under the correct day. The backend enforces this at
+the ORM boundary (a UTC-normalizing `timestamptz` type), so the guarantee holds on
+every backend regardless of whether the driver preserves the offset on read.
+
 ### Idempotent create (`201` vs `200`)
 
 `POST .../log-events` is safe to retry when an `idempotency_key` is supplied —

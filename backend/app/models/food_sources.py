@@ -27,7 +27,6 @@ from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
-    DateTime,
     Float,
     ForeignKey,
     String,
@@ -36,7 +35,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db import Base
+from app.db import Base, UtcDateTime
 
 
 def _utcnow() -> datetime:
@@ -79,11 +78,9 @@ class Product(Base):
     #: Source default serving in grams, when known; enables count-based quantities.
     default_serving_g: Mapped[float | None] = mapped_column(Float, nullable=True)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+        UtcDateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )
 
 
@@ -129,7 +126,7 @@ class EvidenceSource(Base):
     #: Stable per-record source reference, e.g. ``usda_fdc:171688``.
     source_ref: Mapped[str] = mapped_column(String(128), nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
     #: Immutable snapshot of the per-100g facts used for this resolution.
     calories_per_100g: Mapped[float] = mapped_column(Float, nullable=False)
     protein_per_100g: Mapped[float] = mapped_column(Float, nullable=False)
@@ -139,9 +136,7 @@ class EvidenceSource(Base):
     #: fallback reason, density/serving assumptions. ``None`` for a deterministic
     #: database source (USDA/OFF) that needs none. Never raw user text or page content.
     assumptions: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+        UtcDateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )

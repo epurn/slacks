@@ -26,10 +26,10 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, String, Uuid
+from sqlalchemy import ForeignKey, Integer, LargeBinary, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db import Base
+from app.db import Base, UtcDateTime
 
 
 def _utcnow() -> datetime:
@@ -70,9 +70,7 @@ class LogAttachment(Base):
     #: The saved image bytes. Untrusted input, size- and content-type-validated at
     #: the service boundary before storage; never logged.
     data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+        UtcDateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )
