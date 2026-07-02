@@ -35,6 +35,9 @@ import {
   E2E_CLARIFICATION,
   E2E_RESOLVED_EVENT,
   E2E_RESOLVED_SUMMARY,
+  E2E_FAILED_RAW_TEXT,
+  E2E_FAILED_EVENT,
+  E2E_FAILED_RETRY_EVENT,
 } from './fixtures';
 
 /**
@@ -86,9 +89,25 @@ export const e2eConnectionStore: ServerConnectionStore = {
  *   phase 2 — entry resolved and counting (after second POST / re-submission)
  *
  * The smoke flow never POSTs, so it always sees the phase-0 empty-day fixture.
+ *
+ * The FTY-176 failed-parse flow runs off a separate `failedStage` keyed on the
+ * gibberish `raw_text` (never "coffee"), so it drives independent state in the
+ * same binary: stage 0 → first gibberish POST returns a `failed` event; stage 1
+ * → a Retry POST returns a fresh `pending` attempt. GET reflects the stage so a
+ * poll never drops the reconciled server row.
  */
 export function createE2EMockFetch(): typeof fetch {
   let phase: 0 | 1 | 2 = 0;
+  let failedStage: 0 | 1 | 2 = 0;
+
+  const rawTextOf = (init?: RequestInit): string | undefined => {
+    if (typeof init?.body !== 'string') return undefined;
+    try {
+      return (JSON.parse(init.body) as { raw_text?: string }).raw_text;
+    } catch {
+      return undefined;
+    }
+  };
 
   const json = (body: unknown, status = 200): Response =>
     new Response(JSON.stringify(body), {
@@ -110,10 +129,21 @@ export function createE2EMockFetch(): typeof fetch {
 
     const pathEnd = url.split('?')[0];
 
-    // /log-events — POST advances the phase and returns the next event;
-    // GET returns the phase-appropriate event list.
+    // /log-events — POST advances state and returns the next event;
+    // GET returns the state-appropriate event list.
     if (pathEnd.endsWith('/log-events')) {
       if (method === 'POST') {
+        // FTY-176 failed-parse flow: gibberish text fails first, then a Retry
+        // produces a fresh pending attempt. Keyed on raw_text so it never
+        // collides with the clarify flow's "coffee" phase machine.
+        if (rawTextOf(init) === E2E_FAILED_RAW_TEXT) {
+          if (failedStage === 0) {
+            failedStage = 1;
+            return json(E2E_FAILED_EVENT, 201);
+          }
+          failedStage = 2;
+          return json(E2E_FAILED_RETRY_EVENT, 201);
+        }
         if (phase === 0) {
           phase = 1;
           return json(E2E_CLARIFY_EVENT, 201);
@@ -121,6 +151,10 @@ export function createE2EMockFetch(): typeof fetch {
         phase = 2;
         return json(E2E_RESOLVED_EVENT, 201);
       }
+      // The failed-parse flow's GET reflects its own stage so a poll never drops
+      // the reconciled failed / retry-pending row.
+      if (failedStage === 1) return json([E2E_FAILED_EVENT]);
+      if (failedStage === 2) return json([E2E_FAILED_RETRY_EVENT]);
       if (phase === 0) return json([]);
       if (phase === 1) return json([E2E_CLARIFY_EVENT]);
       return json([E2E_RESOLVED_EVENT]);

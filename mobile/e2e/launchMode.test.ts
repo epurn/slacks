@@ -34,6 +34,9 @@ import {
   E2E_CLARIFY_EVENT,
   E2E_RESOLVED_EVENT,
   E2E_RESOLVED_EVENT_TIME_LABEL,
+  E2E_FAILED_RAW_TEXT,
+  E2E_FAILED_EVENT,
+  E2E_FAILED_RETRY_EVENT,
 } from './fixtures';
 // eslint-disable-next-line import/first
 import { formatWallClockTime } from '@/state/today';
@@ -336,5 +339,61 @@ describe('FTY-162 clarify-flow: stateful mock phase transitions', () => {
     expect(formatWallClockTime(E2E_RESOLVED_EVENT.created_at)).toBe(
       E2E_RESOLVED_EVENT_TIME_LABEL,
     );
+  });
+});
+
+// ─── FTY-176 failed-parse-flow stateful mock ─────────────────────────────────
+//
+// Proves the failed-parse branch the failed-parse.yaml Maestro flow relies on,
+// and that it stays independent of the clarify phase machine. Each test builds a
+// fresh mock so state does not leak.
+
+describe('FTY-176 failed-parse flow: stateful mock transitions', () => {
+  const apiSession = toApiSession(E2E_SESSION);
+
+  it('first gibberish POST returns a failed event', async () => {
+    const mockFetch = createE2EMockFetch();
+    const created = await createLogEvent(
+      apiSession,
+      E2E_FAILED_RAW_TEXT,
+      'key-1',
+      mockFetch,
+    );
+    expect(created.id).toBe(E2E_FAILED_EVENT.id);
+    expect(created.status).toBe('failed');
+  });
+
+  it('GET after the failed POST lists the failed event (so a poll never drops it)', async () => {
+    const mockFetch = createE2EMockFetch();
+    await createLogEvent(apiSession, E2E_FAILED_RAW_TEXT, 'key-1', mockFetch);
+    const events = await listTodayLogEvents(apiSession, '2026-01-01', mockFetch);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.status).toBe('failed');
+  });
+
+  it('a Retry POST returns a fresh pending attempt with a distinct id', async () => {
+    const mockFetch = createE2EMockFetch();
+    await createLogEvent(apiSession, E2E_FAILED_RAW_TEXT, 'key-1', mockFetch);
+    const retried = await createLogEvent(
+      apiSession,
+      E2E_FAILED_RAW_TEXT,
+      'key-2',
+      mockFetch,
+    );
+    expect(retried.id).toBe(E2E_FAILED_RETRY_EVENT.id);
+    expect(retried.id).not.toBe(E2E_FAILED_EVENT.id);
+    expect(retried.status).toBe('pending');
+    // GET now lists the pending attempt so the reconciled row survives a poll.
+    const events = await listTodayLogEvents(apiSession, '2026-01-01', mockFetch);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.id).toBe(E2E_FAILED_RETRY_EVENT.id);
+    expect(events[0]?.status).toBe('pending');
+  });
+
+  it('the failed-parse branch does not disturb the clarify phase machine', async () => {
+    const mockFetch = createE2EMockFetch();
+    // "coffee" still runs the clarify phase machine, untouched by the gibberish key.
+    const created = await createLogEvent(apiSession, 'coffee', undefined, mockFetch);
+    expect(created.status).toBe('needs_clarification');
   });
 });
