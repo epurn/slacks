@@ -46,9 +46,9 @@ from app.schemas.corrections import (
 )
 
 #: Display-ready labels for the source types whose label is fixed. The
-#: ``official_source`` host is computed per-item from the URL (see
-#: :func:`_source_label`); ``model_prior`` reads "Rough estimate" so the client can
-#: render the "≈ rough estimate · make it exact" nudge.
+#: ``official_source`` / ``reference_source`` host is computed per-item from the URL
+#: (see :func:`_source_label`); ``model_prior`` reads "Rough estimate" so the client
+#: can render the "≈ rough estimate · make it exact" nudge.
 _SOURCE_LABELS: dict[SourceType, str] = {
     SourceType.TRUSTED_NUTRITION_DATABASE: "USDA",
     SourceType.PRODUCT_DATABASE: "Open Food Facts",
@@ -56,8 +56,11 @@ _SOURCE_LABELS: dict[SourceType, str] = {
     SourceType.MODEL_PRIOR: "Rough estimate",
 }
 
-#: Fallback label for an ``official_source`` whose URL host cannot be parsed.
-_OFFICIAL_SOURCE_FALLBACK_LABEL = "Official source"
+#: Fallback labels for a URL-backed source whose URL host cannot be parsed.
+_URL_SOURCE_FALLBACK_LABELS: dict[SourceType, str] = {
+    SourceType.OFFICIAL_SOURCE: "Official source",
+    SourceType.REFERENCE_SOURCE: "Reference source",
+}
 
 
 def serialize_food_item(session: Session, item: DerivedFoodItem) -> DerivedFoodItemDTO:
@@ -154,19 +157,20 @@ def item_is_edited(session: Session, item_type: CandidateType, item_id: uuid.UUI
 def _source_label(source_type: SourceType, source_ref: str) -> str:
     """Map a ``source_type`` / ``source_ref`` to a display-ready label."""
 
-    if source_type is SourceType.OFFICIAL_SOURCE:
-        return _official_source_host(source_ref)
+    if source_type in _URL_SOURCE_FALLBACK_LABELS:
+        return _url_source_host(source_type, source_ref)
     return _SOURCE_LABELS[source_type]
 
 
-def _official_source_host(source_ref: str) -> str:
-    """Extract the host from an ``official_source:<url>`` ref for display.
+def _url_source_host(source_type: SourceType, source_ref: str) -> str:
+    """Extract the host from an ``<source_type>:<url>`` ref for display.
 
-    The ref carries the URL only (no headers/body/query secrets). Falls back to a
-    generic label when the host cannot be parsed.
+    Shared by the ``official_source`` and ``reference_source`` tiers, whose ref
+    carries the page URL only (no headers/body/query secrets). Falls back to a
+    generic per-tier label when the host cannot be parsed.
     """
 
-    prefix = f"{SourceType.OFFICIAL_SOURCE.value}:"
+    prefix = f"{source_type.value}:"
     url = source_ref[len(prefix) :] if source_ref.startswith(prefix) else source_ref
     host = urlparse(url).hostname
-    return host or _OFFICIAL_SOURCE_FALLBACK_LABEL
+    return host or _URL_SOURCE_FALLBACK_LABELS[source_type]

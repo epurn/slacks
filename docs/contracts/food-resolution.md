@@ -75,6 +75,19 @@ also gains common serving/portion nouns (`slice`, `sandwich`, `handful`, `ring`,
 `finger`, …). No schema, migration, or serving-math change beyond the count vocabulary;
 the USDA/OFF/label/official paths and their plausibility gate are unchanged.
 
+7 (FTY-166) inserts the **reference-source tier** between the official source and
+the model prior inside the FTY-062 step: a branded item official sources miss — and
+a detail-rich generic item, which has no brand page — is searched for **public
+nutrition reference evidence** (sanitized identity + the fixed `nutrition facts`
+intent), the result page fetched through the **searched-result** hardened-fetch
+policy (`reference_fetch.py` — HTTPS-only, public-IP-only, no redirects, bounded,
+active content stripped, no host allowlist because the target is an arbitrary
+public result URL), and the stated facts transcribed/validated/recomputed exactly
+like an official page, recorded as `source_type = reference_source` with
+`source_ref = reference_source:<url>`. The model prior runs only after this tier
+also fails, with per-tier reasons in `assumptions`. See
+`evidence-retrieval.md` (**Reference-Source Fallback — FTY-166**).
+
 5 (FTY-093) adds **item re-match** — a *list-alternatives* + *re-resolve-to-chosen-source*
 capability over an existing `derived_food_items` row. It adds `FdcClient.list_matches`
 (the USDA list-candidates path, surfacing every energy-bearing match rather than the
@@ -452,11 +465,14 @@ empty for a generic food (`"white rice"`). A candidate carrying a non-blank `bra
   never interpreted.
 
 Inside the official step, a **branded** candidate is searched against official sources
-(a named product has an authoritative page) and falls through to model-prior on a miss;
-a **generic** detail-rich candidate has no brand page to search, so it goes **straight
-to the model-prior** estimate (search is never consulted) with a `"generic food;
-estimated from model prior"` assumption. Either way the result carries the explicit
-`source_type = model_prior` status and stays user-editable — never a silent guess.
+first (a named product has an authoritative page); a **generic** detail-rich candidate
+has no brand page, so official search is skipped. Either way, on a miss the candidate
+falls through to the **reference-source tier** (FTY-166 — a public-nutrition-reference
+search + searched-result fetch), and only when that also produces nothing confident to
+the **model-prior** estimate, whose `assumptions` name the per-tier reason (e.g.
+`"generic food (no official page to search); reference_source returned no confident
+match; estimated from model prior"`). The result always carries its explicit
+`source_type` and stays user-editable — never a silent guess.
 
 ### Orchestration
 
@@ -481,17 +497,32 @@ injected adapters (the step itself opens no socket):
    model-prior, and an implausible *model-prior* estimate routes to
    `needs_clarification` rather than committing an absurd total (FTY-132).
 
+### Reference-source tier (FTY-166, before any model prior)
+
+When the official tier misses — or does not apply (a generic candidate) — the step
+runs the same search → fetch → extract → recompute chain against **public nutrition
+reference evidence**: the query is the sanitized identity plus the fixed
+`nutrition facts` intent, and each result URL is fetched through the
+**searched-result** policy (`reference_fetch.py`; no host allowlist, full SSRF
+posture — see `evidence-retrieval.md`). A confident, plausible transcription
+resolves the item with `source_type = reference_source` and
+`source_ref = reference_source:<url>`; like an official page it writes **no**
+global `products` row.
+
 ### Model-prior fallback (with status, never a silent guess)
 
-When the search provider is **disabled**, **unavailable** (no key), the **fetcher is
-unconfigured** (empty allowlist), or **nothing confident is found**, the candidate
-falls through to a **model-prior** estimate of the same `NamedFoodEstimate` shape,
-from the item identity alone. It is recorded with `source_type = model_prior`,
-`source_ref = model_prior`, and an explicit `assumptions` reason (e.g.
-`"official_source disabled; estimated from model prior"`) plus the model's own
-assumptions, so the entry surfaces an explicit source status and stays user-editable —
-never a silent guess (per the `evidence-retrieval.md` Fallback Rule). A model that
-cannot estimate the item routes to `needs_clarification`.
+When the search provider is **disabled** or **unavailable** (no key), when a tier's
+fetch is off (**official**: empty allowlist; **reference**:
+`FATTY_REFERENCE_FETCH_ENABLED=false`), or when **nothing confident is found** on
+either tier, the candidate falls through to a **model-prior** estimate of the same
+`NamedFoodEstimate` shape, from the item identity alone. It is recorded with
+`source_type = model_prior`, `source_ref = model_prior`, and an explicit
+`assumptions` reason naming each tier's outcome (e.g. `"official_source returned no
+confident match; reference_source returned no confident match; estimated from model
+prior"`) plus the model's own assumptions, so the entry surfaces an explicit source
+status and stays user-editable — never a silent guess (per the
+`evidence-retrieval.md` Fallback Rule). A model that cannot estimate the item routes
+to `needs_clarification`.
 
 ### Persistence
 
@@ -499,52 +530,62 @@ A resolved official-source / model-prior candidate becomes a `resolved`
 `derived_food_items` row plus a user-owned `evidence_sources` row, exactly like the
 USDA/OFF path, with two differences:
 
-- **No global cache.** Official-source pages are per-URL and model-prior estimates are
-  per-resolution, so neither writes a `products` row; the evidence `product_id` is
-  `NULL`.
-- **Provenance.** `source_ref` is `official_source:<url>` (the **URL only** — never the
-  raw page) or `model_prior`; the immutable per-100g facts snapshot, content hash, and
-  fetch time are stored as for any source. The `0012` migration adds the additive,
-  nullable **`evidence_sources.assumptions`** JSON column carrying the documented
-  assumptions (the model-prior reason); a USDA/OFF/label row leaves it `NULL`.
+- **No global cache.** Official-source / reference-source pages are per-URL and
+  model-prior estimates are per-resolution, so none writes a `products` row; the
+  evidence `product_id` is `NULL`.
+- **Provenance.** `source_ref` is `official_source:<url>` or `reference_source:<url>`
+  (the **URL only** — never the raw page) or `model_prior`; the immutable per-100g
+  facts snapshot, content hash, and fetch time are stored as for any source. The
+  `0012` migration adds the additive, nullable **`evidence_sources.assumptions`**
+  JSON column carrying the documented assumptions (the model-prior reason); a
+  USDA/OFF/label row leaves it `NULL`.
 
-The consulted source systems (`official_source`, and/or `model_prior`) are recorded on
-the run `source_refs`, and the assumptions on the run `assumptions`.
+The consulted source systems (`official_source`, `reference_source`, and/or
+`model_prior`) are recorded on the run `source_refs`, and the assumptions on the run
+`assumptions`.
 
 ### Routing
 
 | Condition | Pipeline signal | Persisted | Event transition |
 | --- | --- | --- | --- |
 | Branded candidate, USDA/OFF miss, official page resolves | _(completes)_ | food `resolved` (`official_source`) + `evidence_sources` (`official_source:<url>`, no `product_id`) | `processing → completed` |
-| Official page resolves but per-100g facts fail the FTY-115 plausibility bound | _(non-match; falls through)_ | nothing for the official page | `→ model-prior, then completed` / `needs_clarification` |
-| Search disabled / unavailable / no confident match → model-prior | _(completes)_ | food `resolved` (`model_prior`) + `evidence_sources` (`model_prior`, assumptions) | `processing → completed` |
+| Official page misses (or fails the FTY-115 plausibility bound), reference page resolves (FTY-166) | _(completes)_ | food `resolved` (`reference_source`) + `evidence_sources` (`reference_source:<url>`, no `product_id`) | `processing → completed` |
+| Generic candidate USDA miss, **detail-rich** (FTY-167), reference page resolves (FTY-166) | _(completes; official search skipped)_ | food `resolved` (`reference_source`) | `processing → completed` |
+| A fetched page resolves but its per-100g facts fail the FTY-115 plausibility bound | _(non-match; falls through)_ | nothing for that page | `→ next tier / model-prior` |
+| Search disabled / unavailable, a tier's fetch off, or no confident match on either tier → model-prior | _(completes)_ | food `resolved` (`model_prior`) + `evidence_sources` (`model_prior`, per-tier assumptions) | `processing → completed` |
 | Model-prior estimate fails the FTY-115 plausibility bound | `NeedsClarification` | clarification question | `processing → needs_clarification` |
-| Branded candidate USDA/OFF **resolves** | _(as FTY-044/060)_ | official source not consulted | `processing → completed` |
+| Branded candidate USDA/OFF **resolves** | _(as FTY-044/060)_ | official/reference source not consulted | `processing → completed` |
 | Generic candidate USDA miss, **no usable amount** | `NeedsClarification` | clarification question | `processing → needs_clarification` |
-| Generic candidate USDA miss, **detail-rich** (FTY-167) | _(completes)_ | food `resolved` (`model_prior`, no official search) | `processing → completed` |
 | Usable facts but unresolvable quantity, or model cannot estimate | `NeedsClarification` | clarification question | `processing → needs_clarification` |
 
 ### Security / Privacy
 
 - **No direct egress.** The step issues no network call of its own; all search goes
-  through the FTY-079 adapter and all fetches through the FTY-078 hardened fetcher
-  (both injected seams), so the SSRF/egress and query-sanitization boundaries live
-  upstream and this orchestration cannot bypass them. A test proves the fetcher only
-  ever receives a URL the search adapter returned.
-- **Untrusted-until-validated.** Fetched/searched/extracted/LLM content is validated
-  against `NamedFoodEstimate` and recomputed by the deterministic calculators before
-  persistence.
+  through the FTY-079 adapter and all fetches through the injected hardened fetchers
+  (FTY-078 official; FTY-166 searched-result), so the SSRF/egress and
+  query-sanitization boundaries live upstream and this orchestration cannot bypass
+  them. Tests prove each fetcher only ever receives a URL the search adapter
+  returned.
+- **Untrusted-until-validated.** Fetched/searched/extracted/LLM content — official
+  and reference pages alike — is validated against `NamedFoodEstimate` and recomputed
+  by the deterministic calculators before persistence.
 - **No-raw-page retention.** `evidence_sources` stores the URL, timestamp, content
   hash, and extracted per-100g facts only — never the raw page (per `data-retention.md`).
 - **Data minimization.** Only item identity (name + brand) crosses the search
-  boundary; no personal context.
+  boundary — the reference query adds only the fixed `nutrition facts` intent; no
+  personal context, no raw diary text.
 
 ### Examples (tests)
 
 `tests/test_official_source_resolution.py` proves, with a stubbed search adapter and
-fetcher: official-page resolution end-to-end; the official step runs only for branded
-candidates and only after a USDA/OFF miss; the disabled-provider model-prior-with-status
-fallback; and no direct egress. `tests/test_food_migration.py` applies/rolls back the
+fetchers: official-page resolution end-to-end; the official → reference → model-prior
+tier order for a branded item and reference-before-model-prior for a detail-rich
+generic item (FTY-166); the official step runs only after a USDA/OFF miss; the
+disabled-provider / reference-miss model-prior-with-per-tier-status fallback; that no
+raw page text is persisted; and no direct egress. `tests/test_reference_fetch.py`
+proves the searched-result policy negatives (HTTPS-only, private/loopback/link-local/
+metadata blocked, redirects refused, oversized and non-text bodies rejected, inert
+text, fail-closed off switch). `tests/test_food_migration.py` applies/rolls back the
 `0012` `assumptions` migration.
 
 ## Liveness & Diagnostics
@@ -564,13 +605,17 @@ The backend exposes four health-check endpoints, all returning structured JSON w
 - **`GET /healthz/sources`** — evidence source capability descriptor. Returns each
   configured source's `id`, `source_type`, `kinds` (e.g. `["generic_food"]`,
   `["barcode"]`), `enabled`, and `available` (matches the configuration and any
-  credentials). Open Food Facts and USDA FDC are listed; allows self-hosters to
-  confirm configuration without trial calls.
-- **`GET /healthz/egress`** — official-source fetch egress policy (FTY-078).
-  Returns the configured allowlist, size/timeout/content-type limits, and fixed
-  invariants (`https_only`, `public_ip_only`, `redirects_followed=false`,
-  `active_content_stripped`). Allows operators to audit the hardened-fetch
-  boundary without reading code.
+  credentials). Open Food Facts, USDA FDC, the official-source search, and the
+  reference-source tier (FTY-166) are listed; allows self-hosters to confirm
+  configuration without trial calls.
+- **`GET /healthz/egress`** — evidence-fetch egress policy (FTY-078/166).
+  Returns the configured official-source allowlist, size/timeout/content-type
+  limits, and fixed invariants (`https_only`, `public_ip_only`,
+  `redirects_followed=false`, `active_content_stripped`), plus a
+  `searched_result_fetch` block describing whether searched public result pages
+  may be fetched for reference-source evidence (enable flag, bounds, invariants,
+  `raw_pages_persisted=false`) — never a URL from a user entry. Allows operators
+  to audit the hardened-fetch boundary without reading code.
 
 ## Migration / Compatibility
 
@@ -605,6 +650,14 @@ The backend exposes four health-check endpoints, all returning structured JSON w
   adds a higher-effort, lower-priority source and the gated model-prior fallback. The
   parse `brand` field is additive (the model may now emit it; old runs default it to
   `NULL`).
+- FTY-166 adds the reference-source tier inside the official step (a deliberate
+  pre-v1 breaking change to the fallback order: model prior now runs only after the
+  reference tier). **No migration**: `evidence_sources.source_type` / `source_ref`
+  are strings, and the `0012` `assumptions` column already carries the fallback
+  reasons. Additive config (`FATTY_REFERENCE_FETCH_*`), an additive
+  `searched_result_fetch` egress-diagnostics block, and a new `reference_source`
+  value in the provenance vocabulary/read-model. The USDA/OFF/label paths, the
+  search adapter, and the serving math are unchanged.
 - FTY-051 extends `derived_food_items` with nullable `calories_estimated` /
   `protein_g_estimated` / `carbs_g_estimated` / `fat_g_estimated` snapshots (the
   immutable originals paired with the editable current calories/macros) and lets a

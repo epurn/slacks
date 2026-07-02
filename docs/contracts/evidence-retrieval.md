@@ -58,7 +58,8 @@ Adapter — FTY-079 / FTY-164**.
 
 1 (FTY-045). The source-system identifiers are stable strings recorded on each
 evidence record and on the estimation run `source_refs`: `usda_fdc`,
-`open_food_facts`, `official_source`, `user_label`, `model_prior`.
+`open_food_facts`, `official_source`, `user_label`, `reference_source` (FTY-166),
+`model_prior`.
 
 FTY-079 implements the `official_source` **search** boundary (the pluggable
 search-provider adapter) without changing this contract; see **Search Provider
@@ -77,6 +78,13 @@ without changing the source hierarchy, the lookup-status vocabulary, the fallbac
 rule, the normalized-fact schema, the serving math, or the `evidence_sources` record
 shape. It introduces **no** schema migration. See **Item Re-match — FTY-093**.
 
+FTY-166 adds the **`reference_source`** evidence tier: when official sources miss
+(or do not apply — a detail-rich generic food has no brand page), the estimator
+searches for **public nutrition reference evidence**, fetches the bounded result
+page through the hardened **searched-result** fetch policy, and transcribes the
+stated facts — so `model_prior` becomes the final fallback only after evidence
+search/fetch fails. See **Reference-Source Fallback — FTY-166**.
+
 ## Source Hierarchy
 
 The estimator selects the highest-preference applicable source and only falls
@@ -90,7 +98,8 @@ configured v1 provider sits:
 | 2 | `official_source` | search + hardened fetch | official restaurant / manufacturer / product page |
 | 3 | `product_database` | `open_food_facts` | barcoded and packaged food products |
 | 4 | `trusted_nutrition_database` | `usda_fdc` | generic foods and common serving references |
-| 5 | `model_prior` | `model_prior` | last-resort fallback only (see **Fallback Rule**) |
+| 5 | `reference_source` | search + hardened searched-result fetch | public nutrition reference pages, when the higher tiers miss or do not apply (FTY-166) |
+| 6 | `model_prior` | `model_prior` | last-resort fallback only (see **Fallback Rule**) |
 
 Ingredient-based recipe calculation and similar-dish reference estimates
 (system-overview ranks 6–7) are deferred; this contract reserves room for them
@@ -106,7 +115,11 @@ source lookup for that item is available (configured, enabled, and applicable).
 `model_prior` is permitted only when, for the applicable source(s), the lookup
 outcome is `unavailable`, `disabled`, `rate_limited`, or `failed`, when no
 source type applies, or when the user supplied insufficient information and
-declined a clarifying question.
+declined a clarifying question. Since FTY-166 the applicable sources include the
+`reference_source` tier, so the model prior is never asked to invent nutrition
+facts while a reference search/fetch is still available: it runs only after
+official **and** reference evidence returned no confident match (or could not be
+consulted), and its `assumptions` name the per-tier reason.
 
 A `model_prior` result is recorded as an evidence record with
 `source_type = model_prior` and the reason it was used, so the source status is
@@ -132,16 +145,17 @@ from. Records are split so global source facts never carry user-specific data:
 | Field | Type | Notes |
 | --- | --- | --- |
 | `source_type` | enum | One of the **Source Hierarchy** values. |
-| `source_ref` | string | Stable reference, e.g. `usda_fdc:<fdcId>`, `open_food_facts:<barcode>`, `official_source:<url>`, `user_label:<content_hash>` (FTY-061; the SHA-256 of the label image, which a saved `log_attachments` row shares), `model_prior`. |
+| `source_ref` | string | Stable reference, e.g. `usda_fdc:<fdcId>`, `open_food_facts:<barcode>`, `official_source:<url>`, `reference_source:<url>` (FTY-166), `user_label:<content_hash>` (FTY-061; the SHA-256 of the label image, which a saved `log_attachments` row shares), `model_prior`. |
 | `content_hash` | string | Hash of the extracted facts / fetched content the snapshot came from. |
 | `fetched_at` | timestamptz | When the source was queried/extracted. |
 | `facts` | normalized nutrition facts | Immutable snapshot (see below). |
 | `status` | lookup status | The outcome that produced this record (see **Provider Capability / Status**). |
 | `assumptions` | string[] | Any documented assumptions (density, default serving, model-prior reason). |
 
-`source_ref` for a fetched `official_source` records the URL only (no headers,
-body, or query secrets). Object-level ownership and `ON DELETE CASCADE` are
-defined in `food-resolution.md` and `docs/security/data-retention.md`.
+`source_ref` for a fetched `official_source` or `reference_source` records the
+URL only (no headers, body, or query secrets). Object-level ownership and
+`ON DELETE CASCADE` are defined in `food-resolution.md` and
+`docs/security/data-retention.md`.
 
 ## Normalized Nutrition Fact Schema
 
@@ -492,6 +506,86 @@ applicable) while a named/branded item USDA misses does.
   assumptions); the `status` lookup outcome continues to be surfaced via the run
   `source_refs` and the `source_type`.
 
+## Reference-Source Fallback — FTY-166
+
+The **reference-source** tier keeps the model prior from inventing nutrition facts
+when official sources miss: for a food the trusted databases cannot cost, the
+estimator searches for **public nutrition reference evidence** (the same pluggable
+search adapter, FTY-079/164), fetches the bounded result page through the hardened
+**searched-result** fetch policy, transcribes the facts the page states through the
+strict `NamedFoodEstimate` schema, and recomputes calories/macros with the FTY-044
+deterministic serving math. Only when this tier also produces nothing confident does
+the resolver fall to `model_prior` — with per-tier `assumptions` naming why.
+
+### Tier order (pipeline, after a USDA/OFF miss)
+
+- **branded / named item:** official source search + fetch → **reference source
+  search + fetch** → model prior with status;
+- **detail-rich generic item (FTY-167):** no brand page exists, so the official
+  search is skipped → **reference source search + fetch** → model prior with status;
+- a generic item with **no usable amount** still routes to `needs_clarification`
+  before any of this (FTY-167 boundary unchanged).
+
+### Owner
+
+`backend/app/estimator/reference_fetch.py` (`ReferenceFetchSettings`,
+`fetch_searched_result` — the searched-result egress policy) and the reference tier
+of `backend/app/estimator/official_step.py` (`REFERENCE_SOURCE`,
+`REFERENCE_SEARCH_INTENT`, the tier orchestration). Diagnostics:
+`backend/app/services/sources.py` (`reference_source` capability entry, the
+`searched_result_fetch` egress descriptor).
+
+### Search (identity + fixed nutrition intent only)
+
+The reference query is the sanitized item identity **plus the fixed string
+`nutrition facts`** — nothing else. It passes through the same FTY-079
+`sanitize_query` chokepoint, so raw diary text, profile, weight, history, and event
+metadata have no channel to the provider. Result URLs and titles remain untrusted.
+
+### Searched-result fetch policy (`FATTY_REFERENCE_FETCH_` env vars)
+
+A searched result URL points at an **arbitrary public host** the operator could not
+have allowlisted in advance, so this policy deliberately has **no host allowlist**;
+every other hardened-fetch protection is preserved against the attacker-influenced
+URL:
+
+- **HTTPS only** for public result pages (no local-HTTP exception on this path);
+- **public IP only** — loopback, private, link-local (incl. `169.254.169.254`
+  metadata), CGNAT, multicast, reserved, and unspecified targets are refused, and
+  the vetted IP is pinned (no DNS-rebinding TOCTOU);
+- **redirects refused**;
+- **bounded timeout / size / content type** (inert text types only);
+- **active content stripped** before extraction;
+- **raw pages never persisted**.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `FATTY_REFERENCE_FETCH_ENABLED` | `true` | Whether searched public result pages may be fetched at all. `false` turns the tier off (skipped with an explicit model-prior reason). |
+| `FATTY_REFERENCE_FETCH_TIMEOUT_SECONDS` | `10` | Per-request wall-clock timeout. |
+| `FATTY_REFERENCE_FETCH_MAX_BYTES` | `2000000` | Response-size cap; a larger body fails closed. |
+| `FATTY_REFERENCE_FETCH_ALLOWED_CONTENT_TYPES` | `text/html, application/xhtml+xml, text/plain` | Accepted content types; anything else fails closed. |
+
+### Record shape / provenance
+
+A reference-source record mirrors an official-source record: `source_type =
+reference_source`, `source_ref = reference_source:<url>` (the URL only — never the
+raw page), an immutable per-100g facts snapshot, `content_hash`, `fetched_at`, and
+**no** global `products` cache row (`product_id` is `NULL`). Clients can therefore
+distinguish a reference-page number from an official-page number and from a rough
+estimate; the read-model label is the page host. The FTY-115/132 plausibility gate
+applies in canonical per-100g space exactly as on the official path.
+
+### Diagnostics
+
+`GET /healthz/sources` lists a `reference_source` capability (`kinds =
+[generic_food, named_product, restaurant_item]`; `enabled` when both search and the
+searched-result fetch are on, `available` when search is). `GET /healthz/egress`
+carries a `searched_result_fetch` block — the enable flag, bounds, and fixed
+invariants (`https_only`, `public_ip_only`, `redirects_followed=false`,
+`active_content_stripped`, `raw_pages_persisted=false`) — describing whether
+searched public result fetch is enabled **without ever exposing a URL from a user
+entry**.
+
 ## Item Re-match — FTY-093
 
 The **item re-match** capability is the "Change match" lever of the correction sheet:
@@ -691,6 +785,16 @@ cross-user / unknown / unauthenticated fail-closed.
   (`0012` migration). It does not redefine the hierarchy, the status vocabulary, or the
   fallback rule; it fixes the pipeline ordering (official source last before
   model-prior). See `food-resolution.md` (**Official-Source Resolution**).
+- FTY-166 adds the **`reference_source`** tier (a deliberate pre-v1 breaking
+  change to the resolution order): the source-system id `reference_source` joins
+  the stable vocabulary, model prior moves to rank 6, and a new
+  `FATTY_REFERENCE_FETCH_`-prefixed config block governs the searched-result fetch
+  policy. No schema migration: `evidence_sources.source_type` / `source_ref` are
+  strings and the `assumptions` column (FTY-062) already carries the fallback
+  reasons. Clients gain the `reference_source` value in the provenance read-model
+  (`SourceType`), and `GET /healthz/egress` gains the `searched_result_fetch`
+  block. The official-source adapter, the search boundary, the status vocabulary,
+  and the serving math are unchanged.
 - FTY-093 adds the **item re-match** capability (`re_match.py` + the thin
   `re-match` router/schemas) and `FdcClient.list_matches`. It is additive with **no
   schema migration**: re-resolve is an in-place `UPDATE` of the existing

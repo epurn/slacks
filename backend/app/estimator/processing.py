@@ -56,6 +56,7 @@ from app.estimator.pipeline import (
     default_pipeline,
     label_pipeline,
 )
+from app.estimator.reference_fetch import load_reference_fetch_settings
 from app.estimator.search import build_search_provider
 from app.llm import build_provider, load_llm_settings
 from app.models.derived import (
@@ -212,16 +213,18 @@ def process_estimation(
             # evidence writes, so the default pipeline is built per call here where the
             # session is in scope. A barcode candidate prefers the Open Food Facts source
             # (enabled by default); a generic food uses USDA FDC (disabled without a key,
-            # leaving the candidate unresolved). The official-source step (FTY-062) runs
-            # last for branded candidates the food step deferred: it searches (FTY-079)
-            # and fetches (FTY-078) official pages, else falls through to a model-prior
-            # estimate. Building the clients/adapters makes no network call.
+            # leaving the candidate unresolved). The official-source step (FTY-062/166)
+            # runs last for the candidates the food step deferred: it searches (FTY-079)
+            # and fetches official pages (FTY-078), then public reference pages
+            # (FTY-166), else falls through to a model-prior estimate. Building the
+            # clients/adapters makes no network call.
             resolver = FoodResolver(session=session, source=build_fdc_client())
             barcode_resolver = BarcodeResolver(session=session, source=build_off_client())
             official_step = OfficialSourceResolveStep(
                 provider=provider,
                 search_provider=build_search_provider(),
                 fetch_settings=load_official_fetch_settings(),
+                reference_fetch_settings=load_reference_fetch_settings(),
             )
             pipeline = default_pipeline(
                 provider,

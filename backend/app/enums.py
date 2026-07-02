@@ -280,6 +280,7 @@ class SourceType(StrEnum):
     PRODUCT_DATABASE = "product_database"
     OFFICIAL_SOURCE = "official_source"
     USER_LABEL = "user_label"
+    REFERENCE_SOURCE = "reference_source"
     MODEL_PRIOR = "model_prior"
 
 

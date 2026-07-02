@@ -15,6 +15,8 @@ from collections.abc import Mapping
 from app.estimator.fdc import FDC_SOURCE, FDC_SOURCE_TYPE, load_fdc_settings
 from app.estimator.off import OFF_SOURCE, OFF_SOURCE_TYPE, load_off_settings
 from app.estimator.official_fetch import load_official_fetch_settings
+from app.estimator.official_step import REFERENCE_SOURCE, REFERENCE_SOURCE_TYPE
+from app.estimator.reference_fetch import load_reference_fetch_settings
 from app.estimator.search import (
     OFFICIAL_SOURCE,
     OFFICIAL_SOURCE_TYPE,
@@ -22,7 +24,16 @@ from app.estimator.search import (
     load_search_settings,
 )
 from app.llm.config import load_llm_settings
-from app.schemas.sources import EgressPolicy, SourceCapability, SourcesStatus
+from app.schemas.sources import (
+    EgressPolicy,
+    SearchedResultFetchPolicy,
+    SourceCapability,
+    SourcesStatus,
+)
+
+#: Lookup kinds the reference-source tier serves (FTY-166): branded items official
+#: sources miss, plus detail-rich generic foods (which have no official page).
+REFERENCE_KINDS: tuple[str, ...] = ("generic_food", "named_product", "restaurant_item")
 
 #: Claude Code LLM provider descriptor constants.
 CLAUDE_CODE_SOURCE = "claude_code"
@@ -80,6 +91,7 @@ def list_source_capabilities(environ: Mapping[str, str] | None = None) -> Source
     """
 
     search = load_search_settings(environ)
+    reference = load_reference_fetch_settings(environ)
     off = load_off_settings(environ)
     fdc = load_fdc_settings(environ)
     llm = load_llm_settings(environ)
@@ -92,6 +104,16 @@ def list_source_capabilities(environ: Mapping[str, str] | None = None) -> Source
                 source_type=OFFICIAL_SOURCE_TYPE,
                 kinds=list(SEARCH_KINDS),
                 enabled=search.is_enabled,
+                available=search.is_available,
+            ),
+            SourceCapability(
+                id=REFERENCE_SOURCE,
+                source_type=REFERENCE_SOURCE_TYPE,
+                kinds=list(REFERENCE_KINDS),
+                # The reference tier rides the search adapter: it is on only when both
+                # the searched-result fetch and search itself are enabled, and it is
+                # available exactly when search is (the fetch needs no credential).
+                enabled=reference.enabled and search.is_enabled,
                 available=search.is_available,
             ),
             SourceCapability(
@@ -122,18 +144,28 @@ def list_source_capabilities(environ: Mapping[str, str] | None = None) -> Source
 
 
 def describe_egress_policy(environ: Mapping[str, str] | None = None) -> EgressPolicy:
-    """Return the official-source fetch egress policy (FTY-078) for diagnostics.
+    """Return the evidence-fetch egress policy (FTY-078/166) for diagnostics.
 
-    Surfaces the configured host allowlist and the page-fetch bounds (size, timeout,
-    content types) plus the fixed hardened-fetch invariants, so a self-hoster can see
-    the SSRF / egress boundary without reading code. Reads config only — never a
-    secret — and makes no external calls, so it is safe on a liveness-adjacent endpoint.
+    Surfaces the configured official-source host allowlist and page-fetch bounds
+    (size, timeout, content types) plus the fixed hardened-fetch invariants, and the
+    searched-result (reference-source) fetch policy — whether public search-result
+    pages may be fetched, and under what bounds — so a self-hoster can see the SSRF /
+    egress boundary without reading code. Reads config only — never a secret, never a
+    URL from a user entry — and makes no external calls, so it is safe on a
+    liveness-adjacent endpoint.
     """
 
     official = load_official_fetch_settings(environ)
+    reference = load_reference_fetch_settings(environ)
     return EgressPolicy(
         allowed_hosts=sorted(official.allowed_hosts),
         max_bytes=official.max_bytes,
         timeout_seconds=official.timeout_seconds,
         allowed_content_types=sorted(official.allowed_content_types),
+        searched_result_fetch=SearchedResultFetchPolicy(
+            enabled=reference.enabled,
+            max_bytes=reference.max_bytes,
+            timeout_seconds=reference.timeout_seconds,
+            allowed_content_types=sorted(reference.allowed_content_types),
+        ),
     )

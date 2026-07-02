@@ -106,6 +106,16 @@ def test_healthz_sources_reports_provider_capabilities(client: TestClient) -> No
     assert "api_key" not in official
     assert "key" not in official
 
+    # Reference-source fallback (FTY-166) rides the search adapter and the
+    # searched-result fetch, both on by default: enabled + available, no key.
+    reference = sources["reference_source"]
+    assert reference["source_type"] == "reference_source"
+    assert reference["kinds"] == ["generic_food", "named_product", "restaurant_item"]
+    assert reference["enabled"] is True
+    assert reference["available"] is True
+    assert "api_key" not in reference
+    assert "key" not in reference
+
 
 def test_healthz_egress_reports_official_fetch_policy(client: TestClient) -> None:
     response = client.get("/healthz/egress")
@@ -131,3 +141,23 @@ def test_healthz_egress_reports_official_fetch_policy(client: TestClient) -> Non
     # No secret ever appears in the egress diagnostics.
     assert "api_key" not in policy
     assert "key" not in policy
+
+    # Searched-result (reference-source) fetch policy (FTY-166): describes whether
+    # public search-result pages may be fetched — on by default — plus the same
+    # fixed invariants and bounds. No host list exists (targets are searched public
+    # result URLs) and no URL from a user entry is ever surfaced.
+    searched = policy["searched_result_fetch"]
+    assert searched["enabled"] is True
+    assert "allowed_hosts" not in searched
+    assert searched["https_only"] is True
+    assert searched["public_ip_only"] is True
+    assert searched["redirects_followed"] is False
+    assert searched["active_content_stripped"] is True
+    assert searched["raw_pages_persisted"] is False
+    assert searched["max_bytes"] > 0
+    assert searched["timeout_seconds"] > 0
+    assert searched["allowed_content_types"] == [
+        "application/xhtml+xml",
+        "text/html",
+        "text/plain",
+    ]

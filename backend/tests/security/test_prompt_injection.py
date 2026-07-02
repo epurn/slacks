@@ -27,13 +27,17 @@ from pydantic import BaseModel, ValidationError
 
 from app.estimator.label_step import LabelInput, LabelResolveStep
 from app.estimator.official_fetch import OfficialFetchSettings
-from app.estimator.official_step import OfficialSourceResolveStep
+from app.estimator.official_step import (
+    REFERENCE_SOURCE_TYPE,
+    OfficialSourceResolveStep,
+)
 from app.estimator.parse import ParseStep
 from app.estimator.pipeline import (
     CandidateDraft,
     EstimationContext,
     StepFailed,
 )
+from app.estimator.reference_fetch import ReferenceFetchSettings
 from app.estimator.search import (
     OFFICIAL_SOURCE_TYPE,
     SearchCandidate,
@@ -180,6 +184,7 @@ def test_injection_in_fetched_page_does_not_set_stored_calories() -> None:
         provider=provider,
         search_provider=search,
         fetch_settings=OfficialFetchSettings(allowed_hosts=frozenset({"example.com"})),
+        reference_fetch_settings=ReferenceFetchSettings(),
         fetch_fn=fetch_fn,
     )
     context = _context()
@@ -248,6 +253,8 @@ def test_injected_page_facts_beyond_bounds_are_rejected_not_persisted() -> None:
         provider=provider,
         search_provider=search,
         fetch_settings=OfficialFetchSettings(allowed_hosts=frozenset({"example.com"})),
+        # Reference tier off so the fallback under test is the model prior.
+        reference_fetch_settings=ReferenceFetchSettings(enabled=False),
         fetch_fn=fetch_fn,
     )
     context = _context()
@@ -260,6 +267,69 @@ def test_injected_page_facts_beyond_bounds_are_rejected_not_persisted() -> None:
     item = context.resolved_food_items[0]
     # The injected number was rejected; the persisted value is the in-bounds prior.
     assert item.calories_per_100g == 250.0
+
+
+def test_injection_in_reference_page_does_not_set_stored_calories() -> None:
+    # The FTY-166 reference tier fetches ARBITRARY public search-result pages, so its
+    # page text is at least as adversarial as an official page's. Same guarantee: the
+    # stored calories are the deterministic scaling of the schema-validated facts,
+    # never a number lifted from the injected page, and the injected text triggers no
+    # extra search/fetch.
+    fetched: list[str] = []
+
+    def reference_fetch_fn(url: str, settings: ReferenceFetchSettings) -> str:
+        fetched.append(url)
+        return f"{_INJECTION}\nNutrition: 99999 kcal per serving. <script>steal()</script>"
+
+    search = _FakeSearch(
+        SearchResult(
+            status=SearchStatus.SUCCESS,
+            candidates=(SearchCandidate(url="https://ref.example.com/rice", title=_INJECTION),),
+        )
+    )
+    provider = FakeProvider(
+        responses=[
+            {
+                "disposition": "resolved",
+                "confidence": 0.9,
+                "facts": {
+                    "basis": "per_100g",
+                    "product_name": "white rice",
+                    "calories": 130.0,
+                    "protein_g": 2.0,
+                    "carbs_g": 28.0,
+                    "fat_g": 0.2,
+                },
+            }
+        ]
+    )
+    step = OfficialSourceResolveStep(
+        provider=provider,
+        search_provider=search,
+        # Official fetch unconfigured: a generic candidate never searches it anyway.
+        fetch_settings=OfficialFetchSettings(),
+        reference_fetch_settings=ReferenceFetchSettings(),
+        reference_fetch_fn=reference_fetch_fn,
+    )
+    context = _context()
+    context.pending_official_candidates.append(
+        CandidateDraft(name="white rice", quantity_text="150g", unit="g", amount=150.0)
+    )
+
+    step.run(context)
+
+    assert len(context.resolved_food_items) == 1
+    item = context.resolved_food_items[0]
+    assert item.calories_per_100g == 130.0
+    assert item.calories == pytest.approx(195.0)  # 150 g × 130/100, from the calculator
+    assert item.calories != 99999
+    # The injection text (page or search title) is never persisted as item data.
+    assert "IGNORE" not in item.name
+    assert item.source_ref == f"{REFERENCE_SOURCE_TYPE}:https://ref.example.com/rice"
+    # The only query that egressed is the sanitized identity + the fixed nutrition
+    # intent — no personal context, no injected page text fed back into a search.
+    assert search.queries == ["white rice nutrition facts"]
+    assert fetched == ["https://ref.example.com/rice"]
 
 
 # --- OCR / vision label text ----------------------------------------------------

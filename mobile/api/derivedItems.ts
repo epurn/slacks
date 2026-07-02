@@ -37,13 +37,16 @@ export type DerivedItemType = "food" | "exercise";
 export interface ItemSourceDTO {
   /**
    * Evidence hierarchy type from evidence-retrieval.md.
-   * `model_prior` signals the "≈ rough estimate · make it exact" treatment.
+   * `reference_source` is a public nutrition reference page (FTY-166), between
+   * an official page and a rough estimate; `model_prior` signals the
+   * "≈ rough estimate · make it exact" treatment.
    */
   readonly source_type:
     | "trusted_nutrition_database"
     | "product_database"
     | "official_source"
     | "user_label"
+    | "reference_source"
     | "model_prior";
   /** Display-ready label (e.g. "USDA", "Open Food Facts", "Label scan", "Rough estimate"). */
   readonly label: string;

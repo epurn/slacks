@@ -539,7 +539,7 @@
         "type": "string"
       },
       "EgressPolicy": {
-        "description": "The official-source fetch egress policy (FTY-078), for operator diagnostics.\n\nThe configured SSRF / egress boundary surfaced at ``GET /healthz/egress`` so a\nself-hoster can confirm the policy without reading code. Carries **no** secrets \u2014\nonly the non-secret host allowlist and the (non-secret) bound values. The boolean\ninvariants (``https_only`` / ``public_ip_only`` / ``redirects_followed``) are fixed\nproperties of the hardened fetch, restated here so the egress contract is visible.",
+        "description": "The evidence-fetch egress policy (FTY-078/166), for operator diagnostics.\n\nThe configured SSRF / egress boundary surfaced at ``GET /healthz/egress`` so a\nself-hoster can confirm the policy without reading code. Carries **no** secrets \u2014\nonly the non-secret host allowlist and the (non-secret) bound values. The boolean\ninvariants (``https_only`` / ``public_ip_only`` / ``redirects_followed``) are fixed\nproperties of the hardened fetch, restated here so the egress contract is visible.\n``searched_result_fetch`` describes the reference-source tier: whether searched\npublic result pages may be fetched at all (FTY-166).",
         "properties": {
           "active_content_stripped": {
             "default": true,
@@ -579,6 +579,9 @@
             "title": "Redirects Followed",
             "type": "boolean"
           },
+          "searched_result_fetch": {
+            "$ref": "#/components/schemas/SearchedResultFetchPolicy"
+          },
           "timeout_seconds": {
             "title": "Timeout Seconds",
             "type": "number"
@@ -588,7 +591,8 @@
           "allowed_hosts",
           "max_bytes",
           "timeout_seconds",
-          "allowed_content_types"
+          "allowed_content_types",
+          "searched_result_fetch"
         ],
         "title": "EgressPolicy",
         "type": "object"
@@ -1423,6 +1427,63 @@
         "title": "SavedFoodSource",
         "type": "string"
       },
+      "SearchedResultFetchPolicy": {
+        "description": "The searched-result (reference-source) fetch egress policy (FTY-166).\n\nDescribes whether \u2014 and under what bounds \u2014 public search-result pages may be\nfetched for reference-source evidence. There is deliberately **no host\nallowlist**: eligible targets are the public result URLs the search adapter\nreturned, so the surfaced policy is the enable switch, the bounds, and the fixed\nhardened-fetch invariants. Carries no secrets and never any URL from a user\nentry.",
+        "properties": {
+          "active_content_stripped": {
+            "default": true,
+            "title": "Active Content Stripped",
+            "type": "boolean"
+          },
+          "allowed_content_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Content Types",
+            "type": "array"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "https_only": {
+            "default": true,
+            "title": "Https Only",
+            "type": "boolean"
+          },
+          "max_bytes": {
+            "title": "Max Bytes",
+            "type": "integer"
+          },
+          "public_ip_only": {
+            "default": true,
+            "title": "Public Ip Only",
+            "type": "boolean"
+          },
+          "raw_pages_persisted": {
+            "default": false,
+            "title": "Raw Pages Persisted",
+            "type": "boolean"
+          },
+          "redirects_followed": {
+            "default": false,
+            "title": "Redirects Followed",
+            "type": "boolean"
+          },
+          "timeout_seconds": {
+            "title": "Timeout Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "enabled",
+          "max_bytes",
+          "timeout_seconds",
+          "allowed_content_types"
+        ],
+        "title": "SearchedResultFetchPolicy",
+        "type": "object"
+      },
       "SourceCandidateDTO": {
         "additionalProperties": false,
         "description": "One alternative source match offered for an item (FTY-093).\n\nThe client renders these as \"Change match\" choices: ``source_type`` (the evidence\nclassification driving the source icon), ``source_ref`` (the opaque id echoed back\non re-resolve \u2014 never facts), a display ``name``, the ``basis`` the facts preview\nis expressed against, and the canonical per-basis facts (``calories`` + macros) as\na compact preview. A rough/`partial` or energy-less match is never offered.",
@@ -1521,6 +1582,7 @@
           "product_database",
           "official_source",
           "user_label",
+          "reference_source",
           "model_prior"
         ],
         "title": "SourceType",

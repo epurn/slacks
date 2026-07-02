@@ -38,6 +38,8 @@ export function provenancePresentation(
       return { glyph: '📷', accessibilityLabel: `Source: ${source.label}` };
     case 'official_source':
       return { glyph: '🌐', accessibilityLabel: `Source: ${source.label}` };
+    case 'reference_source':
+      return { glyph: '📖', accessibilityLabel: `Source: ${source.label}` };
     case 'model_prior':
       return { glyph: '≈', accessibilityLabel: 'Rough estimate' };
   }

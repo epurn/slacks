@@ -17,6 +17,7 @@ const SOURCE_LABELS: Record<ItemSourceDTO['source_type'], string> = {
   product_database: 'Open Food Facts',
   official_source: 'example.com',
   user_label: 'Label scan',
+  reference_source: 'reference.example.com',
   model_prior: 'Rough estimate',
 };
 
@@ -58,6 +59,7 @@ describe('ProvenanceIcon', () => {
       ['product_database', 'Open Food Facts'],
       ['user_label', 'Label scan'],
       ['official_source', 'example.com'],
+      ['reference_source', 'reference.example.com'],
     ])('%s: a11y label includes the source label', (sourceType, expectedLabel) => {
       const tree = mount(
         React.createElement(ProvenanceIcon, { source: sourceOf(sourceType) }),
