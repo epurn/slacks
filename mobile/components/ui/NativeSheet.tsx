@@ -1,11 +1,11 @@
 /**
  * NativeSheet — a controlled bottom sheet with genuine iOS detents.
  *
- * Wraps react-native-screens' declarative `ScreenStack` / `ScreenStackItem` to
- * present a real UIKit sheet: native detents (medium/large or fit-to-content),
- * the system grabber, swipe-to-dismiss, VoiceOver focus management, and the
- * content-dims-behind material — none of which a plain React Native `Modal`
- * can do (it fakes detents by switching a `maxHeight`).
+ * On iOS it wraps react-native-screens' declarative `ScreenStack` /
+ * `ScreenStackItem` to present a real UIKit sheet: native detents (medium/large
+ * or fit-to-content), the system grabber, swipe-to-dismiss, VoiceOver focus
+ * management, and the content-dims-behind material — none of which a plain React
+ * Native `Modal` can do (it fakes detents by switching a `maxHeight`).
  *
  * ## Why this mechanism (chosen for FTY-183)
  *
@@ -21,17 +21,38 @@
  * API. No native module outside the managed SDK is added.
  *
  * Reduce Motion, the dimming material, and VoiceOver announcement all come from
- * the native presentation controller, so we do not reimplement them.
+ * the native presentation controller on iOS, so we do not reimplement them.
  *
- * The sheet mounts only while `visible`, presenting over the current screen; the
- * screen behind stays visible through any undimmed detent (see
+ * ## Non-iOS fallback
+ *
+ * The UIKit detent controller is iOS-only. Off iOS (Android, and the Jest
+ * android project / E2E emulator) we present the *same controlled content* in a
+ * `Modal`-based bottom-anchored sheet: an explicit height derived from the
+ * initial detent (so a `flex: 1` body fills it instead of collapsing), a
+ * decorative grabber, tap-outside / back-button dismissal, and a Reduce-Motion
+ * check that drops the slide animation. This is the presentation that shipped
+ * before FTY-183 and that the Maestro clarify flow drives to completion, so the
+ * end-to-end save/resolve paths stay reachable on the tested platform.
+ *
+ * The sheet mounts only while `visible`, presenting over the current screen; on
+ * iOS the screen behind stays visible through any undimmed detent (see
  * `largestUndimmedDetentIndex`). A native swipe/tap-outside dismissal calls
- * `onClose` via `onDismissed`.
+ * `onClose`.
  */
 
-import { useCallback, type ReactNode } from "react";
 import {
+  useCallback,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  AccessibilityInfo,
+  Modal,
+  Platform,
+  Pressable,
   StyleSheet,
+  useWindowDimensions,
   View,
   type NativeSyntheticEvent,
   type StyleProp,
@@ -76,6 +97,29 @@ export interface NativeSheetProps {
 const BASE_SCREEN_ID = "native-sheet-presenter";
 const SHEET_SCREEN_ID = "native-sheet-content";
 
+/** Corner radius used by the non-iOS fallback when the caller sets none. */
+const FALLBACK_CORNER_RADIUS = 16;
+
+/** Track the OS Reduce-Motion setting so the fallback sheet can drop its slide. */
+function useReduceMotion(): boolean {
+  const [reduceMotion, setReduceMotion] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
+      if (mounted) setReduceMotion(enabled);
+    });
+    const subscription = AccessibilityInfo.addEventListener(
+      "reduceMotionChanged",
+      setReduceMotion,
+    );
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
+  return reduceMotion;
+}
+
 export function NativeSheet({
   visible,
   onClose,
@@ -95,9 +139,80 @@ export function NativeSheet({
     },
     [onClose],
   );
+  const { height: windowHeight } = useWindowDimensions();
+  const reduceMotion = useReduceMotion();
 
   if (!visible) return null;
 
+  // ── Non-iOS: Modal-based bottom sheet ──────────────────────────────────────
+  // UIKit detents don't exist off iOS. Present the same controlled content in a
+  // bottom-anchored Modal so it renders and stays reachable to assistive tech
+  // and the E2E harness.
+  if (Platform.OS !== "ios") {
+    // A numeric detent maps to an explicit sheet height (fraction of the window)
+    // so a `flex: 1` body fills it rather than collapsing to a zero-height strip;
+    // `fitToContents` sizes to its content under a 90% ceiling.
+    const sheetHeightStyle: ViewStyle =
+      detents === "fitToContents"
+        ? { maxHeight: "90%" }
+        : {
+            height: Math.round(
+              windowHeight *
+                (detents[initialDetentIndex] ??
+                  detents[detents.length - 1] ??
+                  1),
+            ),
+          };
+    const corner = cornerRadius ?? FALLBACK_CORNER_RADIUS;
+
+    return (
+      <Modal
+        visible
+        transparent
+        animationType={reduceMotion ? "none" : "slide"}
+        presentationStyle="overFullScreen"
+        onRequestClose={onClose}
+        accessibilityViewIsModal
+      >
+        <View style={styles.fallbackOverlay}>
+          {/* Backdrop — tapping outside the sheet dismisses it. */}
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={onClose}
+            accessibilityLabel="Close sheet"
+            accessibilityRole="button"
+          />
+          <View
+            accessibilityViewIsModal
+            accessibilityLabel={accessibilityLabel}
+            style={[
+              styles.fallbackSheet,
+              {
+                backgroundColor,
+                borderTopLeftRadius: corner,
+                borderTopRightRadius: corner,
+              },
+              sheetHeightStyle,
+              contentStyle,
+            ]}
+          >
+            {grabberVisible ? (
+              <View
+                style={styles.fallbackGrabberWrap}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+              >
+                <View style={styles.fallbackGrabber} />
+              </View>
+            ) : null}
+            {children}
+          </View>
+        </View>
+      </Modal>
+    );
+  }
+
+  // ── iOS: genuine UIKit detent sheet ────────────────────────────────────────
   return (
     // Full-window overlay; `box-none` so the transparent presenter never eats
     // touches meant for the screen behind an undimmed detent.
@@ -152,5 +267,25 @@ const styles = StyleSheet.create({
   },
   sheet: {
     flex: 1,
+  },
+  // ── Non-iOS fallback ──
+  fallbackOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.35)",
+  },
+  fallbackSheet: {
+    overflow: "hidden",
+  },
+  fallbackGrabberWrap: {
+    alignItems: "center",
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  fallbackGrabber: {
+    width: 36,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(128,128,128,0.4)",
   },
 });
