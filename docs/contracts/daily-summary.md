@@ -161,8 +161,16 @@ this contract):
   excluded: only `completed` events carry committed resolved items (FTY-043/FTY-044
   commit items in the same transaction as the terminal `completed` status).
 - `unresolved` items (NULL calories / NULL active_calories) are excluded.
-- A test proves this exclusion: non-`completed` event items and `unresolved` items
-  never inflate a total.
+- **`proposed` items are excluded by construction (FTY-196).** A legible
+  nutrition-label parse lands as an uncounted **`proposed`** food item on a
+  `completed` event (`label-upload.md` → Confirmation gate); because the predicate
+  requires `status == 'resolved'`, a `proposed` item is filtered out automatically
+  and never inflates intake until the user confirms it (`proposed → resolved`). This
+  filter is **not relaxed** for the gate — the exclusion is a property of the
+  existing predicate, not new logic.
+- A test proves this exclusion: non-`completed` event items, `unresolved` items,
+  and `proposed` (unconfirmed label) items never inflate a total (single-day and
+  range).
 
 ## Day / timezone resolution
 

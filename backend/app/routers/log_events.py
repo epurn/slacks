@@ -35,18 +35,24 @@ from app.deps import CurrentUser
 from app.estimator.enqueue import EstimationEnqueuer, get_enqueuer
 from app.estimator.label_step import LabelInput
 from app.estimator.label_upload import LabelProcessor, get_label_processor
+from app.schemas.corrections import DerivedFoodItemDTO
+from app.schemas.label_proposal import LabelProposalConfirmRequest, LabelProposalResponse
 from app.schemas.log_events import (
     ClarificationQuestionDTO,
     ClarificationResponse,
     LogEventCreateRequest,
     LogEventDTO,
 )
+from app.services import item_read_model
+from app.services import label_proposal as label_proposal_service
 from app.services import log_events as log_event_service
 from app.services.attachments import (
     AttachmentInvalidContentType,
     AttachmentTooLarge,
     validate_upload,
 )
+from app.services.corrections import InvalidCorrection
+from app.services.label_proposal import LabelProposalNotFound
 from app.services.log_events import LogEventForbidden, LogEventNotFound
 
 router = APIRouter(prefix="/api/users", tags=["log-events"])
@@ -234,3 +240,86 @@ def get_log_event_clarification(
     return ClarificationResponse(
         questions=[ClarificationQuestionDTO(text=q.question_text) for q in questions]
     )
+
+
+@router.get(
+    "/{user_id}/log-events/{event_id}/label-proposal",
+    response_model=LabelProposalResponse,
+)
+def get_label_proposal(
+    user_id: uuid.UUID,
+    event_id: uuid.UUID,
+    current_user: CurrentUser,
+    session: Annotated[Session, Depends(get_session)],
+) -> LabelProposalResponse:
+    """Return the uncounted proposed values for a label event (FTY-196).
+
+    A legible label parse lands as an **uncounted proposal** (a ``proposed`` food
+    item that does not count toward totals) rather than a counted ``resolved`` item,
+    because "OCR is fallible — Fatty never silently trusts a fallible parse". This
+    read backs the mobile confirm sheet (FTY-197): it returns the parsed food values
+    plus their ``user_label`` ``source`` descriptor.
+
+    Ownership is fail-closed (FTY-030): a cross-user or nonexistent ``event_id`` is
+    indistinguishable as ``404`` (no existence oracle). An event with no proposal
+    (never had one, or already confirmed) returns ``200`` with ``proposal: null``
+    (no status oracle). The nutrition values, like ``raw_text``, are never logged.
+    """
+
+    try:
+        item = label_proposal_service.get_label_proposal(session, user_id, current_user, event_id)
+    except (LogEventForbidden, LogEventNotFound) as exc:
+        raise _NOT_FOUND from exc
+    proposal = item_read_model.serialize_food_item(session, item) if item is not None else None
+    return LabelProposalResponse(proposal=proposal)
+
+
+@router.post(
+    "/{user_id}/log-events/{event_id}/label-proposal/confirm",
+    response_model=DerivedFoodItemDTO,
+)
+def confirm_label_proposal(
+    user_id: uuid.UUID,
+    event_id: uuid.UUID,
+    current_user: CurrentUser,
+    session: Annotated[Session, Depends(get_session)],
+    payload: LabelProposalConfirmRequest | None = None,
+) -> DerivedFoodItemDTO:
+    """Confirm a label proposal so it counts toward the day's totals (FTY-196).
+
+    Flips the proposed food item ``proposed → resolved`` in one transaction, so the
+    daily-summary finalized-state filter (unchanged) then counts it. An optional
+    body carries adjusted values: a changed ``calories``/macro commits as the user's
+    number (a ``user_edit`` value override — the item reads ``is_edited``), an
+    adjusted ``amount`` (serving count) commits as a provenance-preserving rescale,
+    and an omitted body commits the parsed values as-is. The ``user_label``
+    provenance is preserved either way.
+
+    Ownership is fail-closed (``404`` cross-user / nonexistent, no existence oracle,
+    also when the owned event carries no proposal). A **double confirm** is
+    idempotent — the already-committed item is returned, never double-counted. An
+    out-of-range / invalid adjusted value returns ``422`` with a machine-readable
+    error shape that never echoes the value.
+    """
+
+    adjustments = payload or LabelProposalConfirmRequest()
+    try:
+        item = label_proposal_service.confirm_label_proposal(
+            session,
+            user_id,
+            current_user,
+            event_id,
+            calories=adjustments.calories,
+            protein_g=adjustments.protein_g,
+            carbs_g=adjustments.carbs_g,
+            fat_g=adjustments.fat_g,
+            amount=adjustments.amount,
+        )
+    except (LogEventForbidden, LogEventNotFound, LabelProposalNotFound) as exc:
+        raise _NOT_FOUND from exc
+    except InvalidCorrection as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": exc.code, "field": exc.field},
+        ) from exc
+    return item_read_model.serialize_food_item(session, item)

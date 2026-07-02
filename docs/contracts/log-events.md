@@ -398,6 +398,15 @@ transitions by reusing this map. The clarification answer (FTY-170, above) is
 the user-driven trigger for the already-legal `needs_clarification →
 processing` transition; it adds no new status and no new transition.
 
+This is the **event** status vocabulary. The separate **derived-item** status
+vocabulary (`DerivedItemStatus`: `unresolved` / `resolved`, plus `proposed` added
+by FTY-196 for an uncounted, confirmation-required nutrition-label parse) is owned
+by the estimator/label contracts (`label-upload.md`, `label-extraction.md`,
+`daily-summary.md`), not here — this contract deliberately excludes derived
+food/exercise items. FTY-196 adds no event status and does not change this map: a
+label event still reaches terminal `completed`; only its food item is held
+`proposed` until confirmed.
+
 ## Validation
 
 - `raw_text`: required; trimmed; non-empty after trimming; 1–2000 characters.

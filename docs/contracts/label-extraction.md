@@ -106,8 +106,14 @@ The backend — never the model — turns the validated panel into stored number
 On a legible, confident panel the worker writes, in the **same transaction** as the
 terminal `completed` status:
 
-- a `resolved` **`derived_food_items`** row (canonical `calories`/macros + `grams`,
-  with the original snapshot captured for FTY-051 corrections);
+- a **`proposed`** (uncounted, FTY-196) **`derived_food_items`** row (canonical
+  `calories`/macros + `grams`, with the original snapshot captured for FTY-051
+  corrections). The deterministic serving math is unchanged; only the item's
+  committed/counted status changes — a label parse is held as an uncounted proposal
+  until the user confirms it (`label-upload.md` → Confirmation gate), because "OCR
+  is fallible — Fatty never silently trusts a fallible parse"
+  (`docs/design-philosophy.md`). It was `resolved` (immediately counted) before
+  FTY-196;
 - a user-owned **`evidence_sources`** row with `source_type = user_label`,
   `source_ref = user_label:<content_hash>`, the image `content_hash`, the extraction
   timestamp, and the immutable per-100g facts snapshot. `product_id` is **null** —
@@ -123,7 +129,7 @@ panel facts: serving 40 g, 200 kcal / 10 P / 20 C / 8 F per serving
   → serving_g = 40; per-100g = 500 kcal / 25 P / 50 C / 20 F
   → consumed grams = 1 × 40 = 40
   → calories = 200.0; protein 10.0; carbs 20.0; fat 8.0
-  → derived_food_items += Trail Mix (resolved, calories 200.0, grams 40)
+  → derived_food_items += Trail Mix (proposed/uncounted, calories 200.0, grams 40)
   → evidence_sources += user_label:<sha256> (hash, extracted_at, per-100g snapshot)
   → run.source_refs += "user_label"; event: processing → completed
   → raw image discarded (no log_attachments row) unless save=true
@@ -146,7 +152,7 @@ panel facts: serving 40 g, 200 kcal / 10 P / 20 C / 8 F per serving
 
 | Condition | Pipeline signal | Persisted | Event transition |
 | --- | --- | --- | --- |
-| Legible, confident panel + resolvable serving/quantity | _(completes)_ | food `resolved` (`user_label`) + `evidence_sources` | `processing → completed` |
+| Legible, confident panel + resolvable serving/quantity | _(completes)_ | food **`proposed`** (uncounted, `user_label`) + `evidence_sources` — confirm to count (FTY-196) | `processing → completed` |
 | Unreadable / low-confidence / missing facts | `NeedsClarification` (`label_unreadable`) | clarification question | `processing → needs_clarification` |
 | Unresolvable serving size or quantity | `NeedsClarification` | clarification question | `processing → needs_clarification` |
 | Not a nutrition label (unusable input) | `StepFailed` (`unusable_label`) | nothing | `processing → failed` |
@@ -206,3 +212,8 @@ schema-invalid, retention default vs. save) are covered by
   uses.
 - Additive to the pipeline: `label_pipeline` is a separate composition from
   `default_pipeline`; the text parse/exercise/food path is unchanged.
+- **FTY-196 (no migration).** The persisted label item's status changes from
+  `resolved` to `proposed` (the uncounted confirmation-gate state); `status` is a
+  `VARCHAR`, so the new value needs no schema migration. Only the label path writes
+  `proposed`; the text food/exercise resolution still commits `resolved`. The
+  read/confirm API for the proposal lives in `label-upload.md`.

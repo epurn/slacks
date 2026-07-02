@@ -63,6 +63,18 @@ natural-language text; the food facts come from the extracted panel and are
 persisted by the FTY-061 pipeline (a `derived_food_items` row + a `user_label`
 `evidence_sources` row).
 
+**The legible-panel food item lands `proposed`, not counted (FTY-196).** A legible
+parse persists its `derived_food_items` row in the **`proposed`** state — an
+**uncounted proposal** — instead of a counted `resolved` item, because "OCR is
+fallible — Fatty never silently trusts a fallible parse"
+(`docs/design-philosophy.md`). The event still reaches terminal `completed`
+(extraction finished), but the food item is **excluded from `daily-summary` intake
+by construction** (the finalized-state filter requires item `status == 'resolved'`
+— it is **not** relaxed) until the user confirms it via the confirmation gate
+below. This is a **pre-v1 breaking change** to the post-extraction result (no
+consumers in production; the clean redesign is preferred). See
+[Confirmation gate](#confirmation-gate-fty-196).
+
 ## Validation
 
 The image is **untrusted data**, validated fail-closed *before* any event is
@@ -120,9 +132,66 @@ Content-Type: image/png
 → 201 Created
   { "id": "...", "user_id": "<uid>", "raw_text": "Nutrition label photo",
     "status": "completed", "created_at": "...", "updated_at": "..." }
-  (a resolved derived_food_items row + a user_label evidence_sources row persisted;
-   no log_attachments row, because save=false)
+  (a **proposed** (uncounted) derived_food_items row + a user_label evidence_sources
+   row persisted; no log_attachments row, because save=false. The proposal does not
+   count toward daily-summary intake until confirmed — see the confirmation gate.)
 ```
+
+## Confirmation gate (FTY-196)
+
+A photographed label is **capture-then-confirm**: the parse lands as an uncounted
+`proposed` item (above), and two owner-scoped routes let the mobile confirm sheet
+(FTY-197) show the parsed values and commit them. Both fail closed — a cross-user or
+nonexistent `event_id` is `404` with no existence oracle, mirroring `log-events.md` /
+`daily-summary.md` — and neither logs the nutrition values.
+
+**Read the proposed values.**
+
+```
+GET /api/users/{user_id}/log-events/{event_id}/label-proposal
+Authorization: Bearer <token>
+
+→ 200 { "proposal": { …DerivedFoodItemDTO… } }   # the parsed name/serving/calories/
+                                                 # macros + user_label `source`
+→ 200 { "proposal": null }                       # event has no uncounted proposal
+```
+
+The `proposal` is the shared item read shape (`daily-summary.md` → per-item
+provenance): the parsed values enriched with the `user_label` `source` descriptor
+(`label: "Label scan"`) and `is_edited`. It is `null` when the event has no
+uncounted proposal — never had one (a `needs_clarification` / `failed` disposition,
+or a non-label event) or already confirmed. There is **no status oracle**: those
+cases are indistinguishable.
+
+**Confirm the proposal (commits it → counted).**
+
+```
+POST /api/users/{user_id}/log-events/{event_id}/label-proposal/confirm
+Authorization: Bearer <token>
+{ "calories"?: number, "protein_g"?: number, "carbs_g"?: number,
+  "fat_g"?: number, "amount"?: number }        # body optional
+
+→ 200 { …DerivedFoodItemDTO (status: "resolved")… }
+```
+
+Confirm flips the food item `proposed → resolved` in **one transaction**, so the
+daily-summary finalized-state filter then counts it. The body is optional:
+
+- **Omitted / empty** → the parsed values commit as-is; the item keeps its
+  `user_label` provenance and reads `is_edited: false` (an accepted parse is not a
+  user edit).
+- **`calories` / a macro** → a **value override**: commits the user's number,
+  appends a `user_edit` correction, and the item reads `is_edited: true`
+  (`corrections.md`). Provenance stays `user_label`.
+- **`amount`** → the adjusted consumed serving count: a **provenance-preserving**
+  servings rescale (`amount_adjust`, `corrections.md`) — calories/macros rescale,
+  the source is untouched, and the item stays un-edited.
+
+A **double confirm** is idempotent: a second call finds the item already `resolved`
+and returns it unchanged, so a proposal is never counted twice. An out-of-range /
+invalid adjusted value returns `422` with a machine-readable error shape
+(`{"error": <code>, "field": <field>}`) that never echoes the value; a
+negative/non-finite value is rejected at the request boundary (`422`).
 
 Backend coverage: `backend/tests/test_label_upload_endpoint.py` (happy path,
 discard-vs-save retention, `413`/`415` data-boundary rejection, `404`/`401`
@@ -138,3 +207,12 @@ content-free error mapping).
   `POST .../log-events` (text) and `GET` routes; the text path is unchanged.
 - The wire is raw-body (not multipart), so the backend needs no multipart parser
   dependency.
+- **FTY-196 (no migration).** The confirmation gate adds the `proposed`
+  `derived_food_items.status` value and two additive routes
+  (`GET`/`POST .../log-events/{event_id}/label-proposal[/confirm]`). `status` is a
+  plain `VARCHAR` (not a database `ENUM`), so the new value is an application-only
+  change that round-trips on SQLite and Postgres with **no** schema migration. The
+  legible-panel result changing from a counted `resolved` item to an uncounted
+  `proposed` one is a **pre-v1 breaking change** (no production consumers). The
+  daily-summary finalized-state filter is **unchanged** — the exclusion is by
+  construction.
