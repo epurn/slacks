@@ -48,6 +48,7 @@ export default function ProfileRoute() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Done"
+              testID="profile-done"
               onPress={handleDone}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               style={styles.doneButton}

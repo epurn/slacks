@@ -66,6 +66,7 @@ app under test reliably. If the app ID changes, update `app.json` and every flow
 | `smoke.yaml` | App launches in E2E mode → Today mounts **and** its timeline reaches the ready, non-error state — data-present, not data-starved (FTY-160) |
 | `clarify.yaml` | Full clarify path: submit an entry → needs-a-detail row appears → tap row → clarify sheet shows the seeded question (data-starved sheet fails here) → free-text answer → entry resolves and counts in Today totals (FTY-162) |
 | `failed-parse.yaml` | Failed-parse UX: submit gibberish → "Couldn't read that" row appears with Retry + Edit-as-text (never a static dead end) → tap Retry → the failed row is superseded in place by a fresh pending attempt, no stale duplicate (FTY-176) |
+| `profile.yaml` | Profile native header: tap the Today gear → the "Profile" native large-title header renders with the grouped settings inset below it → the Goal row still opens its inline editor → Done dismisses back to Today (FTY-182) |
 
 ## E2E launch mode (deterministic boot)
 

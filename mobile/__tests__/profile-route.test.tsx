@@ -5,13 +5,19 @@
  * Done action that dismisses back to where the gear was opened. SettingsScreen's
  * behaviour (editing, target-reveal, cadence, sign-out) is covered by
  * SettingsScreen.test.tsx and stubbed here so this test isolates the header wiring.
+ *
+ * This lives under mobile/__tests__/ rather than beside the route in app/: everything
+ * under app/ is an expo-router route (a recursive require.context), so a `*.test.tsx`
+ * there gets bundled as a route and its top-level `jest.fn()` crashes the E2E
+ * dev-client build. The reachable Profile user flow is proven end-to-end by the
+ * .maestro/profile.yaml flow; this file keeps the isolated header-options coverage.
  */
 
 import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
 import { ThemeProvider } from "@/theme";
-import ProfileRoute from "./profile";
+import ProfileRoute from "@/app/profile";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Capture the options handed to the native <Stack.Screen>, and the router.
