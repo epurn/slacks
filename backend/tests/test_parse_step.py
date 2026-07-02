@@ -465,7 +465,7 @@ def test_implausible_count_routes_to_clarification() -> None:
     # A targeted question naming the item is set.
     assert len(context.clarification_questions) == 1
     assert "eggs" in _question_texts(context)[0]
-    assert _question_options(context) == [[]]
+    assert _question_options(context) == [["1", "2", "3"]]
 
 
 def test_implausible_mass_routes_to_clarification() -> None:
@@ -495,7 +495,7 @@ def test_implausible_mass_routes_to_clarification() -> None:
     assert context.food_candidates == []
     assert len(context.clarification_questions) == 1
     assert "chicken" in _question_texts(context)[0]
-    assert _question_options(context) == [[]]
+    assert _question_options(context) == [["1 serving", "2 servings", "3 servings"]]
 
 
 def test_implausible_mass_only_in_quantity_text_routes_to_clarification() -> None:
@@ -518,7 +518,7 @@ def test_implausible_mass_only_in_quantity_text_routes_to_clarification() -> Non
     assert context.food_candidates == []
     assert len(context.clarification_questions) == 1
     assert "chicken" in _question_texts(context)[0]
-    assert _question_options(context) == [[]]
+    assert _question_options(context) == [["1 serving", "2 servings", "3 servings"]]
 
 
 def test_implausible_quantity_text_mass_with_structured_count_clarifies() -> None:
@@ -550,7 +550,7 @@ def test_implausible_quantity_text_mass_with_structured_count_clarifies() -> Non
     assert context.food_candidates == []
     assert len(context.clarification_questions) == 1
     assert "chicken" in _question_texts(context)[0]
-    assert _question_options(context) == [[]]
+    assert _question_options(context) == [["1 serving", "2 servings", "3 servings"]]
 
 
 def test_unknown_unit_large_amount_routes_to_clarification() -> None:
@@ -580,7 +580,7 @@ def test_unknown_unit_large_amount_routes_to_clarification() -> None:
     assert context.food_candidates == []
     assert len(context.clarification_questions) == 1
     assert "rice" in _question_texts(context)[0]
-    assert _question_options(context) == [[]]
+    assert _question_options(context) == [["grams", "cups", "servings"]]
 
 
 def test_realistic_small_food_count_routes_to_parsed() -> None:
@@ -699,7 +699,7 @@ def test_implausible_food_still_gated_when_exercise_present() -> None:
     assert context.exercise_candidates == []
     assert len(context.clarification_questions) == 1
     assert "eggs" in _question_texts(context)[0]
-    assert _question_options(context) == [[]]
+    assert _question_options(context) == [["1", "2", "3"]]
 
 
 # ---------------------------------------------------------------------------
@@ -811,7 +811,7 @@ def test_implausible_range_midpoint_routes_to_clarification() -> None:
     assert context.assumptions == []
     assert len(context.clarification_questions) == 1
     assert "onion rings" in _question_texts(context)[0]
-    assert _question_options(context) == [[]]
+    assert _question_options(context) == [["1", "2", "3"]]
 
 
 def test_needs_clarification_disposition_with_detail_is_estimated() -> None:

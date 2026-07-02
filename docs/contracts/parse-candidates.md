@@ -42,11 +42,12 @@ shape and records schema version `parse/v2`. Model-raised clarification output i
 treated as low-quality and fails closed unless each question has specific
 question text plus 2–5 bounded, display-only candidate options. The old generic
 default-question fallback is retired for provider output; backend-routed
-low-confidence `parsed` samples synthesize a targeted amount/duration question
-with 2–5 fixed quick-pick options. Other deterministic backend questions (for
-example plausibility/food/exercise/label gates) still carry targeted text with
-`options: []` when no meaningful quick-pick set exists. The `0017` migration
-adds the persisted `options` column.
+low-confidence `parsed` samples and deterministic parse plausibility questions
+synthesize targeted amount/duration/unit questions with 2–5 fixed quick-pick
+options. Other non-parse deterministic backend questions (for example
+food/exercise/label gates) still carry targeted text with `options: []` when no
+meaningful quick-pick set exists. The `0017` migration adds the persisted
+`options` column.
 
 3 (FTY-159): **pre-v1 breaking behaviour change** (no shim) — the clarify
 decision becomes the **data-calibrated policy** (ADR 0003 Layer C). The step
@@ -107,13 +108,14 @@ sandwiches?") and `options` (candidate quick-pick answer strings; ≤ 5 per
 question, each 1–80 chars). Options are **display candidates** the client
 renders as one-tap chips — never an enum the server validates an answer
 against; free text is always an allowed answer (see `log-events.md`,
-Clarification read / Clarification answer). The estimator produces either no
-options for deterministic backend-raised questions without meaningful quick-pick
-choices (the client then shows free-text only) or **2–5 meaningful candidates**
-for model-raised parse clarifications and backend-routed low-confidence parsed
-clarifications. The schema enforces the hard count/length caps; FTY-172's parse
-producer adds a stricter quality gate for provider output, rejecting missing,
-generic, or under-optioned clarification questions before persistence.
+Clarification read / Clarification answer). The parse estimator produces **2–5
+meaningful candidates** for model-raised parse clarifications,
+backend-routed low-confidence parsed clarifications, and deterministic parse
+plausibility clarifications. Other backend steps may still produce no options
+for deterministic questions without meaningful quick-pick choices. The schema
+enforces the hard count/length caps; FTY-172's parse producer adds a stricter
+quality gate for provider output, rejecting missing, generic, or under-optioned
+clarification questions before persistence.
 
 String length and list count bounds cap an adversarial or runaway reply.
 
@@ -138,7 +140,7 @@ clarification quick-pick options (additive; no prior user data is required):
   are what the clarification read serves (`log-events.md`), so the producer
   (this step) and the reader share one shape field-for-field. Questions the
   backend synthesises deterministically — the plausibility gate's targeted
-  question — carry `options: []`.
+  question — carry 2–5 quick-pick options.
 
 ## Outputs / Routing
 

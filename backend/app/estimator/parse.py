@@ -39,6 +39,7 @@ surface: each sample is the same validated call.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -89,8 +90,10 @@ DEFAULT_CLARIFICATION_QUESTION = "Could you clarify what you logged and how much
 _MIN_CLARIFICATION_OPTIONS = 2
 _MAX_CLARIFICATION_OPTIONS = 5
 _FOOD_AMOUNT_OPTIONS = ["1 serving", "2 servings", "3 servings"]
+_FOOD_COUNT_OPTIONS = ["1", "2", "3"]
 _CUP_AMOUNT_OPTIONS = ["1/2 cup", "1 cup", "2 cups"]
 _SPREAD_AMOUNT_OPTIONS = ["1 tsp", "1 tbsp", "2 tbsp"]
+_FOOD_UNIT_OPTIONS = ["grams", "cups", "servings"]
 _EXERCISE_DURATION_OPTIONS = ["15 minutes", "30 minutes", "60 minutes"]
 _CUP_OPTION_FOODS = {
     "cereal",
@@ -113,12 +116,18 @@ _SPREAD_OPTION_FOODS = {
     "peanut butter",
 }
 _GENERIC_QUESTIONS = {
-    "could you clarify what you logged and how much?",
-    "how much was it?",
-    "we need a detail to count this entry.",
-    "can you clarify?",
-    "could you clarify?",
+    "can you clarify",
+    "could you clarify",
+    "could you clarify what you logged and how much",
+    "how much was it",
+    "we need a detail to count this entry",
 }
+_GENERIC_QUESTION_PATTERNS = (
+    re.compile(r"^(?:how much|what amount) did you (?:have|eat|drink|consume)$"),
+    re.compile(r"^what did you (?:have|eat|drink|consume)$"),
+    re.compile(r"^what was (?:it|that|this)$"),
+    re.compile(r"^(?:what|which) (?:kind|type|brand|flavor|size) did you (?:have|mean)$"),
+)
 
 
 @dataclass(frozen=True)
@@ -223,7 +232,7 @@ class ParseStep:
 
         implausible = _first_implausible([item for item, _ in effective])
         if implausible is not None:
-            context.clarification_questions = [ClarificationDraft(text=implausible)]
+            context.clarification_questions = [implausible]
             raise NeedsClarification("implausible_candidate")
 
         for item, assumption in effective:
@@ -384,10 +393,19 @@ def _backend_food_options(item: ParsedCandidate) -> list[str]:
 def _validate_provider_clarification(text: str, options: Sequence[str]) -> None:
     """Fail closed on clarification output the sheet cannot use directly."""
 
-    if not text or _normalise_question(text) in _GENERIC_QUESTIONS:
+    if not text or _is_generic_clarification_question(text):
         raise StepFailed("clarification_quality_failed")
     if not _MIN_CLARIFICATION_OPTIONS <= len(options) <= _MAX_CLARIFICATION_OPTIONS:
         raise StepFailed("clarification_quality_failed")
+
+
+def _is_generic_clarification_question(text: str) -> bool:
+    """Whether a provider question lacks a concrete missing-detail anchor."""
+
+    key = _normalise_question(text).strip(" ?.!:")
+    if key in _GENERIC_QUESTIONS:
+        return True
+    return any(pattern.fullmatch(key) is not None for pattern in _GENERIC_QUESTION_PATTERNS)
 
 
 def _clean_options(options: Sequence[str]) -> list[str]:
@@ -410,8 +428,8 @@ def _normalise_question(text: str) -> str:
     return " ".join(text.casefold().split())
 
 
-def _first_implausible(items: list[ParsedCandidate]) -> str | None:
-    """Return a clarification question for the first implausible food candidate, or None.
+def _first_implausible(items: list[ParsedCandidate]) -> ClarificationDraft | None:
+    """Return a clarification draft for the first implausible food candidate, if any.
 
     Checks each *food* candidate in order; returns the targeted question from the
     first failure so the user can correct the most prominent implausible entry
@@ -427,5 +445,20 @@ def _first_implausible(items: list[ParsedCandidate]) -> str | None:
             continue
         result = check_candidate(item)
         if not result.plausible:
-            return result.clarification_question
+            if result.clarification_question is None:
+                raise StepFailed("clarification_quality_failed")
+            return ClarificationDraft(
+                text=result.clarification_question,
+                options=_implausible_candidate_options(item, result.reason),
+            )
     return None
+
+
+def _implausible_candidate_options(item: ParsedCandidate, reason: str | None) -> list[str]:
+    """Return quick-pick options for deterministic parse plausibility questions."""
+
+    if reason == "unknown_unit":
+        return list(_FOOD_UNIT_OPTIONS)
+    if reason == "implausible_count":
+        return list(_FOOD_COUNT_OPTIONS)
+    return _backend_food_options(item)

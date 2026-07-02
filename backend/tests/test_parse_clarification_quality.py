@@ -99,6 +99,25 @@ def test_generic_clarification_question_fails_closed() -> None:
     assert exc.value.reason == "clarification_quality_failed"
 
 
+def test_generic_amount_clarification_without_item_fails_closed() -> None:
+    provider = FakeProvider(
+        responses=_sampled(
+            {
+                "disposition": "needs_clarification",
+                "confidence": 0.8,
+                "clarification_questions": [
+                    _clarify("What amount did you have?", ["1 serving", "2 servings"]),
+                ],
+            }
+        )
+    )
+
+    with pytest.raises(StepFailed) as exc:
+        _run(provider, _context())
+
+    assert exc.value.reason == "clarification_quality_failed"
+
+
 def test_clarification_question_without_two_options_fails_closed() -> None:
     provider = FakeProvider(
         responses=_sampled(
