@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 import sys
 
 
@@ -21,6 +22,8 @@ REQUIRED_FILES = [
     "SECURITY.md",
     "Makefile",
     ".gitignore",
+    "scripts/code-shape-baseline.json",
+    "scripts/verify-code-shape.py",
     ".github/CODEOWNERS",
     ".github/pull_request_template.md",
     ".github/workflows/governance.yml",
@@ -158,6 +161,12 @@ def main() -> None:
         fail("branch protection template must not require native latest-push approval")
     if not protection.get("required_conversation_resolution"):
         fail("branch protection template must require conversation resolution")
+
+    code_shape = ROOT / "scripts" / "verify-code-shape.py"
+    for args in ([], ["--self-test"]):
+        result = subprocess.run([sys.executable, str(code_shape), *args], cwd=ROOT)
+        if result.returncode != 0:
+            raise SystemExit(result.returncode)
 
     print("governance checks passed")
 

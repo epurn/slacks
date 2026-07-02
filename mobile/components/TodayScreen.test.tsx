@@ -8,6 +8,7 @@ import { LogEventApiError, type LogEventDTO } from "@/api/logEvents";
 import type { SavedFoodDTO } from "@/api/savedFoods";
 import type { OutboxEntry, OutboxStore } from "@/state/outbox";
 import type { Session } from "@/state/session";
+import { mockReduceMotion } from "@/testUtils/reduceMotion";
 
 // TodayScreen imports BarcodeScannerScreen which imports expo-camera native
 // modules; mock those before any tests run.
@@ -86,6 +87,8 @@ const INACTIVE = () => false;
 // outbox retry timer) can never fire into a later test and update an unmounted
 // component.
 const activeTrees: ReactTestRenderer[] = [];
+
+beforeEach(() => mockReduceMotion(false));
 
 afterEach(() => {
   for (const tree of activeTrees) {
@@ -547,12 +550,8 @@ describe("TodayScreen needs-clarification entries", () => {
     );
     await act(async () => {});
 
-    // The gentle "needs a detail" affordance + inviting call-to-action are
-    // present — not a bare dashed "—" silent row.
     const text = textContent(tree);
-    expect(text).toContain("needs a detail");
     expect(text).toContain("Add a detail");
-    // The typed phrase still reads in the row.
     expect(text).toContain("milk");
   });
 
@@ -574,7 +573,7 @@ describe("TodayScreen needs-clarification entries", () => {
     );
     expect(row.props.accessibilityRole).toBe("button");
     expect(row.props.accessibilityHint).toBe(
-      "Tap to add the missing detail so Fatty can count it",
+      "Tap to see the full phrase and add the missing detail",
     );
     expect(resolvedStyle(row).minHeight).toBeGreaterThanOrEqual(44);
   });

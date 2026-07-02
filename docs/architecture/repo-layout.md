@@ -29,7 +29,10 @@ Supporting top-level paths already in the repo:
 runs:
 
 1. `governance` — `scripts/verify-governance.py`, the dependency-free public
-   repository governance gate.
+   repository governance gate. It also runs `scripts/verify-code-shape.py`,
+   which scans first-party source for new over-threshold files and backend /
+   estimator boundary imports against the explicit
+   `scripts/code-shape-baseline.json` baseline.
 2. `packages` — each package's optional verify hook.
 
 ### How a package plugs into `make verify`

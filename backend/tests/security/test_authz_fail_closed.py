@@ -41,6 +41,7 @@ def _auth(token: str) -> dict[str, str]:
         ("GET", "/api/users/{uid}/profile"),
         ("PUT", "/api/users/{uid}/profile"),
         ("GET", "/api/users/{uid}/log-events"),
+        ("GET", "/api/users/{uid}/log-events/by-date"),
         ("POST", "/api/users/{uid}/log-events"),
         ("GET", "/api/users/{uid}/log-events/{rid}"),
         ("GET", "/api/users/{uid}/daily-summary"),
@@ -122,6 +123,7 @@ def _read_paths(owner: dict[str, str]) -> list[tuple[str, str, dict[str, str]]]:
     return [
         ("GET", f"/api/users/{uid}/profile", {}),
         ("GET", f"/api/users/{uid}/log-events", {}),
+        ("GET", f"/api/users/{uid}/log-events/by-date", {"day": "2026-01-01"}),
         ("GET", f"/api/users/{uid}/log-events/{owner['event_id']}", {}),
         ("GET", f"/api/users/{uid}/daily-summary", {}),
         (
@@ -170,3 +172,10 @@ def test_missing_resource_is_indistinguishable_from_forbidden(
     for method, path, body in cases:
         resp = client.request(method, path, headers=_auth(auth), json=body)
         assert resp.status_code == 404, f"{method} {path} -> {resp.status_code}"
+
+    entries_by_date = client.get(
+        f"/api/users/{unknown}/log-events/by-date",
+        headers=_auth(auth),
+        params={"day": "2026-06-01"},
+    )
+    assert entries_by_date.status_code == 404
