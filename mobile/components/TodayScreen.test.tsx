@@ -1,5 +1,4 @@
 import { act, create as render, type ReactTestRenderer } from "react-test-renderer";
-import { AccessibilityInfo } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { TodayScreen } from "./TodayScreen";
@@ -9,6 +8,7 @@ import { LogEventApiError, type LogEventDTO } from "@/api/logEvents";
 import type { SavedFoodDTO } from "@/api/savedFoods";
 import type { OutboxEntry, OutboxStore } from "@/state/outbox";
 import type { Session } from "@/state/session";
+import { mockReduceMotion } from "@/testUtils/reduceMotion";
 
 // TodayScreen imports BarcodeScannerScreen which imports expo-camera native
 // modules; mock those before any tests run.
@@ -88,23 +88,7 @@ const INACTIVE = () => false;
 // component.
 const activeTrees: ReactTestRenderer[] = [];
 
-function immediateReduceMotion(enabled: boolean): Promise<boolean> {
-  return {
-    then(onFulfilled?: ((value: boolean) => unknown) | null) {
-      onFulfilled?.(enabled);
-      return Promise.resolve(enabled);
-    },
-  } as Promise<boolean>;
-}
-
-beforeEach(() => {
-  jest
-    .spyOn(AccessibilityInfo, "isReduceMotionEnabled")
-    .mockReturnValue(immediateReduceMotion(false));
-  jest
-    .spyOn(AccessibilityInfo, "addEventListener")
-    .mockReturnValue({ remove: jest.fn() } as never);
-});
+beforeEach(() => mockReduceMotion(false));
 
 afterEach(() => {
   for (const tree of activeTrees) {
@@ -566,11 +550,8 @@ describe("TodayScreen needs-clarification entries", () => {
     );
     await act(async () => {});
 
-    // The single "Add a detail" affordance is present — not a bare dashed "—"
-    // silent row, and not the old duplicated tag + CTA.
     const text = textContent(tree);
     expect(text).toContain("Add a detail");
-    // The typed phrase still reads in the row.
     expect(text).toContain("milk");
   });
 
