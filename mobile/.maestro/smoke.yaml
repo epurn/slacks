@@ -7,11 +7,14 @@
 #   - marks onboarding complete for the E2E user.
 # AuthGate therefore routes straight to Today.
 #
-# Assertions (both added in FTY-160), queried via the accessibility tree:
+# Assertions, queried via the accessibility tree:
 #   1. the Today ScrollView mounts (testID="today-screen"), and
 #   2. its timeline reaches the ready, non-error state
 #      (testID="today-timeline-ready" — the empty-day invite that only renders
 #      once the log-events + daily-summary fixtures load without error).
+#   3. the Today hero renders the calm empty-day full-budget copy.
+#   4. after a log resolves and Refresh loads the updated daily summary, the
+#      hero renders the consumed / target kcal + percent status line.
 # Asserting (2) as well as (1) is what makes the flow catch a data-starved Today:
 # if a fixture 404s, the timeline renders the error state instead and this fails,
 # rather than going green on the always-mounted ScrollView alone.
@@ -30,3 +33,29 @@ appId: com.fatty
     visible:
       id: today-timeline-ready
     timeout: 15000
+- assertVisible:
+    text: ".*0 / 2,000 kcal · 2,000 to go.*"
+
+# Submit once to advance the E2E mock into its needs-detail phase, then submit a
+# concrete follow-up. The second POST resolves the synthetic entry; Refresh
+# reloads the resolved event list and non-zero daily summary.
+- tapOn:
+    text: "Log food or exercise.*"
+- inputText: "coffee"
+- tapOn:
+    text: "Add entry"
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-with-entries
+    timeout: 10000
+- tapOn:
+    text: "Log food or exercise.*"
+- inputText: "coffee large"
+- tapOn:
+    text: "Add entry"
+- tapOn:
+    text: "Refresh"
+- extendedWaitUntil:
+    visible:
+      text: ".*120 / 2,000 kcal · 6%.*"
+    timeout: 10000

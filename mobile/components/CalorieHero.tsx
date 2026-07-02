@@ -33,9 +33,11 @@ function pct(consumed: number, target: number): number {
 export function CalorieHero({
   consumed,
   target,
+  hasIntake = true,
 }: {
   consumed: number;
   target: number | null;
+  hasIntake?: boolean;
 }) {
   const { colors } = useTheme();
 
@@ -75,10 +77,16 @@ export function CalorieHero({
   const remaining = Math.max(target - consumed, 0);
   const over = Math.max(consumed - target, 0);
   const percentage = pct(consumed, target);
+  const isEmptyDay = !hasIntake;
+  const statusLine = isEmptyDay
+    ? `${formatCalories(consumed)} / ${formatCalories(target)} kcal · ${formatCalories(remaining)} to go`
+    : `${formatCalories(consumed)} / ${formatCalories(target)} kcal · ${percentage}%`;
 
   // A11y: combine all hero data into one clear sentence.
   const a11yLabel = isOver
     ? `${formatCalories(consumed)} of ${formatCalories(target)} kcal, ${formatCalories(over)} over budget`
+    : isEmptyDay
+      ? `${formatCalories(consumed)} of ${formatCalories(target)} kcal, ${formatCalories(remaining)} remaining`
     : `${formatCalories(consumed)} of ${formatCalories(target)} kcal, ${percentage} percent, ${formatCalories(remaining)} remaining`;
 
   return (
@@ -101,7 +109,7 @@ export function CalorieHero({
         style={[styles.contextLine, { color: colors.textSecondary }]}
         accessibilityElementsHidden
       >
-        {`/ of ${formatCalories(target)} kcal · ${percentage}%`}
+        {statusLine}
       </Text>
 
       {/* Slim progress bar */}
@@ -114,20 +122,21 @@ export function CalorieHero({
         trackColor={colors.separator}
       />
 
-      {/* "X to go" / "X over" copy — always text, never color alone */}
-      <Text
-        style={[
-          styles.subLine,
-          isOver
-            ? { color: colors.coral, fontWeight: "600" }
-            : { color: colors.textSecondary },
-        ]}
-        accessibilityElementsHidden
-      >
-        {isOver
-          ? `${formatCalories(over)} over`
-          : `${formatCalories(remaining)} to go`}
-      </Text>
+      {isEmptyDay ? null : (
+        <Text
+          style={[
+            styles.subLine,
+            isOver
+              ? { color: colors.coral, fontWeight: "600" }
+              : { color: colors.textSecondary },
+          ]}
+          accessibilityElementsHidden
+        >
+          {isOver
+            ? `${formatCalories(over)} over`
+            : `${formatCalories(remaining)} to go`}
+        </Text>
+      )}
     </View>
   );
 }
@@ -165,12 +174,14 @@ function ProgressBar({
               styles.barFill,
               { flex: target, backgroundColor: amberColor },
             ]}
+            testID="calorie-hero-bar-fill"
           />
           <View
             style={[
               styles.barFill,
               { flex: cappedOver, backgroundColor: coralColor },
             ]}
+            testID="calorie-hero-bar-overfill"
           />
         </>
       ) : (
@@ -180,9 +191,11 @@ function ProgressBar({
               styles.barFill,
               { flex: consumed, backgroundColor: amberColor },
             ]}
+            testID="calorie-hero-bar-fill"
           />
           <View
             style={[styles.barFill, { flex: Math.max(target - consumed, 0) }]}
+            testID="calorie-hero-bar-remainder"
           />
         </>
       )}
@@ -202,7 +215,7 @@ const styles = StyleSheet.create({
     fontSize: typeScale.heroDisplay,
     fontWeight: "700",
     fontVariant: ["tabular-nums"],
-    letterSpacing: -1,
+    letterSpacing: 0,
     lineHeight: typeScale.heroDisplay * 1.05,
   },
   contextLine: {

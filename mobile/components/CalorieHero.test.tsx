@@ -15,6 +15,15 @@ function allText(tree: ReactTestRenderer): string {
     .join(" ");
 }
 
+function flattenedStyle(style: unknown): Record<string, unknown> {
+  if (Array.isArray(style)) {
+    return Object.assign({}, ...style.map(flattenedStyle));
+  }
+  return typeof style === "object" && style !== null
+    ? (style as Record<string, unknown>)
+    : {};
+}
+
 describe("CalorieHero — under budget", () => {
   it("shows consumed, target, percent, and remaining", () => {
     let tree: ReactTestRenderer;
@@ -23,6 +32,7 @@ describe("CalorieHero — under budget", () => {
     });
 
     const text = allText(tree!);
+    expect(text).toContain("1,240 / 2,000 kcal · 62%");
     expect(text).toContain("1,240");
     expect(text).toContain("2,000");
     expect(text).toContain("62%");
@@ -97,25 +107,36 @@ describe("CalorieHero — empty state", () => {
   it("shows 0 consumed with full budget, empty bar track, calm tone", () => {
     let tree: ReactTestRenderer;
     act(() => {
-      tree = render(<CalorieHero consumed={0} target={2000} />);
+      tree = render(<CalorieHero consumed={0} target={2000} hasIntake={false} />);
     });
 
     const text = allText(tree!);
-    expect(text).toContain("0");
-    expect(text).toContain("2,000");
-    expect(text).toContain("to go");
-    // Should never show an alarming "0%" as the only info
-    expect(text).toContain("0%");  // 0% is fine, just not alarming
+    expect(text).toContain("0 / 2,000 kcal · 2,000 to go");
+    expect(text).not.toContain("0%");
+    const fill = tree!.root.findByProps({ testID: "calorie-hero-bar-fill" });
+    expect(flattenedStyle(fill.props.style).flex).toBe(0);
   });
 
   it("VoiceOver label says 2,000 remaining", () => {
     let tree: ReactTestRenderer;
     act(() => {
-      tree = render(<CalorieHero consumed={0} target={2000} />);
+      tree = render(<CalorieHero consumed={0} target={2000} hasIntake={false} />);
     });
 
     const labels = allA11yLabels(tree!);
     expect(labels.some((l) => l.includes("2,000 remaining"))).toBe(true);
+    expect(labels.some((l) => l.includes("0 percent"))).toBe(false);
+  });
+
+  it("keeps a genuine 0-kcal logged day distinct from an unlogged day", () => {
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(<CalorieHero consumed={0} target={2000} hasIntake />);
+    });
+
+    const text = allText(tree!);
+    expect(text).toContain("0 / 2,000 kcal · 0%");
+    expect(text).toContain("2,000 to go");
   });
 });
 

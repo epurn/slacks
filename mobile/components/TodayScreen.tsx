@@ -552,9 +552,8 @@ export function TodayScreen({
     getDailySummary(apiSession).then(
       (loaded) => {
         setSummary(loaded);
-        // Clear any stale error so a recovered poll drops the error banner —
-        // DailySummary renders its error branch ahead of the summary, so without
-        // this an initial-load failure would stick even once good data arrives.
+        // Clear any stale error so a recovered poll drops the inline summary
+        // error once good data arrives.
         setSummaryError(null);
       },
       () => {
@@ -871,6 +870,8 @@ export function TodayScreen({
             online and caught up (FTY-104, harvested onto Today in FTY-147). */}
         <ConnectionBanner state={reachability} queuedCount={queuedCount} />
 
+        <DailySummary summary={summary} error={summaryError} onRetry={refresh} />
+
         <View style={styles.composer}>
           <TextInput
             ref={inputRef}
@@ -962,8 +963,6 @@ export function TodayScreen({
           loadError={loadError}
           onRetry={() => void refresh()}
           saveFood={saveFood}
-          summary={summary}
-          summaryError={summaryError}
         />
       </ScrollView>
 
@@ -1030,8 +1029,6 @@ function Timeline({
   loadError,
   onRetry,
   saveFood,
-  summary,
-  summaryError,
 }: {
   events: readonly LogEventDTO[];
   itemsByEvent: Readonly<Record<string, readonly DerivedItem[]>>;
@@ -1050,8 +1047,6 @@ function Timeline({
   loadError: string | null;
   onRetry: () => void;
   saveFood: typeof saveFoodApi;
-  summary?: DailySummaryDTO | null;
-  summaryError?: string | null;
 }) {
   const { colors } = useTheme();
 
@@ -1067,10 +1062,12 @@ function Timeline({
     // and a calm single invite — never an alarming blank.
     return (
       <View>
-        <DailySummary summary={summary} error={summaryError} />
         {phase === "error" ? (
           <View style={styles.state}>
-            <Text style={styles.stateText} accessibilityRole="alert">
+            <Text
+              style={[styles.stateText, { color: colors.textSecondary }]}
+              accessibilityRole="alert"
+            >
               {loadError}
             </Text>
             <Pressable
@@ -1097,9 +1094,11 @@ function Timeline({
 
   return (
     <View testID="today-timeline-with-entries">
-      <DailySummary summary={summary} error={summaryError} />
       {phase === "error" && loadError ? (
-        <Text style={styles.error} accessibilityRole="alert">
+        <Text
+          style={[styles.error, { color: colors.textSecondary }]}
+          accessibilityRole="alert"
+        >
           {loadError}
         </Text>
       ) : null}

@@ -56,6 +56,9 @@ describe("DailySummary — hero (CalorieHero)", () => {
     expect(labels.some((l) => l.includes("1,240 of 2,000 kcal"))).toBe(true);
     expect(labels.some((l) => l.includes("62 percent"))).toBe(true);
     expect(labels.some((l) => l.includes("760 remaining"))).toBe(true);
+
+    const text = allText(tree!);
+    expect(text).toContain("1,240 / 2,000 kcal · 62%");
   });
 
   it("renders over-budget hero with coral copy '500 over'", () => {
@@ -95,6 +98,7 @@ describe("DailySummary — hero (CalorieHero)", () => {
         <DailySummary
           summary={mockSummary({
             intake: { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
+            has_intake: false,
             target: targetModel(2000),
           })}
         />,
@@ -104,6 +108,10 @@ describe("DailySummary — hero (CalorieHero)", () => {
     const labels = allA11yLabels(tree!);
     expect(labels.some((l) => l.includes("0 of 2,000 kcal"))).toBe(true);
     expect(labels.some((l) => l.includes("2,000 remaining"))).toBe(true);
+
+    const text = allText(tree!);
+    expect(text).toContain("0 / 2,000 kcal · 2,000 to go");
+    expect(text).not.toContain("0%");
   });
 });
 
@@ -156,23 +164,31 @@ describe("DailySummary — macro tier (MacroTier)", () => {
 });
 
 describe("DailySummary — error and null states", () => {
-  it("renders an error alert", () => {
+  it("keeps the hero shell while rendering a calm summary error alert", () => {
     const msg = "We couldn't load your summary.";
+    const onRetry = jest.fn();
     let tree: ReactTestRenderer;
     act(() => {
-      tree = render(<DailySummary summary={null} error={msg} />);
+      tree = render(
+        <DailySummary summary={null} error={msg} onRetry={onRetry} />,
+      );
     });
 
     const text = allText(tree!);
+    expect(text).toContain("0");
+    expect(text).toContain("No target set");
     expect(text).toContain(msg);
+    expect(text).toContain("Try again");
+    expect(allA11yLabels(tree!).some((l) => l.includes("no target set"))).toBe(true);
   });
 
-  it("returns null when no summary and no error", () => {
+  it("renders a fallback hero shell when no summary and no error", () => {
     let tree: ReactTestRenderer;
     act(() => {
       tree = render(<DailySummary />);
     });
-    expect(tree!.root.instance).toBeNull();
+    expect(allText(tree!)).toContain("No target set");
+    expect(allA11yLabels(tree!).some((l) => l.includes("no target set"))).toBe(true);
   });
 
   it("light and dark: hero a11y label is consistent regardless of color scheme", () => {
