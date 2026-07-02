@@ -1,0 +1,143 @@
+{
+  "version": 1,
+  "loc_thresholds": {
+    "source": 750,
+    "test": 1000
+  },
+  "large_files": {
+    "backend/app/estimator/search.py": {
+      "kind": "source",
+      "lane": "estimator",
+      "lines": 788,
+      "reason": "Existing over-threshold first-party source file at FTY-200 baseline."
+    },
+    "backend/tests/test_daily_summary_api.py": {
+      "kind": "test",
+      "lane": "backend",
+      "lines": 1160,
+      "reason": "Existing over-threshold first-party test file at FTY-200 baseline."
+    },
+    "backend/tests/test_parse_step.py": {
+      "kind": "test",
+      "lane": "estimator",
+      "lines": 1023,
+      "reason": "Existing over-threshold first-party test file at FTY-200 baseline."
+    },
+    "docs/contracts/evidence-retrieval.md": {
+      "kind": "source",
+      "lane": "docs",
+      "lines": 808,
+      "reason": "Existing over-threshold first-party source document at FTY-200 baseline."
+    },
+    "mobile/components/CorrectionSheet.tsx": {
+      "kind": "source",
+      "lane": "mobile",
+      "lines": 1608,
+      "reason": "Existing over-threshold first-party source file at FTY-200 baseline."
+    },
+    "mobile/components/OnboardingScreen.tsx": {
+      "kind": "source",
+      "lane": "mobile",
+      "lines": 982,
+      "reason": "Existing over-threshold first-party source file at FTY-200 baseline."
+    },
+    "mobile/components/SettingsScreen.test.tsx": {
+      "kind": "test",
+      "lane": "mobile",
+      "lines": 1154,
+      "reason": "Existing over-threshold first-party test file at FTY-200 baseline."
+    },
+    "mobile/components/SettingsScreen.tsx": {
+      "kind": "source",
+      "lane": "mobile",
+      "lines": 1987,
+      "reason": "Existing over-threshold first-party source file at FTY-200 baseline."
+    },
+    "mobile/components/TodayScreen.test.tsx": {
+      "kind": "test",
+      "lane": "mobile",
+      "lines": 1808,
+      "reason": "Existing over-threshold first-party test file at FTY-200 baseline."
+    },
+    "mobile/components/TodayScreen.tsx": {
+      "kind": "source",
+      "lane": "mobile",
+      "lines": 1379,
+      "reason": "Existing over-threshold first-party source file at FTY-200 baseline."
+    }
+  },
+  "boundary_imports": [
+    {
+      "direction": "estimator_to_backend",
+      "path": "backend/app/estimator/label_step.py",
+      "module": "app.services.attachments",
+      "reason": "Existing upload validation dependency at FTY-200 baseline."
+    },
+    {
+      "direction": "estimator_to_backend",
+      "path": "backend/app/estimator/processing.py",
+      "module": "app.services.attachments",
+      "reason": "Existing worker ingestion dependency at FTY-200 baseline."
+    },
+    {
+      "direction": "estimator_to_backend",
+      "path": "backend/app/estimator/processing.py",
+      "module": "app.services.log_events",
+      "reason": "Existing event transition dependency at FTY-200 baseline."
+    },
+    {
+      "direction": "service_to_estimator_internal",
+      "path": "backend/app/services/clarification.py",
+      "module": "app.estimator.processing",
+      "reason": "Existing clarification re-estimate dependency at FTY-200 baseline."
+    },
+    {
+      "direction": "service_to_estimator_internal",
+      "path": "backend/app/services/label_proposal.py",
+      "module": "app.estimator.label_step",
+      "reason": "Existing label proposal source-type dependency at FTY-200 baseline."
+    },
+    {
+      "direction": "service_to_estimator_internal",
+      "path": "backend/app/services/sources.py",
+      "module": "app.estimator.fdc",
+      "reason": "Existing source diagnostics dependency at FTY-200 baseline."
+    },
+    {
+      "direction": "service_to_estimator_internal",
+      "path": "backend/app/services/sources.py",
+      "module": "app.estimator.off",
+      "reason": "Existing source diagnostics dependency at FTY-200 baseline."
+    },
+    {
+      "direction": "service_to_estimator_internal",
+      "path": "backend/app/services/sources.py",
+      "module": "app.estimator.official_fetch",
+      "reason": "Existing source diagnostics dependency at FTY-200 baseline."
+    },
+    {
+      "direction": "service_to_estimator_internal",
+      "path": "backend/app/services/sources.py",
+      "module": "app.estimator.official_step",
+      "reason": "Existing source diagnostics dependency at FTY-200 baseline."
+    },
+    {
+      "direction": "service_to_estimator_internal",
+      "path": "backend/app/services/sources.py",
+      "module": "app.estimator.reference_fetch",
+      "reason": "Existing source diagnostics dependency at FTY-200 baseline."
+    },
+    {
+      "direction": "service_to_estimator_internal",
+      "path": "backend/app/services/sources.py",
+      "module": "app.estimator.search",
+      "reason": "Existing source diagnostics dependency at FTY-200 baseline."
+    },
+    {
+      "direction": "service_to_estimator_internal",
+      "path": "backend/app/services/targets.py",
+      "module": "app.estimator.constants",
+      "reason": "Existing target service calculator-constant dependency at FTY-200 baseline."
+    }
+  ]
+}

@@ -16,7 +16,6 @@
  */
 
 import { act, create as render, type ReactTestRenderer } from "react-test-renderer";
-import { AccessibilityInfo } from "react-native";
 import { ThemeProvider } from "@/theme";
 
 import {
@@ -32,6 +31,7 @@ import {
 } from "@/api/derivedItems";
 import { SavedFoodApiError, type SavedFoodDTO } from "@/api/savedFoods";
 import type { ApiSession } from "@/state/session";
+import { mockReduceMotion } from "@/testUtils/reduceMotion";
 
 // expo-symbols is a native module — replace SymbolView with a View stub that
 // exposes the symbol name via testID (same pattern as AppIcon.test.tsx); the
@@ -225,8 +225,7 @@ function defaultProps(overrides: Partial<CorrectionSheetBaseProps> = {}) {
 
 // Mock AccessibilityInfo for all tests (isReduceMotionEnabled returns false by default).
 beforeEach(() => {
-  jest.spyOn(AccessibilityInfo, "isReduceMotionEnabled").mockResolvedValue(false);
-  jest.spyOn(AccessibilityInfo, "addEventListener").mockReturnValue({ remove: jest.fn() } as never);
+  mockReduceMotion(false);
 });
 
 afterEach(() => {
@@ -912,6 +911,7 @@ describe("accessibility", () => {
     const tree = mount(<CorrectionSheet {...defaultProps()} />);
     expect(hasA11yLabel(tree, "Close sheet")).toBe(true);
   });
+
 });
 
 // ─── Visible / close behaviour ────────────────────────────────────────────────
