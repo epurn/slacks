@@ -23,10 +23,10 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, Uuid
+from sqlalchemy import Float, ForeignKey, Integer, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db import Base
+from app.db import Base, UtcDateTime
 from app.enums import AuthProvider, MetabolicFormula, UnitsPreference
 
 
@@ -42,11 +42,9 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+        UtcDateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )
 
     identities: Mapped[list[AuthIdentity]] = relationship(
@@ -80,11 +78,9 @@ class AuthIdentity(Base):
     # lower-cased by the auth service so lookups are case-insensitive.
     identifier: Mapped[str] = mapped_column(String(320), nullable=False)
     password_hash: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+        UtcDateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )
 
     user: Mapped[User] = relationship(back_populates="identities")
@@ -121,11 +117,9 @@ class UserProfile(Base):
     )
     # IANA timezone name (e.g. "America/New_York"); validated at the DTO boundary.
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+        UtcDateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )
 
     user: Mapped[User] = relationship(back_populates="profile")

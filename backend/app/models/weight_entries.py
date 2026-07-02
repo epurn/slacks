@@ -22,10 +22,10 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, date, datetime
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Uuid
+from sqlalchemy import Date, Float, ForeignKey, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db import Base
+from app.db import Base, UtcDateTime
 from app.models.identity import User
 
 
@@ -53,11 +53,9 @@ class WeightEntry(Base):
     )
     weight_kg: Mapped[float] = mapped_column(Float, nullable=False)
     effective_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+        UtcDateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )
 
     user: Mapped[User] = relationship()
