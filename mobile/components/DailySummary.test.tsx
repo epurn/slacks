@@ -148,6 +148,26 @@ describe("DailySummary — macro tier (MacroTier)", () => {
     expect(labels.some((l) => l.includes("Burned: 300 kcal"))).toBe(true);
   });
 
+  it("omits the macro tier when showMacros is false, keeping the hero", () => {
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(
+        <DailySummary
+          summary={mockSummary({
+            intake: { calories: 1234, protein_g: 80, carbs_g: 150, fat_g: 40 },
+            exercise: { active_calories: 300 },
+          })}
+          showMacros={false}
+        />,
+      );
+    });
+
+    const labels = allA11yLabels(tree!);
+    expect(labels.some((l) => l.includes("Protein:"))).toBe(false);
+    expect(labels.some((l) => l.includes("Burned"))).toBe(false);
+    expect(labels.some((l) => l.includes("1,234 of 1,800 kcal"))).toBe(true);
+  });
+
   it("hides exercise burn line when active_calories is 0", () => {
     let tree: ReactTestRenderer;
     act(() => {

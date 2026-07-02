@@ -19,10 +19,17 @@ export function DailySummary({
   summary,
   error = null,
   onRetry,
+  showMacros = true,
 }: {
   summary?: DailySummaryDTO | null;
   error?: string | null;
   onRetry?: () => void;
+  /**
+   * Today mounts the hero alone above the composer (FTY-178) and keeps the
+   * macro tier in its pre-existing spot below it until FTY-179 reworks that
+   * tier; the historical day view keeps the combined default.
+   */
+  showMacros?: boolean;
 } = {}) {
   const { colors } = useTheme();
   const summaryState = summary ? "ready" : error ? "unavailable" : "loading";
@@ -35,7 +42,7 @@ export function DailySummary({
         hasIntake={summary?.has_intake ?? false}
         summaryState={summaryState}
       />
-      {summary ? (
+      {showMacros && summary ? (
         <MacroTier
           protein_g={summary.intake.protein_g}
           carbs_g={summary.intake.carbs_g}

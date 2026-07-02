@@ -168,6 +168,31 @@ describe("TodayScreen summary states", () => {
     expect(textContent(tree)).not.toContain("0%");
   });
 
+  it("orders the screen hero → composer → macro tier (macro work is FTY-179)", async () => {
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={jest.fn().mockResolvedValue([])}
+        getDailySummary={jest.fn().mockResolvedValue(summary())}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    // findAll walks the rendered tree depth-first, so indices reflect
+    // top-to-bottom screen order.
+    const labels = a11yLabels(tree);
+    const heroIndex = labels.findIndex((label) =>
+      label.includes("1,234 of 2,000 kcal"),
+    );
+    const composerIndex = labels.indexOf("Log food or exercise");
+    const proteinIndex = labels.findIndex((label) => label.startsWith("Protein:"));
+
+    expect(heroIndex).toBeGreaterThanOrEqual(0);
+    expect(composerIndex).toBeGreaterThan(heroIndex);
+    expect(proteinIndex).toBeGreaterThan(composerIndex);
+  });
+
   it("themes the timeline load-error text legibly in light and dark", async () => {
     const message = "Could not load your timeline.";
     const load = jest.fn().mockRejectedValue(new LogEventApiError(500, message));

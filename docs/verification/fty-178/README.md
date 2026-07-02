@@ -6,6 +6,12 @@ not the E2E mock. The six required state screenshots (empty / populated /
 summary-load error × light / dark) are below, plus one bonus shot of the
 error state with a previously loaded summary.
 
+Recaptured 2026-07-02 (round 2) after the review-round-3 scope fix: the
+screen order is now **hero → composer → macro chips → timeline**. The hero
+stays directly above the composer (the Q-A1 default) and the macro tier sits
+back in its pre-FTY-178 position beneath the composer — reworking that tier
+is FTY-179 scope. All seven screenshots show the corrected order.
+
 ## Setup
 
 - Backend: FastAPI API (`uv run uvicorn app.main:app`) + Celery estimation
@@ -19,6 +25,11 @@ error state with a previously loaded summary.
   1,643 kcal); signed in through the app's Connect → Sign in screens.
 - Driven with Maestro 2.6.1; light/dark switched via
   `xcrun simctl ui booted appearance`.
+- Round 2: the populated/error shots reuse the same account and real logged
+  day; the empty-day shots use a second fresh account with the identical
+  profile + goal (same derived 1,643 kcal target), signed in through the
+  app's sign-out → sign-in flow, since the first account's day is genuinely
+  populated now.
 
 ## The populated day is real pipeline output
 
@@ -27,15 +38,18 @@ it (claude_code) and stopped at `needs_clarification` ("How much did you
 have…") → answered `118 grams` through the app's clarify sheet → the
 re-estimation resolved via the real USDA FDC lookup to a 118 g / 408 kcal
 item, and the daily summary flipped to `has_intake: true` with 408 consumed.
-Every state below is the hero rendering genuine backend responses.
+Every state below is the hero rendering genuine backend responses. The
+populated shots also show a second, still-unclarified `one medium banana`
+entry (a real `needs_clarification` row from the same pipeline) beneath the
+resolved one.
 
 ## Screenshot index
 
 | # | Screenshot | State | Evidence |
 |---|------------|-------|----------|
-| 1 | `01-empty-light.png` | Empty day, light | Hero reads `0 / 1,643 kcal · 1,643 to go` — no `0%`, empty track, single "Log your first thing" invite |
+| 1 | `01-empty-light.png` | Empty day, light | Hero reads `0 / 1,643 kcal · 1,643 to go` — no `0%`, empty track, composer directly beneath the hero, zeroed macro chips below the composer, single "Log your first thing" invite |
 | 2 | `02-empty-dark.png` | Empty day, dark | Same copy, dark palette |
-| 3 | `03-populated-light.png` | Populated, light | Hero reads `408 / 1,643 kcal · 25%` with `1,235 to go` context line; resolved entry in timeline |
+| 3 | `03-populated-light.png` | Populated, light | Hero reads `408 / 1,643 kcal · 25%` with `1,235 to go` context line; composer directly beneath the hero; macro chips below the composer; resolved entry in timeline |
 | 4 | `04-populated-dark.png` | Populated, dark | Same copy, dark palette |
 | 5 | `05-error-light.png` | Summary-load error, light | API stopped, app cold-launched: hero shell renders the `Summary unavailable / Try again below` state (never null/blank) with the calm inline error + "Try again" retry; timeline error text in the legible theme token |
 | 6 | `06-error-dark.png` | Summary-load error, dark | Same forced-error state, dark palette |
@@ -56,4 +70,6 @@ The assertions now match the combined accessibility label
 (`0 of 2,000 kcal, 2,000 remaining` / `120 of 2,000 kcal, 6 percent, 1,880
 remaining`) — the same approach `clarify.yaml` step 11 already uses, which
 Android CI matches via `contentDescription`. The updated flow passes
-end-to-end on this iOS simulator (all 13 steps green).
+end-to-end on this iOS simulator (all 13 steps green). Round 2 re-confirmed
+the empty-day label assertion (`.*0 of 1,643 kcal, 1,643 remaining.*`) passes
+on iOS against the real backend after the layout fix.

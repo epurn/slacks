@@ -50,6 +50,7 @@ import { DailySummary } from "@/components/DailySummary";
 import { EntryRow } from "@/components/EntryRow";
 import { ItemTimelineRow } from "@/components/ItemTimelineRow";
 import { LabelCaptureScreen } from "@/components/LabelCaptureScreen";
+import { MacroTier } from "@/components/MacroTier";
 import { OfflineEntryRow } from "@/components/OfflineEntryRow";
 import { TypeaheadSuggestionBar } from "@/components/TypeaheadSuggestionBar";
 import {
@@ -870,7 +871,9 @@ export function TodayScreen({
             online and caught up (FTY-104, harvested onto Today in FTY-147). */}
         <ConnectionBanner state={reachability} queuedCount={queuedCount} />
 
-        <DailySummary summary={summary} error={summaryError} onRetry={refresh} />
+        {/* Hero first, composer directly beneath it (FTY-178 Q-A1 default);
+            the macro tier renders below the composer — reworking it is FTY-179. */}
+        <DailySummary summary={summary} error={summaryError} onRetry={refresh} showMacros={false} />
 
         <View style={styles.composer}>
           <TextInput
@@ -946,6 +949,17 @@ export function TodayScreen({
           <Text style={[styles.error, { color: colors.coral }]} accessibilityRole="alert">
             {submitError}
           </Text>
+        ) : null}
+
+        {/* Macro tier in its pre-FTY-178 spot beneath the composer; the hero
+            above owns the loading/unavailable shells. */}
+        {summary ? (
+          <MacroTier
+            protein_g={summary.intake.protein_g}
+            carbs_g={summary.intake.carbs_g}
+            fat_g={summary.intake.fat_g}
+            active_calories={summary.exercise.active_calories}
+          />
         ) : null}
 
         <Timeline

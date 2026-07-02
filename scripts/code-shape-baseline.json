@@ -62,8 +62,8 @@
     "mobile/components/TodayScreen.tsx": {
       "kind": "source",
       "lane": "mobile",
-      "lines": 1379,
-      "reason": "Existing over-threshold first-party source file at FTY-200 baseline."
+      "lines": 1392,
+      "reason": "Existing over-threshold first-party source file at FTY-200 baseline; +13 in FTY-178 to mount the hero above the composer and the macro tier separately beneath it (macro rework is FTY-179)."
     }
   },
   "boundary_imports": [
