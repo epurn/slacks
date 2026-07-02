@@ -41,8 +41,9 @@ from app.estimator.processing import process_estimation
 from app.llm.providers.fake import FakeProvider
 from app.models.derived import ClarificationAnswer, ClarificationQuestion, DerivedExerciseItem
 from app.models.estimation import EstimationJob, EstimationRun
-from app.models.identity import UserProfile
+from app.models.identity import User, UserProfile
 from app.models.log_events import LogEvent
+from app.services import clarification as clarification_service
 from tests.conftest import RecordingEnqueuer
 
 RAW_TEXT = "went for a run"
@@ -443,6 +444,62 @@ def test_fresh_answer_after_event_moved_on_conflicts(
         headers={"Authorization": auth},
     )
     assert polled.json()["status"] == "processing"
+
+
+def test_sibling_answer_committed_after_read_still_conflicts(
+    client: TestClient, session: Session, enqueuer: RecordingEnqueuer
+) -> None:
+    """The post-lock status check reads committed sibling state, not the
+    session's pre-lock identity-map snapshot (FTY-171 review regression).
+
+    Single-threaded interleaving: this session loads the event while it still
+    awaits clarification, a sibling answer then commits through another session
+    (the API client's) and moves the event on, and only then does this session
+    resolve its own question. Without ``populate_existing`` on the locked
+    re-read, the stale snapshot lets the resolve through — persisting a second
+    answer and enqueueing a second re-estimate; it must instead raise
+    :class:`~app.services.clarification.NotAwaitingClarification` (the 409) and
+    mutate nothing.
+    """
+
+    user_id, auth, event_id, question_ids = _drive_to_needs_clarification(
+        client,
+        session,
+        "answer-stale-read@example.com",
+        questions=[QUESTION, "Road or trail?"],
+    )
+
+    # Warm this session's identity map: the event is loaded while still
+    # awaiting clarification and stays loaded (expire_on_commit=False).
+    stale_event = session.scalars(select(LogEvent).where(LogEvent.id == uuid.UUID(event_id))).one()
+    assert LogEventStatus(stale_event.status) is LogEventStatus.NEEDS_CLARIFICATION
+
+    # The sibling answer lands "concurrently": it commits through the API's own
+    # session, resolving its question and driving the event to processing.
+    sibling = _post_answer(client, user_id, auth, event_id, question_ids[0], ANSWER)
+    assert sibling.status_code == 201
+    enqueue_count = len(enqueuer.calls)
+
+    user = session.get(User, uuid.UUID(user_id))
+    assert user is not None
+    with pytest.raises(clarification_service.NotAwaitingClarification):
+        clarification_service.answer_clarification_question(
+            session,
+            uuid.UUID(user_id),
+            user,
+            uuid.UUID(event_id),
+            uuid.UUID(question_ids[1]),
+            "road",
+        )
+
+    # Nothing persisted or mutated: one answer row, no second re-estimate, and
+    # the event stays where the sibling left it.
+    assert [a.answer_text for a in _answer_rows(session, event_id)] == [ANSWER]
+    assert len(enqueuer.calls) == enqueue_count
+    status = session.scalars(
+        select(LogEvent.status).where(LogEvent.id == uuid.UUID(event_id))
+    ).one()
+    assert LogEventStatus(status) is LogEventStatus.PROCESSING
 
 
 def test_cross_user_and_unknown_access_fails_closed(client: TestClient, session: Session) -> None:

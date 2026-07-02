@@ -190,6 +190,75 @@ def test_answer_round_trip_on_postgres(pg_engine: Engine) -> None:
         assert item.active_calories == 210.0
 
 
+def test_sibling_answer_committed_after_read_conflicts_on_postgres(pg_engine: Engine) -> None:
+    """The locked re-read sees committed sibling state under Postgres, not the
+    session's pre-lock identity-map snapshot (FTY-171 review regression).
+
+    The review repro: a session reads the event while it still awaits
+    clarification, a sibling answer commits through a second session, and the
+    first session then resolves its own question. The ``FOR UPDATE`` re-read
+    must refresh (``populate_existing``) so the guard raises
+    :class:`~app.services.clarification.NotAwaitingClarification` instead of
+    persisting a second answer and re-opening the job for a second re-estimate.
+    """
+
+    upgrade(pg_engine, "head")
+    user_id = _seed_user(pg_engine)
+    event_id = _seed_pending_event(pg_engine, user_id)
+    factory = create_session_factory(pg_engine)
+
+    with factory() as session:
+        process_estimation(
+            session,
+            log_event_id=event_id,
+            user_id=user_id,
+            pipeline=_clarify_pipeline([QUESTION, "Road or trail?"]),
+        )
+
+    with factory() as stale_session, factory() as sibling_session:
+        # This session reads the event while it still awaits clarification …
+        user = stale_session.get(User, user_id)
+        assert user is not None
+        stale_event = stale_session.get(LogEvent, event_id)
+        assert stale_event is not None
+        assert LogEventStatus(stale_event.status) is LogEventStatus.NEEDS_CLARIFICATION
+        question_ids = list(
+            stale_session.scalars(
+                select(ClarificationQuestion.id)
+                .where(ClarificationQuestion.log_event_id == event_id)
+                .order_by(ClarificationQuestion.position.asc())
+            )
+        )
+
+        # … a sibling answer lands concurrently through a second session and
+        # commits the needs_clarification → processing transition …
+        sibling_user = sibling_session.get(User, user_id)
+        assert sibling_user is not None
+        clarification_service.answer_clarification_question(
+            sibling_session, user_id, sibling_user, event_id, question_ids[0], "30 minutes"
+        )
+
+        # … so the stale session's own resolve must conflict and mutate nothing.
+        with pytest.raises(clarification_service.NotAwaitingClarification):
+            clarification_service.answer_clarification_question(
+                stale_session, user_id, user, event_id, question_ids[1], "road"
+            )
+
+    with factory() as session:
+        answers = list(
+            session.scalars(
+                select(ClarificationAnswer.answer_text).where(
+                    ClarificationAnswer.log_event_id == event_id
+                )
+            )
+        )
+        assert answers == ["30 minutes"]
+        job = session.scalars(
+            select(EstimationJob).where(EstimationJob.log_event_id == event_id)
+        ).one()
+        assert EstimationJobStatus(job.status) is EstimationJobStatus.QUEUED
+
+
 def test_fresh_round_replaces_unanswered_rows_on_postgres(pg_engine: Engine) -> None:
     """The NOT IN (subquery) replacement deletes exactly the open rows on Postgres."""
 

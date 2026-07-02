@@ -100,9 +100,16 @@ def answer_clarification_question(
 
     # Serialize concurrent resolves on the same event: the row lock (Postgres;
     # a no-op on SQLite) makes the answered/status checks below read committed
-    # sibling state rather than racing it.
+    # sibling state rather than racing it. populate_existing forces the re-read
+    # to overwrite the copy get_event just put in the identity map — without it
+    # the locked SELECT hands back that object with its pre-lock attributes and
+    # the status guard reads a stale snapshot (a committed sibling answer would
+    # slip past the 409 and enqueue a second re-estimate).
     locked = session.scalars(
-        select(LogEvent).where(LogEvent.id == event.id).with_for_update()
+        select(LogEvent)
+        .where(LogEvent.id == event.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     ).one_or_none()
     if locked is None:
         raise log_event_service.LogEventNotFound("log event not found")
