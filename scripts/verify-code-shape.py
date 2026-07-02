@@ -24,19 +24,16 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASELINE = ROOT / "scripts" / "code-shape-baseline.json"
 
 SOURCE_EXTENSIONS = {".js", ".jsx", ".md", ".py", ".sh", ".ts", ".tsx", ".yaml", ".yml"}
-SOURCE_PREFIXES = (
-    ".github/workflows/",
-    "backend/app/",
-    "backend/tests/",
+SOURCE_ROOTS = (
+    ".github/",
+    "backend/",
     "contracts/",
     "docs/",
     "infra/",
-    "mobile/api/",
-    "mobile/app/",
-    "mobile/components/",
-    "mobile/e2e/",
-    "mobile/theme/",
+    "mobile/",
+    "packages/",
     "scripts/",
+    "searxng/",
 )
 EXCLUDED_PARTS = {
     ".expo",
@@ -159,7 +156,11 @@ def is_first_party_source(path: str) -> bool:
         return False
     if Path(path).suffix not in SOURCE_EXTENSIONS:
         return False
-    return path.startswith(SOURCE_PREFIXES)
+    if path.startswith(SOURCE_ROOTS):
+        return True
+    return "/" not in path and (
+        Path(path).suffix == ".md" or Path(path).name.startswith("docker-compose.")
+    )
 
 
 def classify_lane(path: str) -> str:
@@ -171,9 +172,11 @@ def classify_lane(path: str) -> str:
         return "backend"
     if path.startswith("mobile/"):
         return "mobile"
+    if path.startswith("packages/"):
+        return "packages"
     if path.startswith("contracts/"):
         return "contracts"
-    if path.startswith("infra/") or path.startswith("docker-compose"):
+    if path.startswith("infra/") or path.startswith("searxng/") or path.startswith("docker-compose"):
         return "infra"
     if path.startswith("scripts/") or path.startswith(".github/"):
         return "scripts-ci"
@@ -238,6 +241,8 @@ def imported_modules(node: ast.Import | ast.ImportFrom, internal_modules: set[st
     for alias in node.names:
         if alias.name == "*":
             modules.append(f"{node.module}.*")
+        elif node.module == "app" and alias.name in {"services", "routers"}:
+            modules.append(f"app.{alias.name}")
         elif node.module in {"app.services", "app.routers"}:
             modules.append(f"{node.module}.{alias.name}")
         elif node.module == ESTIMATOR_PUBLIC_FACADE and alias.name in internal_modules:
@@ -449,19 +454,19 @@ def fixture_baseline(
 def run_self_test() -> None:
     with tempfile.TemporaryDirectory(prefix="fatty-code-shape-") as tmp:
         root = Path(tmp)
-        write(root / "mobile/components/Huge.tsx", "\n".join(["export const x = 1;"] * 5) + "\n")
+        write(root / "mobile/state/Huge.ts", "\n".join(["export const x = 1;"] * 5) + "\n")
         write(
             root / "backend/app/estimator/parse.py",
-            "from app.services.log_events import transition_event\n",
+            "from app import services\n",
         )
         boundary = {
             "direction": "estimator_to_backend",
             "path": "backend/app/estimator/parse.py",
-            "module": "app.services.log_events",
+            "module": "app.services",
         }
         baseline = fixture_baseline(
             root,
-            {"mobile/components/Huge.tsx": 5},
+            {"mobile/state/Huge.ts": 5},
             [boundary],
         )
         if validate(root, baseline, report=False):
@@ -469,22 +474,22 @@ def run_self_test() -> None:
 
         baseline_without_large = fixture_baseline(root, {}, [boundary])
         violations = validate(root, baseline_without_large, report=False)
-        if not any("mobile/components/Huge.tsx" in item for item in violations):
+        if not any("mobile/state/Huge.ts" in item for item in violations):
             fail("self-test expected an unbaselined large source file violation")
 
         baseline_without_boundary = fixture_baseline(
             root,
-            {"mobile/components/Huge.tsx": 5},
+            {"mobile/state/Huge.ts": 5},
             [],
         )
         violations = validate(root, baseline_without_boundary, report=False)
         if not any("estimator_to_backend" in item for item in violations):
             fail("self-test expected an unbaselined estimator-to-service import violation")
 
-        write(root / "mobile/components/Huge.tsx", "\n".join(["export const x = 1;"] * 6) + "\n")
+        write(root / "mobile/state/Huge.ts", "\n".join(["export const x = 1;"] * 6) + "\n")
         baseline_with_old_size = fixture_baseline(
             root,
-            {"mobile/components/Huge.tsx": 5},
+            {"mobile/state/Huge.ts": 5},
             [boundary],
         )
         violations = validate(root, baseline_with_old_size, report=False)
