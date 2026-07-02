@@ -137,8 +137,9 @@ class ClarificationQuestion(Base):
     """A question the parse step raised when a log event was too ambiguous.
 
     Persisted unanswered: FTY-042 stores the question and transitions the event to
-    ``needs_clarification``. The answer flow, ``clarification_answers``, and UI are
-    a later story. ``position`` preserves the order the questions were asked.
+    ``needs_clarification``. The user resolves it through the clarification answer
+    endpoint (FTY-171), which persists a :class:`ClarificationAnswer` against this
+    row. ``position`` preserves the order the questions were asked.
     """
 
     __tablename__ = "clarification_questions"
@@ -155,6 +156,49 @@ class ClarificationQuestion(Base):
     )
     question_text: Mapped[str] = mapped_column(Text, nullable=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime, nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+
+class ClarificationAnswer(Base):
+    """The user's answer to one clarification question (FTY-171).
+
+    At most one answer exists per question: the unique ``question_id`` is the
+    **idempotency anchor** for the clarification resolve (``log-events.md`` v4) —
+    a re-sent or concurrent duplicate submit collides on it and converges to the
+    stored row, so an answer can never resolve the same question twice or spawn a
+    second re-estimate. ``log_event_id`` / ``user_id`` carry object-level
+    ownership at the persistence boundary; all three foreign keys cascade so
+    retention follows the owning question, event, and account.
+
+    ``answer_text`` is sensitive user data (tied to the user's log, like
+    ``raw_text``): stored via parameterized inserts, passed to the re-estimate as
+    structured input, never executed or interpreted, never logged, and never
+    copied into estimation-run ``trace``/``error``.
+    """
+
+    __tablename__ = "clarification_answers"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    question_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("clarification_questions.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    log_event_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("log_events.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    answer_text: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         UtcDateTime, nullable=False, default=_utcnow, onupdate=_utcnow

@@ -28,6 +28,11 @@ MAX_RAW_TEXT_LENGTH = 2000
 #: well under this; the cap bounds the stored, unparsed token.
 MAX_IDEMPOTENCY_KEY_LENGTH = 200
 
+#: Maximum accepted length of a clarification answer (FTY-170/171). An answer is
+#: a short missing detail ("4", "2%", "1 tbsp"); the cap bounds the stored,
+#: uninterpreted text.
+MAX_ANSWER_LENGTH = 300
+
 
 class LogEventCreateRequest(BaseModel):
     """Request body for ``POST /api/users/{user_id}/log-events``.
@@ -83,23 +88,56 @@ class LogEventDTO(BaseModel):
 
 
 class ClarificationQuestionDTO(BaseModel):
-    """A single persisted clarification question (FTY-152).
+    """A single persisted clarification question (FTY-152, FTY-170/171).
 
-    v1 surfaces the question ``text`` only. The estimator does not produce
-    quick-pick options today, so the client answers via free-text; the shape is
-    forward-compatible — an additive ``options`` array can be added later without
-    breaking this contract.
+    Carries the stored row's stable ``id`` (the key an answer submission
+    references), the question ``text``, and the quick-pick ``options`` the
+    clarify sheet renders as one-tap chips. Options are display candidates only —
+    never an enum the server validates an answer against; free text is always an
+    allowed answer. The list may be empty (the client then shows the free-text
+    affordance only); it stays empty until the estimator persists options
+    (``parse-candidates.md`` v2, produced by FTY-172).
     """
 
+    id: uuid.UUID
     text: str
+    options: list[str] = Field(default_factory=list)
 
 
 class ClarificationResponse(BaseModel):
-    """Response body for the owner-scoped clarification read (FTY-152).
+    """Response body for the owner-scoped clarification read (FTY-152, FTY-170).
 
-    Carries the event's persisted clarification questions ordered by ``position``.
-    An event with no clarification rows (any non-``needs_clarification`` event, or
-    one with none persisted) yields an empty list — there is no status oracle.
+    Carries a ``needs_clarification`` event's **unanswered** clarification
+    questions ordered by ``position``. The read is status-gated: an owned event
+    in any other status — or one with no unanswered rows — yields an empty list,
+    and the two cases are indistinguishable (no status oracle).
     """
 
     questions: list[ClarificationQuestionDTO]
+
+
+class ClarificationAnswerRequest(BaseModel):
+    """Request body for ``POST .../log-events/{event_id}/clarification/answers``.
+
+    ``question_id`` references one of the event's persisted clarification
+    questions (from the clarification read). ``answer`` is the user's answer as
+    opaque text — a tapped quick-pick option's value or free text. It is
+    untrusted user input validated as bounded **data** at this single trust
+    boundary: trimmed, non-empty after trimming (an empty/whitespace answer is
+    rejected ``422`` before any work — finding A5), and at most
+    :data:`MAX_ANSWER_LENGTH` characters. It is never validated against the
+    question's options and never interpreted.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    question_id: uuid.UUID
+    answer: str = Field(min_length=1, max_length=MAX_ANSWER_LENGTH)
+
+    @field_validator("answer")
+    @classmethod
+    def _strip_answer_non_empty(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("answer must not be empty or whitespace only")
+        return stripped
