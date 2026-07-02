@@ -92,7 +92,8 @@ Low confidence is reserved for input that is *genuinely* indeterminate, not
 merely unstated. FTY-167 extended this into the deterministic calculator
 layers for detail-rich casual entries — counts, ranges, servings, distances,
 step counts, and game counts all route to estimation instead of clarification
-when the underlying detail signal is present (`app/estimator/detail_signals.py`;
+when the underlying detail signal is present
+(`backend/app/estimator/detail_signals.py`;
 see `docs/contracts/parse-candidates.md`, "Detail-signal routing override").
 This is prompting and deterministic routing, not a change to the confidence
 signal itself, and it is cross-cutting: it works whether the ultimate operating
@@ -133,7 +134,7 @@ verbalized confidence, or verbalized confidence alone if Layer B does not
 outperform it) using risk-coverage curves over the synthetic and naturalistic
 sets, in the spirit of Guo et al. (ICML 2017, temperature scaling), Yadkori et
 al. (2024, conformal abstention), and Li et al. (ICLR 2024, early-stopping
-calibration). This replaces the hardcoded `0.45` / `0.5` constants with a
+self-consistency). This replaces the hardcoded `0.45` / `0.5` constants with a
 calibrated policy backed by measured accuracy at that operating point, rather
 than a guess.
 
@@ -152,10 +153,10 @@ principles:
   sees. The clarify gate's job is to catch cases that are *genuinely*
   indeterminate, not to hide behind caution.
 
-Zhang et al. (ICLR 2025) further note that instruction-tuned models rarely
-volunteer a clarifying question on their own even when one is warranted —
-reinforcing that the routing decision belongs in engineered policy (this
-architecture), not left to the model's own judgment about when to ask.
+Zhang & Choi (Findings of NAACL 2025) further note that instruction-tuned
+models rarely volunteer a clarifying question on their own even when one is
+warranted — reinforcing that the routing decision belongs in engineered policy
+(this architecture), not left to the model's own judgment about when to ask.
 
 ## Consequences
 
@@ -196,7 +197,7 @@ architecture), not left to the model's own judgment about when to ask.
    ICML 2017.
 7. Yadkori, Kuzborskij, György & Szepesvári, "To Believe or Not to Believe
    Your LLM," 2024.
-8. Li et al., "Inference-Time Intervention" / early-stopping calibration line,
-   ICLR 2024.
-9. Zhang et al., "Clarify When Necessary: Resolving Ambiguity Through
-   Interaction with LMs," ICLR 2025.
+8. Li et al., "Escape Sky-high Cost: Early-Stopping Self-Consistency for
+   Multi-Step Reasoning," ICLR 2024, arXiv:2401.10480.
+9. Zhang & Choi, "Clarify When Necessary: Resolving Ambiguity Through
+   Interaction with LMs," Findings of NAACL 2025, arXiv:2311.09469.
