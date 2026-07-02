@@ -268,6 +268,7 @@ function makeStyles(colors: ColorPalette) {
       marginBottom: -6,
     },
     failedAction: {
+      minWidth: 44,
       minHeight: 44,
       justifyContent: "center",
     },
