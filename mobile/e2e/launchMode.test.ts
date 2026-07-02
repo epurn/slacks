@@ -34,6 +34,7 @@ import {
   E2E_CLARIFY_QUESTION_ID,
   E2E_CLARIFY_OPTIONS,
   E2E_CLARIFY_EVENT,
+  E2E_CLARIFY_RESOLVED_EVENT,
   E2E_RESOLVED_EVENT,
   E2E_RESOLVED_EVENT_TIME_LABEL,
   E2E_FAILED_RAW_TEXT,
@@ -323,7 +324,7 @@ describe('FTY-162 clarify-flow: stateful mock phase transitions', () => {
     expect(resolved.raw_text).toBe('coffee');
   });
 
-  it('phase 2 (after answer) → GET /log-events returns the resolved event list', async () => {
+  it('phase 2 (after answer) → GET /log-events returns the SAME event, completed', async () => {
     const mockFetch = createE2EMockFetch();
     await createLogEvent(apiSession, 'coffee', undefined, mockFetch); // phase 0 → 1
     await answerClarification(
@@ -334,9 +335,15 @@ describe('FTY-162 clarify-flow: stateful mock phase transitions', () => {
       mockFetch,
     ); // phase 1 → 2
     const events = await listTodayLogEvents(apiSession, '2026-01-01', mockFetch);
+    // One row: the clarify event itself, transitioned to completed. Same id (no
+    // duplicate — A5), same raw phrase (never mutated by an answer — A3), same
+    // created_at. This is what makes clarify.yaml's post-refresh assertions a
+    // genuine end-to-end proof of same-entry resolution.
     expect(events).toHaveLength(1);
-    expect(events[0]?.id).toBe(E2E_RESOLVED_EVENT.id);
+    expect(events[0]?.id).toBe(E2E_CLARIFY_EVENT_ID);
     expect(events[0]?.status).toBe('completed');
+    expect(events[0]?.raw_text).toBe(E2E_CLARIFY_EVENT.raw_text);
+    expect(events[0]?.created_at).toBe(E2E_CLARIFY_EVENT.created_at);
   });
 
   it('phase 2 (after answer) → GET /daily-summary returns non-zero intake', async () => {
@@ -357,11 +364,17 @@ describe('FTY-162 clarify-flow: stateful mock phase transitions', () => {
   it('smoke flow: a second POST /log-events also advances to the resolved phase', async () => {
     // The FTY-178 smoke flow reaches phase 2 via a plain re-submission (no
     // clarify sheet), so the second-POST path must keep advancing the machine.
+    // A re-submission genuinely creates a second event server-side, so this
+    // route — and only this route — serves the distinct-id resolved fixture.
     const mockFetch = createE2EMockFetch();
     await createLogEvent(apiSession, 'coffee', undefined, mockFetch); // phase 0 → 1
     const resolved = await createLogEvent(apiSession, 'coffee large', undefined, mockFetch); // phase 1 → 2
     expect(resolved.id).toBe(E2E_RESOLVED_EVENT.id);
+    expect(resolved.id).not.toBe(E2E_CLARIFY_EVENT_ID);
     expect(resolved.status).toBe('completed');
+    const events = await listTodayLogEvents(apiSession, '2026-01-01', mockFetch);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.id).toBe(E2E_RESOLVED_EVENT.id);
     const summary = await getDailySummary(apiSession, '2026-01-01', mockFetch);
     expect(summary.intake.calories).toBe(120);
   });
@@ -372,13 +385,13 @@ describe('FTY-162 clarify-flow: stateful mock phase transitions', () => {
     expect(events).toHaveLength(0);
   });
 
-  // Drift guard for the FTY-174 Maestro assertion: the resolved fixture is
-  // computed as today-at-11:14 *device local*, so the timeline's cluster label
-  // must format to the exact string clarify.yaml asserts on-device ("11:14 AM"),
-  // in whatever timezone the test host runs. If someone moves the fixture
-  // instant, this fails here before the e2e job does.
+  // Drift guard for the FTY-174 Maestro assertion: the clarify flow's resolved
+  // fixture is computed as today-at-11:14 *device local*, so the timeline's
+  // cluster label must format to the exact string clarify.yaml asserts
+  // on-device ("11:14 AM"), in whatever timezone the test host runs. If someone
+  // moves the fixture instant, this fails here before the e2e job does.
   it('resolved fixture renders as the clarify.yaml time label in the local zone', () => {
-    expect(formatWallClockTime(E2E_RESOLVED_EVENT.created_at)).toBe(
+    expect(formatWallClockTime(E2E_CLARIFY_RESOLVED_EVENT.created_at)).toBe(
       E2E_RESOLVED_EVENT_TIME_LABEL,
     );
   });

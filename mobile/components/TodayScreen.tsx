@@ -640,19 +640,29 @@ export function TodayScreen({
       if (!apiSession) return;
       const trimmed = answer.trim();
       if (!trimmed) return;
-      if (!questionId) {
-        // No loaded question to answer against (read still pending or failed).
-        // Surface honestly rather than dead-ending; the row stays actionable.
-        setSubmitError(
-          "We couldn't load the question. Reopen the entry and try again.",
-        );
-        return;
-      }
       try {
+        // The sheet's opening read may still be in flight (or have failed) when
+        // the user submits the free-text fallback, so the loading/error states
+        // stay genuinely non-blocking: re-read the question id at submit time
+        // and answer against it — the answer is never silently dropped.
+        let resolvedQuestionId = questionId;
+        if (!resolvedQuestionId) {
+          const clarification = await getClarification(apiSession, eventId);
+          resolvedQuestionId = clarification.questions[0]?.id ?? null;
+        }
+        if (!resolvedQuestionId) {
+          // The event has no persisted question to answer against (empty
+          // payload). Surface honestly rather than dead-ending; the row stays
+          // as needs-a-detail and remains tappable.
+          setSubmitError(
+            "We couldn't load the question. Reopen the entry and try again.",
+          );
+          return;
+        }
         const updated = await answerClarification(
           apiSession,
           eventId,
-          questionId,
+          resolvedQuestionId,
           trimmed,
         );
         // Same event, updated in place (needs_clarification → processing). No
@@ -664,7 +674,13 @@ export function TodayScreen({
         setSubmitError(messageFor(error, "save"));
       }
     },
-    [apiSession, answerClarification, closeItemSheet, setSubmitError],
+    [
+      apiSession,
+      answerClarification,
+      getClarification,
+      closeItemSheet,
+      setSubmitError,
+    ],
   );
 
   // Retry a failed parse as a fresh attempt (FTY-176). There is no server-side

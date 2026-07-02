@@ -906,6 +906,129 @@ describe("TodayScreen needs-clarification entries", () => {
     expect(textContent(tree)).toContain("We need a detail");
     expect(hasA11yLabel(tree, "Your answer")).toBe(true);
   });
+
+  it("re-reads the question id at submit time so a fallback answer resolves after a failed read", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: "a", raw_text: "milk", status: "needs_clarification" }),
+      ]);
+    const answerClarification = jest
+      .fn()
+      .mockResolvedValue(
+        event({ id: "a", raw_text: "milk", status: "processing" }),
+      );
+    // The sheet-opening read fails (transient), so no question id is stashed on
+    // the sheet target; the submit-time re-read succeeds.
+    const getClarification = jest
+      .fn()
+      .mockRejectedValueOnce(new LogEventApiError(404, "We couldn't find your log."))
+      .mockResolvedValue({
+        questions: [{ id: "q1", text: "What kind of milk?", options: [] }],
+      });
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        answerClarification={answerClarification}
+        getClarification={getClarification}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    await act(async () => {
+      press(tree, "milk, needs a detail, uncounted");
+    });
+    typeInto(tree, "Your answer", "Oat milk");
+    await act(async () => {
+      press(tree, "Submit answer");
+    });
+
+    // The free-text fallback genuinely submits — never dropped on the floor: the
+    // question id is re-read at submit time and the answer travels the round-trip.
+    expect(getClarification).toHaveBeenCalledTimes(2);
+    expect(answerClarification).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+      "a",
+      "q1",
+      "Oat milk",
+    );
+    expect(hasA11yLabel(tree, "milk, needs a detail, uncounted")).toBe(false);
+  });
+
+  it("surfaces the failure and keeps the row actionable when the submit-time re-read also fails", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: "a", raw_text: "milk", status: "needs_clarification" }),
+      ]);
+    const answerClarification = jest.fn();
+    const getClarification = jest
+      .fn()
+      .mockRejectedValue(new LogEventApiError(404, "We couldn't find your log."));
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        answerClarification={answerClarification}
+        getClarification={getClarification}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    await act(async () => {
+      press(tree, "milk, needs a detail, uncounted");
+    });
+    typeInto(tree, "Your answer", "Oat milk");
+    await act(async () => {
+      press(tree, "Submit answer");
+    });
+
+    // Both reads failed: the failure is surfaced, nothing is submitted against a
+    // fabricated id, and the row stays needs-a-detail — tappable, never a dead end.
+    expect(answerClarification).not.toHaveBeenCalled();
+    expect(textContent(tree)).toContain("We couldn't find your log.");
+    expect(hasA11yLabel(tree, "milk, needs a detail, uncounted")).toBe(true);
+  });
+
+  it("surfaces an honest error when the event has no persisted question to answer", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: "a", raw_text: "milk", status: "needs_clarification" }),
+      ]);
+    const answerClarification = jest.fn();
+    // Both the opening read and the submit-time re-read return an empty payload.
+    const getClarification = emptyClarification();
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        answerClarification={answerClarification}
+        getClarification={getClarification}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    await act(async () => {
+      press(tree, "milk, needs a detail, uncounted");
+    });
+    typeInto(tree, "Your answer", "Oat milk");
+    await act(async () => {
+      press(tree, "Submit answer");
+    });
+
+    // No question exists server-side, so there is nothing to answer against:
+    // say so plainly and leave the row actionable rather than dead-ending.
+    expect(answerClarification).not.toHaveBeenCalled();
+    expect(textContent(tree)).toContain(
+      "We couldn't load the question. Reopen the entry and try again.",
+    );
+    expect(hasA11yLabel(tree, "milk, needs a detail, uncounted")).toBe(true);
+  });
 });
 
 describe("TodayScreen failed-parse rows (FTY-176)", () => {

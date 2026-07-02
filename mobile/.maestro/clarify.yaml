@@ -13,7 +13,11 @@
 # FTY-175 upgrade: the sheet now renders Fatty's real question + candidate
 # quick-pick chips (FTY-170 payload), and a chip tap resolves via the first-class
 # answer round-trip (POST /clarification/answers) — not a duplicate log create.
-# This drives the chip path to completion end-to-end.
+# This drives the chip path to completion end-to-end. The post-answer refresh
+# serves E2E_CLARIFY_RESOLVED_EVENT — the SAME event id, raw phrase, and
+# created_at as the needs_clarification fixture, now `completed` — so the
+# post-refresh assertions (steps 12–14) genuinely prove same-entry, no-duplicate
+# resolution, not just that "some" completed entry counts.
 #
 # Load-bearing assertion (step 6): the seeded question text must be visible in
 # the sheet. If the sheet opens data-starved (no question), ClarifyMode shows
@@ -104,14 +108,29 @@ appId: com.fatty
       text: "coffee, needs a detail, uncounted"
     timeout: 10000
 
-# Step 11: Tap Refresh to load the phase-2 fixture: resolved event list and
+# Step 11: Tap Refresh to load the phase-2 fixture: the resolved event list —
+#          the SAME event, now completed (E2E_CLARIFY_RESOLVED_EVENT) — and the
 #          non-zero daily summary. (The manual refresh is needed because the
 #          re-estimated event completes synchronously in the mock and there is
 #          no polling window before the test asserts counts.)
 - tapOn:
     text: "Refresh"
 
-# Step 12: Assert the entry counts — the CalorieHero accessibility label
+# Step 12: Assert the resolved entry is still on the timeline as the untouched
+#          raw phrase ("coffee") with the needs-a-detail treatment gone. The
+#          refreshed day-list carries exactly one event — the same id as the
+#          needs_clarification fixture — so a duplicate row could only come from
+#          a client-side create, which the next assertion's absence of a second
+#          needs-detail/pending row (plus the same-id fixture, proven in
+#          launchMode.test.ts) rules out.
+- extendedWaitUntil:
+    visible:
+      text: "coffee"
+    timeout: 10000
+- assertNotVisible:
+    text: "coffee, needs a detail, uncounted"
+
+# Step 13: Assert the entry counts — the CalorieHero accessibility label
 #          includes the consumed kcal from the E2E_RESOLVED_SUMMARY fixture
 #          (120 kcal of 2,000 kcal). Maestro text matching is an anchored
 #          regex over the whole node text, and the full hero label carries a
@@ -123,9 +142,10 @@ appId: com.fatty
       text: ".*120 of 2,000 kcal.*"
     timeout: 10000
 
-# Step 13: FTY-174 Hermes meridiem regression guard. The resolved fixture
+# Step 14: FTY-174 Hermes meridiem regression guard. The resolved fixture
 #          event is pinned to 11:14 AM in the device's own timezone
-#          (E2E_RESOLVED_EVENT in e2e/fixtures.ts), so the timeline's cluster
+#          (E2E_CLARIFY_RESOLVED_EVENT in e2e/fixtures.ts, inheriting the
+#          clarify event's immutable created_at), so the timeline's cluster
 #          time label must render exactly "11:14 AM". This runs on the real
 #          Hermes engine — the environment where the old
 #          toLocaleTimeString(..., { hour12: true }) path rendered the wrong
