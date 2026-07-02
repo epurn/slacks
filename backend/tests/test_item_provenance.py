@@ -219,6 +219,13 @@ def test_value_override_appends_single_user_edit_row_without_touching_amount(
             "official_source:https://nutrition.example.com/menu/item",
             "nutrition.example.com",
         ),
+        (
+            SourceType.REFERENCE_SOURCE,
+            "reference_source:https://en.wikipedia.org/wiki/Banana",
+            "en.wikipedia.org",
+        ),
+        # Unparsable ref URL falls back to the generic per-tier label.
+        (SourceType.REFERENCE_SOURCE, "reference_source:not a url", "Reference source"),
         (SourceType.MODEL_PRIOR, "model_prior", "Rough estimate"),
     ],
 )
