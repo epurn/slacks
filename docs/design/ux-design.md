@@ -100,9 +100,12 @@ The status-first home.
 - **Hero: calories consumed vs. target only** — a bold number plus a slim linear
   bar ("1,240 / 2,000 kcal · 62%"). One focus. The hero leads the screen
   (status-first), with the composer directly beneath it (§3; FTY-178).
-- **Secondary tier (below the composer):** macro chips (P/C/F), then a distinct
-  "🔥 burned" exercise line. Exercise is **not** in the hero and **not** a
-  fourth macro.
+- **Secondary tier (below the composer):** compact macro chips (P/C/F) that read
+  consumed-vs-target ("P 80/155g", sourced from the daily-summary target
+  read-model; consumed-only when no target is set), then a distinct exercise burn
+  line with an icon-system flame glyph (SF Symbol, never an emoji). Exercise is
+  **not** in the hero and **not** a fourth macro, and its figure is never folded
+  into the food/calorie math.
 - **Timeline:** items-forward, grouped into **time clusters** (entries within a
   ~10–15 minute grace window combine, text-message-chain style). Each item shows
   name · kcal · an **always-on source icon**. The raw phrase appears only on tap

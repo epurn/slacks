@@ -42,6 +42,14 @@ appId: com.fatty
 - assertVisible:
     text: ".*0 of 2,000 kcal, 2,000 remaining.*"
 
+# Secondary tier (FTY-179): macro chips read consumed-vs-target from the
+# daily-summary target read-model. On the empty E2E day protein is 0 of its 150g
+# target; each chip is accessible={true}, so Maestro sees the collapsed label.
+# (The burn line only renders when active_calories > 0 — the E2E day has none, so
+# it correctly stays absent and there is nothing to assert for it here.)
+- assertVisible:
+    text: ".*Protein 0 of 150 grams.*"
+
 # Submit once to advance the E2E mock into its needs-detail phase, then submit a
 # concrete follow-up. The second POST resolves the synthetic entry; Refresh
 # reloads the resolved event list and non-zero daily summary.
@@ -65,3 +73,7 @@ appId: com.fatty
     visible:
       text: ".*120 of 2,000 kcal, 6 percent, 1,880 remaining.*"
     timeout: 10000
+# The resolved entry moves protein to 1g against its 150g target — the chip
+# tracks the same non-zero daily summary the hero does.
+- assertVisible:
+    text: ".*Protein 1 of 150 grams.*"

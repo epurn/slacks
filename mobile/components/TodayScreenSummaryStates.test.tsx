@@ -186,7 +186,7 @@ describe("TodayScreen summary states", () => {
       label.includes("1,234 of 2,000 kcal"),
     );
     const composerIndex = labels.indexOf("Log food or exercise");
-    const proteinIndex = labels.findIndex((label) => label.startsWith("Protein:"));
+    const proteinIndex = labels.findIndex((label) => label.startsWith("Protein "));
 
     expect(heroIndex).toBeGreaterThanOrEqual(0);
     expect(composerIndex).toBeGreaterThan(heroIndex);
