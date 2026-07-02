@@ -305,14 +305,13 @@ quick-pick values:
   can render one-tap chips; the server never validates an answer against
   them. **Free-text is always an allowed answer**, whether or not options are
   present.
-- **When present, options are up to 5 short candidates** (2–5 by producer
-  guidance — the parse schema enforces only the hard caps, so a persisted
-  list outside that guidance is served as-is), each length-bounded — the
+- **When present, options are up to 5 short candidates** (2–5 for model-raised
+  parse clarifications; deterministic backend-raised questions may have none),
+  each length-bounded — the
   bounds and the persistence shape are the parse contract's
   (`parse-candidates.md` v2, `ClarificationQuestion`). The list MAY be empty;
   the client then shows the free-text affordance only (e.g. the deterministic
-  plausibility gate's targeted question and the persisted default question
-  carry no options).
+  plausibility/food/exercise/label gates' targeted questions carry no options).
 
 The read is **status-gated, not row-driven**: questions are served only while
 the event is in `needs_clarification` — the only status in which a fresh
@@ -629,6 +628,11 @@ curl -sX POST :8000/api/users/<uid>/log-events/<event_id>/clarification/answers 
   `0015` and rolls back cleanly (`alembic downgrade 0015`), verified by an
   apply/rollback test and exercised against Postgres by the FTY-143 migration
   guard.
+- The `0017` migration (FTY-172) is **additive**: it adds the not-null
+  `options` JSON column to `clarification_questions`, backfilled/defaulted to
+  `[]` for existing deterministic questions. It applies on top of `0016` and
+  rolls back cleanly (`alembic downgrade 0016`), verified by an
+  apply/rollback test.
 - **FTY-170 (breaking, pre-v1, no shim).** The clarification read's
   per-question shape changes from `{ text }` to `{ id, text, options }`, the
   read is scoped to unanswered questions, and the clarification answer
@@ -637,6 +641,6 @@ curl -sX POST :8000/api/users/<uid>/log-events/<event_id>/clarification/answers 
   the raw phrase and duplicated entries (audit findings A3/A5). No back-compat
   shim is kept: pre-v1, the old shape has no consumers to preserve. Landing
   order for implementers: the `options` persistence and produce side is the
-  parse contract's (`parse-candidates.md` v2, migration with FTY-172); the
+  parse contract's (`parse-candidates.md` v2, `0017` with FTY-172); the
   `clarification_answers` table, the new read shape, and the answer round-trip
   are FTY-171; the mobile clarify sheet (FTY-153) consumes both new shapes.

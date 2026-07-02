@@ -498,4 +498,6 @@ def _question(item_name: str, mode: str) -> str:
 
     if mode == "unit":
         return f"What unit were you using for {item_name}?"
+    if mode == "count":
+        return f"How many {item_name} did you have?"
     return f"How much {item_name} did you have?"

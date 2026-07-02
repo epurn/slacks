@@ -56,7 +56,13 @@ def _pipeline(responses: list[dict[str, object] | LLMError]) -> Pipeline:
     return Pipeline([ParseStep(provider), StubCalculateStep()])
 
 
-def _seed_event(client: TestClient, email: str, raw_text: str) -> tuple[uuid.UUID, uuid.UUID]:
+def _clarify(text: str, options: list[str]) -> dict[str, object]:
+    return {"text": text, "options": options}
+
+
+def _seed_event_with_auth(
+    client: TestClient, email: str, raw_text: str
+) -> tuple[uuid.UUID, uuid.UUID, str]:
     reg = client.post("/api/auth/register", json={"email": email, "password": "a-good-password"})
     assert reg.status_code == 201
     user_id = uuid.UUID(reg.json()["user"]["id"])
@@ -67,7 +73,12 @@ def _seed_event(client: TestClient, email: str, raw_text: str) -> tuple[uuid.UUI
         json={"raw_text": raw_text},
     )
     assert created.status_code == 201
-    return user_id, uuid.UUID(created.json()["id"])
+    return user_id, uuid.UUID(created.json()["id"]), auth
+
+
+def _seed_event(client: TestClient, email: str, raw_text: str) -> tuple[uuid.UUID, uuid.UUID]:
+    user_id, event_id, _auth = _seed_event_with_auth(client, email, raw_text)
+    return user_id, event_id
 
 
 def _food(session: Session, event_id: uuid.UUID) -> list[DerivedFoodItem]:
@@ -130,13 +141,18 @@ def test_valid_input_persists_unresolved_candidates_and_completes(
 def test_ambiguous_input_persists_questions_and_needs_clarification(
     client: TestClient, session: Session
 ) -> None:
-    user_id, event_id = _seed_event(client, "parse-clarify@example.com", "had some rice")
+    user_id, event_id, auth = _seed_event_with_auth(
+        client, "parse-clarify@example.com", "had some rice"
+    )
     pipeline = _pipeline(
         [
             {
                 "disposition": "needs_clarification",
                 "confidence": 0.7,
-                "clarification_questions": ["How much rice?", "Cooked or raw?"],
+                "clarification_questions": [
+                    _clarify("How much rice?", ["1/2 cup", "1 cup", "2 cups"]),
+                    _clarify("Cooked or raw?", ["Cooked", "Raw"]),
+                ],
             }
         ]
     )
@@ -147,11 +163,176 @@ def test_ambiguous_input_persists_questions_and_needs_clarification(
     assert result.event_status is LogEventStatus.NEEDS_CLARIFICATION
     questions = _questions(session, event_id)
     assert [q.question_text for q in questions] == ["How much rice?", "Cooked or raw?"]
+    assert [q.options for q in questions] == [["1/2 cup", "1 cup", "2 cups"], ["Cooked", "Raw"]]
     assert [q.position for q in questions] == [0, 1]
     assert all(q.user_id == user_id for q in questions)
+    read = client.get(
+        f"/api/users/{user_id}/log-events/{event_id}/clarification",
+        headers={"Authorization": auth},
+    )
+    assert read.status_code == 200
+    assert read.json() == {
+        "questions": [
+            {
+                "id": str(questions[0].id),
+                "text": "How much rice?",
+                "options": ["1/2 cup", "1 cup", "2 cups"],
+            },
+            {"id": str(questions[1].id), "text": "Cooked or raw?", "options": ["Cooked", "Raw"]},
+        ]
+    }
     # No candidates were committed on the ambiguous path.
     assert _food(session, event_id) == []
     assert _exercise(session, event_id) == []
+
+
+@pytest.mark.parametrize(
+    ("email", "raw_text", "question", "options"),
+    [
+        (
+            "parse-clarify-milk@example.com",
+            "milk in my coffee",
+            "What kind of milk was in your coffee?",
+            ["Whole", "2%", "Skim", "Oat", "Almond"],
+        ),
+        (
+            "parse-clarify-spread@example.com",
+            "crackers and peanut butter",
+            "How much peanut butter did you have?",
+            ["1 tsp", "1 tbsp", "2 tbsp"],
+        ),
+        (
+            "parse-clarify-sandwich@example.com",
+            "sandwich",
+            "What kind of sandwich was it?",
+            ["Turkey", "Ham", "PB&J", "Tuna", "Veggie"],
+        ),
+    ],
+)
+def test_representative_gated_entries_persist_specific_question_options_and_read_shape(
+    client: TestClient,
+    session: Session,
+    email: str,
+    raw_text: str,
+    question: str,
+    options: list[str],
+) -> None:
+    user_id, event_id, auth = _seed_event_with_auth(client, email, raw_text)
+    pipeline = _pipeline(
+        [
+            {
+                "disposition": "needs_clarification",
+                "confidence": 0.3,
+                "clarification_questions": [_clarify(question, options)],
+            }
+        ]
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.job_status is EstimationJobStatus.NEEDS_CLARIFICATION
+    assert result.event_status is LogEventStatus.NEEDS_CLARIFICATION
+    questions = _questions(session, event_id)
+    assert [(q.question_text, q.options) for q in questions] == [(question, options)]
+    assert 2 <= len(questions[0].options) <= 5
+    assert all(option for option in questions[0].options)
+
+    read = client.get(
+        f"/api/users/{user_id}/log-events/{event_id}/clarification",
+        headers={"Authorization": auth},
+    )
+
+    assert read.status_code == 200
+    assert read.json() == {
+        "questions": [{"id": str(questions[0].id), "text": question, "options": options}]
+    }
+
+
+def test_low_confidence_parsed_entry_persists_backend_clarification_options(
+    client: TestClient, session: Session
+) -> None:
+    user_id, event_id, auth = _seed_event_with_auth(
+        client, "parse-low-confidence-clarify@example.com", "some rice"
+    )
+    pipeline = _pipeline(
+        [
+            {
+                "disposition": "parsed",
+                "confidence": 0.1,
+                "items": [{"type": "food", "name": "rice", "quantity_text": "some"}],
+            }
+        ]
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.job_status is EstimationJobStatus.NEEDS_CLARIFICATION
+    assert result.event_status is LogEventStatus.NEEDS_CLARIFICATION
+    assert _food(session, event_id) == []
+    assert _exercise(session, event_id) == []
+    questions = _questions(session, event_id)
+    assert [(q.question_text, q.options) for q in questions] == [
+        ("How much rice did you have?", ["1/2 cup", "1 cup", "2 cups"])
+    ]
+
+    read = client.get(
+        f"/api/users/{user_id}/log-events/{event_id}/clarification",
+        headers={"Authorization": auth},
+    )
+
+    assert read.status_code == 200
+    assert read.json() == {
+        "questions": [
+            {
+                "id": str(questions[0].id),
+                "text": "How much rice did you have?",
+                "options": ["1/2 cup", "1 cup", "2 cups"],
+            }
+        ]
+    }
+
+
+def test_implausible_candidate_persists_backend_clarification_options(
+    client: TestClient, session: Session
+) -> None:
+    user_id, event_id, auth = _seed_event_with_auth(
+        client, "parse-implausible-clarify@example.com", "50 eggs"
+    )
+    pipeline = _pipeline(
+        [
+            {
+                "disposition": "parsed",
+                "confidence": 0.9,
+                "items": [{"type": "food", "name": "eggs", "quantity_text": "50", "amount": 50.0}],
+            }
+        ]
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.job_status is EstimationJobStatus.NEEDS_CLARIFICATION
+    assert result.event_status is LogEventStatus.NEEDS_CLARIFICATION
+    assert _food(session, event_id) == []
+    questions = _questions(session, event_id)
+    assert [(q.question_text, q.options) for q in questions] == [
+        ("How many eggs did you have?", ["1", "2", "3"])
+    ]
+
+    read = client.get(
+        f"/api/users/{user_id}/log-events/{event_id}/clarification",
+        headers={"Authorization": auth},
+    )
+
+    assert read.status_code == 200
+    assert read.json() == {
+        "questions": [
+            {
+                "id": str(questions[0].id),
+                "text": "How many eggs did you have?",
+                "options": ["1", "2", "3"],
+            }
+        ]
+    }
 
 
 def test_unparseable_input_fails_closed_terminally(client: TestClient, session: Session) -> None:

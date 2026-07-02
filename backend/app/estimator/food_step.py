@@ -74,6 +74,7 @@ from app.estimator.off import (
 )
 from app.estimator.pipeline import (
     CandidateDraft,
+    ClarificationDraft,
     EstimationContext,
     NeedsClarification,
     ResolvedFoodItem,
@@ -300,7 +301,7 @@ class FoodResolveStep:
                 return
             # No match, invalid barcode, or no usable energy value: route
             # deterministically. Never finalized from a guess while OFF is available.
-            context.clarification_questions = [BARCODE_UNKNOWN_QUESTION]
+            context.clarification_questions = [ClarificationDraft(text=BARCODE_UNKNOWN_QUESTION)]
             raise NeedsClarification("barcode_unknown")
 
         if self.resolver.enabled:
@@ -314,7 +315,7 @@ class FoodResolveStep:
             if _is_resolution_deferrable(candidate):
                 context.pending_official_candidates.append(candidate)
                 return
-            context.clarification_questions = [UNKNOWN_FOOD_QUESTION]
+            context.clarification_questions = [ClarificationDraft(text=UNKNOWN_FOOD_QUESTION)]
             raise NeedsClarification("unknown_food")
 
         # No enabled source applies to this candidate (e.g. no FDC key and no
@@ -392,7 +393,7 @@ class FoodResolveStep:
             default_serving_g=product.default_serving_g,
         )
         if grams is None:
-            context.clarification_questions = [QUANTITY_QUESTION]
+            context.clarification_questions = [ClarificationDraft(text=QUANTITY_QUESTION)]
             raise NeedsClarification("unresolvable_quantity")
 
         facts = NutritionFacts(

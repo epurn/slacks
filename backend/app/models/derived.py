@@ -26,7 +26,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Float, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import JSON, Float, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, UtcDateTime
@@ -155,6 +155,9 @@ class ClarificationQuestion(Base):
         Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     question_text: Mapped[str] = mapped_column(Text, nullable=False)
+    #: Display-only quick-pick answer candidates. Free text is always allowed by
+    #: the answer endpoint; these are stored as bounded data, never an enum.
+    options: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(

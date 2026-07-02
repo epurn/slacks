@@ -39,6 +39,7 @@ from app.estimator.exercise import (
 from app.estimator.met_table import MET_TABLE_SOURCE, MET_TABLE_VERSION
 from app.estimator.pipeline import (
     CandidateDraft,
+    ClarificationDraft,
     EstimationContext,
     NeedsClarification,
     ResolvedExerciseItem,
@@ -87,10 +88,10 @@ class ExerciseCalculateStep:
                 quantity_text=candidate.quantity_text,
             )
         except UnknownActivityError as exc:
-            context.clarification_questions = [UNKNOWN_ACTIVITY_QUESTION]
+            context.clarification_questions = [ClarificationDraft(text=UNKNOWN_ACTIVITY_QUESTION)]
             raise NeedsClarification(exc.reason) from exc
         except InvalidDurationError as exc:
-            context.clarification_questions = [DURATION_QUESTION]
+            context.clarification_questions = [ClarificationDraft(text=DURATION_QUESTION)]
             raise NeedsClarification(exc.reason) from exc
         except MissingBodyWeightError as exc:
             # An incomplete profile, not an ambiguous log: fail closed rather than

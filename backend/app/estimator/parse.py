@@ -39,6 +39,7 @@ surface: each sample is the same validated call.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -50,6 +51,7 @@ from app.estimator.parse_prompt import build_parse_prompt
 from app.estimator.pipeline import (
     AnsweredClarification,
     CandidateDraft,
+    ClarificationDraft,
     EstimationContext,
     NeedsClarification,
     StepError,
@@ -80,10 +82,52 @@ __all__ = [
     "build_parse_prompt",
 ]
 
-#: Fallback question persisted when the samples route to ``needs_clarification``
-#: but supply none — so a ``needs_clarification`` event always has at least one
-#: question for the later answer flow.
+#: Retired generic fallback question. The parse step no longer silently persists
+#: this for low-quality provider clarification output; it is kept as a sentinel
+#: so tests and quality checks can reject accidental fallback regressions.
 DEFAULT_CLARIFICATION_QUESTION = "Could you clarify what you logged and how much?"
+
+_MIN_CLARIFICATION_OPTIONS = 2
+_MAX_CLARIFICATION_OPTIONS = 5
+_FOOD_AMOUNT_OPTIONS = ["1 serving", "2 servings", "3 servings"]
+_FOOD_COUNT_OPTIONS = ["1", "2", "3"]
+_CUP_AMOUNT_OPTIONS = ["1/2 cup", "1 cup", "2 cups"]
+_SPREAD_AMOUNT_OPTIONS = ["1 tsp", "1 tbsp", "2 tbsp"]
+_FOOD_UNIT_OPTIONS = ["grams", "cups", "servings"]
+_EXERCISE_DURATION_OPTIONS = ["15 minutes", "30 minutes", "60 minutes"]
+_CUP_OPTION_FOODS = {
+    "cereal",
+    "chili",
+    "curry",
+    "ice cream",
+    "oatmeal",
+    "pasta",
+    "rice",
+    "soup",
+}
+_SPREAD_OPTION_FOODS = {
+    "butter",
+    "cream cheese",
+    "hummus",
+    "jam",
+    "jelly",
+    "margarine",
+    "nutella",
+    "peanut butter",
+}
+_GENERIC_QUESTIONS = {
+    "can you clarify",
+    "could you clarify",
+    "could you clarify what you logged and how much",
+    "how much was it",
+    "we need a detail to count this entry",
+}
+_GENERIC_QUESTION_PATTERNS = (
+    re.compile(r"^(?:how much|what amount) did you (?:have|eat|drink|consume)$"),
+    re.compile(r"^what did you (?:have|eat|drink|consume)$"),
+    re.compile(r"^what was (?:it|that|this)$"),
+    re.compile(r"^(?:what|which) (?:kind|type|brand|flavor|size) did you (?:have|mean)$"),
+)
 
 
 @dataclass(frozen=True)
@@ -161,7 +205,10 @@ class ParseStep:
             signal.hybrid
         )
         if conservative and not _reply_has_sufficient_detail(result.items):
-            context.clarification_questions = _clarification_questions(samples)
+            context.clarification_questions = _clarification_questions(
+                samples,
+                fallback_items=result.items if not signal.all_non_parsed else (),
+            )
             raise NeedsClarification("low_confidence_or_ambiguous")
 
         # A sample set that claims "parsed" yet routes nothing to persist is
@@ -273,25 +320,116 @@ def _candidate_has_detail(item: ParsedCandidate) -> bool:
     return has_food_detail(item.amount, item.quantity_text)
 
 
-def _clarification_questions(samples: Sequence[ParseResult]) -> list[str]:
-    """The distinct non-empty questions across the samples, or a single default.
+def _clarification_questions(
+    samples: Sequence[ParseResult], *, fallback_items: Sequence[ParsedCandidate] = ()
+) -> list[ClarificationDraft]:
+    """Return distinct high-quality clarification questions across samples.
 
     Every sample expresses the same event's ambiguity, so their questions are
     pooled (first occurrence wins — duplicates across samples are the common
-    case) rather than taken from one arbitrary sample.
+    case) rather than taken from one arbitrary sample. FTY-172 makes a provider
+    clarification with a missing/generic question or fewer than two options a
+    low-quality structured output: fail closed instead of persisting a generic
+    fallback the user cannot act on. A low-confidence ``parsed`` result without
+    provider questions is a backend-routed clarification, not provider-raised
+    clarification output, so it gets a deterministic targeted question derived
+    from the first item that lacks a detail signal.
     """
 
-    questions: list[str] = []
+    questions: list[ClarificationDraft] = []
+    seen: set[str] = set()
     for sample in samples:
         for question in sample.clarification_questions:
-            cleaned = question.strip()
-            if cleaned and cleaned not in questions:
-                questions.append(cleaned)
-    return questions or [DEFAULT_CLARIFICATION_QUESTION]
+            text = question.text.strip()
+            options = _clean_options(question.options)
+            _validate_provider_clarification(text, options)
+            key = _normalise_question(text)
+            if key not in seen:
+                seen.add(key)
+                questions.append(ClarificationDraft(text=text, options=options))
+    if not questions:
+        if fallback_items:
+            return [_backend_clarification_question(fallback_items)]
+        raise StepFailed("clarification_quality_failed")
+    return questions
 
 
-def _first_implausible(items: list[ParsedCandidate]) -> str | None:
-    """Return a clarification question for the first implausible food candidate, or None.
+def _backend_clarification_question(items: Sequence[ParsedCandidate]) -> ClarificationDraft:
+    """Build a bounded question for backend-routed low-confidence parses.
+
+    The item name comes from the schema-validated parse reply (bounded data, not
+    raw log text). The options are fixed short suggestions; the answer endpoint
+    still accepts arbitrary free text.
+    """
+
+    item = next((candidate for candidate in items if not _candidate_has_detail(candidate)), None)
+    if item is None:
+        raise StepFailed("clarification_quality_failed")
+    if item.type is CandidateType.EXERCISE:
+        return ClarificationDraft(
+            text=f"How long did you do {item.name}?",
+            options=list(_EXERCISE_DURATION_OPTIONS),
+        )
+    return ClarificationDraft(
+        text=f"How much {item.name} did you have?",
+        options=_backend_food_options(item),
+    )
+
+
+def _backend_food_options(item: ParsedCandidate) -> list[str]:
+    """Return quick-pick options for backend-routed food amount questions."""
+
+    unit = (item.unit or "").casefold()
+    name = item.name.casefold()
+    if unit in {"cup", "cups"} or any(food in name for food in _CUP_OPTION_FOODS):
+        return list(_CUP_AMOUNT_OPTIONS)
+    if unit in {"tsp", "tbsp", "teaspoon", "teaspoons", "tablespoon", "tablespoons"} or any(
+        food in name for food in _SPREAD_OPTION_FOODS
+    ):
+        return list(_SPREAD_AMOUNT_OPTIONS)
+    return list(_FOOD_AMOUNT_OPTIONS)
+
+
+def _validate_provider_clarification(text: str, options: Sequence[str]) -> None:
+    """Fail closed on clarification output the sheet cannot use directly."""
+
+    if not text or _is_generic_clarification_question(text):
+        raise StepFailed("clarification_quality_failed")
+    if not _MIN_CLARIFICATION_OPTIONS <= len(options) <= _MAX_CLARIFICATION_OPTIONS:
+        raise StepFailed("clarification_quality_failed")
+
+
+def _is_generic_clarification_question(text: str) -> bool:
+    """Whether a provider question lacks a concrete missing-detail anchor."""
+
+    key = _normalise_question(text).strip(" ?.!:")
+    if key in _GENERIC_QUESTIONS:
+        return True
+    return any(pattern.fullmatch(key) is not None for pattern in _GENERIC_QUESTION_PATTERNS)
+
+
+def _clean_options(options: Sequence[str]) -> list[str]:
+    """Trim and deduplicate display options while preserving model order."""
+
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for option in options:
+        value = option.strip()
+        key = value.casefold()
+        if key and key not in seen:
+            seen.add(key)
+            cleaned.append(value)
+    return cleaned
+
+
+def _normalise_question(text: str) -> str:
+    """Casefold and collapse spacing for generic-question checks and dedupe."""
+
+    return " ".join(text.casefold().split())
+
+
+def _first_implausible(items: list[ParsedCandidate]) -> ClarificationDraft | None:
+    """Return a clarification draft for the first implausible food candidate, if any.
 
     Checks each *food* candidate in order; returns the targeted question from the
     first failure so the user can correct the most prominent implausible entry
@@ -307,5 +445,20 @@ def _first_implausible(items: list[ParsedCandidate]) -> str | None:
             continue
         result = check_candidate(item)
         if not result.plausible:
-            return result.clarification_question
+            if result.clarification_question is None:
+                raise StepFailed("clarification_quality_failed")
+            return ClarificationDraft(
+                text=result.clarification_question,
+                options=_implausible_candidate_options(item, result.reason),
+            )
     return None
+
+
+def _implausible_candidate_options(item: ParsedCandidate, reason: str | None) -> list[str]:
+    """Return quick-pick options for deterministic parse plausibility questions."""
+
+    if reason == "unknown_unit":
+        return list(_FOOD_UNIT_OPTIONS)
+    if reason == "implausible_count":
+        return list(_FOOD_COUNT_OPTIONS)
+    return _backend_food_options(item)

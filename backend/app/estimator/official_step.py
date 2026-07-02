@@ -67,6 +67,7 @@ from app.estimator.hardened_fetch import (
 from app.estimator.official_fetch import OfficialFetchSettings, fetch_official_source
 from app.estimator.pipeline import (
     CandidateDraft,
+    ClarificationDraft,
     EstimationContext,
     NeedsClarification,
     ResolvedFoodItem,
@@ -375,7 +376,7 @@ class OfficialSourceResolveStep:
         reason = "; ".join([*reasons, "estimated from model prior"])
         estimate = self._estimate_model_prior(candidate)
         if estimate is None or estimate.disposition is not EstimateDisposition.RESOLVED:
-            context.clarification_questions = [UNKNOWN_FOOD_QUESTION]
+            context.clarification_questions = [ClarificationDraft(text=UNKNOWN_FOOD_QUESTION)]
             raise NeedsClarification("model_prior_unavailable")
 
         item = self._build_item(
@@ -390,7 +391,7 @@ class OfficialSourceResolveStep:
         if item is None:
             # The estimate was unusable (e.g. per-serving facts with no gram serving
             # size); ask rather than guess the portion.
-            context.clarification_questions = [UNKNOWN_FOOD_QUESTION]
+            context.clarification_questions = [ClarificationDraft(text=UNKNOWN_FOOD_QUESTION)]
             raise NeedsClarification("model_prior_unusable")
         return item
 
@@ -499,7 +500,7 @@ class OfficialSourceResolveStep:
             default_serving_g=default_serving_g,
         )
         if grams is None:
-            context.clarification_questions = [QUANTITY_QUESTION]
+            context.clarification_questions = [ClarificationDraft(text=QUANTITY_QUESTION)]
             raise NeedsClarification("unresolvable_quantity")
 
         scaled = scale_facts(per_100g, grams)

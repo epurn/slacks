@@ -107,9 +107,9 @@ class ClarificationQuestionDTO(BaseModel):
     references), the question ``text``, and the quick-pick ``options`` the
     clarify sheet renders as one-tap chips. Options are display candidates only —
     never an enum the server validates an answer against; free text is always an
-    allowed answer. The list may be empty (the client then shows the free-text
-    affordance only); it stays empty until the estimator persists options
-    (``parse-candidates.md`` v2, produced by FTY-172).
+    allowed answer. The list may be empty only for deterministic backend-raised
+    questions that have no meaningful quick-pick set; model-raised parse
+    clarifications carry producer-generated options (``parse-candidates.md`` v2).
     """
 
     id: uuid.UUID

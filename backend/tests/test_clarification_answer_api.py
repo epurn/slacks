@@ -81,6 +81,16 @@ def _create_event(client: TestClient, user_id: str, auth: str, raw_text: str = R
     return str(created.json()["id"])
 
 
+def _clarify_question(text: str) -> dict[str, object]:
+    if "road or trail" in text.casefold():
+        options = ["Road", "Trail"]
+    elif "jog or a sprint" in text.casefold():
+        options = ["Jog", "Sprint"]
+    else:
+        options = ["15 minutes", "30 minutes", "45 minutes"]
+    return {"text": text, "options": options}
+
+
 def _clarify_pipeline(questions: list[str]) -> Pipeline:
     """A real parse pipeline whose provider routes to needs_clarification.
 
@@ -95,7 +105,7 @@ def _clarify_pipeline(questions: list[str]) -> Pipeline:
                 "disposition": "needs_clarification",
                 "confidence": 0.2,
                 "items": [],
-                "clarification_questions": questions,
+                "clarification_questions": [_clarify_question(question) for question in questions],
             }
         ]
         * SELF_CONSISTENCY_FIRST_WINDOW

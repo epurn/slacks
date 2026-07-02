@@ -70,12 +70,23 @@ def _clarify_pipeline(questions: list[str]) -> Pipeline:
                 "disposition": "needs_clarification",
                 "confidence": 0.2,
                 "items": [],
-                "clarification_questions": questions,
+                "clarification_questions": [
+                    {"text": question, "options": _options_for_question(question)}
+                    for question in questions
+                ],
             }
         ]
         * SELF_CONSISTENCY_FIRST_WINDOW
     )
     return Pipeline([ParseStep(provider), ExerciseCalculateStep()])
+
+
+def _options_for_question(question: str) -> list[str]:
+    if "road or trail" in question.casefold():
+        return ["Road", "Trail"]
+    if "jog or a sprint" in question.casefold():
+        return ["Jog", "Sprint"]
+    return ["15 minutes", "30 minutes", "45 minutes"]
 
 
 def _resolve_pipeline() -> tuple[Pipeline, FakeProvider]:

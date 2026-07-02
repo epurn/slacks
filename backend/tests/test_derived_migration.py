@@ -74,6 +74,23 @@ def test_derived_item_tables_have_candidate_columns(tmp_path: Path) -> None:
         engine.dispose()
 
 
+def test_clarification_questions_options_migration_applies_and_rolls_back(
+    tmp_path: Path,
+) -> None:
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'question-options.db'}")
+    try:
+        upgrade(engine, "head")
+        columns = {c["name"]: c for c in inspect(engine).get_columns("clarification_questions")}
+        assert "options" in columns
+        assert not columns["options"]["nullable"]
+
+        downgrade(engine, "0016")
+        rolled_back = {c["name"] for c in inspect(engine).get_columns("clarification_questions")}
+        assert "options" not in rolled_back
+    finally:
+        engine.dispose()
+
+
 def test_exercise_active_calories_migration_applies_and_rolls_back(tmp_path: Path) -> None:
     # FTY-043 adds derived_exercise_items.active_calories (0006); it applies on top of
     # the derived-parse schema and rolls back to 0005 without touching food items.

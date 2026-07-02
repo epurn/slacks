@@ -64,7 +64,12 @@ not floor confidence just because a number was inferred rather than stated.
 structural basis to infer an amount — no explicit count, no portion word, no \
 standard serving from the item's name or structure — or when the item itself is \
 ambiguous. A named food with any quantity cue should be estimated, not asked \
-about. Provide concise clarification_questions for each item you cannot infer.
+about. Each clarification_questions entry must be an object with text and \
+options: the text asks one specific question naming the missing detail (kind, \
+amount, preparation, or duration), and options contains 2-5 short, plausible, \
+common quick-pick answers for that exact question. Options are suggestions only; \
+the user can always type a different answer. Never use a generic fallback like \
+"How much was it?" or "Could you clarify?".
 - If the entry is empty, gibberish, or not a food/exercise log at all, set \
 disposition "unparseable" and a short reason.
 - Set confidence in [0, 1] reflecting how sure you are of the extraction. A \

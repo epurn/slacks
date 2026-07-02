@@ -121,6 +121,19 @@ class CandidateDraft:
 
 
 @dataclass(frozen=True)
+class ClarificationDraft:
+    """A clarification question the worker will persist for the answer flow.
+
+    ``text`` is the specific missing detail shown to the user. ``options`` are
+    display-only quick-pick candidates; they never constrain the answer endpoint,
+    which always accepts free text.
+    """
+
+    text: str
+    options: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class AnsweredClarification:
     """One answered (question, answer) pair carried into a re-estimate (FTY-171).
 
@@ -284,7 +297,7 @@ class EstimationContext:
     resolved_exercise_items: list[ResolvedExerciseItem] = field(default_factory=list)
     resolved_food_items: list[ResolvedFoodItem] = field(default_factory=list)
     resolved_label_items: list[ResolvedLabelItem] = field(default_factory=list)
-    clarification_questions: list[str] = field(default_factory=list)
+    clarification_questions: list[ClarificationDraft] = field(default_factory=list)
 
     def record_step(self, name: str, status: str) -> None:
         """Append a sanitized trace entry for a completed step.

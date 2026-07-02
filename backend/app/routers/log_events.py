@@ -253,8 +253,9 @@ def get_log_event_clarification(
     The mobile clarify sheet (FTY-153) fetches this lazily when it opens, so the
     Today list/poll DTO stays lean. Questions are ordered by ``position`` and
     carry their stable ``id`` (the key an answer submission references), their
-    ``text``, and their quick-pick ``options`` (empty until the estimator
-    persists options — FTY-172; the client then shows free-text only).
+    ``text``, and their quick-pick ``options``. Model-raised parse
+    clarifications carry options; deterministic backend-raised questions may
+    carry an empty list, in which case the client shows free-text only.
 
     The read is status-gated (``log-events.md`` v4): only a
     ``needs_clarification`` event serves questions, and only its **unanswered**
@@ -272,7 +273,10 @@ def get_log_event_clarification(
     except (LogEventForbidden, LogEventNotFound) as exc:
         raise _NOT_FOUND from exc
     return ClarificationResponse(
-        questions=[ClarificationQuestionDTO(id=q.id, text=q.question_text) for q in questions]
+        questions=[
+            ClarificationQuestionDTO(id=q.id, text=q.question_text, options=q.options or [])
+            for q in questions
+        ]
     )
 
 

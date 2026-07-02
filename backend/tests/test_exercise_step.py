@@ -81,7 +81,8 @@ def test_unknown_activity_routes_to_clarification() -> None:
         ExerciseCalculateStep().run(ctx)
 
     assert excinfo.value.reason == "unknown_activity"
-    assert ctx.clarification_questions == [UNKNOWN_ACTIVITY_QUESTION]
+    assert [q.text for q in ctx.clarification_questions] == [UNKNOWN_ACTIVITY_QUESTION]
+    assert [q.options for q in ctx.clarification_questions] == [[]]
 
 
 def test_missing_duration_routes_to_clarification() -> None:
@@ -91,7 +92,8 @@ def test_missing_duration_routes_to_clarification() -> None:
         ExerciseCalculateStep().run(ctx)
 
     assert excinfo.value.reason == "missing_duration"
-    assert ctx.clarification_questions == [DURATION_QUESTION]
+    assert [q.text for q in ctx.clarification_questions] == [DURATION_QUESTION]
+    assert [q.options for q in ctx.clarification_questions] == [[]]
 
 
 def test_missing_body_weight_fails_closed() -> None:

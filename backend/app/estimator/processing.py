@@ -686,7 +686,8 @@ def _persist_clarification_questions(
             ClarificationQuestion(
                 log_event_id=run.log_event_id,
                 user_id=run.user_id,
-                question_text=question,
+                question_text=question.text,
+                options=question.options,
                 position=position,
             )
         )
