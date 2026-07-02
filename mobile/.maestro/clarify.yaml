@@ -5,10 +5,15 @@
 #
 # Flow:
 #   Today (empty day) → submit "coffee" → needs_clarification row appears →
-#   tap row → clarify sheet opens with the seeded question visible →
-#   enter free-text answer → submit → entry resolves → tap Refresh →
-#   entry counts in Today totals → cluster time renders "11:14 AM" (FTY-174
-#   Hermes meridiem regression guard).
+#   tap row → clarify sheet opens with the seeded question + quick-pick chips →
+#   tap the "Large" chip → answer round-trip resolves the SAME entry in place →
+#   tap Refresh → entry counts in Today totals → cluster time renders "11:14 AM"
+#   (FTY-174 Hermes meridiem regression guard).
+#
+# FTY-175 upgrade: the sheet now renders Fatty's real question + candidate
+# quick-pick chips (FTY-170 payload), and a chip tap resolves via the first-class
+# answer round-trip (POST /clarification/answers) — not a duplicate log create.
+# This drives the chip path to completion end-to-end.
 #
 # Load-bearing assertion (step 6): the seeded question text must be visible in
 # the sheet. If the sheet opens data-starved (no question), ClarifyMode shows
@@ -77,30 +82,36 @@ appId: com.fatty
       text: ".*What size was the coffee.*"
     timeout: 5000
 
-# Step 8: Enter a free-text answer and submit. The keyboard opened by the text
-# input covers the submit button on the CI emulator, so dismiss it first.
-- tapOn:
-    text: "Your answer"
-- inputText: "large"
-- hideKeyboard
-- tapOn:
-    text: "Submit answer"
+# Step 8: Assert the quick-pick chips rendered from the clarify payload
+#         (FTY-170/175) — the "Large" candidate option is a tappable chip. A
+#         chipless (data-starved) sheet would fail this before the tap.
+- extendedWaitUntil:
+    visible:
+      text: "Large"
+    timeout: 5000
 
-# Step 9: Assert the needs-a-detail treatment dropped — the entry resolved.
-#         The sheet closes, the row disappears from the "needs a detail" state.
+# Step 9: Tap the "Large" chip. One tap resolves: the answer travels the FTY-170
+#         answer round-trip (POST /clarification/answers), not a duplicate log
+#         create — no keyboard, no free-text needed.
+- tapOn:
+    text: "Large"
+
+# Step 10: Assert the needs-a-detail treatment dropped — the entry resolved in
+#          place (needs_clarification → processing). The sheet closes and the
+#          row leaves the "needs a detail" state without spawning a second row.
 - extendedWaitUntil:
     notVisible:
       text: "coffee, needs a detail, uncounted"
     timeout: 10000
 
-# Step 10: Tap Refresh to load the phase-2 fixture: resolved event list and
+# Step 11: Tap Refresh to load the phase-2 fixture: resolved event list and
 #          non-zero daily summary. (The manual refresh is needed because the
-#          re-submitted event completes synchronously in the mock and there is
+#          re-estimated event completes synchronously in the mock and there is
 #          no polling window before the test asserts counts.)
 - tapOn:
     text: "Refresh"
 
-# Step 11: Assert the entry counts — the CalorieHero accessibility label
+# Step 12: Assert the entry counts — the CalorieHero accessibility label
 #          includes the consumed kcal from the E2E_RESOLVED_SUMMARY fixture
 #          (120 kcal of 2,000 kcal). Maestro text matching is an anchored
 #          regex over the whole node text, and the full hero label carries a
@@ -112,7 +123,7 @@ appId: com.fatty
       text: ".*120 of 2,000 kcal.*"
     timeout: 10000
 
-# Step 12: FTY-174 Hermes meridiem regression guard. The resolved fixture
+# Step 13: FTY-174 Hermes meridiem regression guard. The resolved fixture
 #          event is pinned to 11:14 AM in the device's own timezone
 #          (E2E_RESOLVED_EVENT in e2e/fixtures.ts), so the timeline's cluster
 #          time label must render exactly "11:14 AM". This runs on the real

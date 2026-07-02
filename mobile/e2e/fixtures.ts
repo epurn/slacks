@@ -85,6 +85,18 @@ export const E2E_CLARIFY_EVENT_ID =
 export const E2E_CLARIFY_QUESTION =
   'What size was the coffee — small, medium, or large?';
 
+/** Stable id of the seeded clarification question — the key the answer round-trip references (FTY-170). */
+export const E2E_CLARIFY_QUESTION_ID =
+  'e2e-clarify-question-00000000-0000-0000-0000-000000000000';
+
+/**
+ * Candidate quick-pick options the clarify sheet renders as one-tap chips
+ * (FTY-170). clarify.yaml taps `E2E_CLARIFY_CHIP` to resolve the entry in a
+ * single tap — the headline capability this story (FTY-175) wires.
+ */
+export const E2E_CLARIFY_OPTIONS = ['Small', 'Medium', 'Large'];
+export const E2E_CLARIFY_CHIP = 'Large';
+
 /** Synthetic needs_clarification event for the FTY-162 clarify flow. */
 export const E2E_CLARIFY_EVENT: LogEventDTO = {
   id: E2E_CLARIFY_EVENT_ID,
@@ -95,9 +107,30 @@ export const E2E_CLARIFY_EVENT: LogEventDTO = {
   updated_at: '2026-01-01T08:00:00Z',
 };
 
-/** Clarification read response carrying the seeded question. */
+/**
+ * Clarification read response carrying the seeded question, its stable id, and
+ * candidate quick-pick options (the FTY-170 `{ id, text, options }` shape).
+ */
 export const E2E_CLARIFICATION: ClarificationDTO = {
-  questions: [{ text: E2E_CLARIFY_QUESTION }],
+  questions: [
+    {
+      id: E2E_CLARIFY_QUESTION_ID,
+      text: E2E_CLARIFY_QUESTION,
+      options: E2E_CLARIFY_OPTIONS,
+    },
+  ],
+};
+
+/**
+ * The answer round-trip's response (FTY-170): the **same** clarify event,
+ * transitioned in place to `processing`. Its id is unchanged (no duplicate row)
+ * and its `raw_text` is still 'coffee' (the raw phrase is never mutated by an
+ * answer — audit A3) even though the user answered "large".
+ */
+export const E2E_CLARIFY_PROCESSING_EVENT: LogEventDTO = {
+  ...E2E_CLARIFY_EVENT,
+  status: 'processing',
+  updated_at: '2026-01-01T08:00:01Z',
 };
 
 /**
@@ -124,17 +157,24 @@ function todayAtDeviceLocal(hour: number, minute: number): string {
 
 const E2E_RESOLVED_EVENT_INSTANT = todayAtDeviceLocal(11, 14);
 
-/** Resolved event returned after the user answers the clarify question. */
+/**
+ * The resolved, completed entry the day-list returns after the clarify answer
+ * re-estimates the event. Its `raw_text` stays 'coffee' — the answer supplied
+ * the "large" detail as structured input, it never rewrote the raw phrase (audit
+ * A3). (Distinct id from the needs_clarification event so the FTY-178 smoke
+ * flow's second-POST re-submission reconciles without a duplicate-key collision;
+ * the clarify flow drops the pre-resolve row on refresh either way.)
+ */
 export const E2E_RESOLVED_EVENT: LogEventDTO = {
   id: 'e2e-resolved-event-00000000-0000-0000-0000-000000000000',
   user_id: E2E_SESSION.userId,
-  raw_text: 'coffee large',
+  raw_text: 'coffee',
   status: 'completed',
   created_at: E2E_RESOLVED_EVENT_INSTANT,
   updated_at: E2E_RESOLVED_EVENT_INSTANT,
 };
 
-/** Daily summary reflecting the resolved "coffee large" entry (120 kcal). */
+/** Daily summary reflecting the resolved "coffee" entry (120 kcal). */
 export const E2E_RESOLVED_SUMMARY: DailySummaryDTO = {
   date: '2026-01-01',
   intake: { calories: 120, protein_g: 1, carbs_g: 20, fat_g: 3 },

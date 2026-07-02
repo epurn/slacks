@@ -1,5 +1,6 @@
 import {
   LogEventApiError,
+  answerClarification,
   createLogEvent,
   getLogEventClarification,
   listTodayLogEvents,
@@ -151,14 +152,19 @@ describe("createLogEvent", () => {
 });
 
 describe("getLogEventClarification", () => {
-  it("GETs the owner-scoped clarification read for the event with a bearer token", async () => {
+  it("GETs the owner-scoped clarification read carrying the question id, text, and chips", async () => {
+    const question = {
+      id: "q-1",
+      text: "How much peanut butter?",
+      options: ["1 tbsp", "2 tbsp"],
+    };
     const fetchMock = jest.fn().mockResolvedValue(
-      okResponse({ questions: [{ text: "How much peanut butter?" }] }),
+      okResponse({ questions: [question] }),
     );
 
     const result = await getLogEventClarification(SESSION, "event-1", fetchMock);
 
-    expect(result).toEqual({ questions: [{ text: "How much peanut butter?" }] });
+    expect(result).toEqual({ questions: [question] });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(
       "https://api.example.test/api/users/11111111-1111-1111-1111-111111111111/log-events/event-1/clarification",
@@ -167,6 +173,16 @@ describe("getLogEventClarification", () => {
     expect((init.headers as Record<string, string>).Authorization).toBe(
       "Bearer test-token",
     );
+  });
+
+  it("carries a question with an empty options list (deterministic backend-raised)", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(
+      okResponse({ questions: [{ id: "q-2", text: "Which meal?", options: [] }] }),
+    );
+
+    const result = await getLogEventClarification(SESSION, "event-1", fetchMock);
+
+    expect(result.questions[0]?.options).toEqual([]);
   });
 
   it("returns an empty question list for an event with no clarification rows", async () => {
@@ -181,6 +197,77 @@ describe("getLogEventClarification", () => {
     const fetchMock = jest.fn().mockResolvedValue(errorResponse(404));
     await expect(
       getLogEventClarification(SESSION, "event-1", fetchMock),
+    ).rejects.toMatchObject({ name: "LogEventApiError", status: 404 });
+  });
+});
+
+describe("answerClarification", () => {
+  const PROCESSING: LogEventDTO = {
+    ...DTO,
+    raw_text: "crackers and peanut butter",
+    status: "processing",
+  };
+
+  it("POSTs question_id + answer to the owner-scoped answers endpoint with a bearer token", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(okResponse(PROCESSING, 201));
+
+    const result = await answerClarification(
+      SESSION,
+      "event-1",
+      "q-1",
+      "2 tbsp",
+      fetchMock,
+    );
+
+    expect(result).toEqual(PROCESSING);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      "https://api.example.test/api/users/11111111-1111-1111-1111-111111111111/log-events/event-1/clarification/answers",
+    );
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({
+      question_id: "q-1",
+      answer: "2 tbsp",
+    });
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      "Bearer test-token",
+    );
+  });
+
+  it("treats a 200 idempotent replay the same as a 201 fresh answer", async () => {
+    const completed: LogEventDTO = { ...PROCESSING, status: "completed" };
+    const fetchMock = jest.fn().mockResolvedValue(okResponse(completed, 200));
+
+    const result = await answerClarification(
+      SESSION,
+      "event-1",
+      "q-1",
+      "2 tbsp",
+      fetchMock,
+    );
+
+    expect(result.status).toBe("completed");
+  });
+
+  it("does not echo the user's answer into the error message", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(errorResponse(422));
+    await expect(
+      answerClarification(SESSION, "event-1", "q-1", "peanuts", fetchMock),
+    ).rejects.toMatchObject({ name: "LogEventApiError" });
+    const error = await answerClarification(
+      SESSION,
+      "event-1",
+      "q-1",
+      "peanuts",
+      fetchMock,
+    ).catch((e: LogEventApiError) => e);
+    expect((error as LogEventApiError).message).not.toContain("peanuts");
+  });
+
+  it("maps a 404 to a fail-closed LogEventApiError", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(errorResponse(404));
+    await expect(
+      answerClarification(SESSION, "event-1", "q-1", "2 tbsp", fetchMock),
     ).rejects.toMatchObject({ name: "LogEventApiError", status: 404 });
   });
 });

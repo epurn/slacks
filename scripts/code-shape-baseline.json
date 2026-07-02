@@ -56,14 +56,14 @@
     "mobile/components/TodayScreen.test.tsx": {
       "kind": "test",
       "lane": "mobile",
-      "lines": 1808,
-      "reason": "Existing over-threshold first-party test file at FTY-200 baseline."
+      "lines": 1890,
+      "reason": "Existing over-threshold first-party test file at FTY-200 baseline; +82 in FTY-175 for clarify answer-round-trip coverage (chip resolve, free-text resolve, error path, in-place poll, chip render from payload)."
     },
     "mobile/components/TodayScreen.tsx": {
       "kind": "source",
       "lane": "mobile",
-      "lines": 1392,
-      "reason": "Existing over-threshold first-party source file at FTY-200 baseline; +13 in FTY-178 to mount the hero above the composer and the macro tier separately beneath it (macro rework is FTY-179)."
+      "lines": 1398,
+      "reason": "Existing over-threshold first-party source file at FTY-200 baseline; +13 in FTY-178 to mount the hero above the composer and the macro tier separately beneath it (macro rework is FTY-179); +6 in FTY-175 wiring the FTY-170 clarify payload (question id + chips) and the answer round-trip that resolves the same entry in place."
     }
   },
   "boundary_imports": [

@@ -29,6 +29,7 @@ import {
 } from "@/api/labelCapture";
 import {
   LogEventApiError,
+  answerClarification as answerClarificationApi,
   createLogEvent as createLogEventApi,
   getLogEventClarification as getLogEventClarificationApi,
   listTodayLogEvents as listTodayLogEventsApi,
@@ -210,6 +211,7 @@ export function TodayScreen({
   load = listTodayLogEventsApi,
   create = createLogEventApi,
   getClarification = getLogEventClarificationApi,
+  answerClarification = answerClarificationApi,
   editItem = editDerivedItemApi,
   items: itemsOverride,
   useActive = useScreenActive,
@@ -232,6 +234,8 @@ export function TodayScreen({
   create?: typeof createLogEventApi;
   /** Injectable clarification-question read for the clarify sheet (FTY-153). */
   getClarification?: typeof getLogEventClarificationApi;
+  /** Injectable clarification answer round-trip for the clarify sheet (FTY-170/175). */
+  answerClarification?: typeof answerClarificationApi;
   editItem?: typeof editDerivedItemApi;
   /**
    * Derived food/exercise items keyed by their `log_event_id`, rendered as
@@ -312,23 +316,22 @@ export function TodayScreen({
     /** The needs_clarification event id being resolved (clarify-mode only). */
     eventId?: string;
     /**
-     * Fatty's question + options for clarify-mode (FTY-153). Seeded with a `null`
-     * question (the generic-prompt + free-text fallback) and filled in place once
-     * the FTY-152 clarification read resolves — calm, no layout jump.
+     * The clarification question's stable id — the key the answer round-trip
+     * (FTY-170) references. `null` until the clarification read resolves; an
+     * answer can only be submitted once it is known.
+     */
+    questionId?: string | null;
+    /**
+     * Fatty's question + options for clarify-mode (FTY-153/170). Seeded with a
+     * `null` question (the generic-prompt + free-text fallback) and filled in
+     * place — question text + quick-pick chips — once the clarification read
+     * resolves. Calm, no layout jump.
      */
     clarificationData?: ClarificationData;
   } | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
-  // Needs_clarification events the user has answered this session (FTY-149).
-  // Render state only (per the story's privacy note): an answered entry is
-  // superseded by the re-submitted, now-counting entry, so it is filtered from
-  // the timeline even though the server still lists it as needs_clarification
-  // until a future backend resolve path lands.
-  const [resolvedClarificationIds, setResolvedClarificationIds] = useState<
-    ReadonlySet<string>
-  >(() => new Set());
   // Failed events the user has retried / handed to the composer this session
-  // (FTY-176). Like `resolvedClarificationIds`, this is render state only: a
+  // (FTY-176). This is render state only: a
   // retried failed row is superseded in place by the fresh attempt (or by the
   // composer resubmission), so it is filtered from the timeline even though the
   // server still lists the original as `failed`. A create-call error un-hides
@@ -588,19 +591,29 @@ export function TodayScreen({
         logPhrase: event.raw_text,
         needsClarification: true,
         eventId: event.id,
+        questionId: null,
         clarificationData: { question: null, options: [] },
       });
       setSheetVisible(true);
       if (!apiSession) return;
       getClarification(apiSession, event.id).then(
         (result) => {
-          const question = result.questions[0]?.text ?? null;
-          if (question === null) return;
+          const first = result.questions[0];
+          if (!first) return;
           // Only fill if the sheet still targets this event (the user may have
-          // tapped a different entry while the read was in flight).
+          // tapped a different entry while the read was in flight). Fill Fatty's
+          // real question + its candidate quick-pick chips in place — calm, no
+          // layout jump — and stash the question id the answer round-trip needs.
           setSheetTarget((prev) =>
             prev && prev.eventId === event.id
-              ? { ...prev, clarificationData: { question, options: [] } }
+              ? {
+                  ...prev,
+                  questionId: first.id,
+                  clarificationData: {
+                    question: first.text,
+                    options: first.options,
+                  },
+                }
               : prev,
           );
         },
@@ -612,51 +625,46 @@ export function TodayScreen({
     [apiSession, getClarification],
   );
 
-  // Resolve a needs_clarification entry from the user's answer (FTY-149). With no
-  // backend resolve endpoint yet, the answer travels the existing create path:
-  // the user's typed phrase plus their answer become one re-submitted entry that
-  // the estimator resolves and that then *counts* in the hero/macros. The
-  // original needs-a-detail entry is marked resolved so it drops its treatment
-  // and is superseded in place — calm, no navigation, never auto-filled.
+  // Resolve a needs_clarification entry from the user's answer (FTY-170/175).
+  // The answer — a tapped chip or free text — travels the first-class answer
+  // round-trip: it is applied as a structured detail to the *same* event, which
+  // the backend re-estimates in place. This replaces the retired create-path
+  // re-submission (FTY-149) that mutated the raw phrase and spawned a duplicate
+  // (audit A3/A5). The response is the same event now `processing`, so we swap it
+  // in place: the row drops its needs-a-detail treatment immediately, polling
+  // drives it to `completed`, and the daily summary then counts it — calm, no
+  // navigation, no second row, never auto-filled.
   const handleClarificationResolved = useCallback(
-    async (eventId: string, rawText: string, answer: string) => {
+    async (eventId: string, questionId: string | null, answer: string) => {
       closeItemSheet();
       if (!apiSession) return;
       const trimmed = answer.trim();
       if (!trimmed) return;
-      setResolvedClarificationIds((prev) => {
-        const next = new Set(prev);
-        next.add(eventId);
-        return next;
-      });
-      const combined = `${rawText} ${trimmed}`.trim();
-      const id = `${OPTIMISTIC_ID_PREFIX}${tempId.current++}`;
-      const optimistic = optimisticLogEvent({
-        id,
-        userId: apiSession.userId,
-        rawText: combined,
-        createdAt: new Date().toISOString(),
-      });
-      setEvents((prev) => sortByNewest([optimistic, ...prev]));
+      if (!questionId) {
+        // No loaded question to answer against (read still pending or failed).
+        // Surface honestly rather than dead-ending; the row stays actionable.
+        setSubmitError(
+          "We couldn't load the question. Reopen the entry and try again.",
+        );
+        return;
+      }
       try {
-        const created = await create(apiSession, combined);
+        const updated = await answerClarification(
+          apiSession,
+          eventId,
+          questionId,
+          trimmed,
+        );
+        // Same event, updated in place (needs_clarification → processing). No
+        // optimistic second event: the resolve mutates the one entry server-side.
         setEvents((prev) =>
-          sortByNewest(prev.map((e) => (e.id === id ? created : e))),
+          sortByNewest(prev.map((e) => (e.id === eventId ? updated : e))),
         );
       } catch (error) {
-        setEvents((prev) => prev.filter((e) => e.id !== id));
-        // Roll back the optimistic hide so the original needs_clarification
-        // row reappears in the timeline — otherwise the entry is filtered for
-        // the rest of the session with no user-reachable retry path.
-        setResolvedClarificationIds((prev) => {
-          const next = new Set(prev);
-          next.delete(eventId);
-          return next;
-        });
         setSubmitError(messageFor(error, "save"));
       }
     },
-    [apiSession, create, closeItemSheet, setSubmitError],
+    [apiSession, answerClarification, closeItemSheet, setSubmitError],
   );
 
   // Retry a failed parse as a fresh attempt (FTY-176). There is no server-side
@@ -757,18 +765,16 @@ export function TodayScreen({
   // (not `events`) so the timeline clusters them newest-first alongside server
   // rows; ClusterView renders them through OfflineEntryRow by their id.
   const displayEvents = useMemo(() => {
-    // Drop entries the user has answered (needs_clarification, FTY-149) or
-    // retried / handed to the composer (failed, FTY-176) this session — they are
-    // superseded in place by the fresh attempt, even after a poll re-fetches the
-    // original server row in its pre-resolve status.
+    // Drop entries the user has retried / handed to the composer (failed,
+    // FTY-176) this session — they are superseded in place by the fresh attempt,
+    // even after a poll re-fetches the original server row in its pre-retry
+    // status. Answered needs_clarification entries need no such filter: the
+    // FTY-170 resolve transitions the same event in place (→ processing), so the
+    // real server row already drops its needs-a-detail treatment (FTY-175).
     const visible =
-      resolvedClarificationIds.size === 0 && supersededFailedIds.size === 0
+      supersededFailedIds.size === 0
         ? events
-        : events.filter(
-            (event) =>
-              !resolvedClarificationIds.has(event.id) &&
-              !supersededFailedIds.has(event.id),
-          );
+        : events.filter((event) => !supersededFailedIds.has(event.id));
     if (offlineEntries.length === 0) return visible;
     const offlineEvents = offlineEntries
       .filter((entry) => entry.syncState !== "accepted")
@@ -781,7 +787,7 @@ export function TodayScreen({
         }),
       );
     return sortByNewest([...visible, ...offlineEvents]);
-  }, [events, offlineEntries, resolvedClarificationIds, supersededFailedIds]);
+  }, [events, offlineEntries, supersededFailedIds]);
 
   if (!session) {
     return <SignInRequired insetTop={insets.top + 24} />;
@@ -1000,7 +1006,7 @@ export function TodayScreen({
             onClarificationResolved={(answer) =>
               void handleClarificationResolved(
                 sheetTarget.eventId as string,
-                sheetTarget.logPhrase,
+                sheetTarget.questionId ?? null,
                 answer,
               )
             }

@@ -609,120 +609,193 @@ describe("TodayScreen needs-clarification entries", () => {
     expect(hasA11yLabel(tree, "Increase amount")).toBe(false);
   });
 
-  it("resolves via the existing create path so the entry recomputes and counts", async () => {
+  it("resolves via the answer round-trip so the SAME entry recomputes in place — no create, no duplicate", async () => {
     const load = jest
       .fn()
       .mockResolvedValue([
         event({ id: "a", raw_text: "milk", status: "needs_clarification" }),
       ]);
-    const create = jest
+    const create = jest.fn();
+    // The round-trip returns the SAME event (id "a"), transitioned to processing,
+    // with its raw phrase untouched — the backend re-estimates it in place.
+    const answerClarification = jest
       .fn()
       .mockResolvedValue(
-        event({ id: "b", raw_text: "milk 2%", status: "completed" }),
+        event({ id: "a", raw_text: "milk", status: "processing" }),
       );
+    const getClarification = jest.fn().mockResolvedValue({
+      questions: [
+        { id: "q1", text: "What kind of milk?", options: ["Whole", "2%", "Skim"] },
+      ],
+    });
     const tree = mount(
       <TodayScreen
         session={SESSION}
         load={load}
         create={create}
-        getClarification={emptyClarification()}
+        answerClarification={answerClarification}
+        getClarification={getClarification}
         useActive={INACTIVE}
       />,
     );
     await act(async () => {});
 
-    press(tree, "milk, needs a detail, uncounted");
-    typeInto(tree, "Your answer", "2%");
     await act(async () => {
-      press(tree, "Submit answer");
+      press(tree, "milk, needs a detail, uncounted");
+    });
+    // Tap the "2%" quick-pick chip → one tap resolves via the answer round-trip.
+    await act(async () => {
+      press(tree, "2%");
     });
 
-    // The answer travels the existing create path as the typed phrase + answer,
-    // never auto-filled or fabricated.
-    expect(create).toHaveBeenCalledWith(
+    // The answer travels the first-class round-trip keyed on the event + question
+    // id — never the create path — so no second event is spawned and the raw
+    // phrase is never mutated (audit A3/A5).
+    expect(answerClarification).toHaveBeenCalledWith(
       expect.objectContaining({ userId: SESSION!.userId }),
-      "milk 2%",
+      "a",
+      "q1",
+      "2%",
     );
+    expect(create).not.toHaveBeenCalled();
 
-    // The original needs-a-detail entry is superseded in place: its treatment is
-    // gone and the now-counting re-submission stands in for it.
+    // The same entry transitions in place (→ processing): its needs-a-detail
+    // treatment is gone, and no duplicate "milk" row stands in for it.
     expect(hasA11yLabel(tree, "milk, needs a detail, uncounted")).toBe(false);
-    expect(textContent(tree)).toContain("milk 2%");
   });
 
-  it("restores the original entry and surfaces an error when the clarify re-submission fails", async () => {
+  it("resolves a free-text answer via the round-trip when options are absent", async () => {
     const load = jest
       .fn()
       .mockResolvedValue([
         event({ id: "a", raw_text: "milk", status: "needs_clarification" }),
       ]);
-    const create = jest
+    const answerClarification = jest
+      .fn()
+      .mockResolvedValue(
+        event({ id: "a", raw_text: "milk", status: "processing" }),
+      );
+    // A deterministic backend-raised question carries no options — free text only.
+    const getClarification = jest.fn().mockResolvedValue({
+      questions: [{ id: "q1", text: "What kind of milk?", options: [] }],
+    });
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        answerClarification={answerClarification}
+        getClarification={getClarification}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    await act(async () => {
+      press(tree, "milk, needs a detail, uncounted");
+    });
+    typeInto(tree, "Your answer", "Oat milk");
+    await act(async () => {
+      press(tree, "Submit answer");
+    });
+
+    expect(answerClarification).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+      "a",
+      "q1",
+      "Oat milk",
+    );
+    expect(hasA11yLabel(tree, "milk, needs a detail, uncounted")).toBe(false);
+  });
+
+  it("surfaces an error and keeps the entry actionable when the answer round-trip fails", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: "a", raw_text: "milk", status: "needs_clarification" }),
+      ]);
+    const answerClarification = jest
       .fn()
       .mockRejectedValue(
         new LogEventApiError(422, "That entry couldn't be saved."),
       );
+    const getClarification = jest.fn().mockResolvedValue({
+      questions: [
+        { id: "q1", text: "What kind of milk?", options: ["Whole", "2%", "Skim"] },
+      ],
+    });
     const tree = mount(
       <TodayScreen
         session={SESSION}
         load={load}
-        create={create}
-        getClarification={emptyClarification()}
+        answerClarification={answerClarification}
+        getClarification={getClarification}
         useActive={INACTIVE}
       />,
     );
     await act(async () => {});
 
-    press(tree, "milk, needs a detail, uncounted");
-    typeInto(tree, "Your answer", "2%");
     await act(async () => {
-      press(tree, "Submit answer");
+      press(tree, "milk, needs a detail, uncounted");
+    });
+    await act(async () => {
+      press(tree, "2%");
     });
 
-    // The create failed: the optimistic hide is rolled back so the original
-    // needs-a-detail entry reappears (a user-reachable retry path), and the
-    // failure is surfaced rather than swallowed.
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: SESSION!.userId }),
-      "milk 2%",
-    );
+    // The answer failed: the entry stays as needs_clarification (still tappable,
+    // never a dead end), and the failure is surfaced rather than swallowed.
+    expect(answerClarification).toHaveBeenCalled();
     expect(hasA11yLabel(tree, "milk, needs a detail, uncounted")).toBe(true);
     expect(textContent(tree)).toContain("That entry couldn't be saved.");
   });
 
-  it("keeps the answered entry hidden even after a poll re-fetches it as needs_clarification", async () => {
+  it("keeps the resolved entry advanced after a poll re-fetches the processing event", async () => {
     jest.useFakeTimers();
     try {
+      const needsClar = event({
+        id: "a",
+        raw_text: "milk",
+        status: "needs_clarification",
+      });
+      const processing = event({
+        id: "a",
+        raw_text: "milk",
+        status: "processing",
+      });
+      // Initial load returns the needs_clarification row; after the answer
+      // advances it server-side, every subsequent poll returns the processing
+      // event for the SAME id.
       const load = jest
         .fn()
-        // Initial load + every poll keep returning the still-unresolved server row.
-        .mockResolvedValue([
-          event({ id: "a", raw_text: "milk", status: "needs_clarification" }),
-        ]);
-      const create = jest
-        .fn()
-        .mockResolvedValue(
-          event({ id: "b", raw_text: "milk 2%", status: "pending" }),
-        );
+        .mockResolvedValueOnce([needsClar])
+        .mockResolvedValue([processing]);
+      const answerClarification = jest.fn().mockResolvedValue(processing);
+      const getClarification = jest.fn().mockResolvedValue({
+        questions: [
+          { id: "q1", text: "What kind of milk?", options: ["Whole", "2%", "Skim"] },
+        ],
+      });
       const tree = mount(
         <TodayScreen
           session={SESSION}
           load={load}
-          create={create}
-          getClarification={emptyClarification()}
+          answerClarification={answerClarification}
+          getClarification={getClarification}
           useActive={() => true}
           pollIntervalMs={1000}
         />,
       );
       await act(async () => {});
 
-      press(tree, "milk, needs a detail, uncounted");
-      typeInto(tree, "Your answer", "2%");
       await act(async () => {
-        press(tree, "Submit answer");
+        press(tree, "milk, needs a detail, uncounted");
+      });
+      await act(async () => {
+        press(tree, "2%");
       });
 
-      // The re-submission is pending → polling runs and re-fetches the original
-      // needs_clarification row; it must stay filtered (resolved this session).
+      // The event is processing → polling runs and re-fetches the same event
+      // (now processing). It must stay advanced in place, never revert to the
+      // needs-a-detail treatment and never appear twice.
       act(() => jest.advanceTimersByTime(1000));
       await act(async () => {});
 
@@ -732,14 +805,21 @@ describe("TodayScreen needs-clarification entries", () => {
     }
   });
 
-  it("fetches FTY-152's clarification read and shows Fatty's real question", async () => {
+  it("fetches the clarification read and shows Fatty's real question + quick-pick chips", async () => {
     const load = jest
       .fn()
       .mockResolvedValue([
         event({ id: "a", raw_text: "peanut butter", status: "needs_clarification" }),
       ]);
     const getClarification = jest.fn().mockResolvedValue({
-      questions: [{ text: "How much peanut butter?" }, { text: "Smooth or crunchy?" }],
+      questions: [
+        {
+          id: "q1",
+          text: "How much peanut butter?",
+          options: ["1 tbsp", "2 tbsp"],
+        },
+        { id: "q2", text: "Smooth or crunchy?", options: [] },
+      ],
     });
     const tree = mount(
       <TodayScreen
@@ -763,7 +843,10 @@ describe("TodayScreen needs-clarification entries", () => {
     );
     expect(textContent(tree)).toContain("How much peanut butter?");
     expect(textContent(tree)).not.toContain("We need a detail");
-    // The answer affordances stay reachable alongside the question.
+    // The payload's candidate options render as tappable quick-pick chips.
+    expect(hasA11yLabel(tree, "1 tbsp")).toBe(true);
+    expect(hasA11yLabel(tree, "2 tbsp")).toBe(true);
+    // The free-text fallback stays reachable alongside the chips.
     expect(hasA11yLabel(tree, "Your answer")).toBe(true);
     expect(hasA11yLabel(tree, "Submit answer")).toBe(true);
   });
