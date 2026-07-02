@@ -16,7 +16,7 @@
  */
 
 import { act, create as render, type ReactTestRenderer } from "react-test-renderer";
-import { AccessibilityInfo } from "react-native";
+import { AccessibilityInfo, Modal } from "react-native";
 import { ThemeProvider } from "@/theme";
 
 import {
@@ -176,6 +176,10 @@ function hasA11yLabel(tree: ReactTestRenderer, label: string): boolean {
   return allA11yLabels(tree).includes(label);
 }
 
+function modalAnimationType(tree: ReactTestRenderer): string {
+  return tree.root.findByType(Modal).props.animationType as string;
+}
+
 function press(tree: ReactTestRenderer, label: string): void {
   const node = tree.root.find(
     (n) =>
@@ -223,9 +227,24 @@ function defaultProps(overrides: Partial<CorrectionSheetBaseProps> = {}) {
   };
 }
 
+function immediateReduceMotion(enabled: boolean): Promise<boolean> {
+  return {
+    then(onFulfilled?: ((value: boolean) => unknown) | null) {
+      onFulfilled?.(enabled);
+      return Promise.resolve(enabled);
+    },
+  } as Promise<boolean>;
+}
+
+function mockReduceMotion(enabled: boolean): void {
+  jest
+    .spyOn(AccessibilityInfo, "isReduceMotionEnabled")
+    .mockReturnValue(immediateReduceMotion(enabled));
+}
+
 // Mock AccessibilityInfo for all tests (isReduceMotionEnabled returns false by default).
 beforeEach(() => {
-  jest.spyOn(AccessibilityInfo, "isReduceMotionEnabled").mockResolvedValue(false);
+  mockReduceMotion(false);
   jest.spyOn(AccessibilityInfo, "addEventListener").mockReturnValue({ remove: jest.fn() } as never);
 });
 
@@ -684,6 +703,23 @@ describe("clarify mode", () => {
     expect(allText(tree)).toContain("We need a detail");
   });
 
+  it("renders the full logged phrase in clarify mode without truncating it", () => {
+    const longPhrase =
+      "a large bowl of homemade granola with milk, blueberries, and honey drizzled on top";
+    const tree = mount(
+      <CorrectionSheet
+        {...defaultProps()}
+        logPhrase={longPhrase}
+        needsClarification
+        clarificationData={clarificationData}
+      />,
+    );
+    const phrase = tree.root.findByProps({ testID: "clarify-full-phrase" });
+    expect(phrase.props.children).toBe(longPhrase);
+    expect(phrase.props.numberOfLines).toBeUndefined();
+    expect(allText(tree)).toContain(longPhrase);
+  });
+
   it("renders the free-text input + Done at a usable height in both states", () => {
     // A height floor on the clarify sheet keeps the body usable instead of the
     // collapsed zero-height strip (the live RC regression this story fixes) —
@@ -911,6 +947,33 @@ describe("accessibility", () => {
   it("backdrop has an accessible close label", () => {
     const tree = mount(<CorrectionSheet {...defaultProps()} />);
     expect(hasA11yLabel(tree, "Close sheet")).toBe(true);
+  });
+
+  it("uses the slide modal animation when Reduce Motion is off", async () => {
+    let tree!: ReactTestRenderer;
+    await act(async () => {
+      tree = render(
+        <ThemeProvider override="light">
+          <CorrectionSheet {...defaultProps()} />
+        </ThemeProvider>,
+      );
+    });
+    await act(async () => {});
+    expect(modalAnimationType(tree)).toBe("slide");
+  });
+
+  it("uses no modal animation when Reduce Motion is enabled", async () => {
+    mockReduceMotion(true);
+    let tree!: ReactTestRenderer;
+    await act(async () => {
+      tree = render(
+        <ThemeProvider override="light">
+          <CorrectionSheet {...defaultProps()} />
+        </ThemeProvider>,
+      );
+    });
+    await act(async () => {});
+    expect(modalAnimationType(tree)).toBe("none");
   });
 });
 

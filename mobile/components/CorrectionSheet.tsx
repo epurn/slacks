@@ -1,8 +1,8 @@
 /**
  * FTY-100: Universal detail / correction sheet.
  *
- * A slide-up sheet (a `Modal` with `animationType="slide"`) that opens from any
- * timeline item and provides four ordered levers for correction:
+ * A sheet that opens from any timeline item and provides four ordered levers for
+ * correction:
  *
  *   1. Amount stepper (primary) — provenance-preserving portion adjust (FTY-092)
  *   2. "Change match" — alternative source search + re-resolve (FTY-093)
@@ -20,10 +20,12 @@
 
 import {
   useCallback,
+  useEffect,
   useRef,
   useState,
 } from "react";
 import {
+  AccessibilityInfo,
   Modal,
   Pressable,
   ScrollView,
@@ -169,6 +171,29 @@ export function CorrectionSheet({
 }: CorrectionSheetProps) {
   const { colors } = useTheme();
   const [item, setItem] = useState<DerivedItem>(initialItem);
+  // Unknown starts motion-free; if the system says Reduce Motion is off, the
+  // sheet can use its normal slide animation on subsequent presentations.
+  const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled().then(
+      (enabled) => {
+        if (mounted) setReduceMotion(enabled);
+      },
+      () => {
+        if (mounted) setReduceMotion(true);
+      },
+    );
+    const subscription = AccessibilityInfo.addEventListener(
+      "reduceMotionChanged",
+      (enabled) => setReduceMotion(enabled),
+    );
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
 
   // Resync local item when prop changes (parent may push a confirmed edit).
   const [syncedItem, setSyncedItem] = useState<DerivedItem>(initialItem);
@@ -447,6 +472,7 @@ export function CorrectionSheet({
     food !== null && food.calories !== null && !!logPhrase;
 
   const sheetBg = colors.surfaceRaised;
+  const animationType = reduceMotion === false ? "slide" : "none";
 
   // ─── Render ───────────────────────────────────────────────────────────────────
 
@@ -454,7 +480,7 @@ export function CorrectionSheet({
     <Modal
       visible={visible}
       transparent
-      animationType="slide"
+      animationType={animationType}
       presentationStyle="overFullScreen"
       onRequestClose={onClose}
       accessibilityViewIsModal
@@ -515,6 +541,7 @@ export function CorrectionSheet({
                 onSubmitAnswer={handleClarifyAnswer}
                 submitting={clarifySubmitting}
                 colors={colors}
+                logPhrase={logPhrase}
               />
             ) : (
               <>
@@ -1073,6 +1100,7 @@ function ClarifyMode({
   onSubmitAnswer,
   submitting,
   colors,
+  logPhrase,
 }: {
   clarificationData?: ClarificationData;
   clarifyText: string;
@@ -1080,9 +1108,25 @@ function ClarifyMode({
   onSubmitAnswer: (answer: string) => void;
   submitting: boolean;
   colors: ReturnType<typeof useTheme>["colors"];
+  logPhrase?: string;
 }) {
   return (
     <View style={styles.clarifySection}>
+      {logPhrase ? (
+        <View style={styles.clarifyPhraseBlock}>
+          <Text style={[styles.clarifyPhraseLabel, { color: colors.textMuted }]}>
+            Logged phrase
+          </Text>
+          <Text
+            testID="clarify-full-phrase"
+            style={[styles.clarifyPhrase, { color: colors.text }]}
+            accessibilityLabel={`Logged phrase: ${logPhrase}`}
+          >
+            {logPhrase}
+          </Text>
+        </View>
+      ) : null}
+
       {/* Question — testID targets this element in Maestro (FTY-162 clarify flow). */}
       <Text
         testID="clarify-question"
@@ -1535,6 +1579,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.base,
     paddingVertical: spacing.lg,
     gap: spacing.md,
+  },
+  clarifyPhraseBlock: {
+    gap: spacing.xs,
+  },
+  clarifyPhraseLabel: {
+    fontSize: typeScale.footnote,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  clarifyPhrase: {
+    fontSize: typeScale.callout,
+    lineHeight: 22,
   },
   clarifyQuestion: {
     fontSize: typeScale.headline,

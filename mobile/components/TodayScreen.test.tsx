@@ -1,4 +1,5 @@
 import { act, create as render, type ReactTestRenderer } from "react-test-renderer";
+import { AccessibilityInfo } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { TodayScreen } from "./TodayScreen";
@@ -86,6 +87,24 @@ const INACTIVE = () => false;
 // outbox retry timer) can never fire into a later test and update an unmounted
 // component.
 const activeTrees: ReactTestRenderer[] = [];
+
+function immediateReduceMotion(enabled: boolean): Promise<boolean> {
+  return {
+    then(onFulfilled?: ((value: boolean) => unknown) | null) {
+      onFulfilled?.(enabled);
+      return Promise.resolve(enabled);
+    },
+  } as Promise<boolean>;
+}
+
+beforeEach(() => {
+  jest
+    .spyOn(AccessibilityInfo, "isReduceMotionEnabled")
+    .mockReturnValue(immediateReduceMotion(false));
+  jest
+    .spyOn(AccessibilityInfo, "addEventListener")
+    .mockReturnValue({ remove: jest.fn() } as never);
+});
 
 afterEach(() => {
   for (const tree of activeTrees) {
