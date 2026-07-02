@@ -40,6 +40,8 @@ import {
   E2E_FAILED_RAW_TEXT,
   E2E_FAILED_EVENT,
   E2E_FAILED_RETRY_EVENT,
+  e2eWeightEntries,
+  e2eDailySummaryRange,
 } from './fixtures';
 
 /**
@@ -133,6 +135,18 @@ export function createE2EMockFetch(): typeof fetch {
       headers: { 'Content-Type': 'application/json' },
     });
 
+  // Read a query-string parameter off a full request URL (the Trends range/weight
+  // reads carry the from/to window the fixtures are anchored to).
+  const queryParam = (u: string, key: string): string | undefined => {
+    const q = u.split('?')[1];
+    if (!q) return undefined;
+    for (const pair of q.split('&')) {
+      const [k, v] = pair.split('=');
+      if (k === key) return decodeURIComponent(v ?? '');
+    }
+    return undefined;
+  };
+
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url =
       typeof input === 'string'
@@ -202,9 +216,49 @@ export function createE2EMockFetch(): typeof fetch {
       return json(E2E_CLARIFICATION);
     }
 
+    // /daily-summary/range — backs the Trends adherence card (FTY-187). Returns
+    // one summary per calendar day in the requested window, anchored to the same
+    // from/to the client derived from the device clock, so the card renders real
+    // on-target days rather than an empty/error state.
+    if (pathEnd.endsWith('/daily-summary/range')) {
+      const from = queryParam(url, 'from');
+      const to = queryParam(url, 'to');
+      return json(from && to ? e2eDailySummaryRange(from, to) : []);
+    }
+
     // /daily-summary — returns non-zero intake once the entry is resolved.
     if (pathEnd.endsWith('/daily-summary')) {
       return json(phase === 2 ? E2E_RESOLVED_SUMMARY : E2E_DAILY_SUMMARY);
+    }
+
+    // /weight-entries — backs the Trends weight card (FTY-187). GET returns the
+    // synthetic series anchored to the window's end (`to` = the device's today)
+    // so the chart + headline delta render real data. A POST (a weight save) is
+    // acknowledged by echoing the submitted weight/date back as a stored entry,
+    // though the Trends flow only needs the sheet to open.
+    if (pathEnd.endsWith('/weight-entries')) {
+      if (method === 'POST') {
+        const body =
+          typeof init?.body === 'string'
+            ? (JSON.parse(init.body) as {
+                weight?: number;
+                effective_date?: string;
+              })
+            : {};
+        const date = body.effective_date ?? '2026-01-01';
+        return json(
+          {
+            id: 'e2e-weight-created',
+            user_id: E2E_SESSION.userId,
+            weight_kg: body.weight ?? 75,
+            effective_date: date,
+            created_at: `${date}T08:00:00Z`,
+            updated_at: `${date}T08:00:00Z`,
+          },
+          201,
+        );
+      }
+      return json(e2eWeightEntries(queryParam(url, 'to') ?? '2026-01-01'));
     }
 
     // Static fixtures (profile, target).

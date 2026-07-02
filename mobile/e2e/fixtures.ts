@@ -10,6 +10,7 @@ import type { SessionRecord } from '@/state/session';
 import type { ProfileDTO } from '@/api/profile';
 import type { DailySummaryDTO, TargetReadModel } from '@/api/dailySummary';
 import type { LogEventDTO, ClarificationDTO } from '@/api/logEvents';
+import type { WeightEntryDTO } from '@/api/weightEntries';
 
 export const E2E_SERVER_URL = 'http://localhost:8000';
 
@@ -238,3 +239,109 @@ export const E2E_FAILED_RETRY_EVENT: LogEventDTO = {
   created_at: '2026-01-01T08:01:00Z',
   updated_at: '2026-01-01T08:01:00Z',
 };
+
+// ─── FTY-187 Trends weight + adherence fixtures ───────────────────────────────
+//
+// The Trends screen queries a live date window derived from the device's own
+// clock (rangeBounds(range, new Date())), so these fixtures are built from the
+// requested window rather than pinned to fixed dates — the data always lands
+// inside range and the chart, headline, and adherence card render real content.
+// A data-starved Trends (empty/error cards) is an explicit testing-standards
+// failure, so trends.yaml asserts the populated end state, not a placeholder.
+
+/**
+ * Shift a YYYY-MM-DD string by whole days, UTC-anchored so it never drifts
+ * across a DST boundary. Used to derive the fixture dates from the window the
+ * Trends screen requests.
+ */
+function shiftIsoDate(isoDate: string, days: number): string {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const at = new Date(Date.UTC(y!, m! - 1, d!));
+  at.setUTCDate(at.getUTCDate() + days);
+  return at.toISOString().slice(0, 10);
+}
+
+/**
+ * Every calendar day from `from` through `to` inclusive (oldest first),
+ * mirroring the client's buildDayRange so range summaries key onto the strip.
+ */
+function e2eDayRange(from: string, to: string): string[] {
+  const out: string[] = [];
+  let cur = from;
+  for (let i = 0; i < 400 && cur <= to; i++) {
+    out.push(cur);
+    cur = shiftIsoDate(cur, 1);
+  }
+  return out;
+}
+
+/**
+ * Synthetic weight series for the Trends flow. Dates are anchored to the
+ * window's end (`to` — the device's today), so the entries fall inside the live
+ * range the screen queries and the multi-point chart + headline delta render
+ * real data. A gentle downward EWMA trend keeps the headline delta legible.
+ */
+export function e2eWeightEntries(to: string): WeightEntryDTO[] {
+  const series: readonly (readonly [number, number])[] = [
+    [28, 76.2],
+    [21, 75.9],
+    [14, 75.6],
+    [7, 75.2],
+    [0, 74.8],
+  ];
+  return series.map(([daysAgo, weightKg], i) => {
+    const date = shiftIsoDate(to, -daysAgo);
+    return {
+      id: `e2e-weight-${i}`,
+      user_id: E2E_SESSION.userId,
+      weight_kg: weightKg,
+      effective_date: date,
+      created_at: `${date}T08:00:00Z`,
+      updated_at: `${date}T08:00:00Z`,
+    };
+  });
+}
+
+/**
+ * Synthetic daily-summary range for the Trends adherence card. The range
+ * endpoint returns a row per calendar day, so this returns one per day in the
+ * window: the most recent 12 days carry a target and near-target logged intake
+ * (mostly on-target) so the card shows real on-target days, and earlier days
+ * are unlogged (`has_intake: false`) exactly like days the server has no
+ * finalized data for — dayAdherenceState classifies those as no-data.
+ */
+export function e2eDailySummaryRange(
+  from: string,
+  to: string,
+): DailySummaryDTO[] {
+  const days = e2eDayRange(from, to);
+  const total = days.length;
+  return days.map((date, i) => {
+    const logged = i >= total - 12;
+    if (!logged) {
+      return {
+        date,
+        intake: { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
+        has_intake: false,
+        target: null,
+        exercise: { active_calories: 0 },
+      };
+    }
+    // Mostly on-target (within ±10% of the 2,000 kcal target); every fifth day
+    // off-target, so the card reports a believable on-of-target ratio.
+    const offTarget = i % 5 === 0;
+    const calories = offTarget ? 1500 : 1980;
+    return {
+      date,
+      intake: {
+        calories,
+        protein_g: Math.round(calories * 0.075),
+        carbs_g: Math.round(calories * 0.1),
+        fat_g: Math.round(calories * 0.0325),
+      },
+      has_intake: true,
+      target: E2E_TARGET,
+      exercise: { active_calories: 0 },
+    };
+  });
+}

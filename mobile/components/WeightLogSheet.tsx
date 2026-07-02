@@ -89,6 +89,7 @@ export function WeightLogSheet({
       onRequestClose={onClose}
     >
       <View
+        testID="weight-log-sheet"
         style={[
           styles.container,
           {
