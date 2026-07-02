@@ -12,7 +12,11 @@ Contracts implemented here:
   exists per log event (unique ``log_event_id``). A job already in a terminal
   status is never reprocessed, so re-delivering the same task is a no-op that
   writes nothing. The event is claimed (``pending → processing``) only when it is
-  still ``pending``.
+  still ``pending``; an event already ``processing`` with a non-terminal job is
+  processed as-is — the path an answer-triggered re-estimate takes (FTY-171: the
+  clarification resolve re-opens the terminal ``needs_clarification`` job and
+  drives ``needs_clarification → processing`` *before* enqueueing, so the worker
+  itself never re-opens a terminal job and redelivery idempotency is preserved).
 - **Ownership.** The event is loaded scoped to the job's ``user_id``; a mismatch
   (or missing event) fails closed with :class:`EstimationEventNotFound` rather
   than processing another user's data.
@@ -30,7 +34,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -48,6 +52,7 @@ from app.estimator.off import build_off_client
 from app.estimator.official_fetch import load_official_fetch_settings
 from app.estimator.official_step import OfficialSourceResolveStep
 from app.estimator.pipeline import (
+    AnsweredClarification,
     CandidateDraft,
     EstimationContext,
     Pipeline,
@@ -60,6 +65,7 @@ from app.estimator.reference_fetch import load_reference_fetch_settings
 from app.estimator.search import build_search_provider
 from app.llm import build_provider, load_llm_settings
 from app.models.derived import (
+    ClarificationAnswer,
     ClarificationQuestion,
     DerivedExerciseItem,
     DerivedFoodItem,
@@ -165,6 +171,30 @@ def _load_owned_event(session: Session, log_event_id: uuid.UUID, user_id: uuid.U
     if event is None:
         raise EstimationEventNotFound("log event not found for job owner")
     return event
+
+
+def _load_answered_clarifications(
+    session: Session, log_event_id: uuid.UUID
+) -> list[AnsweredClarification]:
+    """Return the event's answered (question, answer) pairs, oldest question first.
+
+    The clarification answer flow (FTY-171) accumulates one
+    ``clarification_answers`` row per resolved question; a re-estimate consumes
+    **every** detail answered so far as structured input alongside the unchanged
+    raw text. Empty on a first estimate. The pairs are untrusted user text and
+    must never be copied into the sanitized run ``trace``/``error``.
+    """
+
+    rows = session.execute(
+        select(ClarificationQuestion.question_text, ClarificationAnswer.answer_text)
+        .join(ClarificationAnswer, ClarificationAnswer.question_id == ClarificationQuestion.id)
+        .where(ClarificationAnswer.log_event_id == log_event_id)
+        .order_by(ClarificationAnswer.created_at.asc(), ClarificationQuestion.position.asc())
+    ).all()
+    return [
+        AnsweredClarification(question_text=question, answer_text=answer)
+        for question, answer in rows
+    ]
 
 
 def _load_user_weight_kg(session: Session, user_id: uuid.UUID) -> float | None:
@@ -288,6 +318,7 @@ def process_estimation(
         raw_text=event.raw_text,
         weight_kg=_load_user_weight_kg(session, user_id),
         label_input=label_upload,
+        answered_clarifications=_load_answered_clarifications(session, log_event_id),
     )
     result = _run_pipeline(pipeline, context)
 
@@ -632,8 +663,24 @@ def _retain_label_image(
 def _persist_clarification_questions(
     session: Session, run: EstimationRun, context: EstimationContext
 ) -> None:
-    """Persist the parse step's clarification questions, unanswered and ordered."""
+    """Persist the parse step's clarification questions, unanswered and ordered.
 
+    A fresh clarification round **replaces** the event's unanswered question rows
+    (``parse-candidates.md``): on an answer-triggered re-estimate that lands on
+    ``needs_clarification`` again, the previous round's still-open questions are
+    superseded by the new round's, in the same transaction as the terminal
+    status. Answered questions — and their ``clarification_answers`` — are kept:
+    they carry the accumulated details the next re-estimate consumes. On a first
+    estimate there are no prior rows and the delete is a no-op.
+    """
+
+    answered_ids = select(ClarificationAnswer.question_id)
+    session.execute(
+        delete(ClarificationQuestion).where(
+            ClarificationQuestion.log_event_id == run.log_event_id,
+            ClarificationQuestion.id.not_in(answered_ids),
+        )
+    )
     for position, question in enumerate(context.clarification_questions):
         session.add(
             ClarificationQuestion(

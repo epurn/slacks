@@ -38,11 +38,13 @@ from app.estimator.label_upload import LabelProcessor, get_label_processor
 from app.schemas.corrections import DerivedFoodItemDTO
 from app.schemas.label_proposal import LabelProposalConfirmRequest, LabelProposalResponse
 from app.schemas.log_events import (
+    ClarificationAnswerRequest,
     ClarificationQuestionDTO,
     ClarificationResponse,
     LogEventCreateRequest,
     LogEventDTO,
 )
+from app.services import clarification as clarification_service
 from app.services import item_read_model
 from app.services import label_proposal as label_proposal_service
 from app.services import log_events as log_event_service
@@ -50,6 +52,10 @@ from app.services.attachments import (
     AttachmentInvalidContentType,
     AttachmentTooLarge,
     validate_upload,
+)
+from app.services.clarification import (
+    ClarificationQuestionNotFound,
+    NotAwaitingClarification,
 )
 from app.services.corrections import InvalidCorrection
 from app.services.label_proposal import LabelProposalNotFound
@@ -219,16 +225,21 @@ def get_log_event_clarification(
     current_user: CurrentUser,
     session: Annotated[Session, Depends(get_session)],
 ) -> ClarificationResponse:
-    """Return the persisted clarification questions for one of the caller's events.
+    """Return the open clarification questions for one of the caller's events.
 
     The mobile clarify sheet (FTY-153) fetches this lazily when it opens, so the
-    Today list/poll DTO stays lean. Questions are ordered by ``position`` and carry
-    only their ``text`` — the estimator produces no quick-pick options today.
+    Today list/poll DTO stays lean. Questions are ordered by ``position`` and
+    carry their stable ``id`` (the key an answer submission references), their
+    ``text``, and their quick-pick ``options`` (empty until the estimator
+    persists options — FTY-172; the client then shows free-text only).
 
-    Ownership is fail-closed (FTY-030): a cross-user or nonexistent ``event_id`` is
-    indistinguishable as ``404`` (no existence oracle). An event with no
-    clarification rows returns ``200`` with an empty list (no status oracle). The
-    question text, like raw text, is never logged.
+    The read is status-gated (``log-events.md`` v4): only a
+    ``needs_clarification`` event serves questions, and only its **unanswered**
+    ones, so a served question is always freshly answerable. Ownership is
+    fail-closed (FTY-030): a cross-user or nonexistent ``event_id`` is
+    indistinguishable as ``404`` (no existence oracle); a wrong-status event and
+    one with no rows both return an empty list (no status oracle). The question
+    text, like raw text, is never logged.
     """
 
     try:
@@ -238,8 +249,65 @@ def get_log_event_clarification(
     except (LogEventForbidden, LogEventNotFound) as exc:
         raise _NOT_FOUND from exc
     return ClarificationResponse(
-        questions=[ClarificationQuestionDTO(text=q.question_text) for q in questions]
+        questions=[ClarificationQuestionDTO(id=q.id, text=q.question_text) for q in questions]
     )
+
+
+@router.post(
+    "/{user_id}/log-events/{event_id}/clarification/answers",
+    response_model=LogEventDTO,
+    status_code=status.HTTP_201_CREATED,
+)
+def answer_log_event_clarification(
+    user_id: uuid.UUID,
+    event_id: uuid.UUID,
+    payload: ClarificationAnswerRequest,
+    current_user: CurrentUser,
+    session: Annotated[Session, Depends(get_session)],
+    enqueue: Annotated[EstimationEnqueuer, Depends(get_enqueuer)],
+    response: Response,
+) -> LogEventDTO:
+    """Resolve one clarification question on the caller's own event (FTY-171).
+
+    The answer — a tapped quick-pick option's value or free text — is applied as
+    a structured detail to the **same** event, which is re-estimated with every
+    detail answered so far (``needs_clarification → processing``; the client
+    polls as usual). The raw phrase is never mutated and no second event is ever
+    created (audit findings A3/A5); an empty/whitespace answer is rejected
+    ``422`` at the request boundary before any work.
+
+    A fresh resolve returns ``201`` and enqueues the re-estimate only after the
+    answer, the re-opened job, and the transition are committed — the worker
+    never races an unpersisted resolve. An idempotent replay of an
+    already-answered question returns ``200`` with the event's current DTO and
+    enqueues nothing. A fresh answer for an event that has since moved on
+    returns ``409 {"error": "not_awaiting_clarification"}`` and mutates nothing.
+    Ownership fails closed (``404``, no existence oracle) for a cross-user or
+    nonexistent event or a question that is not the event's own. The answer
+    text, like raw text, is never logged.
+    """
+
+    try:
+        event, resolved = clarification_service.answer_clarification_question(
+            session,
+            user_id,
+            current_user,
+            event_id,
+            question_id=payload.question_id,
+            answer_text=payload.answer,
+        )
+    except (LogEventForbidden, LogEventNotFound, ClarificationQuestionNotFound) as exc:
+        raise _NOT_FOUND from exc
+    except NotAwaitingClarification as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "not_awaiting_clarification"},
+        ) from exc
+    if resolved:
+        enqueue(log_event_id=event.id, user_id=event.user_id)
+    else:
+        response.status_code = status.HTTP_200_OK
+    return LogEventDTO.model_validate(event)
 
 
 @router.get(
