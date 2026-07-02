@@ -210,10 +210,14 @@ clarification answer):
 ```
 
 `items` uses the shared `DerivedFoodItemDTO | DerivedExerciseItemDTO` shape from
-`corrections.md` / `daily-summary.md`. A pending, failed, or completed-with-no-item
+`corrections.md` / `daily-summary.md`, but only for finalized item detail: the
+owning event must be `completed`, the item must be `resolved`, and its costed
+value must be present (`calories` for food, `active_calories` for exercise). A
+pending, processing, failed, needs_clarification, or completed-with-no-finalized-item
 event is still returned with `items: []`, matching the Today timeline's status-row
-fallback. Non-finalized item rows retain their own `status` (`unresolved` /
-`proposed`) and nullable values; clients must not count them as finalized totals.
+fallback. Non-finalized item rows remain persisted with their own `status`
+(`unresolved` / `proposed`) and nullable values, but they are not included in this
+read until they become finalized.
 - **Get-by-id** → `200` with the event DTO.
 
 The DTO does **not** echo `idempotency_key`: it is a write-only request token with

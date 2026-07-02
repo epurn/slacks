@@ -30,7 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.enums import LogEventStatus
+from app.enums import DerivedItemStatus, LogEventStatus
 from app.models.derived import (
     ClarificationAnswer,
     ClarificationQuestion,
@@ -203,25 +203,31 @@ def list_entries_for_day(
 
     This is the FTY-198 day-listing read for past-day timelines. It deliberately
     composes :func:`list_events_for_day` for authorization, default-day handling,
-    ordering, and profile-timezone day bounds, then enriches each event with the
-    shared item serializer from :mod:`app.services.item_read_model` so provenance
-    is not re-derived here.
+    ordering, and profile-timezone day bounds, then enriches completed events
+    with finalized item rows from the shared serializer in
+    :mod:`app.services.item_read_model` so provenance is not re-derived here.
     """
 
     events = list_events_for_day(session, owner_id, current_user, day)
     if not events:
         return []
 
-    event_ids = [event.id for event in events]
+    completed_event_ids = [
+        event.id for event in events if LogEventStatus(event.status) is LogEventStatus.COMPLETED
+    ]
     items_by_event: dict[uuid.UUID, list[DerivedFoodItemDTO | DerivedExerciseItemDTO]] = (
         defaultdict(list)
     )
+    if not completed_event_ids:
+        return [LogEventEntry(event=event, items=items_by_event[event.id]) for event in events]
 
     food_items = session.scalars(
         select(DerivedFoodItem)
         .where(
             DerivedFoodItem.user_id == owner_id,
-            DerivedFoodItem.log_event_id.in_(event_ids),
+            DerivedFoodItem.log_event_id.in_(completed_event_ids),
+            DerivedFoodItem.status == DerivedItemStatus.RESOLVED,
+            DerivedFoodItem.calories.isnot(None),
         )
         .order_by(
             DerivedFoodItem.log_event_id.asc(),
@@ -236,7 +242,9 @@ def list_entries_for_day(
         select(DerivedExerciseItem)
         .where(
             DerivedExerciseItem.user_id == owner_id,
-            DerivedExerciseItem.log_event_id.in_(event_ids),
+            DerivedExerciseItem.log_event_id.in_(completed_event_ids),
+            DerivedExerciseItem.status == DerivedItemStatus.RESOLVED,
+            DerivedExerciseItem.active_calories.isnot(None),
         )
         .order_by(
             DerivedExerciseItem.log_event_id.asc(),

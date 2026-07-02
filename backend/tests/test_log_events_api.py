@@ -115,7 +115,8 @@ def _seed_exercise_item(
     user_id: str,
     event_id: uuid.UUID,
     *,
-    active_calories: float = 120.0,
+    status: DerivedItemStatus = DerivedItemStatus.RESOLVED,
+    active_calories: float | None = 120.0,
 ) -> uuid.UUID:
     factory = create_session_factory(db_engine)
     with factory() as session:
@@ -126,7 +127,7 @@ def _seed_exercise_item(
             quantity_text="30 minutes",
             unit="minutes",
             amount=30.0,
-            status=DerivedItemStatus.RESOLVED,
+            status=status,
             active_calories=active_calories,
             active_calories_estimated=active_calories,
         )
@@ -566,6 +567,99 @@ def test_entries_by_date_returns_events_with_today_item_read_model(
     assert exercise["active_calories"] == 120.0
     assert exercise["source"] is None
     assert exercise["is_edited"] is False
+
+
+def test_entries_by_date_surfaces_only_finalized_item_detail(
+    client: TestClient, db_engine: Engine
+) -> None:
+    user_id, auth = _register(client, "entries-finalized@example.com")
+    completed_event_id = _seed_event_at(
+        db_engine,
+        user_id,
+        datetime(2026, 6, 20, 10, 0, tzinfo=UTC),
+        raw_text="finalized lunch",
+        status=LogEventStatus.COMPLETED,
+    )
+    pending_event_id = _seed_event_at(
+        db_engine,
+        user_id,
+        datetime(2026, 6, 20, 11, 0, tzinfo=UTC),
+        raw_text="pending snack",
+        status=LogEventStatus.PENDING,
+    )
+    failed_event_id = _seed_event_at(
+        db_engine,
+        user_id,
+        datetime(2026, 6, 20, 12, 0, tzinfo=UTC),
+        raw_text="failed walk",
+        status=LogEventStatus.FAILED,
+    )
+
+    resolved_food_id = _seed_food_item(db_engine, user_id, completed_event_id)
+    proposed_food_id = _seed_food_item(
+        db_engine,
+        user_id,
+        completed_event_id,
+        name="label proposal",
+        status=DerivedItemStatus.PROPOSED,
+        calories=180.0,
+    )
+    unresolved_food_id = _seed_food_item(
+        db_engine,
+        user_id,
+        completed_event_id,
+        name="unresolved food",
+        status=DerivedItemStatus.UNRESOLVED,
+        calories=None,
+    )
+    null_costed_food_id = _seed_food_item(
+        db_engine,
+        user_id,
+        completed_event_id,
+        name="incomplete resolved food",
+        status=DerivedItemStatus.RESOLVED,
+        calories=None,
+    )
+    resolved_exercise_id = _seed_exercise_item(db_engine, user_id, completed_event_id)
+    null_costed_exercise_id = _seed_exercise_item(
+        db_engine,
+        user_id,
+        completed_event_id,
+        active_calories=None,
+    )
+    pending_resolved_food_id = _seed_food_item(db_engine, user_id, pending_event_id)
+    failed_resolved_exercise_id = _seed_exercise_item(db_engine, user_id, failed_event_id)
+
+    resp = client.get(
+        f"/api/users/{user_id}/log-events/by-date",
+        headers={"Authorization": auth},
+        params={"day": "2026-06-20"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [entry["event"]["id"] for entry in body] == [
+        str(completed_event_id),
+        str(pending_event_id),
+        str(failed_event_id),
+    ]
+    assert [item["id"] for item in body[0]["items"]] == [
+        str(resolved_food_id),
+        str(resolved_exercise_id),
+    ]
+    assert body[1]["items"] == []
+    assert body[2]["items"] == []
+
+    hidden_item_ids = {
+        str(proposed_food_id),
+        str(unresolved_food_id),
+        str(null_costed_food_id),
+        str(null_costed_exercise_id),
+        str(pending_resolved_food_id),
+        str(failed_resolved_exercise_id),
+    }
+    surfaced_item_ids = {item["id"] for entry in body for item in entry["items"]}
+    assert hidden_item_ids.isdisjoint(surfaced_item_ids)
 
 
 def test_entries_by_date_uses_profile_timezone_and_matches_daily_summary(
