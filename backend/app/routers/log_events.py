@@ -43,6 +43,7 @@ from app.schemas.log_events import (
     ClarificationResponse,
     LogEventCreateRequest,
     LogEventDTO,
+    LogEventEntryDTO,
 )
 from app.services import clarification as clarification_service
 from app.services import item_read_model
@@ -197,6 +198,28 @@ def list_log_events(
     except LogEventForbidden as exc:
         raise _NOT_FOUND from exc
     return [LogEventDTO.model_validate(event) for event in events]
+
+
+@router.get("/{user_id}/log-events/by-date", response_model=list[LogEventEntryDTO])
+def list_log_event_entries_by_date(
+    user_id: uuid.UUID,
+    current_user: CurrentUser,
+    session: Annotated[Session, Depends(get_session)],
+    day: Annotated[
+        date | None,
+        Query(description="Calendar day (YYYY-MM-DD) in the user's timezone; defaults to today."),
+    ] = None,
+) -> list[LogEventEntryDTO]:
+    """List the caller's day entries with Today-feed item rows (FTY-198)."""
+
+    try:
+        entries = log_event_service.list_entries_for_day(session, user_id, current_user, day)
+    except LogEventForbidden as exc:
+        raise _NOT_FOUND from exc
+    return [
+        LogEventEntryDTO(event=LogEventDTO.model_validate(entry.event), items=entry.items)
+        for entry in entries
+    ]
 
 
 @router.get("/{user_id}/log-events/{event_id}", response_model=LogEventDTO)

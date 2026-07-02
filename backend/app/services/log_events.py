@@ -22,6 +22,8 @@ This module owns two contracts:
 from __future__ import annotations
 
 import uuid
+from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date
 
 from sqlalchemy import select
@@ -29,9 +31,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.enums import LogEventStatus
-from app.models.derived import ClarificationAnswer, ClarificationQuestion
+from app.models.derived import (
+    ClarificationAnswer,
+    ClarificationQuestion,
+    DerivedExerciseItem,
+    DerivedFoodItem,
+)
 from app.models.identity import User
 from app.models.log_events import LogEvent
+from app.schemas.corrections import DerivedExerciseItemDTO, DerivedFoodItemDTO
+from app.services import item_read_model
 from app.timeutils import current_day, day_bounds_utc, user_timezone
 
 #: The log-event status state machine: each status maps to the set of statuses
@@ -70,6 +79,14 @@ class LogEventNotFound(Exception):
 
 class IllegalTransition(Exception):
     """Raised when a status change is not permitted by :data:`LEGAL_TRANSITIONS`."""
+
+
+@dataclass(frozen=True)
+class LogEventEntry:
+    """A day-listing entry: event envelope plus Today item read-model rows."""
+
+    event: LogEvent
+    items: list[DerivedFoodItemDTO | DerivedExerciseItemDTO]
 
 
 def is_legal_transition(current: LogEventStatus, target: LogEventStatus) -> bool:
@@ -174,6 +191,65 @@ def list_events_for_day(
             .order_by(LogEvent.created_at.asc(), LogEvent.id.asc())
         )
     )
+
+
+def list_entries_for_day(
+    session: Session,
+    owner_id: uuid.UUID,
+    current_user: User,
+    day: date | None = None,
+) -> list[LogEventEntry]:
+    """Return ``owner_id``'s day entries with derived item read-model rows.
+
+    This is the FTY-198 day-listing read for past-day timelines. It deliberately
+    composes :func:`list_events_for_day` for authorization, default-day handling,
+    ordering, and profile-timezone day bounds, then enriches each event with the
+    shared item serializer from :mod:`app.services.item_read_model` so provenance
+    is not re-derived here.
+    """
+
+    events = list_events_for_day(session, owner_id, current_user, day)
+    if not events:
+        return []
+
+    event_ids = [event.id for event in events]
+    items_by_event: dict[uuid.UUID, list[DerivedFoodItemDTO | DerivedExerciseItemDTO]] = (
+        defaultdict(list)
+    )
+
+    food_items = session.scalars(
+        select(DerivedFoodItem)
+        .where(
+            DerivedFoodItem.user_id == owner_id,
+            DerivedFoodItem.log_event_id.in_(event_ids),
+        )
+        .order_by(
+            DerivedFoodItem.log_event_id.asc(),
+            DerivedFoodItem.created_at.asc(),
+            DerivedFoodItem.id.asc(),
+        )
+    )
+    for item in food_items:
+        items_by_event[item.log_event_id].append(item_read_model.serialize_food_item(session, item))
+
+    exercise_items = session.scalars(
+        select(DerivedExerciseItem)
+        .where(
+            DerivedExerciseItem.user_id == owner_id,
+            DerivedExerciseItem.log_event_id.in_(event_ids),
+        )
+        .order_by(
+            DerivedExerciseItem.log_event_id.asc(),
+            DerivedExerciseItem.created_at.asc(),
+            DerivedExerciseItem.id.asc(),
+        )
+    )
+    for exercise_item in exercise_items:
+        items_by_event[exercise_item.log_event_id].append(
+            item_read_model.serialize_exercise_item(session, exercise_item)
+        )
+
+    return [LogEventEntry(event=event, items=items_by_event[event.id]) for event in events]
 
 
 def get_event(

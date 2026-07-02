@@ -1001,6 +1001,34 @@
         "title": "LogEventDTO",
         "type": "object"
       },
+      "LogEventEntryDTO": {
+        "description": "Today-feed-shaped day-listing row (FTY-198).\n\nCarries the owning log event plus the derived food/exercise items the Today\ntimeline renders beneath it. Item DTOs reuse the shared correction/item\nread-model, including per-item ``source`` provenance and ``is_edited``.",
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/LogEventDTO"
+          },
+          "items": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DerivedFoodItemDTO"
+                },
+                {
+                  "$ref": "#/components/schemas/DerivedExerciseItemDTO"
+                }
+              ]
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "event",
+          "items"
+        ],
+        "title": "LogEventEntryDTO",
+        "type": "object"
+      },
       "LogEventStatus": {
         "description": "Lifecycle status of a raw log event (FTY-030).\n\nThis is the canonical v1 status vocabulary for the log-event state machine.\nA new event starts at :attr:`PENDING`; the estimator pipeline (Milestone 4)\ndrives it through :attr:`PROCESSING` to a terminal :attr:`COMPLETED`,\n:attr:`FAILED`, or :attr:`NEEDS_CLARIFICATION`. The legal transitions between\nthese statuses are the named state-machine contract in\n:mod:`app.services.log_events`; later stories extend that map rather than\nredefining the vocabulary here.\n\nFTY-030 implements creation at :attr:`PENDING` and the\n``PENDING \u2192 COMPLETED`` transition only; the remaining transitions are\nreserved for the estimator stories.",
         "enum": [
@@ -2780,6 +2808,89 @@
           }
         },
         "summary": "Create Log Event",
+        "tags": [
+          "log-events"
+        ]
+      }
+    },
+    "/api/users/{user_id}/log-events/by-date": {
+      "get": {
+        "description": "List the caller's day entries with Today-feed item rows (FTY-198).",
+        "operationId": "list_log_event_entries_by_date_api_users__user_id__log_events_by_date_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Calendar day (YYYY-MM-DD) in the user's timezone; defaults to today.",
+            "in": "query",
+            "name": "day",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Calendar day (YYYY-MM-DD) in the user's timezone; defaults to today.",
+              "title": "Day"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LogEventEntryDTO"
+                  },
+                  "title": "Response List Log Event Entries By Date Api Users  User Id  Log Events By Date Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Log Event Entries By Date",
         "tags": [
           "log-events"
         ]
