@@ -60,15 +60,22 @@ export type DateRangeKey = "1M" | "3M" | "6M";
 
 export interface DateRangeOption {
   readonly key: DateRangeKey;
+  /** Visible chip label — human prose, never the raw range key ("1M"/"3M"/"6M"). */
   readonly label: string;
+  /** Spoken label for the toggle — prose, never the raw range key. */
+  readonly accessibilityLabel: string;
   readonly days: number;
 }
 
-/** Configurable range list — add new options here without a contract change. */
+/**
+ * Configurable range list — add new options here without a contract change.
+ * `key` is the internal/test-ID identifier; `label`/`accessibilityLabel` are the
+ * user-facing prose and must never expose the raw key (ux-design §4b, FTY-189).
+ */
 export const DATE_RANGE_OPTIONS: readonly DateRangeOption[] = [
-  { key: "1M", label: "1M", days: 30 },
-  { key: "3M", label: "3M", days: 90 },
-  { key: "6M", label: "6M", days: 180 },
+  { key: "1M", label: "1 month", accessibilityLabel: "Last month", days: 30 },
+  { key: "3M", label: "3 months", accessibilityLabel: "Last 3 months", days: 90 },
+  { key: "6M", label: "6 months", accessibilityLabel: "Last 6 months", days: 180 },
 ];
 
 export const DEFAULT_DATE_RANGE: DateRangeKey = "1M";

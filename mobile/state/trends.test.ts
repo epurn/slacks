@@ -150,6 +150,13 @@ describe("DATE_RANGE_OPTIONS", () => {
     expect(keys).toContain("3M");
     expect(keys).toContain("6M");
   });
+
+  it("never exposes a raw range key in a visible or spoken label (FTY-189)", () => {
+    for (const opt of DATE_RANGE_OPTIONS) {
+      expect(opt.label).not.toMatch(/\b[136]M\b/);
+      expect(opt.accessibilityLabel).not.toMatch(/\b[136]M\b/);
+    }
+  });
 });
 
 describe("DEFAULT_DATE_RANGE", () => {

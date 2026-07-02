@@ -401,6 +401,7 @@ export function TrendsScreen({
             loading={weightPhase === "loading"}
             error={weightPhase === "error" ? weightError : null}
             onRetry={reloadWeight}
+            today={todayStr}
             width={chartWidth}
           />
           <Pressable
@@ -525,7 +526,7 @@ function RangeSelector({
             key={opt.key}
             testID={`range-btn-${opt.key}`}
             accessibilityRole="button"
-            accessibilityLabel={`${opt.label} range`}
+            accessibilityLabel={opt.accessibilityLabel}
             accessibilityState={{ selected: isSelected }}
             onPress={() => onChange(opt.key)}
             style={[
