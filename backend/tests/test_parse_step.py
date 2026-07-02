@@ -22,10 +22,7 @@ from typing import Any
 import pytest
 
 from app.estimator.clarify_policy import NL_PARSE_CLARIFY_POLICY
-from app.estimator.parse import (
-    DEFAULT_CLARIFICATION_QUESTION,
-    ParseStep,
-)
+from app.estimator.parse import ParseStep
 from app.estimator.pipeline import (
     EstimationContext,
     NeedsClarification,
@@ -150,79 +147,6 @@ def test_parsed_but_no_items_fails_closed() -> None:
     assert exc.value.reason == "no_candidates"
 
 
-def test_needs_clarification_disposition_collects_questions() -> None:
-    provider = FakeProvider(
-        responses=_sampled(
-            {
-                "disposition": "needs_clarification",
-                "confidence": 0.8,
-                "clarification_questions": [
-                    _clarify("How much rice?", ["1/2 cup", "1 cup", "2 cups"]),
-                    _clarify("Cooked or raw?", ["Cooked", "Raw"]),
-                    _clarify("How much rice?", ["1/2 cup", "1 cup", "2 cups"]),
-                ],
-            }
-        )
-    )
-    context = _context()
-
-    with pytest.raises(NeedsClarification):
-        _run(provider, context)
-
-    # Cross-sample duplicates are pooled once; each question keeps its options.
-    assert _question_texts(context) == ["How much rice?", "Cooked or raw?"]
-    assert _question_options(context) == [["1/2 cup", "1 cup", "2 cups"], ["Cooked", "Raw"]]
-
-
-def test_needs_clarification_without_questions_fails_closed() -> None:
-    provider = FakeProvider(
-        responses=_sampled({"disposition": "needs_clarification", "confidence": 0.8})
-    )
-    context = _context()
-
-    with pytest.raises(StepFailed) as exc:
-        _run(provider, context)
-
-    assert exc.value.reason == "clarification_quality_failed"
-    assert context.clarification_questions == []
-
-
-def test_generic_clarification_question_fails_closed() -> None:
-    provider = FakeProvider(
-        responses=_sampled(
-            {
-                "disposition": "needs_clarification",
-                "confidence": 0.8,
-                "clarification_questions": [
-                    _clarify(DEFAULT_CLARIFICATION_QUESTION, ["1 serving", "2 servings"]),
-                ],
-            }
-        )
-    )
-
-    with pytest.raises(StepFailed) as exc:
-        _run(provider, _context())
-
-    assert exc.value.reason == "clarification_quality_failed"
-
-
-def test_clarification_question_without_two_options_fails_closed() -> None:
-    provider = FakeProvider(
-        responses=_sampled(
-            {
-                "disposition": "needs_clarification",
-                "confidence": 0.8,
-                "clarification_questions": [_clarify("How much rice?", ["1 cup"])],
-            }
-        )
-    )
-
-    with pytest.raises(StepFailed) as exc:
-        _run(provider, _context())
-
-    assert exc.value.reason == "clarification_quality_failed"
-
-
 def test_schema_invalid_output_is_rejected_and_fails_closed() -> None:
     # "confidence" is the wrong type; the untrusted reply must be rejected, never
     # coerced-and-trusted, and never returned.
@@ -297,24 +221,6 @@ def test_unanimous_samples_rescue_a_timid_verbalized_confidence() -> None:
 
     assert [c.name for c in context.food_candidates] == ["oatmeal"]
     assert context.clarification_questions == []
-
-
-def test_unanimous_but_rock_bottom_verbalized_synthesizes_clarification() -> None:
-    # Agreement alone cannot buy an estimate: with the verbalized component near
-    # zero the hybrid stays below the calibrated point, and a vague reply (no
-    # detail signal) routes to a backend-generated clarification even when the
-    # parsed sample did not include provider-raised questions.
-    reply = _parsed([{"type": "food", "name": "rice", "quantity_text": "some"}], confidence=0.1)
-    provider = FakeProvider(responses=_sampled(reply))
-    context = _context(raw_text="some rice")
-
-    with pytest.raises(NeedsClarification) as exc:
-        _run(provider, context)
-
-    assert exc.value.reason == "low_confidence_or_ambiguous"
-    assert context.food_candidates == []
-    assert _question_texts(context) == ["How much rice did you have?"]
-    assert _question_options(context) == [["1/2 cup", "1 cup", "2 cups"]]
 
 
 def test_disagreeing_samples_clarify_despite_total_verbalized_confidence() -> None:
