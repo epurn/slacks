@@ -1,8 +1,8 @@
 /**
  * FTY-100: Universal detail / correction sheet.
  *
- * A slide-up sheet (a `Modal` with `animationType="slide"`) that opens from any
- * timeline item and provides four ordered levers for correction:
+ * A sheet that opens from any timeline item and provides four ordered levers for
+ * correction:
  *
  *   1. Amount stepper (primary) — provenance-preserving portion adjust (FTY-092)
  *   2. "Change match" — alternative source search + re-resolve (FTY-093)
@@ -20,10 +20,12 @@
 
 import {
   useCallback,
+  useEffect,
   useRef,
   useState,
 } from "react";
 import {
+  AccessibilityInfo,
   Modal,
   Pressable,
   ScrollView,
@@ -50,6 +52,7 @@ import {
   saveFood as saveFoodApi,
   type NutritionSnapshot,
 } from "@/api/savedFoods";
+import { ClarifyMode, type ClarificationData } from "@/components/ClarifyMode";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { AppIcon } from "@/components/ui/AppIcon";
 import {
@@ -60,17 +63,7 @@ import type { ApiSession } from "@/state/session";
 import { formatValue } from "@/state/derivedItems";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
 
-/** Clarification data for an item in the needs_clarification state. */
-export interface ClarificationData {
-  /**
-   * Fatty's specific question (e.g. "What kind of milk?"), or `null` while the
-   * clarification read is loading or when the event has no persisted question.
-   * Clarify-mode falls back to the generic prompt + free-text when it is `null`.
-   */
-  readonly question: string | null;
-  /** Quick-pick answer options (tappable chips). Empty for v1 (FTY-152). */
-  readonly options: readonly string[];
-}
+export type { ClarificationData } from "@/components/ClarifyMode";
 
 type SheetMode = "normal" | "change-match" | "override" | "clarify";
 type SaveFoodStatus = "idle" | "saving" | "saved" | "error";
@@ -169,6 +162,29 @@ export function CorrectionSheet({
 }: CorrectionSheetProps) {
   const { colors } = useTheme();
   const [item, setItem] = useState<DerivedItem>(initialItem);
+  // Unknown starts motion-free; if the system says Reduce Motion is off, the
+  // sheet can use its normal slide animation on subsequent presentations.
+  const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled().then(
+      (enabled) => {
+        if (mounted) setReduceMotion(enabled);
+      },
+      () => {
+        if (mounted) setReduceMotion(true);
+      },
+    );
+    const subscription = AccessibilityInfo.addEventListener(
+      "reduceMotionChanged",
+      (enabled) => setReduceMotion(enabled),
+    );
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
 
   // Resync local item when prop changes (parent may push a confirmed edit).
   const [syncedItem, setSyncedItem] = useState<DerivedItem>(initialItem);
@@ -447,6 +463,7 @@ export function CorrectionSheet({
     food !== null && food.calories !== null && !!logPhrase;
 
   const sheetBg = colors.surfaceRaised;
+  const animationType = reduceMotion === false ? "slide" : "none";
 
   // ─── Render ───────────────────────────────────────────────────────────────────
 
@@ -454,7 +471,7 @@ export function CorrectionSheet({
     <Modal
       visible={visible}
       transparent
-      animationType="slide"
+      animationType={animationType}
       presentationStyle="overFullScreen"
       onRequestClose={onClose}
       accessibilityViewIsModal
@@ -515,6 +532,7 @@ export function CorrectionSheet({
                 onSubmitAnswer={handleClarifyAnswer}
                 submitting={clarifySubmitting}
                 colors={colors}
+                logPhrase={logPhrase}
               />
             ) : (
               <>
@@ -1066,108 +1084,6 @@ function OverridePanel({
   );
 }
 
-function ClarifyMode({
-  clarificationData,
-  clarifyText,
-  onChangeClarifyText,
-  onSubmitAnswer,
-  submitting,
-  colors,
-}: {
-  clarificationData?: ClarificationData;
-  clarifyText: string;
-  onChangeClarifyText: (v: string) => void;
-  onSubmitAnswer: (answer: string) => void;
-  submitting: boolean;
-  colors: ReturnType<typeof useTheme>["colors"];
-}) {
-  return (
-    <View style={styles.clarifySection}>
-      {/* Question — testID targets this element in Maestro (FTY-162 clarify flow). */}
-      <Text
-        testID="clarify-question"
-        style={[styles.clarifyQuestion, { color: colors.text }]}
-      >
-        {clarificationData?.question ?? "We need a detail to count this entry."}
-      </Text>
-
-      {/* Quick-pick chips */}
-      {clarificationData && clarificationData.options.length > 0 ? (
-        <View style={styles.chipRow} accessibilityRole="radiogroup">
-          {clarificationData.options.map((option) => (
-            <Pressable
-              key={option}
-              onPress={() => onSubmitAnswer(option)}
-              style={[styles.chip, { backgroundColor: colors.controlBackground }]}
-              accessibilityRole="radio"
-              accessibilityLabel={option}
-              disabled={submitting}
-              accessibilityState={{ disabled: submitting }}
-            >
-              <Text style={[styles.chipLabel, { color: colors.text }]}>{option}</Text>
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
-
-      {/* Free-text fallback */}
-      <Text style={[styles.clarifyOrLabel, { color: colors.textMuted }]}>
-        {clarificationData && clarificationData.options.length > 0
-          ? "Or type your own:"
-          : "Type your answer:"}
-      </Text>
-      <View style={styles.clarifyInputRow}>
-        <TextInput
-          accessibilityLabel="Your answer"
-          placeholder="Type your answer…"
-          placeholderTextColor={colors.textMuted}
-          value={clarifyText}
-          onChangeText={onChangeClarifyText}
-          style={[
-            styles.clarifyInput,
-            {
-              backgroundColor: colors.controlBackground,
-              color: colors.text,
-              flex: 1,
-            },
-          ]}
-          editable={!submitting}
-          returnKeyType="done"
-          onSubmitEditing={() => {
-            if (clarifyText.trim()) {
-              onSubmitAnswer(clarifyText);
-            }
-          }}
-        />
-        <Pressable
-          onPress={() => {
-            if (clarifyText.trim()) {
-              onSubmitAnswer(clarifyText);
-            }
-          }}
-          style={[
-            styles.clarifySubmitBtn,
-            { backgroundColor: clarifyText.trim() ? colors.accent : colors.controlBackground },
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel="Submit answer"
-          disabled={submitting || !clarifyText.trim()}
-          accessibilityState={{ disabled: submitting || !clarifyText.trim() }}
-        >
-          <Text
-            style={[
-              styles.clarifySubmitLabel,
-              { color: clarifyText.trim() ? colors.accentForeground : colors.textMuted },
-            ]}
-          >
-            {submitting ? "…" : "Done"}
-          </Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
 function SaveFoodRow({
   status,
   error,
@@ -1526,58 +1442,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   overrideSaveLabel: {
-    fontSize: typeScale.callout,
-    fontWeight: "600",
-  },
-
-  // Clarify mode
-  clarifySection: {
-    paddingHorizontal: spacing.base,
-    paddingVertical: spacing.lg,
-    gap: spacing.md,
-  },
-  clarifyQuestion: {
-    fontSize: typeScale.headline,
-    fontWeight: "600",
-  },
-  chipRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  chip: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.full,
-    minHeight: 44,
-    justifyContent: "center",
-  },
-  chipLabel: {
-    fontSize: typeScale.callout,
-    fontWeight: "500",
-  },
-  clarifyOrLabel: {
-    fontSize: typeScale.footnote,
-  },
-  clarifyInputRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  clarifyInput: {
-    height: 44,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    fontSize: typeScale.callout,
-  },
-  clarifySubmitBtn: {
-    width: 60,
-    height: 44,
-    borderRadius: radius.md,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  clarifySubmitLabel: {
     fontSize: typeScale.callout,
     fontWeight: "600",
   },
