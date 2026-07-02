@@ -56,8 +56,8 @@
     "mobile/components/TrendsScreen.test.tsx": {
       "kind": "test",
       "lane": "mobile",
-      "lines": 1247,
-      "reason": "FTY-189 adds coverage for the goal-aware headline delta (color + narration across loss/gain/maintain), range prose, human-formatted dates, and the non-color adherence cue, crossing the 1000-line test threshold."
+      "lines": 1274,
+      "reason": "FTY-189 adds coverage for the goal-aware headline delta (color + narration across loss/gain/maintain, plus the unknown/no-goal-this-session case rendering neutral rather than a guessed default), range prose, human-formatted dates, and the non-color adherence cue, crossing the 1000-line test threshold."
     },
     "mobile/components/TodayScreen.test.tsx": {
       "kind": "test",

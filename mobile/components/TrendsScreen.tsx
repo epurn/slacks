@@ -54,7 +54,6 @@ import { formatDate } from "@/state/weightEntries";
 import {
   DEFAULT_DATE_RANGE,
   DATE_RANGE_OPTIONS,
-  DEFAULT_GOAL_DIRECTION,
   computeEWMAFromEntries,
   computeHeadlineDelta,
   computeAdherence,
@@ -91,7 +90,12 @@ function weightMessageFor(error: unknown): string {
 interface TrendsScreenProps {
   session?: Session;
   unitsPreference?: UnitsPreference;
-  /** Injectable for tests; defaults to the live session-scoped value (state/goalDirection.tsx). */
+  /**
+   * Injectable for tests; falls back to the live session-scoped value
+   * (state/goalDirection.tsx), which is `null`/unknown until Settings or
+   * Onboarding reports a direction this session. Unknown reads as a neutral
+   * delta (no toward/away claim).
+   */
   goalDirection?: GoalDirection;
   now?: Date;
   /** Injectable for tests. */
@@ -135,9 +139,13 @@ export function TrendsScreen({
     [session],
   );
 
+  // The goal direction, or `null` when unknown (no `GET /goal` read model; only
+  // known once Settings/Onboarding reports it this session — state/goalDirection.tsx).
+  // `resolveDeltaGoalState` treats `null` as neutral so a returning gain/maintain
+  // user is never mis-colored "away" by a guessed default.
   const liveGoalDirection = useGoalDirection();
-  const goalDirection: GoalDirection =
-    goalDirectionOverride ?? liveGoalDirection ?? DEFAULT_GOAL_DIRECTION;
+  const goalDirection: GoalDirection | null =
+    goalDirectionOverride ?? liveGoalDirection ?? null;
 
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();

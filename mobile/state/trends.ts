@@ -161,16 +161,6 @@ export function computeHeadlineDelta(
   return { current, delta, unit, direction };
 }
 
-/**
- * Fallback goal direction when none is known yet this session (e.g. cold
- * launch, before Settings/Onboarding has reported one — see
- * state/goalDirection.tsx). `loss` matches the app-wide default a fresh goal
- * starts from (onboarding, Settings' edit card) and preserves the prior
- * "down = good" behaviour for the common case rather than defaulting to a
- * misleading or arbitrary direction.
- */
-export const DEFAULT_GOAL_DIRECTION: GoalDirection = "loss";
-
 /** How the headline delta relates to the user's goal: colored/narrated accordingly. */
 export type DeltaGoalState = "toward" | "away" | "neutral";
 
@@ -181,12 +171,20 @@ export type DeltaGoalState = "toward" | "away" | "neutral";
  * `maintain` has no directional target, so any real drift (any non-"→" arrow —
  * `computeHeadlineDelta` already zeroes out sub-0.05 noise into "→") counts as
  * away from goal; only a genuinely stable trend is neutral.
+ *
+ * When the goal direction is **unknown** (`null` — e.g. a cold launch before
+ * Settings/Onboarding has reported one this session; there is no `GET /goal`
+ * read model to hydrate it from — see state/goalDirection.tsx), the delta is
+ * neutral: with no authoritative direction we neither celebrate nor warn, so a
+ * returning gain/maintain user is never mis-colored "away" by a guessed `loss`
+ * default. The delta still shows the real magnitude and arrow, just without a
+ * toward/away claim.
  */
 export function resolveDeltaGoalState(
   direction: HeadlineDelta["direction"],
-  goal: GoalDirection,
+  goal: GoalDirection | null,
 ): DeltaGoalState {
-  if (direction === "→") return "neutral";
+  if (direction === "→" || goal === null) return "neutral";
   if (goal === "maintain") return "away";
   const goodArrow = goal === "gain" ? "↑" : "↓";
   return direction === goodArrow ? "toward" : "away";

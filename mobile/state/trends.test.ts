@@ -10,7 +10,6 @@ import {
   ON_TARGET_TOLERANCE,
   DATE_RANGE_OPTIONS,
   DEFAULT_DATE_RANGE,
-  DEFAULT_GOAL_DIRECTION,
   rangeDays,
   rangeBounds,
   rangeProse,
@@ -441,9 +440,9 @@ describe("resolveDeltaGoalState", () => {
     expect(resolveDeltaGoalState("↓", "maintain")).toBe("away");
   });
 
-  it("DEFAULT_GOAL_DIRECTION preserves the pre-FTY-189 'down = good' default", () => {
-    expect(DEFAULT_GOAL_DIRECTION).toBe("loss");
-    expect(resolveDeltaGoalState("↓", DEFAULT_GOAL_DIRECTION)).toBe("toward");
-    expect(resolveDeltaGoalState("↑", DEFAULT_GOAL_DIRECTION)).toBe("away");
+  it("unknown goal direction (null) is neutral — no toward/away claim, never a guessed default", () => {
+    expect(resolveDeltaGoalState("↓", null)).toBe("neutral");
+    expect(resolveDeltaGoalState("↑", null)).toBe("neutral");
+    expect(resolveDeltaGoalState("→", null)).toBe("neutral");
   });
 });

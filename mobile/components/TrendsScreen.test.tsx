@@ -1106,6 +1106,33 @@ describe("TrendsScreen — goal-aware headline delta", () => {
     const delta = findHeadlineDeltaNode(tree);
     expect(styleColor(delta)).toBe(lightPalette.coral);
   });
+
+  it("unknown goal direction (none reported this session) is neutral, never mis-colored 'away'", async () => {
+    // No `goalDirection` prop and no provider value: a returning gain/maintain
+    // user's increase must not be guessed as a loss-goal "away"/coral. With no
+    // authoritative direction (no GET /goal read model) the delta is neutral.
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue(INCREASING)}
+        getDailySummaryRange={jest.fn().mockResolvedValue([])}
+        now={NOW}
+        unitsPreference="metric"
+      />,
+    );
+    await act(async () => {});
+
+    const delta = findHeadlineDeltaNode(tree);
+    expect(styleColor(delta)).toBe(lightPalette.textSecondary);
+    expect(styleColor(delta)).not.toBe(lightPalette.coral);
+    const headline = tree.root.findAll(
+      (n) =>
+        typeof n.props.accessibilityLabel === "string" &&
+        (n.props.accessibilityLabel as string).includes("weight trend"),
+    )[0]!;
+    expect(headline.props.accessibilityLabel).not.toContain("toward your goal");
+    expect(headline.props.accessibilityLabel).not.toContain("away from your goal");
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
