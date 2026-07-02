@@ -19,9 +19,11 @@ This covers three things:
 
 It consumes FTY-041's `structured_completion` (see `llm-provider.md`) and plugs
 into FTY-040's pipeline-step interface and status transitions (see
-`estimation-jobs.md`). It excludes calorie/macro resolution (FTY-044), exercise
-burn (FTY-043), and the clarification **answer** flow, `clarification_answers`,
-and UI (a later story).
+`estimation-jobs.md`). It excludes calorie/macro resolution (FTY-044) and
+exercise burn (FTY-043). The clarification **answer** flow — the resolve
+endpoint, its semantics, and the `clarification_answers` persistence — is owned
+by `log-events.md` (FTY-170 defines it; FTY-171 implements); the clarify sheet
+UI is FTY-153.
 
 ## Owner
 
@@ -31,6 +33,18 @@ estimator / contracts / backend-core lane:
 (`CandidateType`, `DerivedItemStatus`), `backend/alembic/`.
 
 ## Version
+
+2 (FTY-170): **pre-v1 breaking change** (no shim) — the `ParseResult`
+clarification carrier becomes structured: `clarification_questions` changes
+from `list[str]` to a list of `ClarificationQuestion` objects, each carrying
+the specific question `text` plus candidate quick-pick `options` the clarify
+sheet renders as tappable chips (audit finding A2). Schema version string
+`parse/v2`. The `clarification_questions` table gains an `options` column
+(shape specified here; the migration lands with the first producer, FTY-172),
+and a fresh clarification round on a re-estimate **replaces** the event's
+unanswered question rows. Consumers landing against the new shape: FTY-172
+(produce), FTY-171 (serve via the clarification read and resolve via the
+answer endpoint — `log-events.md` v4), FTY-153 (render).
 
 1 (FTY-042). Schema version string `parse/v1`, recorded on the estimation run.
 
@@ -46,7 +60,7 @@ object — smuggled keys are rejected, not ignored):
 | `disposition` | `parsed` \| `needs_clarification` \| `unparseable` | Closed vocabulary; how the model classified the whole entry. |
 | `confidence` | float `[0, 1]` | Gated against a documented threshold. |
 | `items` | `ParsedCandidate[]` (≤ 32) | Extracted candidates. |
-| `clarification_questions` | string[] (≤ 8, ≤ 300 chars) | Present on the ambiguous path. |
+| `clarification_questions` | `ClarificationQuestion[]` (≤ 8) | Present on the ambiguous path; each question carries its quick-pick options. |
 | `reason` | string \| null (≤ 120) | Short label when `unparseable`. |
 
 `ParsedCandidate`: `type` (`food` \| `exercise`), `name` (1–200 chars),
@@ -62,6 +76,18 @@ official-source resolver (search + hardened fetch, then a model-prior fallback)
 instead of stopping at `needs_clarification` — see `food-resolution.md`
 (**Official-Source Resolution**). The model never invents a brand the user did not
 name; like every field it is stored as data, never interpreted.
+
+`ClarificationQuestion` (`extra="forbid"`, FTY-170): `text` (1–300 chars — the
+specific question the clarify sheet shows, e.g. "How many cracker
+sandwiches?") and `options` (candidate quick-pick answer strings; ≤ 5 per
+question, each 1–80 chars). Options are **display candidates** the client
+renders as one-tap chips — never an enum the server validates an answer
+against; free text is always an allowed answer (see `log-events.md`,
+Clarification read / Clarification answer). The estimator produces either no
+options (the client then shows free-text only) or **2–5 meaningful
+candidates** — an FTY-172 prompt requirement; the schema enforces only the
+hard count/length caps, so a reply outside the 2–5 guidance is persisted
+as-is rather than terminally failing the parse.
 
 String length and list count bounds cap an adversarial or runaway reply.
 
@@ -79,7 +105,14 @@ altered):
   advances costed rows to `resolved` (see `exercise-burn.md`).
 - **`clarification_questions`** — one row per question. Columns: `id` (UUID PK),
   `log_event_id` (FK, cascade, indexed), `user_id` (FK, cascade, indexed),
-  `question_text`, `position` (int, stable order), `created_at`/`updated_at`.
+  `question_text`, `options` (JSON array of strings, not null, default `[]` —
+  the question's quick-pick candidates, stored exactly as schema-validated;
+  added by FTY-170, migration lands with FTY-172), `position` (int, stable
+  order), `created_at`/`updated_at`. The stored `question_text` + `options`
+  are what the clarification read serves (`log-events.md`), so the producer
+  (this step) and the reader share one shape field-for-field. Questions the
+  backend synthesises deterministically — the plausibility gate's targeted
+  question and the persisted default question — carry `options: []`.
 
 ## Outputs / Routing
 
@@ -130,10 +163,16 @@ and persists no candidates.
   FTY-043 (`exercise-burn.md`). Running an exercise duration through this gate
   would falsely reject ordinary workouts (e.g. `walking, 60 minutes`).
 
-A `needs_clarification` reply with no questions persists one default question so
-the event always has at least one for the later answer flow. Candidates and
-questions are committed in the **same transaction** as the terminal status, so a
-completed/clarification outcome and its rows are atomic.
+A `needs_clarification` reply with no questions persists one default question
+(`options: []`) so the event always has at least one for the answer flow.
+Candidates and questions are committed in the **same transaction** as the
+terminal status, so a completed/clarification outcome and its rows are atomic.
+When a **re-estimate** of an answered event (`log-events.md`, Clarification
+answer) lands on `needs_clarification` again, the fresh round's questions
+**replace** the event's unanswered question rows in that same transaction —
+answered questions and their `clarification_answers` are preserved, since they
+carry the accumulated details the re-estimate consumes — so the clarification
+read always serves exactly the open questions.
 
 ### Detail-signal routing override (FTY-167)
 
@@ -189,7 +228,8 @@ both `users` and `log_events` enforces object-level ownership.
 
 - **Untrusted LLM, fail closed.** Model output is schema-validated before trust;
   embedded instructions in the user text are never executed or followed —
-  candidate names and questions are stored as data through parameterized inserts.
+  candidate names, questions, and quick-pick options are stored as data through
+  parameterized inserts and never interpreted.
 - **No raw text in logs or runs.** The prompt and raw model output are never
   logged (provider contract) and never copied into the estimation run's `trace`
   or `error`; only sanitized labels (`empty_input`, `unparseable_input`,
@@ -209,7 +249,7 @@ both `users` and `log_events` enforces object-level ownership.
 | Schema-invalid model output | Rejected; terminal `failed` (`schema_validation_failed`); nothing persisted. |
 | Non-retryable provider error (`LLMResponseError`/`LLMConfigurationError`) | Terminal `failed` (`provider_error`). |
 | Transient provider error (`LLMTransientError`) | Retryable; worker retries within its bound. |
-| Ambiguous / low confidence | `needs_clarification`; questions persisted (terminal for now). |
+| Ambiguous / low confidence | `needs_clarification`; questions (text + options) persisted; the user resolves via the clarification answer (`log-events.md`). |
 
 ## Examples
 
@@ -223,6 +263,18 @@ event.raw_text = "two eggs and a 30 min run"
   → event: processing → completed
 ```
 
+```
+event.raw_text = "crackers and peanut butter"        # count genuinely indeterminate
+  → structured_completion(prompt, ParseResult)
+  → { disposition: needs_clarification, confidence: 0.3, items: [ … ],
+      clarification_questions: [
+        { text: "How many cracker sandwiches?", options: ["2", "4", "6"] } ] }
+  → clarification_questions += one row (question_text, options, position 0)
+  → event: processing → needs_clarification
+  # the user resolves via POST .../clarification/answers (log-events.md);
+  # the re-estimate receives the (question, answer) pair as structured input
+```
+
 ## Migration / Compatibility
 
 - The `0005` migration applies (`alembic upgrade head`) on top of the estimation
@@ -234,8 +286,15 @@ event.raw_text = "two eggs and a 30 min run"
   the worker's claim → run → transition contract is unchanged.
 - FTY-043/044 consume the `unresolved` candidates and advance them to `resolved`
   with energy/macros; FTY-043 (exercise burn) is specified in `exercise-burn.md`.
-  The later clarification story consumes the persisted questions and adds the answer
-  flow.
+- **FTY-170 (breaking, pre-v1, no shim).** The `clarification_questions`
+  carrier in `ParseResult` changes from `list[str]` to structured
+  `ClarificationQuestion` objects (`parse/v2`), and the
+  `clarification_questions` table gains the `options` column. The v1
+  string-list shape is retired with no back-compat shim — pre-v1, it has no
+  consumers to preserve. The `options` migration lands with FTY-172 (the
+  first producer); FTY-171 serves the options through the clarification read
+  and implements the answer resolve (`log-events.md` v4); FTY-153 renders the
+  chips and free-text fallback.
 - FTY-060 (`barcode`) and FTY-062 (`brand`) add optional, length-bounded
   `ParsedCandidate` fields. Both are additive and backward-compatible: a reply that
   omits them validates unchanged (they default to `null`), and they are stored as data
