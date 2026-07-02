@@ -3,6 +3,19 @@ import { act, create as render, type ReactTestRenderer } from "react-test-render
 import { DailySummary } from "./DailySummary";
 import type { DailySummaryDTO, TargetReadModel } from "@/api/dailySummary";
 
+// expo-symbols is a native module — stub SymbolView (used by the burn line's
+// AppIcon) with a View so these render tests don't touch native code.
+jest.mock("expo-symbols", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const React = require("react");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { View } = require("react-native");
+  return {
+    SymbolView: ({ name }: { name: string }) =>
+      React.createElement(View, { testID: `sf-symbol-${String(name)}` }),
+  };
+});
+
 /** Build a derived-only target read-model whose effective calorie target is `kcal`. */
 function targetModel(kcal: number): TargetReadModel {
   return {
@@ -116,7 +129,7 @@ describe("DailySummary — hero (CalorieHero)", () => {
 });
 
 describe("DailySummary — macro tier (MacroTier)", () => {
-  it("renders P/C/F chips with consumed grams", () => {
+  it("renders P/C/F chips measured against the summary's macro targets", () => {
     let tree: ReactTestRenderer;
     act(() => {
       tree = render(
@@ -128,10 +141,32 @@ describe("DailySummary — macro tier (MacroTier)", () => {
       );
     });
 
+    // mockSummary's target read-model carries protein 128 / carbs 148 / fat 64.
     const labels = allA11yLabels(tree!);
-    expect(labels.some((l) => l.includes("Protein: 80g"))).toBe(true);
-    expect(labels.some((l) => l.includes("Carbs: 150g"))).toBe(true);
-    expect(labels.some((l) => l.includes("Fat: 40g"))).toBe(true);
+    expect(labels.some((l) => l.includes("Protein 80 of 128 grams"))).toBe(true);
+    expect(labels.some((l) => l.includes("Carbs 150 of 148 grams"))).toBe(true);
+    expect(labels.some((l) => l.includes("Fat 40 of 64 grams"))).toBe(true);
+
+    const text = allText(tree!);
+    expect(text).toContain("80/128g");
+  });
+
+  it("falls back to consumed-only chips when the summary has no target", () => {
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(
+        <DailySummary
+          summary={mockSummary({
+            intake: { calories: 1234, protein_g: 80, carbs_g: 150, fat_g: 40 },
+            target: null,
+          })}
+        />,
+      );
+    });
+
+    const labels = allA11yLabels(tree!);
+    expect(labels.some((l) => l.includes("Protein 80 grams"))).toBe(true);
+    expect(labels.some((l) => l.includes(" of "))).toBe(false);
   });
 
   it("renders exercise burn line distinctly (not a macro chip)", () => {

@@ -980,6 +980,7 @@ export function TodayScreen({
             protein_g={summary.intake.protein_g}
             carbs_g={summary.intake.carbs_g}
             fat_g={summary.intake.fat_g}
+            target={summary.target}
             active_calories={summary.exercise.active_calories}
           />
         ) : null}
