@@ -826,6 +826,189 @@ describe("TodayScreen needs-clarification entries", () => {
   });
 });
 
+describe("TodayScreen failed-parse rows (FTY-176)", () => {
+  it("renders a failed parse as an actionable Retry + Edit-as-text row, never static", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: "a", raw_text: "asdfghjkl", status: "failed" }),
+      ]);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
+    await act(async () => {});
+
+    // Calm inline copy, the captured text, and a visibly-uncounted row.
+    const content = textContent(tree);
+    expect(content).toContain("asdfghjkl");
+    expect(content).toContain("Couldn't read that");
+    // The failed state is conveyed to VoiceOver via the status icon.
+    expect(hasA11yLabel(tree, "Estimate didn't finish")).toBe(true);
+    // Both affordances are present and tappable — not a static dead-end row.
+    expect(hasA11yLabel(tree, "Retry")).toBe(true);
+    expect(hasA11yLabel(tree, "Edit as text")).toBe(true);
+  });
+
+  it("Retry re-submits the same text with a NEW idempotency key and swaps in a pending row", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: "a", raw_text: "asdfghjkl", status: "failed" }),
+      ]);
+    const create = jest
+      .fn()
+      .mockResolvedValue(
+        event({ id: "server-2", raw_text: "asdfghjkl", status: "pending" }),
+      );
+    const keys = sequentialKeys();
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        create={create}
+        generateKey={keys}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    await act(async () => {
+      press(tree, "Retry");
+    });
+
+    // A genuine new attempt via the create path — same text, a fresh key.
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+      "asdfghjkl",
+      expect.any(String),
+    );
+    // The failed row is superseded in place by the new pending attempt — no
+    // stale duplicate, and it is now a waiting-to-estimate row.
+    expect(hasA11yLabel(tree, "Retry")).toBe(false);
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+    expect(textContent(tree)).toContain("asdfghjkl");
+  });
+
+  it("Edit as text prefills the composer with the failed text and supersedes the row", async () => {
+    const load = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: "a", raw_text: "asdfghjkl", status: "failed" }),
+      ]);
+    const create = jest
+      .fn()
+      .mockResolvedValue(
+        event({ id: "server-2", raw_text: "an apple", status: "pending" }),
+      );
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        create={create}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    act(() => {
+      press(tree, "Edit as text");
+    });
+
+    // The failed text is now in the composer for the user to fix, and the row is
+    // superseded in place (the text is safe in the composer, not lost).
+    expect(inputValue(tree, "Log food or exercise")).toBe("asdfghjkl");
+    expect(hasA11yLabel(tree, "Retry")).toBe(false);
+
+    // Fixing the wording and submitting resubmits through the same create path.
+    typeInto(tree, "Log food or exercise", "an apple");
+    await act(async () => {
+      press(tree, "Add entry");
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+      "an apple",
+      expect.any(String),
+    );
+  });
+
+  it("a retry whose create call errors restores the actionable failed row and surfaces the error", async () => {
+    jest.useFakeTimers();
+    try {
+      const load = jest
+        .fn()
+        .mockResolvedValue([
+          event({ id: "a", raw_text: "asdfghjkl", status: "failed" }),
+        ]);
+      const create = jest
+        .fn()
+        .mockRejectedValue(
+          new LogEventApiError(422, "That entry couldn't be saved."),
+        );
+      const tree = mount(
+        <TodayScreen
+          session={SESSION}
+          load={load}
+          create={create}
+          useActive={INACTIVE}
+        />,
+      );
+      await act(async () => {});
+
+      await act(async () => {
+        press(tree, "Retry");
+      });
+
+      // The create failed: the optimistic attempt is rolled back, the original
+      // failed row reappears (still actionable), and the failure is surfaced.
+      expect(hasA11yLabel(tree, "Retry")).toBe(true);
+      expect(hasA11yLabel(tree, "Edit as text")).toBe(true);
+      expect(textContent(tree)).toContain("That entry couldn't be saved.");
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("keeps the retried failed row hidden even after a poll re-fetches it as failed", async () => {
+    jest.useFakeTimers();
+    try {
+      const load = jest
+        .fn()
+        // Initial load + every poll keep returning the original failed row.
+        .mockResolvedValue([
+          event({ id: "a", raw_text: "asdfghjkl", status: "failed" }),
+        ]);
+      const create = jest
+        .fn()
+        .mockResolvedValue(
+          event({ id: "server-2", raw_text: "asdfghjkl", status: "pending" }),
+        );
+      const tree = mount(
+        <TodayScreen
+          session={SESSION}
+          load={load}
+          create={create}
+          useActive={() => true}
+          pollIntervalMs={1000}
+        />,
+      );
+      await act(async () => {});
+
+      await act(async () => {
+        press(tree, "Retry");
+      });
+
+      // The fresh attempt is pending → polling runs and re-fetches the original
+      // failed row; it must stay superseded (retried this session).
+      act(() => jest.advanceTimersByTime(1000));
+      await act(async () => {});
+
+      expect(hasA11yLabel(tree, "Retry")).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
 describe("TodayScreen polling", () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
