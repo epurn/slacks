@@ -1,5 +1,6 @@
 import {
   clusterByTime,
+  formatWallClockTime,
   isOptimisticId,
   optimisticLogEvent,
   reconcileEvents,
@@ -198,5 +199,82 @@ describe("clusterByTime", () => {
     const b = event({ id: "b", created_at: "2026-06-27T08:00:00Z" }); // 10min+1ms earlier
     const clusters = clusterByTime([a, b], WINDOW_MS);
     expect(clusters).toHaveLength(2);
+  });
+});
+
+describe("formatWallClockTime", () => {
+  // Format every instant in a fixed zone (UTC) so the assertions are stable
+  // regardless of the machine running the tests; timezone conversion itself is
+  // covered by its own case below.
+  const UTC = "UTC";
+
+  it("regression: 11:14 AM renders AM, never PM (audit A6)", () => {
+    // The exact bug this story fixes: a morning instant must not flip to PM.
+    expect(formatWallClockTime("2026-06-27T11:14:00Z", UTC)).toBe("11:14 AM");
+  });
+
+  it("formats a mid-afternoon instant as PM", () => {
+    expect(formatWallClockTime("2026-06-27T15:30:00Z", UTC)).toBe("3:30 PM");
+  });
+
+  describe("12-hour boundary cases", () => {
+    it("midnight is 12:xx AM, not 00:xx or 12:xx PM", () => {
+      expect(formatWallClockTime("2026-06-27T00:14:00Z", UTC)).toBe("12:14 AM");
+    });
+
+    it("exactly midnight is 12:00 AM", () => {
+      expect(formatWallClockTime("2026-06-27T00:00:00Z", UTC)).toBe("12:00 AM");
+    });
+
+    it("noon is 12:xx PM, not 00:xx or 12:xx AM", () => {
+      expect(formatWallClockTime("2026-06-27T12:14:00Z", UTC)).toBe("12:14 PM");
+    });
+
+    it("exactly noon is 12:00 PM", () => {
+      expect(formatWallClockTime("2026-06-27T12:00:00Z", UTC)).toBe("12:00 PM");
+    });
+
+    it("one minute before noon is still AM", () => {
+      expect(formatWallClockTime("2026-06-27T11:59:00Z", UTC)).toBe("11:59 AM");
+    });
+
+    it("one minute after noon flips to PM", () => {
+      expect(formatWallClockTime("2026-06-27T12:01:00Z", UTC)).toBe("12:01 PM");
+    });
+
+    it("one minute before midnight is 11:59 PM", () => {
+      expect(formatWallClockTime("2026-06-27T23:59:00Z", UTC)).toBe("11:59 PM");
+    });
+
+    it("one minute after midnight is 12:01 AM", () => {
+      expect(formatWallClockTime("2026-06-27T00:01:00Z", UTC)).toBe("12:01 AM");
+    });
+  });
+
+  it("converts the instant into the requested timezone's wall clock", () => {
+    // 11:14 UTC is 06:14 in New York (EDT, UTC-4) on this date — the label must
+    // reflect the local wall clock, not UTC.
+    expect(formatWallClockTime("2026-06-27T11:14:00Z", "America/New_York")).toBe(
+      "7:14 AM",
+    );
+  });
+
+  it("crosses the local day boundary when the zone shifts the date", () => {
+    // 02:30 UTC is the previous evening (22:30, 10:30 PM) in New York.
+    expect(formatWallClockTime("2026-06-27T02:30:00Z", "America/New_York")).toBe(
+      "10:30 PM",
+    );
+  });
+
+  it("pads minutes to two digits", () => {
+    expect(formatWallClockTime("2026-06-27T09:05:00Z", UTC)).toBe("9:05 AM");
+  });
+
+  it("returns empty string for an unparseable timestamp", () => {
+    expect(formatWallClockTime("not-a-date", UTC)).toBe("");
+  });
+
+  it("returns empty string for an invalid timezone rather than throwing", () => {
+    expect(formatWallClockTime("2026-06-27T11:14:00Z", "Not/AZone")).toBe("");
   });
 });

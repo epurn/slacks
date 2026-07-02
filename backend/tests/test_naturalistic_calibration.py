@@ -1,10 +1,13 @@
 """Tests for the FTY-169 naturalistic calibration band and its harness scoring.
 
 The naturalistic band extends the FTY-157 set with messy, real-world-*style* NL
-diary text whose gold labels are cross-provider-judge verified (see
-``test_cross_provider_judge.py``). These tests pin the committed band's integrity
-(schema, synthetic-only / no-PII, stratification) and prove the existing harness
-scores it and the combined set offline, reportable per band.
+diary text labeled per the cross-provider judge protocol (see
+``test_cross_provider_judge.py``). The committed seed's judged labels are
+author-constructed recorded stand-ins (``source_kind: recorded_stand_in``) —
+``cross_provider_judge`` is reserved for the maintainer's live pass. These tests
+pin the committed band's integrity (schema, synthetic-only / no-PII,
+stratification) and prove the existing harness scores it and the combined set
+offline, reportable per band.
 """
 
 from __future__ import annotations
@@ -19,8 +22,10 @@ from tests.parse_calibration.harness import (
     load_examples,
 )
 
-#: The observed inter-judge agreement rate recorded for the committed seed's
-#: judged subset (12 accepted / 14 judged; see ``README.md`` and the judge run).
+#: The recorded stand-in run's agreement rate over the committed seed's judged
+#: subset (12 accepted / 14 queued+accepted; see ``README.md`` and the judge
+#: run). This is a property of the author-constructed stand-in fixture — NOT an
+#: observed live inter-judge rate; the maintainer's live pass records that.
 #: Pinned here so a fixture edit that silently degrades agreement is caught.
 RECORDED_AGREEMENT_RATE = 12 / 14
 
@@ -30,9 +35,11 @@ def test_naturalistic_band_validates_and_is_tagged() -> None:
 
     assert examples, "the naturalistic seed must not be empty"
     assert all(example.band == "naturalistic" for example in examples)
-    # Labels are earned (cross-provider judge) or author-constructed — never real.
+    # Labels are author-constructed (plain or with stand-in judge outputs) —
+    # never real user data. No committed example may claim cross_provider_judge
+    # until the live protocol actually produces its label.
     assert all(
-        example.source_kind in {"authored_naturalistic", "cross_provider_judge"}
+        example.source_kind in {"authored_naturalistic", "recorded_stand_in"}
         for example in examples
     )
     assert all(example.gold_parse for example in examples)
@@ -106,8 +113,8 @@ def test_harness_reports_combined_band() -> None:
 
 
 def test_recorded_agreement_rate_is_documented_and_high() -> None:
-    # The committed judged subset agreed on the large majority of inputs — a
-    # small, concentrated adjudication queue is the design (README.md).
+    # The stand-in run accepts the large majority of judged inputs — a small,
+    # concentrated adjudication queue is the design the fixture pins (README.md).
     assert RECORDED_AGREEMENT_RATE >= 0.8
 
 
@@ -121,6 +128,8 @@ def _looks_like_pii(text: str) -> bool:
 
 
 def test_hand_built_naturalistic_example_roundtrips() -> None:
+    # Uses the reserved cross_provider_judge kind: the schema must accept the
+    # shape a future live-judged example will carry.
     example = LabeledParseExample.model_validate(
         {
             "id": "naturalistic-sample",

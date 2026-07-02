@@ -33,7 +33,10 @@ import {
   E2E_CLARIFY_QUESTION,
   E2E_CLARIFY_EVENT,
   E2E_RESOLVED_EVENT,
+  E2E_RESOLVED_EVENT_TIME_LABEL,
 } from './fixtures';
+// eslint-disable-next-line import/first
+import { formatWallClockTime } from '@/state/today';
 // eslint-disable-next-line import/first
 import { markOnboardingComplete } from '@/state/onboardingComplete';
 // The real API clients — driven through the mock so the fixture suffixes are
@@ -322,5 +325,16 @@ describe('FTY-162 clarify-flow: stateful mock phase transitions', () => {
     const mockFetch = createE2EMockFetch();
     const events = await listTodayLogEvents(apiSession, '2026-01-01', mockFetch);
     expect(events).toHaveLength(0);
+  });
+
+  // Drift guard for the FTY-174 Maestro assertion: the resolved fixture is
+  // computed as today-at-11:14 *device local*, so the timeline's cluster label
+  // must format to the exact string clarify.yaml asserts on-device ("11:14 AM"),
+  // in whatever timezone the test host runs. If someone moves the fixture
+  // instant, this fails here before the e2e job does.
+  it('resolved fixture renders as the clarify.yaml time label in the local zone', () => {
+    expect(formatWallClockTime(E2E_RESOLVED_EVENT.created_at)).toBe(
+      E2E_RESOLVED_EVENT_TIME_LABEL,
+    );
   });
 });

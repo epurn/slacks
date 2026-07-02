@@ -100,14 +100,38 @@ export const E2E_CLARIFICATION: ClarificationDTO = {
   questions: [{ text: E2E_CLARIFY_QUESTION }],
 };
 
+/**
+ * Wall-clock label the resolved event must render as in the timeline.
+ * clarify.yaml asserts this exact string is visible (and its PM twin is not) —
+ * the FTY-174 Hermes meridiem regression guard. 11:14 AM is the story's
+ * canonical case: the buggy `toLocaleTimeString(..., { hour12: true })` path
+ * rendered it as "11:14 PM" on Hermes.
+ */
+export const E2E_RESOLVED_EVENT_TIME_LABEL = '11:14 AM';
+
+/**
+ * ISO instant for today at 11:14 AM in the *device's own* timezone. Computed
+ * with local-time Date setters (no Intl), so the expected "11:14 AM" label
+ * holds on any simulator/emulator timezone while the render path under test
+ * still goes through Intl on Hermes — keeping the Maestro assertion hermetic
+ * without pinning the device clock.
+ */
+function todayAtDeviceLocal(hour: number, minute: number): string {
+  const at = new Date();
+  at.setHours(hour, minute, 0, 0);
+  return at.toISOString();
+}
+
+const E2E_RESOLVED_EVENT_INSTANT = todayAtDeviceLocal(11, 14);
+
 /** Resolved event returned after the user answers the clarify question. */
 export const E2E_RESOLVED_EVENT: LogEventDTO = {
   id: 'e2e-resolved-event-00000000-0000-0000-0000-000000000000',
   user_id: E2E_SESSION.userId,
   raw_text: 'coffee large',
   status: 'completed',
-  created_at: '2026-01-01T08:01:00Z',
-  updated_at: '2026-01-01T08:01:00Z',
+  created_at: E2E_RESOLVED_EVENT_INSTANT,
+  updated_at: E2E_RESOLVED_EVENT_INSTANT,
 };
 
 /** Daily summary reflecting the resolved "coffee large" entry (120 kcal). */

@@ -169,7 +169,9 @@ if [ "$PLATFORM" = "android" ]; then
 
 elif [ "$PLATFORM" = "ios" ]; then
   echo "==> [verify-e2e] Building iOS simulator binary..."
-  EXPO_PUBLIC_FATTY_E2E=true npx expo run:ios $BUILD_CACHE_FLAG --configuration Debug --simulator --no-bundler
+  # No --simulator flag: Expo 57's run:ios rejects it, and the simulator is
+  # already the default target when --device is not passed.
+  EXPO_PUBLIC_FATTY_E2E=true npx expo run:ios $BUILD_CACHE_FLAG --configuration Debug --no-bundler
 
 else
   echo "ERROR: Unknown PLATFORM='$PLATFORM'. Use 'ios' or 'android'."

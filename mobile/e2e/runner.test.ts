@@ -48,9 +48,12 @@ describe('verify-e2e runner contract', () => {
       'npx expo run:android $BUILD_CACHE_FLAG --variant debug --no-bundler',
     );
     expect(script).not.toContain('npx expo run:android $BUILD_CACHE_FLAG --configuration');
+    // No --simulator flag: Expo 57's run:ios rejects it, and the simulator is
+    // already the default target when --device is not passed.
     expect(script).toContain(
-      'npx expo run:ios $BUILD_CACHE_FLAG --configuration Debug --simulator --no-bundler',
+      'npx expo run:ios $BUILD_CACHE_FLAG --configuration Debug --no-bundler',
     );
+    expect(script).not.toContain('run:ios $BUILD_CACHE_FLAG --configuration Debug --simulator');
     expect(script).toContain('E2E_MAESTRO_TIMEOUT_SECONDS:-300');
     expect(script).toContain('MAESTRO_CLI_NO_ANALYTICS=1 maestro test .maestro/');
   });

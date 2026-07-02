@@ -39,18 +39,24 @@ DifficultyBand = Literal["unambiguous", "inferable", "indeterminate"]
 
 #: Which distribution band an example belongs to. ``synthetic`` is the FTY-157
 #: clean-by-construction set; ``naturalistic`` (FTY-169) is the messy,
-#: real-world-*style* band whose gold labels are cross-provider-judge verified.
+#: real-world-*style* band labeled per the cross-provider judge protocol
+#: (``README.md``).
 DistributionBand = Literal["synthetic", "naturalistic"]
 
 #: How an example's gold label was produced. ``synthetic_by_construction`` is the
-#: FTY-157 known-parse-then-render path; the naturalistic bands (FTY-169) are
-#: either ``authored_naturalistic`` (an author-constructed unambiguous case,
-#: agreement-trivial by construction) or ``cross_provider_judge`` (an
-#: independent Claude + GPT-5.5 agreement, per ``README.md``). No committed
-#: label is ever derived from real user data.
+#: FTY-157 known-parse-then-render path. The naturalistic band (FTY-169) uses
+#: ``authored_naturalistic`` (an author-constructed unambiguous case,
+#: agreement-trivial by construction) or ``recorded_stand_in`` (an
+#: author-constructed label whose recorded two-judge outputs exist only to pin
+#: the router offline — no live judge produced it). ``cross_provider_judge`` is
+#: **reserved** for labels the live independent Claude + GPT-5.5 protocol
+#: actually produced (per ``README.md``); no committed example carries it until
+#: the maintainer's live pass lands. No committed label is ever derived from
+#: real user data.
 LabelSourceKind = Literal[
     "synthetic_by_construction",
     "authored_naturalistic",
+    "recorded_stand_in",
     "cross_provider_judge",
 ]
 

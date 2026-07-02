@@ -172,3 +172,45 @@ export function clusterByTime(
 
   return clusters;
 }
+
+/**
+ * Format a tz-aware ISO instant as a 12-hour wall-clock label (e.g. "11:14 AM")
+ * in `timeZone` — defaulting to the device's own zone — so the timeline shows
+ * the local time the user actually logged (audit finding A6).
+ *
+ * We deliberately do **not** use `toLocaleTimeString(..., { hour12: true })`:
+ * Hermes (React Native's engine) has a documented bug where that path returns
+ * the wrong meridiem on device — an 11:14 AM instant renders as "11:14 PM".
+ * Instead we read the hour/minute from `formatToParts` on the reliable 24-hour
+ * (`h23`) cycle and derive AM/PM ourselves, so the result is correct on device
+ * and exhaustively unit-testable across the 12-hour boundary cases.
+ *
+ * Returns "" for an unparseable timestamp rather than throwing.
+ */
+export function formatWallClockTime(isoTime: string, timeZone?: string): string {
+  const date = new Date(isoTime);
+  if (Number.isNaN(date.getTime())) return "";
+
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hourCycle: "h23",
+      ...(timeZone ? { timeZone } : {}),
+    }).formatToParts(date);
+  } catch {
+    // Invalid/unsupported timeZone — fail soft rather than crash the timeline.
+    return "";
+  }
+
+  const hourRaw = Number(parts.find((p) => p.type === "hour")?.value);
+  const minute = parts.find((p) => p.type === "minute")?.value;
+  if (Number.isNaN(hourRaw) || minute === undefined) return "";
+
+  // h23 yields 0–23; normalize the h24 "24:00" midnight variant just in case.
+  const hour24 = hourRaw === 24 ? 0 : hourRaw;
+  const meridiem = hour24 < 12 ? "AM" : "PM";
+  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+  return `${hour12}:${minute} ${meridiem}`;
+}

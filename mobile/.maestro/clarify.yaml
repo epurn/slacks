@@ -7,7 +7,8 @@
 #   Today (empty day) → submit "coffee" → needs_clarification row appears →
 #   tap row → clarify sheet opens with the seeded question visible →
 #   enter free-text answer → submit → entry resolves → tap Refresh →
-#   entry counts in Today totals.
+#   entry counts in Today totals → cluster time renders "11:14 AM" (FTY-174
+#   Hermes meridiem regression guard).
 #
 # Load-bearing assertion (step 6): the seeded question text must be visible in
 # the sheet. If the sheet opens data-starved (no question), ClarifyMode shows
@@ -99,18 +100,28 @@ appId: com.fatty
 - tapOn:
     text: "Refresh"
 
-# Step 11: Assert the entry counts — the CalorieHero renders the consumed kcal
-#          from the E2E_RESOLVED_SUMMARY fixture and the target context
-#          separately (120 kcal of 2,000 kcal, 6% consumed).
+# Step 11: Assert the entry counts — the CalorieHero accessibility label
+#          includes the consumed kcal from the E2E_RESOLVED_SUMMARY fixture
+#          (120 kcal of 2,000 kcal). Maestro text matching is an anchored
+#          regex over the whole node text, and the full hero label carries a
+#          percent + remaining tail ("120 of 2,000 kcal, 6 percent, 1,880
+#          remaining"), so the kcal phrase needs surrounding wildcards — same
+#          as the step-7 question match.
 - extendedWaitUntil:
     visible:
-      text: "120"
+      text: ".*120 of 2,000 kcal.*"
     timeout: 10000
+
+# Step 12: FTY-174 Hermes meridiem regression guard. The resolved fixture
+#          event is pinned to 11:14 AM in the device's own timezone
+#          (E2E_RESOLVED_EVENT in e2e/fixtures.ts), so the timeline's cluster
+#          time label must render exactly "11:14 AM". This runs on the real
+#          Hermes engine — the environment where the old
+#          toLocaleTimeString(..., { hour12: true }) path rendered the wrong
+#          meridiem ("11:14 PM") while Node-based unit tests stayed green.
 - extendedWaitUntil:
     visible:
-      text: ".*of 2,000 kcal.*6%.*"
+      text: "11:14 AM"
     timeout: 10000
-- extendedWaitUntil:
-    visible:
-      text: "1,880 to go"
-    timeout: 10000
+- assertNotVisible:
+    text: "11:14 PM"

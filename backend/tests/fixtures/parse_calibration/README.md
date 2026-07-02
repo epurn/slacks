@@ -13,8 +13,10 @@ judge protocol.
   real-world-*style* NL inputs (casual phrasing, ranges like `5-10 onion rings`,
   brand shorthand like `kraft PB`, multi-item entries, hedges, minor typos)
   across the same three difficulty strata. These are **not**
-  correct-by-construction, so their gold labels are *earned* by the
-  cross-provider judge protocol below, never asserted. Every input is
+  correct-by-construction; the labeling path that *earns* their gold labels is
+  the cross-provider judge protocol below. The committed seed's labels are
+  author-constructed stand-ins (`source_kind` records this honestly — see the
+  schema) pending the maintainer's live dual-judge pass. Every input is
   **authored** — realistic in style, never scraped from a real user.
 
 Both bands share the labeled-example schema and are scored by the same harness.
@@ -32,8 +34,12 @@ Each line in `examples.jsonl` / `naturalistic_examples.jsonl` is one JSON object
 - `source_kind`: how the gold label was produced —
   `synthetic_by_construction` (FTY-157), or, for the naturalistic band,
   `authored_naturalistic` (an author-constructed unambiguous case,
-  agreement-trivial by construction) or `cross_provider_judge` (an independent
-  Claude + GPT-5.5 agreement; see the protocol below).
+  agreement-trivial by construction) or `recorded_stand_in` (an
+  author-constructed label whose recorded stand-in judge outputs exist to pin
+  the router offline; no live judge produced it). `cross_provider_judge` is
+  **reserved** for labels the live independent Claude + GPT-5.5 protocol below
+  actually produced — no committed example carries it until the maintainer's
+  live pass lands.
 - `source_template`: the generator template / naturalistic style that created
   the example.
 - `input`: the natural-language log text.
@@ -53,7 +59,7 @@ Each line in `examples.jsonl` / `naturalistic_examples.jsonl` is one JSON object
   (`app/estimator/self_consistency.py`) consumes them unchanged. Like the
   `baseline` field, they keep the consistency signals fully offline and
   deterministic. The naturalistic band omits `samples` (defaulting to `[]`): its
-  gold labels come from the cross-provider judge, not a temperature>0 sampler, so
+  gold labels come from the judge-protocol path, not a temperature>0 sampler, so
   it is scored by the calibration-relevant `baseline` signal — the consistency
   signals raise a clear error on a band with no samples.
 
@@ -171,20 +177,25 @@ prints the observed agreement rate and fails closed (exit 2) if a login is
 absent. Fold accepted labels into the seed (adding `band`/`source_kind`/
 `baseline`) and adjudicate the queue before committing.
 
-### Recorded judge run and observed agreement rate
+### Recorded stand-in judge run and its reproduction rate
 
-`naturalistic_judge_run.json` is a **recorded/representative** capture of both
-judges' outputs over the seed's judged inputs — a deterministic offline stand-in
-(mirroring FTY-158's recorded samples), **not** real user data and **not** a
-claim of specific live model output. `test_cross_provider_judge.py` re-runs the
-router over it and asserts it reproduces the committed seed and queue exactly, so
-the accept/adjudicate flow is proven offline with no live model.
+`naturalistic_judge_run.json` is an **author-constructed stand-in** for both
+judges' outputs over the seed's judged inputs — a deterministic offline
+router-regression fixture (mirroring FTY-158's recorded samples), **not** real
+user data and **not** the output of any live judge run. The matching seed rows
+carry `source_kind: recorded_stand_in`, never `cross_provider_judge`.
+`test_cross_provider_judge.py` re-runs the router over it and asserts it
+reproduces the committed seed and queue exactly, so the accept/adjudicate flow
+is proven offline with no live model.
 
-**Observed inter-judge agreement rate on the committed seed: 12/14 ≈ 85.7%** of
-the judged inputs agreed and were accepted; the remaining 2 are in the
-adjudication queue. (The author-constructed `authored_naturalistic` cases are
-agreement-trivial by construction and are not part of this rate.) The
-maintainer's live pass over a larger batch refreshes this number.
+**Recorded stand-in reproduction rate: 12/14 ≈ 85.7%** of the stand-in judged
+inputs agree and are accepted into the seed; the remaining 2 are in the
+adjudication queue. This is a designed property of the fixture — it pins the
+accept-most/queue-few shape the router must reproduce — **not an observed
+inter-judge agreement rate**; no live cross-provider judgment has happened yet.
+(The author-constructed `authored_naturalistic` cases are agreement-trivial by
+construction and are not part of this rate.) The maintainer's live dual-judge
+pass records the first real observed agreement rate and replaces this fixture.
 
 ## Adding examples
 
@@ -196,10 +207,12 @@ candidate shapes, and records not marked `synthetic_by_construction`.
 **Naturalistic band:** add authored inputs to `generate_naturalistic_seed.py`
 and regenerate (`python -m tests.fixtures.parse_calibration.generate_naturalistic_seed`),
 which rewrites the seed, the judge run, and the queue consistently. A judged case
-(`cross_provider_judge`) must carry agreeing recorded judge outputs; a `contested`
+(`recorded_stand_in`) must carry agreeing stand-in judge outputs; a `contested`
 case goes to the queue and is excluded from the seed; an `authored_naturalistic`
-case is an author-constructed unambiguous label. For a full live labeling pass,
-run the judge CLI above and fold in only the agreed/adjudicated labels.
+case is an author-constructed unambiguous label. The generator never emits
+`cross_provider_judge`: only a real run of the judge CLI above earns that kind —
+fold in only the agreed/adjudicated labels it produces, tagged
+`cross_provider_judge`, replacing the stand-in labels for those inputs.
 
 Do not commit real dogfooding logs, user entries, private nutrition history,
 emails, names, phone numbers, addresses, screenshots, OCR text, provider output,

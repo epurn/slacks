@@ -3,10 +3,13 @@
 The naturalistic band is messy, real-world-*style* diary text — casual phrasing,
 ranges ("5-10 onion rings"), brand shorthand ("kraft PB"), multi-item entries,
 hedges, minor typos — across the three FTY-157 difficulty strata. Unlike the
-synthetic band it is **not** correct-by-construction, so its gold labels are
-*earned* by the cross-provider judge protocol (``tests/parse_calibration/judge``,
+synthetic band it is **not** correct-by-construction. The intended labeling path
+is the cross-provider judge protocol (``tests/parse_calibration/judge``,
 documented in ``README.md``): Claude and GPT-5.5 label each input independently,
-agreement is accepted, disagreement is queued for a human.
+agreement is accepted, disagreement is queued for a human. **This seed has not
+been through that live protocol yet** — every label below is author-constructed,
+and the "judge outputs" are deterministic stand-ins that exist to pin the router
+offline, exactly like FTY-158's recorded samples.
 
 Every input here is **authored** — realistic in *style*, never scraped from a
 real user. The `fatty` repo is public and real diary entries are PII
@@ -17,12 +20,12 @@ This generator holds the authored cases and their *recorded* judge outputs
 writes three consistent artifacts so the committed set, the judge run, and the
 queue can never drift:
 
-- ``naturalistic_examples.jsonl`` — the accepted seed (agreement-verified judged
-  cases + author-constructed unambiguous cases), each a full
-  ``LabeledParseExample`` tagged ``band: naturalistic``.
-- ``naturalistic_judge_run.json`` — the recorded two-judge outputs for the
-  judged/contested inputs, from which ``run_protocol`` reproduces the seed and
-  the queue offline (see ``test_cross_provider_judge.py``).
+- ``naturalistic_examples.jsonl`` — the committed seed (stand-in-judged cases +
+  author-constructed unambiguous cases), each a full ``LabeledParseExample``
+  tagged ``band: naturalistic``.
+- ``naturalistic_judge_run.json`` — the recorded stand-in two-judge outputs for
+  the judged/contested inputs, from which ``run_protocol`` reproduces the seed
+  and the queue offline (see ``test_cross_provider_judge.py``).
 - ``naturalistic_adjudication_queue.jsonl`` — the contested inputs (both judges'
   outputs) awaiting maintainer adjudication; they are **not** in the seed.
 
@@ -31,10 +34,15 @@ Provenance per case:
 - ``authored`` — an author-constructed unambiguous case (agreement-trivial by
   construction); committed with ``source_kind: authored_naturalistic``; not in
   the judge run.
-- ``judged`` — both judges agree; committed with ``source_kind:
-  cross_provider_judge``; in the judge run with agreeing labels.
-- ``contested`` — the judges disagree; **not** committed to the seed; in the
-  judge run and the queue.
+- ``judged`` — the stand-in judges agree; committed with ``source_kind:
+  recorded_stand_in``; in the judge run with agreeing labels.
+- ``contested`` — the stand-in judges disagree; **not** committed to the seed;
+  in the judge run and the queue.
+
+``source_kind: cross_provider_judge`` is **reserved** for labels the live
+protocol actually produced. This generator never emits it: when the maintainer's
+live dual-judge pass lands, its agreed/adjudicated labels replace the stand-in
+cases and carry that kind (see ``README.md``, "Adding examples").
 """
 
 from __future__ import annotations
@@ -77,9 +85,10 @@ def _ind(kind: str, name: str) -> dict[str, Any]:
     return {"type": kind, "name": name, "quantity_text": ""}
 
 
-# Each case: the authored gold label (what Claude, the deterministic committed
-# judge, returns) plus baseline (the recorded verbalized-gate stand-in) and, for
-# judged/contested cases, how the codex judge's independent label differs.
+# Each case: the authored gold label (returned by the stand-in "claude" judge)
+# plus baseline (the recorded verbalized-gate stand-in) and, for judged/contested
+# cases, how the stand-in "codex" label differs. Both judge outputs are authored
+# here — absent an override, the codex stand-in defaults to the gold label.
 #
 #   provenance   codex_decision / codex_parse (override) meaning
 #   authored     — (no judge run)
@@ -391,8 +400,11 @@ _CASES: list[dict[str, Any]] = [
 
 
 def _example_record(index: int, case: dict[str, Any]) -> dict[str, Any]:
+    # "recorded_stand_in", never "cross_provider_judge": these labels were
+    # authored alongside their stand-in judge outputs, not produced by a live
+    # judge run (see the module docstring).
     source_kind = (
-        "authored_naturalistic" if case["provenance"] == "authored" else "cross_provider_judge"
+        "authored_naturalistic" if case["provenance"] == "authored" else "recorded_stand_in"
     )
     disposition, confidence = case["baseline"]
     return {
@@ -462,11 +474,13 @@ def main() -> int:
     judge_run = {
         "protocol_version": 1,
         "note": (
-            "Recorded/representative cross-provider judge outputs used to build "
-            "and verify the naturalistic seed offline (a deterministic stand-in, "
-            "mirroring FTY-158's recorded samples). NOT real user data and NOT a "
-            "claim of specific live model output; the maintainer's live run "
-            "(tests.parse_calibration.judge) refreshes it."
+            "Author-constructed stand-in judge outputs used to build and verify "
+            "the naturalistic seed offline (a deterministic router-regression "
+            "fixture, mirroring FTY-158's recorded samples). No live judge "
+            "produced these labels — the matching seed rows carry source_kind "
+            "recorded_stand_in, never cross_provider_judge. NOT real user data "
+            "and NOT a claim of specific live model output; the maintainer's "
+            "live run (tests.parse_calibration.judge) replaces it."
         ),
         "records": judge_records,
     }

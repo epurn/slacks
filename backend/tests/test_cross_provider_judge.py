@@ -205,7 +205,7 @@ def test_recorded_judge_run_reproduces_committed_seed_and_queue() -> None:
     committed = {
         example.input: example
         for example in load_band("naturalistic")
-        if example.source_kind == "cross_provider_judge"
+        if example.source_kind == "recorded_stand_in"
     }
     assert {label.input for label in result.accepted} == set(committed)
     for label in result.accepted:
@@ -221,7 +221,8 @@ def test_recorded_judge_run_reproduces_committed_seed_and_queue() -> None:
     ]
     assert result.queue == committed_queue
 
-    # The recorded agreement rate the README documents.
+    # The stand-in run's recorded agreement rate the README documents (a fixture
+    # property, not an observed live inter-judge rate).
     assert result.agreement_rate == pytest.approx(12 / 14)
 
 

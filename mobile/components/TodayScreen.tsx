@@ -72,6 +72,7 @@ import {
 import {
   OPTIMISTIC_ID_PREFIX,
   clusterByTime,
+  formatWallClockTime,
   optimisticLogEvent,
   reconcileEvents,
   sortByNewest,
@@ -1041,20 +1042,6 @@ function Timeline({
   );
 }
 
-/** Format an ISO timestamp as a short time label for the cluster header. */
-function formatClusterTime(isoTime: string): string {
-  try {
-    const date = new Date(isoTime);
-    return date.toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
-  } catch {
-    return "";
-  }
-}
-
 function ClusterView({
   cluster,
   itemsByEvent,
@@ -1081,7 +1068,7 @@ function ClusterView({
   return (
     <View style={styles.cluster}>
       <Text style={[styles.clusterTime, { color: colors.textMuted }]}>
-        {formatClusterTime(cluster.anchorTime)}
+        {formatWallClockTime(cluster.anchorTime)}
       </Text>
       <View style={[styles.card, { backgroundColor: colors.surfaceRaised }]}>
         {cluster.events.map((event) => {

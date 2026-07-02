@@ -1,5 +1,5 @@
 {
-  "note": "Recorded/representative cross-provider judge outputs used to build and verify the naturalistic seed offline (a deterministic stand-in, mirroring FTY-158's recorded samples). NOT real user data and NOT a claim of specific live model output; the maintainer's live run (tests.parse_calibration.judge) refreshes it.",
+  "note": "Author-constructed stand-in judge outputs used to build and verify the naturalistic seed offline (a deterministic router-regression fixture, mirroring FTY-158's recorded samples). No live judge produced these labels \u2014 the matching seed rows carry source_kind recorded_stand_in, never cross_provider_judge. NOT real user data and NOT a claim of specific live model output; the maintainer's live run (tests.parse_calibration.judge) replaces it.",
   "protocol_version": 1,
   "records": [
     {
