@@ -1,3 +1,4 @@
+import { StyleSheet } from "react-native";
 import { act, create } from "react-test-renderer";
 
 import TabLayout from "./_layout";
@@ -76,10 +77,19 @@ describe("TabLayout tab-bar material (FTY-185)", () => {
       options.tabBarBackground as () => React.ReactElement<{
         tint: string;
         intensity: number;
+        style: unknown;
       }>
     )();
     expect(bg.props.tint).toBe("systemUltraThinMaterialLight");
+    // Occlusion contract: a max-intensity material that fills the entire bar
+    // footprint (absoluteFill) is what dims scrolled content beneath the tab
+    // labels instead of leaving it legible through an uncovered/low-intensity
+    // bar. Pixel-level legibility isn't assertable in the JS/Maestro harness,
+    // so the full-fill + intensity + material props are the structural proof.
     expect(bg.props.intensity).toBe(100);
+    expect(StyleSheet.flatten(bg.props.style)).toEqual(
+      StyleSheet.flatten(StyleSheet.absoluteFill),
+    );
   });
 
   it("uses the dark .ultraThin material in dark mode", () => {

@@ -59,9 +59,13 @@ appId: com.fatty
       id: today-timeline-with-entries
     timeout: 10000
 
-# Step 6: Tap Refresh so the day summary reloads — now over target (2,100 kcal).
-- tapOn:
-    text: "Refresh"
+# Step 6: Pull to refresh so the day summary reloads — now over target (2,100 kcal).
+#         FTY-185 swapped the header Refresh button for the standard RefreshControl
+#         pull, so the flow drags the timeline down from its top to trigger it.
+- swipe:
+    start: 50%, 35%
+    end: 50%, 90%
+    duration: 800
 
 # Step 7: Load-bearing assertion — the hero crosses into its over-budget state.
 #         The CalorieHero a11y label combines the figures into

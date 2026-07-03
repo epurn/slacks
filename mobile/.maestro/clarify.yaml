@@ -108,13 +108,17 @@ appId: com.fatty
       text: "coffee, needs a detail, uncounted"
     timeout: 10000
 
-# Step 11: Tap Refresh to load the phase-2 fixture: the resolved event list —
+# Step 11: Pull to refresh to load the phase-2 fixture: the resolved event list —
 #          the SAME event, now completed (E2E_CLARIFY_RESOLVED_EVENT) — and the
 #          non-zero daily summary. (The manual refresh is needed because the
 #          re-estimated event completes synchronously in the mock and there is
-#          no polling window before the test asserts counts.)
-- tapOn:
-    text: "Refresh"
+#          no polling window before the test asserts counts.) FTY-185 replaced
+#          the header Refresh button with the standard RefreshControl pull, so
+#          the flow drags the timeline down from its top to trigger the refetch.
+- swipe:
+    start: 50%, 35%
+    end: 50%, 90%
+    duration: 800
 
 # Step 12: Assert the resolved entry is still on the timeline as the untouched
 #          raw phrase ("coffee") with the needs-a-detail treatment gone. The
