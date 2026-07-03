@@ -1738,6 +1738,78 @@ describe("TodayScreen barcode scanning", () => {
     expect(textContent(tree)).toContain("That entry couldn't be saved.");
     expect(textContent(tree)).toContain("Log your first thing");
   });
+
+  it("'Type it instead' dismisses the scanner and lands in a pre-filled, focused composer (never a dead end)", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
+    await act(async () => {});
+
+    press(tree, "Scan barcode");
+    expect(hasA11yLabel(tree, "Close scanner")).toBe(true);
+
+    // The scanner lives in a full-screen Modal; grab its dismissal hook while it
+    // is open so we can drive the "dismissal committed" moment deterministically.
+    const scannerModalOnDismiss = tree.root.find(
+      (n) => typeof n.props.onDismiss === "function",
+    ).props.onDismiss as () => void;
+
+    // Spy on the composer TextInput instance's imperative `focus()` right before
+    // the fallback so we measure only the focus the fallback drives — the
+    // never-a-dead-end wiring (FTY-194) raises the keyboard in place.
+    const composer = tree.root.find(
+      (n) =>
+        n.props.accessibilityLabel === "Log food or exercise" &&
+        typeof n.props.onChangeText === "function",
+    );
+    // jest-expo's TextInput `focus` mock is shared across the suite, so clear it
+    // to measure only the focus this fallback drives.
+    const focusSpy = jest.spyOn(
+      composer.instance as { focus: () => void },
+      "focus",
+    );
+    focusSpy.mockClear();
+
+    press(tree, "Type it instead");
+
+    // The scanner is dismissed and the composer is pre-filled immediately with an
+    // editable packaged-food starter — the barcode surface never dead-ends into a
+    // feed with only "close", and it never drops the user into a blank field
+    // (design §3: "Barcode not found → NL composer (pre-filled)").
+    expect(hasA11yLabel(tree, "Close scanner")).toBe(false);
+    expect(inputValue(tree, "Log food or exercise")).toBe("1 serving of ");
+
+    // Focus is NOT raised synchronously — the full-screen scanner Modal still
+    // owns the responder while it slides out, so an early focus would be
+    // swallowed and the keyboard would never rise.
+    expect(focusSpy).not.toHaveBeenCalled();
+
+    // Once the Modal's dismissal has committed (iOS fires `onDismiss` only after
+    // the slide-out finishes), the composer takes focus — the fallback genuinely
+    // lands in a *focused* composer, not just a pre-filled one.
+    act(() => {
+      scannerModalOnDismiss();
+    });
+    expect(focusSpy).toHaveBeenCalled();
+  });
+
+  it("'Type it instead' keeps text the user already typed instead of clobbering it", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
+    await act(async () => {});
+
+    // The user typed a partial entry before reaching for the scanner.
+    typeInto(tree, "Log food or exercise", "greek yogurt");
+
+    press(tree, "Scan barcode");
+    press(tree, "Type it instead");
+
+    // Their in-progress text is preserved — only an empty composer is seeded.
+    expect(inputValue(tree, "Log food or exercise")).toBe("greek yogurt");
+  });
 });
 
 // ─── Label capture entry point (FTY-064) ─────────────────────────────────────

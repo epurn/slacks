@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -93,6 +94,17 @@ import { entryResolvedHaptic } from "@/theme/haptics";
 
 /** Maximum raw-text length, mirrored from the FTY-030 contract. */
 const MAX_RAW_TEXT_LENGTH = 2000;
+
+/**
+ * Composer seed for the barcode scanner's "Type it instead" fallback (FTY-194).
+ * The camera can't hand us a product name, so the fallback drops the user into
+ * the natural-language composer with an editable packaged-food starter — a
+ * running start, never a blank dead end (design §3: "Barcode not found → fall
+ * back to the NL composer (pre-filled)"). The trailing space leaves the caret
+ * ready for the product name. It asserts no nutrition and counts nothing until
+ * the user completes and submits it, so nothing is fabricated.
+ */
+const BARCODE_MANUAL_ENTRY_SEED = "1 serving of ";
 
 type Phase = "loading" | "ready" | "error";
 
@@ -714,6 +726,44 @@ export function TodayScreen({
     [apiSession, submitting, create, setSubmitting, setSubmitError],
   );
 
+  // "Type it instead" from the scanner (FTY-194). The barcode surface must never
+  // dead-end: dismiss the scanner and land the user in a *pre-filled*, focused
+  // composer so a failed/unsupported scan flows straight into natural-language
+  // logging (design §3: "Barcode not found → fall back to the NL composer
+  // (pre-filled)"). The camera carries no scan data, so we seed a packaged-food
+  // starter the user completes — never a fabricated number, and it counts nothing
+  // until submitted. Anything the user had already typed is preserved, not
+  // clobbered; only an empty composer is seeded.
+  //
+  // The scanner lives in a full-screen Modal that owns the keyboard/responder
+  // while it is mounted, so focusing the composer synchronously — before the
+  // dismissal has committed — is swallowed and the keyboard never rises. Record
+  // the intent to focus and flush it once the dismissal has actually committed
+  // (see `focusComposerAfterScanner`), so the fallback lands in a genuinely
+  // *focused* composer rather than only a pre-filled one.
+  const pendingComposerFocus = useRef(false);
+  const handleManualEntry = useCallback(() => {
+    if (text.trim() === "") setText(BARCODE_MANUAL_ENTRY_SEED);
+    pendingComposerFocus.current = true;
+    setScannerOpen(false);
+  }, [setText, text]);
+
+  // Flush a pending composer focus once the scanner Modal has actually dismissed.
+  // On iOS this is driven by the Modal's `onDismiss`, which fires only after the
+  // slide-out animation has fully committed and the composer can take the
+  // responder. Android has no `onDismiss`, but the composer becomes focusable as
+  // soon as the Modal unmounts, so the close effect below flushes it there.
+  const focusComposerAfterScanner = useCallback(() => {
+    if (!pendingComposerFocus.current) return;
+    pendingComposerFocus.current = false;
+    inputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS === "ios") return; // iOS flushes from the Modal's onDismiss.
+    if (!scannerOpen) focusComposerAfterScanner();
+  }, [scannerOpen, focusComposerAfterScanner]);
+
   // Label capture upload (FTY-064 + FTY-196/197). The backend created and
   // extracted the event in-request; add the returned event to the timeline, then
   // read its label proposal (FTY-196). A legible parse lands as an **uncounted
@@ -1094,10 +1144,12 @@ export function TodayScreen({
         animationType="slide"
         presentationStyle="fullScreen"
         onRequestClose={() => setScannerOpen(false)}
+        onDismiss={focusComposerAfterScanner}
       >
         <BarcodeScannerScreen
           onBarcodeScanned={(barcode) => void handleBarcodeScanned(barcode)}
           onClose={() => setScannerOpen(false)}
+          onManualEntry={handleManualEntry}
         />
       </Modal>
 

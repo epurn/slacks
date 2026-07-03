@@ -31,7 +31,15 @@ jest.mock("expo-camera", () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { View } = require("react-native");
   const MockCameraView = jest.fn().mockImplementation(
-    ({ onBarcodeScanned }: { onBarcodeScanned?: (r: { data: string; type: string; cornerPoints: unknown[]; bounds: unknown }) => void }) => {
+    (props: {
+      onBarcodeScanned?: (r: {
+        data: string;
+        type: string;
+        cornerPoints: unknown[];
+        bounds: unknown;
+      }) => void;
+    }) => {
+      const { onBarcodeScanned } = props;
       // Expose a simplified trigger; the mock wraps the required BarcodeScanningResult fields.
       mockTriggerScan = onBarcodeScanned
         ? (data: string) =>
@@ -42,10 +50,9 @@ jest.mock("expo-camera", () => {
               bounds: { origin: { x: 0, y: 0 }, size: { width: 0, height: 0 } },
             })
         : undefined;
-      return ReactLib.createElement(View, {
-        testID: "camera-view",
-        accessibilityLabel: "Camera viewfinder",
-      });
+      // Forward props (notably `enableTorch`) onto the stub so tests can assert
+      // the torch toggle is actually wired to the CameraView.
+      return ReactLib.createElement(View, { ...props, testID: "camera-view" });
     },
   );
   return { CameraView: MockCameraView };
@@ -54,6 +61,28 @@ jest.mock("expo-camera", () => {
 jest.mock("expo-linking", () => ({
   openSettings: jest.fn().mockResolvedValue(undefined),
 }));
+
+// expo-symbols is a native module — stub SymbolView so the torch + manual-entry
+// icons render (same pattern as LabelCaptureScreen.test.tsx / AppIcon.test.tsx).
+jest.mock("expo-symbols", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const ReactLib = require("react");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { View } = require("react-native");
+  return {
+    SymbolView: ({
+      name,
+      accessibilityLabel,
+    }: {
+      name: string;
+      accessibilityLabel?: string;
+    }) =>
+      ReactLib.createElement(View, {
+        testID: `sf-symbol-${String(name)}`,
+        accessibilityLabel,
+      }),
+  };
+});
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -131,6 +160,7 @@ describe("BarcodeScannerScreen – permission flows", () => {
       <BarcodeScannerScreen
         onBarcodeScanned={jest.fn()}
         onClose={jest.fn()}
+        onManualEntry={jest.fn()}
         permissionsHook={makePermissionsHook(permission)}
       />,
     );
@@ -153,6 +183,7 @@ describe("BarcodeScannerScreen – permission flows", () => {
       <BarcodeScannerScreen
         onBarcodeScanned={jest.fn()}
         onClose={jest.fn()}
+        onManualEntry={jest.fn()}
         permissionsHook={makePermissionsHook(permission, requestPermission)}
       />,
     );
@@ -173,6 +204,7 @@ describe("BarcodeScannerScreen – permission flows", () => {
       <BarcodeScannerScreen
         onBarcodeScanned={jest.fn()}
         onClose={jest.fn()}
+        onManualEntry={jest.fn()}
         permissionsHook={makePermissionsHook(permission)}
       />,
     );
@@ -189,6 +221,7 @@ describe("BarcodeScannerScreen – permission flows", () => {
       <BarcodeScannerScreen
         onBarcodeScanned={jest.fn()}
         onClose={jest.fn()}
+        onManualEntry={jest.fn()}
         permissionsHook={makePermissionsHook(permission)}
       />,
     );
@@ -215,6 +248,7 @@ describe("BarcodeScannerScreen – scan callback", () => {
       <BarcodeScannerScreen
         onBarcodeScanned={onBarcodeScanned}
         onClose={jest.fn()}
+        onManualEntry={jest.fn()}
         permissionsHook={makePermissionsHook(permission)}
       />,
     );
@@ -237,6 +271,7 @@ describe("BarcodeScannerScreen – scan callback", () => {
       <BarcodeScannerScreen
         onBarcodeScanned={onBarcodeScanned}
         onClose={jest.fn()}
+        onManualEntry={jest.fn()}
         permissionsHook={makePermissionsHook(permission)}
       />,
     );
@@ -263,6 +298,7 @@ describe("BarcodeScannerScreen – scan callback", () => {
       <BarcodeScannerScreen
         onBarcodeScanned={onBarcodeScanned}
         onClose={jest.fn()}
+        onManualEntry={jest.fn()}
         permissionsHook={makePermissionsHook(permission)}
       />,
     );
@@ -289,6 +325,7 @@ describe("BarcodeScannerScreen – close", () => {
       <BarcodeScannerScreen
         onBarcodeScanned={jest.fn()}
         onClose={onClose}
+        onManualEntry={jest.fn()}
         permissionsHook={makePermissionsHook(permission)}
       />,
     );
@@ -306,6 +343,7 @@ describe("BarcodeScannerScreen – close", () => {
       <BarcodeScannerScreen
         onBarcodeScanned={jest.fn()}
         onClose={onClose}
+        onManualEntry={jest.fn()}
         permissionsHook={makePermissionsHook(permission)}
       />,
     );
@@ -326,6 +364,7 @@ describe("BarcodeScannerScreen – accessibility", () => {
       <BarcodeScannerScreen
         onBarcodeScanned={jest.fn()}
         onClose={jest.fn()}
+        onManualEntry={jest.fn()}
         permissionsHook={makePermissionsHook(permission)}
       />,
     );
@@ -352,6 +391,7 @@ describe("BarcodeScannerScreen – accessibility", () => {
         <BarcodeScannerScreen
           onBarcodeScanned={jest.fn()}
           onClose={jest.fn()}
+          onManualEntry={jest.fn()}
           permissionsHook={makePermissionsHook(perm)}
         />,
       );
@@ -368,9 +408,102 @@ describe("BarcodeScannerScreen – accessibility", () => {
       <BarcodeScannerScreen
         onBarcodeScanned={jest.fn()}
         onClose={jest.fn()}
+        onManualEntry={jest.fn()}
         permissionsHook={makePermissionsHook(permission)}
       />,
     );
     expect(hasA11yLabel(tree, "Camera viewfinder")).toBe(true);
+  });
+});
+
+// ─── Scan chrome: reticle, guidance, torch, manual fallback (FTY-194) ─────────
+
+describe("BarcodeScannerScreen – scan chrome", () => {
+  const granted = () =>
+    makePermission({ status: PermissionStatus.GRANTED, granted: true });
+
+  function cameraNode(tree: ReactTestRenderer) {
+    return tree.root.find((n) => n.props.testID === "camera-view");
+  }
+
+  function pressableFor(tree: ReactTestRenderer, label: string) {
+    return tree.root.find(
+      (n) =>
+        n.props.accessibilityLabel === label &&
+        typeof n.props.onPress === "function",
+    );
+  }
+
+  it("shows the reticle, guidance copy, torch, and manual fallback when granted", () => {
+    const tree = mount(
+      <BarcodeScannerScreen
+        onBarcodeScanned={jest.fn()}
+        onClose={jest.fn()}
+        onManualEntry={jest.fn()}
+        permissionsHook={makePermissionsHook(granted())}
+      />,
+    );
+
+    expect(
+      tree.root.findAll((n) => n.props.testID === "barcode-reticle").length,
+    ).toBeGreaterThan(0);
+    expect(textContent(tree)).toContain("Point at a barcode");
+    expect(hasA11yLabel(tree, "Torch")).toBe(true);
+    expect(hasA11yLabel(tree, "Type it instead")).toBe(true);
+  });
+
+  it("torch is off by default and toggles enableTorch + accessibility state on tap", () => {
+    const tree = mount(
+      <BarcodeScannerScreen
+        onBarcodeScanned={jest.fn()}
+        onClose={jest.fn()}
+        onManualEntry={jest.fn()}
+        permissionsHook={makePermissionsHook(granted())}
+      />,
+    );
+
+    expect(cameraNode(tree).props.enableTorch).toBe(false);
+    expect(pressableFor(tree, "Torch").props.accessibilityState).toEqual({
+      selected: false,
+    });
+
+    act(() => {
+      pressableFor(tree, "Torch").props.onPress();
+    });
+
+    expect(cameraNode(tree).props.enableTorch).toBe(true);
+    expect(pressableFor(tree, "Torch").props.accessibilityState).toEqual({
+      selected: true,
+    });
+  });
+
+  it("fires onManualEntry when 'Type it instead' is pressed (never a dead end)", () => {
+    const onManualEntry = jest.fn();
+    const tree = mount(
+      <BarcodeScannerScreen
+        onBarcodeScanned={jest.fn()}
+        onClose={jest.fn()}
+        onManualEntry={onManualEntry}
+        permissionsHook={makePermissionsHook(granted())}
+      />,
+    );
+
+    press(tree, "Type it instead");
+    expect(onManualEntry).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes accessible labels for the guidance, torch, and manual fallback", () => {
+    const tree = mount(
+      <BarcodeScannerScreen
+        onBarcodeScanned={jest.fn()}
+        onClose={jest.fn()}
+        onManualEntry={jest.fn()}
+        permissionsHook={makePermissionsHook(granted())}
+      />,
+    );
+
+    expect(hasA11yLabel(tree, "Point at a barcode")).toBe(true);
+    expect(hasA11yLabel(tree, "Torch")).toBe(true);
+    expect(hasA11yLabel(tree, "Type it instead")).toBe(true);
   });
 });

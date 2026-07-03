@@ -24,12 +24,15 @@
  */
 
 import { AccessibilityInfo } from 'react-native';
+import type { PermissionResponse } from 'expo';
+import type { useCameraPermissions } from 'expo-camera';
 import { markOnboardingComplete } from '@/state/onboardingComplete';
 import type { SessionStore } from '@/state/sessionStore';
 import type { ServerConnectionStore } from '@/state/serverConnectionStore';
 import {
   E2E_SESSION,
   E2E_SERVER_URL,
+  E2E_CAMERA_PERMISSION_GRANTED,
   E2E_FIXTURE_MAP,
   E2E_DAILY_SUMMARY,
   E2E_GOAL_TARGET_RESPONSE,
@@ -115,6 +118,22 @@ export const e2eConnectionStore: ServerConnectionStore = {
   },
   async save() {},
   async clear() {},
+};
+
+/**
+ * E2E camera-permission hook (FTY-194). Drop-in for expo-camera's
+ * `useCameraPermissions`, returning an already-granted permission so the
+ * barcode scanner renders its granted chrome — reticle, torch, and the
+ * "Type it instead" fallback — without a device camera. `CameraCapture`
+ * defaults to this hook when `isE2EMode()` is true, so the
+ * `barcode-manual-entry.yaml` flow can drive the real scanner path on the
+ * simulator. `request`/`get` resolve to the same granted response; nothing is
+ * ever asked of the OS. Dead code in release builds (never reached off E2E).
+ */
+export const e2eCameraPermissionsHook: typeof useCameraPermissions = () => {
+  const grant = async (): Promise<PermissionResponse> =>
+    E2E_CAMERA_PERMISSION_GRANTED;
+  return [E2E_CAMERA_PERMISSION_GRANTED, grant, grant];
 };
 
 /**

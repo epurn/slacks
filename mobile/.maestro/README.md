@@ -72,6 +72,7 @@ app under test reliably. If the app ID changes, update `app.json` and every flow
 | `correction.yaml` | Correction-saved beat (beat 2) real data-path: submit a log → it resolves → tap the resolved row → the correction sheet opens → step the portion up → the sheet shows the server-recomputed value ("175 kcal"), the successful commit the correction-saved beat rides (FTY-181) |
 | `target.yaml` | Target-reached beat (beat 3) real data-path: hero mounts under target ("0 of 2,000 kcal", seeds not-reached) → submit a large log → Refresh → the day summary crosses the target and the hero flips to its over-budget end state ("2,100 of 2,000 kcal, 100 over budget"), the crossing the target-reached beat rides (FTY-181) |
 | `reduce-motion.yaml` | Reduce Motion (all beats): under the reduce-motion build the harness forces `isReduceMotionEnabled` true, so the beats take their no-motion branch; the resolve value row still eases in (a fade, not a spring) and counts, proving the no-motion path reaches the same successful end state. Run via `E2E_REDUCE_MOTION=1 ./verify-e2e.sh` (see below) (FTY-181) |
+| `barcode-manual-entry.yaml` | Barcode "Type it instead" fallback: open the scanner from Today → the granted chrome renders ("Point at a barcode"; permission granted via the E2E stub since the simulator has no camera) → tap "Type it instead" → the scanner dismisses and the composer is pre-filled with the "1 serving of " starter, the never-a-dead-end running start into NL logging (FTY-194) |
 
 ## E2E launch mode (deterministic boot)
 
