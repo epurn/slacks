@@ -16,16 +16,22 @@ function formatKcal(n: number | null): string {
  * "needs a detail" (needs_clarification parent) entries render muted with a
  * gentle inline tag and are visibly uncounted — they do not appear in hero
  * figures per the finalized-state filter, so no extra math needed here.
- * Tapping calls `onPress` (stub for FTY-100 detail sheet).
+ * A `proposal` row (FTY-197) is a legible label parse held uncounted (FTY-196):
+ * it shows its parsed kcal but muted, tagged "not counted", and invites a tap to
+ * confirm — honestly surfaced, never silently counted.
+ * Tapping calls `onPress` (opens the detail / confirm sheet).
  */
 export function ItemTimelineRow({
   item,
   needsClarification = false,
+  proposal = false,
   onPress,
 }: {
   item: DerivedItem;
   /** True when the parent log event is needs_clarification. */
   needsClarification?: boolean;
+  /** True for an uncounted label proposal awaiting confirm (FTY-196/197). */
+  proposal?: boolean;
   onPress?: () => void;
 }) {
   const { colors } = useTheme();
@@ -36,14 +42,24 @@ export function ItemTimelineRow({
   const source = item.item_type === "food" ? item.source : null;
   const is_edited = item.is_edited ?? false;
 
-  const textColor = needsClarification ? colors.textMuted : colors.text;
-  const kcalColor = needsClarification ? colors.textMuted : colors.textSecondary;
+  // Both uncounted states render muted; only their tag / kcal treatment differ.
+  const uncounted = needsClarification || proposal;
+  const textColor = uncounted ? colors.textMuted : colors.text;
+  const kcalColor = uncounted ? colors.textMuted : colors.textSecondary;
 
   const a11yLabel = needsClarification
     ? `${name}, needs a detail, uncounted`
-    : item.item_type === "food"
-      ? `${name}, ${kcal !== null ? Math.round(kcal) : 0} kcal`
-      : `${name}, ${kcal !== null ? Math.round(kcal) : 0} kcal burned`;
+    : proposal
+      ? `${name}, ${kcal !== null ? Math.round(kcal) : 0} kcal, not yet counted`
+      : item.item_type === "food"
+        ? `${name}, ${kcal !== null ? Math.round(kcal) : 0} kcal`
+        : `${name}, ${kcal !== null ? Math.round(kcal) : 0} kcal burned`;
+
+  const a11yHint = needsClarification
+    ? "Tap to add the missing detail"
+    : proposal
+      ? "Tap to confirm before it counts"
+      : "Tap to view details";
 
   return (
     <Pressable
@@ -55,7 +71,7 @@ export function ItemTimelineRow({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={a11yLabel}
-      accessibilityHint={needsClarification ? "Tap to add the missing detail" : "Tap to view details"}
+      accessibilityHint={a11yHint}
     >
       {/* Provenance icon — always on */}
       <ProvenanceIcon source={source} is_edited={is_edited} />
@@ -69,19 +85,20 @@ export function ItemTimelineRow({
         {name}
       </Text>
 
-      {/* "needs a detail" tag */}
-      {needsClarification ? (
+      {/* Uncounted tag: "needs a detail" (clarify) or "not counted" (proposal) */}
+      {uncounted ? (
         <View
           style={[styles.needsDetailTag, { backgroundColor: colors.controlBackground }]}
           accessibilityElementsHidden
         >
           <Text style={[styles.needsDetailText, { color: colors.textMuted }]}>
-            needs a detail
+            {needsClarification ? "needs a detail" : "not counted"}
           </Text>
         </View>
       ) : null}
 
-      {/* Kcal — right-aligned */}
+      {/* Kcal — right-aligned. A proposal shows its parsed kcal (muted); a
+          needs-a-detail row has no value yet, so it shows an em dash. */}
       <Text
         style={[styles.kcal, { color: kcalColor }]}
         accessibilityElementsHidden

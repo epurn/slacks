@@ -23,8 +23,15 @@ import {
 } from "@/api/client";
 import type { ApiSession } from "@/api/client";
 
-/** Resolution status of a derived item (mirrors the backend `DerivedItemStatus`). */
-export type DerivedItemStatus = "unresolved" | "resolved";
+/**
+ * Resolution status of a derived item (mirrors the backend `DerivedItemStatus`).
+ *
+ * `proposed` (FTY-196) is an **uncounted** nutrition-label parse held for
+ * confirmation: a legible label scan lands `proposed` (excluded from totals by
+ * the finalized-state filter) until the user confirms it via the confirm-parsed
+ * -values sheet (FTY-197), which flips it to `resolved`.
+ */
+export type DerivedItemStatus = "unresolved" | "resolved" | "proposed";
 
 /** Discriminator for the two derived-item kinds. */
 export type DerivedItemType = "food" | "exercise";
