@@ -1,0 +1,189 @@
+import type { Dispatch, SetStateAction } from "react";
+
+import {
+  type DerivedItem,
+  type DerivedFoodItemDTO,
+} from "@/api/derivedItems";
+import {
+  LogEventApiError,
+  type LogEventDTO,
+  type LogEventEntryDTO,
+} from "@/api/logEvents";
+import { type SavedFoodDTO } from "@/api/savedFoods";
+
+/** Load/poll lifecycle phase for the Today timeline. */
+export type Phase = "loading" | "ready" | "error";
+
+/** Maximum raw-text length, mirrored from the FTY-030 contract. */
+export const MAX_RAW_TEXT_LENGTH = 2000;
+
+/**
+ * Composer seed for the barcode scanner's "Type it instead" fallback (FTY-194).
+ * The camera can't hand us a product name, so the fallback drops the user into
+ * the natural-language composer with an editable packaged-food starter — a
+ * running start, never a blank dead end (design §3: "Barcode not found → fall
+ * back to the NL composer (pre-filled)"). The trailing space leaves the caret
+ * ready for the product name. It asserts no nutrition and counts nothing until
+ * the user completes and submits it, so nothing is fabricated.
+ */
+export const BARCODE_MANUAL_ENTRY_SEED = "1 serving of ";
+
+/**
+ * Id prefix for the synthetic saved-food row built locally on a saved-food add
+ * (FTY-053). It marks a client-built resolved row so the items-forward timeline
+ * can tell a true optimistic/saved-food row from a server-fed by-date item —
+ * server ids are UUIDs and never carry this prefix.
+ */
+const SAVED_FOOD_ITEM_ID_PREFIX = "saved-";
+
+export function itemTimelineRowTestID(eventId: string): string {
+  return `item-timeline-row-${eventId}`;
+}
+
+export function itemTimelineExtraRowTestID(
+  eventId: string,
+  itemId: string,
+): string {
+  return `item-timeline-row-${eventId}-${itemId}`;
+}
+
+/** Map an API/network failure to a plain, nonjudgmental message. */
+export function messageFor(error: unknown, kind: "load" | "save"): string {
+  if (error instanceof LogEventApiError) {
+    return error.message;
+  }
+  return kind === "load"
+    ? "We couldn't load your day. Check your connection and try again."
+    : "We couldn't save that entry. Please try again.";
+}
+
+/**
+ * Whether an item is a locally-built synthetic saved-food row (FTY-053) rather
+ * than a server-fed derived item (FTY-198). Used to gate the items-forward
+ * fallback to true optimistic/saved-food rows so a server row can only surface
+ * through the completed branch — the pending→completed transition that resolves
+ * the skeleton in place (FTY-180) and arms the entry-resolve beat (FTY-181),
+ * never a mid-poll swap keyed by item id.
+ */
+export function isSyntheticSavedFoodItem(item: DerivedItem): boolean {
+  return item.id.startsWith(SAVED_FOOD_ITEM_ID_PREFIX);
+}
+
+/** Build a synthetic resolved food item from a saved food selection (FTY-053). */
+export function syntheticSavedFoodItem(
+  savedFood: SavedFoodDTO,
+  logEventId: string,
+  userId: string,
+): DerivedFoodItemDTO {
+  return {
+    item_type: "food",
+    id: `${SAVED_FOOD_ITEM_ID_PREFIX}${savedFood.id}`,
+    user_id: userId,
+    log_event_id: logEventId,
+    name: savedFood.name,
+    quantity_text: `${savedFood.serving_size} ${savedFood.serving_unit}`,
+    unit: savedFood.serving_unit,
+    amount: savedFood.serving_size,
+    status: "resolved",
+    grams: null,
+    calories: savedFood.calories,
+    protein_g: savedFood.protein_g,
+    carbs_g: savedFood.carbs_g,
+    fat_g: savedFood.fat_g,
+    calories_estimated: savedFood.calories,
+    protein_g_estimated: savedFood.protein_g,
+    carbs_g_estimated: savedFood.carbs_g,
+    fat_g_estimated: savedFood.fat_g,
+    source: null,
+    is_edited: false,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Build the placeholder item the clarify-mode sheet opens against for a
+ * `needs_clarification` event (FTY-149). A needs-clarification event has no
+ * resolved derived item — the parse stopped for a missing detail — so the sheet
+ * (which is item-addressed) is fed a minimal, uncounted stand-in: the typed
+ * phrase as the name, no nutrition. Clarify-mode only reads `name`/`id`; it never
+ * shows or commits these null values, so the item is never counted and the
+ * detail is never auto-filled.
+ */
+export function clarificationPlaceholderItem(
+  event: LogEventDTO,
+): DerivedFoodItemDTO {
+  return {
+    item_type: "food",
+    id: `clarify-${event.id}`,
+    user_id: event.user_id,
+    log_event_id: event.id,
+    name: event.raw_text,
+    quantity_text: event.raw_text,
+    unit: null,
+    amount: null,
+    status: "unresolved",
+    grams: null,
+    calories: null,
+    protein_g: null,
+    carbs_g: null,
+    fat_g: null,
+    calories_estimated: null,
+    protein_g_estimated: null,
+    carbs_g_estimated: null,
+    fat_g_estimated: null,
+    source: null,
+    is_edited: false,
+    created_at: event.created_at,
+    updated_at: event.updated_at,
+  };
+}
+
+/**
+ * Drop an optimistic event and its synthetic saved-food item from Today's state
+ * by optimistic id — shared by the server-error rollback and the unreachable
+ * discard paths the submit machine drives through the bridge.
+ */
+export function removeOptimisticEvent(
+  setEvents: Dispatch<SetStateAction<readonly LogEventDTO[]>>,
+  setItemsByEvent: Dispatch<
+    SetStateAction<Readonly<Record<string, readonly DerivedItem[]>>>
+  >,
+  optimisticId: string,
+): void {
+  setEvents((prev) => prev.filter((event) => event.id !== optimisticId));
+  setItemsByEvent((prev) => {
+    if (!(optimisticId in prev)) return prev;
+    const { [optimisticId]: _removed, ...rest } = prev;
+    return rest;
+  });
+}
+
+export function hasOwn(object: object, key: PropertyKey): boolean {
+  return Object.prototype.hasOwnProperty.call(object, key);
+}
+
+/**
+ * Fold the item-forward feed into the items map. Derived items replace prior
+ * rows; completed empty entries are recorded as a settled-empty `[]` without
+ * wiping existing items.
+ */
+export function mergeServerItems(
+  prev: Readonly<Record<string, readonly DerivedItem[]>>,
+  entries: readonly LogEventEntryDTO[],
+): Readonly<Record<string, readonly DerivedItem[]>> {
+  let next: Record<string, readonly DerivedItem[]> | null = null;
+  for (const entry of entries) {
+    if (entry.items.length > 0) {
+      next ??= { ...prev };
+      next[entry.event.id] = entry.items;
+    } else if (
+      entry.event.status === "completed" &&
+      !hasOwn(prev, entry.event.id)
+    ) {
+      next ??= { ...prev };
+      next[entry.event.id] = [];
+    }
+  }
+  return next ?? prev;
+}
