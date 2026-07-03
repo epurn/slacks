@@ -40,6 +40,10 @@ import {
   E2E_FAILED_RAW_TEXT,
   E2E_FAILED_EVENT,
   E2E_FAILED_RETRY_EVENT,
+  E2E_SAVED_FOOD,
+  E2E_SAVED_FOOD_EVENT_ID,
+  E2E_SAVED_FOOD_ITEM_ID,
+  E2E_SOURCE_CANDIDATE,
 } from './fixtures';
 // eslint-disable-next-line import/first
 import { formatWallClockTime } from '@/state/today';
@@ -64,6 +68,10 @@ import {
 import { getDailySummary, getDailySummaryRange } from '@/api/dailySummary';
 // eslint-disable-next-line import/first
 import { listWeightEntries, createWeightEntry } from '@/api/weightEntries';
+// eslint-disable-next-line import/first
+import { searchSavedFoods } from '@/api/savedFoods';
+// eslint-disable-next-line import/first
+import { listSourceCandidates, reResolveItem } from '@/api/corrections';
 
 // jest-expo sets __DEV__ = true globally. Use globalThis so TypeScript is happy
 // without needing @types/node (which the project excludes from "types").
@@ -489,5 +497,116 @@ describe('FTY-176 failed-parse flow: stateful mock transitions', () => {
     // "coffee" still runs the clarify phase machine, untouched by the gibberish key.
     const created = await createLogEvent(apiSession, 'coffee', undefined, mockFetch);
     expect(created.status).toBe('needs_clarification');
+  });
+});
+
+// ─── FTY-183 correction-flow stateful mock ───────────────────────────────────
+//
+// Proves the endpoints the correction.yaml Maestro flow relies on: the saved-food
+// typeahead pick, the completed log event it resolves to, the Change-match
+// candidate list, and the re-resolve commit. Driven through the real API clients
+// so the fixture URLs stay aligned with what the app actually requests.
+
+describe('FTY-183 correction flow: stateful mock endpoints', () => {
+  const apiSession = toApiSession(E2E_SESSION);
+
+  it('saved-food search returns the seeded food for a matching query', async () => {
+    const mockFetch = createE2EMockFetch();
+    const response = await searchSavedFoods(apiSession, 'Chicken', mockFetch);
+    expect(response.items).toHaveLength(1);
+    expect(response.items[0]?.id).toBe(E2E_SAVED_FOOD.id);
+    expect(response.items[0]?.name).toBe(E2E_SAVED_FOOD.name);
+  });
+
+  it('saved-food search returns nothing for a non-matching query (isolated from other flows)', async () => {
+    const mockFetch = createE2EMockFetch();
+    const response = await searchSavedFoods(apiSession, 'coffee', mockFetch);
+    expect(response.items).toHaveLength(0);
+  });
+
+  it('submitting the saved food resolves straight to a completed event', async () => {
+    const mockFetch = createE2EMockFetch();
+    const created = await createLogEvent(
+      apiSession,
+      E2E_SAVED_FOOD.name,
+      undefined,
+      mockFetch,
+    );
+    expect(created.id).toBe(E2E_SAVED_FOOD_EVENT_ID);
+    expect(created.status).toBe('completed');
+    // GET keeps serving the completed event so the resolved row survives a poll.
+    const events = await listTodayLogEvents(apiSession, '2026-01-01', mockFetch);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.id).toBe(E2E_SAVED_FOOD_EVENT_ID);
+    expect(events[0]?.status).toBe('completed');
+  });
+
+  it('the saved-food branch does not disturb the clarify phase machine', async () => {
+    const mockFetch = createE2EMockFetch();
+    await createLogEvent(apiSession, E2E_SAVED_FOOD.name, undefined, mockFetch);
+    // "coffee" still opens the clarify phase machine independently.
+    const created = await createLogEvent(apiSession, 'coffee', undefined, mockFetch);
+    expect(created.status).toBe('needs_clarification');
+  });
+
+  it('Change-match lists the USDA candidate for the item', async () => {
+    const mockFetch = createE2EMockFetch();
+    const candidates = await listSourceCandidates(
+      apiSession,
+      E2E_SAVED_FOOD_ITEM_ID,
+      undefined,
+      mockFetch,
+    );
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.source_ref).toBe(E2E_SOURCE_CANDIDATE.source_ref);
+    expect(candidates[0]?.name).toBe(E2E_SOURCE_CANDIDATE.name);
+  });
+
+  it('re-resolve commits the same item with new provenance and recomputed calories', async () => {
+    const mockFetch = createE2EMockFetch();
+    const updated = await reResolveItem(
+      apiSession,
+      E2E_SAVED_FOOD_ITEM_ID,
+      E2E_SOURCE_CANDIDATE.source_ref,
+      mockFetch,
+    );
+    // Same id + log_event_id → reconciles onto the same timeline row (no duplicate)…
+    expect(updated.id).toBe(E2E_SAVED_FOOD_ITEM_ID);
+    expect(updated.log_event_id).toBe(E2E_SAVED_FOOD_EVENT_ID);
+    // …honest new provenance, and a recomputed value distinct from the original 640.
+    expect(updated.source?.label).toBe('USDA');
+    expect(updated.calories).toBe(415);
+    expect(updated.calories).not.toBe(E2E_SAVED_FOOD.calories);
+  });
+});
+
+// ─── FTY-183 weight save/refetch stateful mock ───────────────────────────────
+//
+// The trends.yaml flow logs a weight, then asserts the refetched Trends headline
+// reflects it. That only works if a POST records the weight and a subsequent GET
+// upserts today's point to it — proven here through the real weight clients.
+
+describe('FTY-183 weight flow: a save upserts the refetched series', () => {
+  const apiSession = toApiSession(E2E_SESSION);
+  const to = '2026-06-29';
+
+  it('GET before any save leaves the window-end point at its seeded value', async () => {
+    const mockFetch = createE2EMockFetch();
+    const entries = await listWeightEntries(apiSession, '2026-06-01', to, mockFetch);
+    const last = entries[entries.length - 1];
+    expect(last?.effective_date).toBe(to);
+    // The seeded series ends at 74.8 kg (the freshest point), not the saved value.
+    expect(last?.weight_kg).toBe(74.8);
+  });
+
+  it('after a save, GET upserts the window-end point to the saved weight', async () => {
+    const mockFetch = createE2EMockFetch();
+    await createWeightEntry(apiSession, 70, to, mockFetch);
+    const entries = await listWeightEntries(apiSession, '2026-06-01', to, mockFetch);
+    const last = entries[entries.length - 1];
+    expect(last?.effective_date).toBe(to);
+    // The refetched series carries the just-saved weight — the load-bearing
+    // signal behind trends.yaml's recomputed "74.7 kg" headline assertion.
+    expect(last?.weight_kg).toBe(70);
   });
 });
