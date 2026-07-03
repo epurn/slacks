@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -733,11 +734,35 @@ export function TodayScreen({
   // starter the user completes — never a fabricated number, and it counts nothing
   // until submitted. Anything the user had already typed is preserved, not
   // clobbered; only an empty composer is seeded.
+  //
+  // The scanner lives in a full-screen Modal that owns the keyboard/responder
+  // while it is mounted, so focusing the composer synchronously — before the
+  // dismissal has committed — is swallowed and the keyboard never rises. Record
+  // the intent to focus and flush it once the dismissal has actually committed
+  // (see `focusComposerAfterScanner`), so the fallback lands in a genuinely
+  // *focused* composer rather than only a pre-filled one.
+  const pendingComposerFocus = useRef(false);
   const handleManualEntry = useCallback(() => {
-    setScannerOpen(false);
     if (text.trim() === "") setText(BARCODE_MANUAL_ENTRY_SEED);
-    inputRef.current?.focus();
+    pendingComposerFocus.current = true;
+    setScannerOpen(false);
   }, [setText, text]);
+
+  // Flush a pending composer focus once the scanner Modal has actually dismissed.
+  // On iOS this is driven by the Modal's `onDismiss`, which fires only after the
+  // slide-out animation has fully committed and the composer can take the
+  // responder. Android has no `onDismiss`, but the composer becomes focusable as
+  // soon as the Modal unmounts, so the close effect below flushes it there.
+  const focusComposerAfterScanner = useCallback(() => {
+    if (!pendingComposerFocus.current) return;
+    pendingComposerFocus.current = false;
+    inputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS === "ios") return; // iOS flushes from the Modal's onDismiss.
+    if (!scannerOpen) focusComposerAfterScanner();
+  }, [scannerOpen, focusComposerAfterScanner]);
 
   // Label capture upload (FTY-064 + FTY-196/197). The backend created and
   // extracted the event in-request; add the returned event to the timeline, then
@@ -1119,6 +1144,7 @@ export function TodayScreen({
         animationType="slide"
         presentationStyle="fullScreen"
         onRequestClose={() => setScannerOpen(false)}
+        onDismiss={focusComposerAfterScanner}
       >
         <BarcodeScannerScreen
           onBarcodeScanned={(barcode) => void handleBarcodeScanned(barcode)}

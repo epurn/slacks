@@ -73,3 +73,14 @@ appId: com.fatty
 #         the placeholder composer and fail here.
 - assertVisible:
     text: "1 serving of"
+
+# Step 8: Prove the composer is genuinely *focused*, not merely pre-filled. The
+#         fallback defers focus until the full-screen scanner Modal has finished
+#         dismissing; a synchronous focus would have been swallowed by the still-
+#         mounted Modal and the keyboard would never have risen. `inputText`
+#         appends to the *focused* field — so these characters only land after the
+#         seed if the composer holds focus. If focus were lost (the bug this
+#         guards), the text would not append and the closing assertion goes red.
+- inputText: "greek yogurt"
+- assertVisible:
+    text: "1 serving of greek yogurt"
