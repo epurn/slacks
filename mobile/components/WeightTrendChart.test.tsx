@@ -1,9 +1,14 @@
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { Circle, Polyline } from "react-native-svg";
 
 import { WeightTrendChart } from "./WeightTrendChart";
 import type { WeightEntryDTO } from "@/api/weightEntries";
+import { lightPalette } from "@/theme";
 
 const TEST_WIDTH = 300;
+// Tests render with the default (light) theme, so the chart draws with the
+// light palette's accent colour and DOT_R radius.
+const DOT_R = 4;
 
 function entry(overrides: Partial<WeightEntryDTO>): WeightEntryDTO {
   return {
@@ -214,7 +219,7 @@ describe("WeightTrendChart — multiple entries", () => {
     expect(textContent(tree)).not.toContain("kg");
   });
 
-  it("renders line-segment views between data points", () => {
+  it("draws the weight line as one SVG polyline through every point, left to right", () => {
     const tree = render(
       <WeightTrendChart
         entries={ENTRIES}
@@ -224,16 +229,26 @@ describe("WeightTrendChart — multiple entries", () => {
         width={TEST_WIDTH}
       />,
     );
-    // n-1 = 2 unique segment testIDs (each testID appears once per composite/host pair)
-    const segmentIds = new Set(
-      tree.root
-        .findAll((n) => typeof n.props.testID === "string" && n.props.testID.startsWith("weight-segment-"))
-        .map((n) => n.props.testID as string),
-    );
-    expect(segmentIds.size).toBe(2);
+    const lines = tree.root.findAllByType(Polyline);
+    // Exactly one polyline is the weight line (not n-1 rotated segment Views).
+    expect(lines).toHaveLength(1);
+    const line = lines[0]!;
+    expect(line.props.stroke).toBe(lightPalette.accent);
+    expect(line.props.fill).toBe("none");
+
+    // Its points pass through all 3 entries, in ascending x order.
+    const pairs = (line.props.points as string)
+      .trim()
+      .split(/\s+/)
+      .map((pt) => pt.split(",").map(Number) as [number, number]);
+    expect(pairs).toHaveLength(ENTRIES.length);
+    const xs = pairs.map(([x]) => x);
+    for (let i = 1; i < xs.length; i++) {
+      expect(xs[i]!).toBeGreaterThan(xs[i - 1]!);
+    }
   });
 
-  it("renders dot views for each data point", () => {
+  it("draws an SVG circle per data point in the accent colour with the dot radius", () => {
     const tree = render(
       <WeightTrendChart
         entries={ENTRIES}
@@ -243,13 +258,13 @@ describe("WeightTrendChart — multiple entries", () => {
         width={TEST_WIDTH}
       />,
     );
-    // 3 unique dot testIDs
-    const dotIds = new Set(
-      tree.root
-        .findAll((n) => typeof n.props.testID === "string" && n.props.testID.startsWith("weight-dot-"))
-        .map((n) => n.props.testID as string),
-    );
-    expect(dotIds.size).toBe(3);
+    const dots = tree.root
+      .findAllByType(Circle)
+      .filter((n) => n.props.fill === lightPalette.accent);
+    expect(dots).toHaveLength(ENTRIES.length);
+    for (const c of dots) {
+      expect(c.props.r).toBe(DOT_R);
+    }
   });
 
   it("does not render a chart canvas when width is 0 (unmeasured)", () => {
@@ -262,12 +277,8 @@ describe("WeightTrendChart — multiple entries", () => {
         width={0}
       />,
     );
-    // No segment or dot views when canvas is not measured
-    const segmentIds = new Set(
-      tree.root
-        .findAll((n) => typeof n.props.testID === "string" && n.props.testID.startsWith("weight-segment-"))
-        .map((n) => n.props.testID as string),
-    );
-    expect(segmentIds.size).toBe(0);
+    // No SVG plot primitives render until a positive width arrives.
+    expect(tree.root.findAllByType(Polyline)).toHaveLength(0);
+    expect(tree.root.findAllByType(Circle)).toHaveLength(0);
   });
 });

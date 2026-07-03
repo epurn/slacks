@@ -1,8 +1,28 @@
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { Circle, Polyline } from "react-native-svg";
 
 import { EWMATrendChart } from "./EWMATrendChart";
 import type { WeightEntryDTO } from "@/api/weightEntries";
 import { computeEWMAFromEntries } from "@/state/trends";
+import { lightPalette } from "@/theme";
+
+// Tests render with the default (light) theme, so the chart draws with the
+// light palette's accent / secondary colours.
+const RAW_DOT_R = 3;
+const TREND_DOT_R = 4;
+const RAW_DOT_OPACITY = 0.35;
+
+function rawCircles(tree: ReactTestRenderer) {
+  return tree.root
+    .findAllByType(Circle)
+    .filter((n) => n.props.fill === lightPalette.textSecondary);
+}
+
+function trendCircles(tree: ReactTestRenderer) {
+  return tree.root
+    .findAllByType(Circle)
+    .filter((n) => n.props.fill === lightPalette.accent);
+}
 
 const TEST_WIDTH = 320;
 // A fixed "today" well after every fixture date, so all dates human-format to
@@ -218,7 +238,7 @@ describe("EWMATrendChart — single point", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("EWMATrendChart — multiple entries", () => {
-  it("renders EWMA segment views between data points", () => {
+  it("draws the EWMA trend as one SVG polyline through every point, left to right", () => {
     const tree = render(
       <EWMATrendChart
         entries={ENTRIES}
@@ -230,20 +250,27 @@ describe("EWMATrendChart — multiple entries", () => {
         width={TEST_WIDTH}
       />,
     );
-    const segIds = new Set(
-      tree.root
-        .findAll(
-          (n) =>
-            typeof n.props.testID === "string" &&
-            n.props.testID.startsWith("ewma-segment-"),
-        )
-        .map((n) => n.props.testID as string),
-    );
-    // n-1 = 2 segments for 3 entries
-    expect(segIds.size).toBe(2);
+    const lines = tree.root.findAllByType(Polyline);
+    // Exactly one polyline is the trend line (not n-1 rotated segments).
+    expect(lines).toHaveLength(1);
+    const line = lines[0]!;
+    expect(line.props.stroke).toBe(lightPalette.accent);
+    expect(line.props.strokeWidth).toBe(3);
+    expect(line.props.fill).toBe("none");
+
+    // Its points pass through all 3 entries, in ascending x order.
+    const pairs = (line.props.points as string)
+      .trim()
+      .split(/\s+/)
+      .map((pt) => pt.split(",").map(Number) as [number, number]);
+    expect(pairs).toHaveLength(ENTRIES.length);
+    const xs = pairs.map(([x]) => x);
+    for (let i = 1; i < xs.length; i++) {
+      expect(xs[i]!).toBeGreaterThan(xs[i - 1]!);
+    }
   });
 
-  it("renders raw dot views for each data point (de-emphasised)", () => {
+  it("draws a raw SVG circle per weigh-in, de-emphasised", () => {
     const tree = render(
       <EWMATrendChart
         entries={ENTRIES}
@@ -255,16 +282,31 @@ describe("EWMATrendChart — multiple entries", () => {
         width={TEST_WIDTH}
       />,
     );
-    const dotIds = new Set(
-      tree.root
-        .findAll(
-          (n) =>
-            typeof n.props.testID === "string" &&
-            n.props.testID.startsWith("ewma-raw-dot-"),
-        )
-        .map((n) => n.props.testID as string),
+    const raw = rawCircles(tree);
+    expect(raw).toHaveLength(ENTRIES.length);
+    for (const c of raw) {
+      expect(c.props.r).toBe(RAW_DOT_R);
+      expect(c.props.opacity).toBe(RAW_DOT_OPACITY);
+    }
+  });
+
+  it("draws a trend SVG circle per point in the accent colour", () => {
+    const tree = render(
+      <EWMATrendChart
+        entries={ENTRIES}
+        ewmaKg={EWMA_KG}
+        unitsPreference="metric"
+        loading={false}
+        error={null}
+        today={TEST_TODAY}
+        width={TEST_WIDTH}
+      />,
     );
-    expect(dotIds.size).toBe(3);
+    const trend = trendCircles(tree);
+    expect(trend).toHaveLength(ENTRIES.length);
+    for (const c of trend) {
+      expect(c.props.r).toBe(TREND_DOT_R);
+    }
   });
 
   it("carries an accessible text summary describing the trend", () => {
@@ -301,12 +343,9 @@ describe("EWMATrendChart — multiple entries", () => {
         width={0}
       />,
     );
-    const segIds = tree.root.findAll(
-      (n) =>
-        typeof n.props.testID === "string" &&
-        n.props.testID.startsWith("ewma-segment-"),
-    );
-    expect(segIds).toHaveLength(0);
+    // No SVG plot primitives render until a positive width arrives.
+    expect(tree.root.findAllByType(Polyline)).toHaveLength(0);
+    expect(tree.root.findAllByType(Circle)).toHaveLength(0);
   });
 
   it("shows axis labels in the user's units", () => {
