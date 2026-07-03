@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, timedelta
+from math import isclose
 from typing import NamedTuple
 
 from sqlalchemy import select
@@ -226,6 +227,34 @@ def direction_of(goal: Goal) -> GoalDirection:
     if goal.target_weight_kg < goal.start_weight_kg:
         return GoalDirection.LOSS
     return GoalDirection.MAINTAIN
+
+
+def pace_of(goal: Goal) -> PacePreset | None:
+    """Recover the pace preset from a persisted trajectory when it matches one.
+
+    The write endpoint persists only the derived start/target weights and dates.
+    Because the derivation uses a fixed horizon and named pace fractions, a goal
+    created by this service can be projected back to its preset. Maintenance has
+    no pace, and old/manual trajectories that do not match a known preset return
+    ``None`` rather than guessing.
+    """
+
+    direction = direction_of(goal)
+    if direction is GoalDirection.MAINTAIN:
+        return None
+
+    days = (goal.target_date - goal.start_date).days
+    if days <= 0 or goal.start_weight_kg <= 0:
+        return None
+
+    weeks = days / 7
+    observed_fraction = (
+        abs(goal.target_weight_kg - goal.start_weight_kg) / goal.start_weight_kg / weeks
+    )
+    for preset, expected_fraction in PACE_WEEKLY_FRACTION[direction].items():
+        if isclose(observed_fraction, expected_fraction, rel_tol=1e-6, abs_tol=1e-9):
+            return preset
+    return None
 
 
 def read_active_goal(session: Session, owner_id: uuid.UUID, current_user: User) -> Goal | None:

@@ -41,6 +41,7 @@ from app.services.goals import (
     create_goal_with_target,
     derive_trajectory,
     direction_of,
+    pace_of,
     read_active_goal,
 )
 from app.services.targets import (
@@ -274,6 +275,29 @@ def test_direction_of_recovers_direction_from_trajectory(session: Session) -> No
     assert direction_of(maintain) is GoalDirection.MAINTAIN
 
 
+def test_pace_of_recovers_preset_from_trajectory(session: Session) -> None:
+    user = _make_user_with_profile(session)
+    gentle, _ = create_goal_with_target(
+        session,
+        user.id,
+        user,
+        GoalTargetRequest(direction=GoalDirection.LOSS, pace=PacePreset.GENTLE),
+    )
+    faster, _ = create_goal_with_target(
+        session,
+        user.id,
+        user,
+        GoalTargetRequest(direction=GoalDirection.LOSS, pace=PacePreset.FASTER),
+    )
+    maintain, _ = create_goal_with_target(
+        session, user.id, user, GoalTargetRequest(direction=GoalDirection.MAINTAIN)
+    )
+
+    assert pace_of(gentle) is PacePreset.GENTLE
+    assert pace_of(faster) is PacePreset.FASTER
+    assert pace_of(maintain) is None
+
+
 def test_read_active_goal_returns_the_active_goal(session: Session) -> None:
     user = _make_user_with_profile(session)
     created, _ = create_goal_with_target(
@@ -286,6 +310,7 @@ def test_read_active_goal_returns_the_active_goal(session: Session) -> None:
     assert active is not None
     assert active.id == created.id
     assert direction_of(active) is GoalDirection.GAIN
+    assert pace_of(active) is PacePreset.GENTLE
 
 
 def test_read_active_goal_is_none_when_no_goal(session: Session) -> None:
@@ -532,7 +557,7 @@ def test_api_cross_user_create_fails_closed_404(client: TestClient) -> None:
     assert resp.status_code == 404
 
 
-def test_api_read_active_goal_direction(client: TestClient) -> None:
+def test_api_read_active_goal_summary(client: TestClient) -> None:
     user_id, auth = _register(client, "goal-read@example.com")
     _complete_profile(client, user_id, auth)
     client.post(
@@ -543,10 +568,10 @@ def test_api_read_active_goal_direction(client: TestClient) -> None:
 
     resp = client.get(f"/api/users/{user_id}/goal", headers={"Authorization": auth})
     assert resp.status_code == 200
-    assert resp.json() == {"direction": "gain"}
+    assert resp.json() == {"direction": "gain", "pace": "steady"}
 
 
-def test_api_read_active_goal_direction_404_when_no_goal(client: TestClient) -> None:
+def test_api_read_active_goal_summary_404_when_no_goal(client: TestClient) -> None:
     user_id, auth = _register(client, "goal-read-none@example.com")
     _complete_profile(client, user_id, auth)
     # Profile complete but no goal created yet — fail closed, no existence oracle.
@@ -554,7 +579,7 @@ def test_api_read_active_goal_direction_404_when_no_goal(client: TestClient) -> 
     assert resp.status_code == 404
 
 
-def test_api_read_active_goal_direction_cross_user_404(client: TestClient) -> None:
+def test_api_read_active_goal_summary_cross_user_404(client: TestClient) -> None:
     owner_id, owner_auth = _register(client, "goal-read-owner@example.com")
     _complete_profile(client, owner_id, owner_auth)
     client.post(

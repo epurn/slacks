@@ -70,7 +70,7 @@ import { toApiSession } from '@/state/session';
 // eslint-disable-next-line import/first
 import { getProfile } from '@/api/profile';
 // eslint-disable-next-line import/first
-import { createGoal, getTarget } from '@/api/goals';
+import { createGoal, getActiveGoalSummary, getTarget } from '@/api/goals';
 // eslint-disable-next-line import/first
 import {
   listTodayLogEvents,
@@ -356,6 +356,11 @@ describe('E2E mock serves the URLs the real API clients request', () => {
   it('getTarget resolves to the target fixture', async () => {
     const target = await getTarget(apiSession, mockFetch);
     expect(target.calories.effective).toBe(2000);
+  });
+
+  it('getActiveGoalSummary resolves to the active goal fixture', async () => {
+    const goal = await getActiveGoalSummary(apiSession, mockFetch);
+    expect(goal).toEqual({ direction: 'loss', pace: 'steady' });
   });
 
   // FTY-182 profile flow: saving a goal edit under the native header POSTs

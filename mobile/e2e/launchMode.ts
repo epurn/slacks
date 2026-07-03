@@ -446,12 +446,14 @@ export function createE2EMockFetch(): typeof fetch {
       return json({ items: match ? [E2E_SAVED_FOOD] : [], limit: 10 });
     }
 
-    // /goal — POST creates/replaces the active goal and returns the goal +
-    // target reveal (FTY-106). Backs the FTY-182 profile flow: saving a goal
-    // edit under the native header resolves to the mini target-reveal, then
-    // SettingsScreen refetches GET /target (served below) for the full macros.
-    // Only POST is answered; GET /goal still 404s so getActiveGoalDirection
-    // keeps returning null (an absent goal) as the other flows expect.
+    // /goal — GET summarizes the active goal for Settings/Trends, and POST
+    // creates/replaces the active goal and returns the target reveal (FTY-106).
+    // Backs the FTY-182 profile flow: saving a goal edit under the native header
+    // resolves to the mini target-reveal, then SettingsScreen refetches
+    // GET /target (served below) for the full macros.
+    if (pathEnd.endsWith('/goal') && method === 'GET') {
+      return json({ direction: E2E_GOAL_TARGET_RESPONSE.target.direction, pace: 'steady' });
+    }
     if (pathEnd.endsWith('/goal') && method === 'POST') {
       return json(E2E_GOAL_TARGET_RESPONSE, 201);
     }

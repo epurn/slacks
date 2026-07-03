@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from app.db import get_session
 from app.deps import CurrentUser
 from app.schemas.goals import (
-    ActiveGoalDirection,
+    ActiveGoalSummary,
     GoalTargetRequest,
     GoalTargetResponse,
 )
@@ -77,20 +77,21 @@ def create_goal(
     return goals_service.build_goal_target_response(goal, target, payload.direction)
 
 
-@router.get("/{user_id}/goal", response_model=ActiveGoalDirection)
-def read_active_goal_direction(
+@router.get("/{user_id}/goal", response_model=ActiveGoalSummary)
+def read_active_goal_summary(
     user_id: uuid.UUID,
     current_user: CurrentUser,
     session: Annotated[Session, Depends(get_session)],
-) -> ActiveGoalDirection:
-    """Read the direction of the caller's active goal (FTY-189).
+) -> ActiveGoalSummary:
+    """Read the direction and pace summary of the caller's active goal.
 
     Trends colours the weight delta by progress toward the goal, so it needs the
     active goal's direction for a returning user after a cold launch — the only
-    authoritative source, since no read-model otherwise carries it. Fails closed
+    authoritative source, since no read-model otherwise carries it. Settings also
+    needs the recovered pace to summarize the collapsed Goal row. Fails closed
     ``404`` on cross-user access *and* when the caller simply has no active goal:
-    the two are indistinguishable (no existence oracle). The recovered direction
-    is the only field returned; no weight/target number is exposed or logged.
+    the two are indistinguishable (no existence oracle). No weight/target number
+    is exposed or logged.
     """
 
     try:
@@ -99,4 +100,7 @@ def read_active_goal_direction(
         raise _NOT_FOUND from exc
     if goal is None:
         raise _NOT_FOUND
-    return ActiveGoalDirection(direction=goals_service.direction_of(goal))
+    return ActiveGoalSummary(
+        direction=goals_service.direction_of(goal),
+        pace=goals_service.pace_of(goal),
+    )

@@ -69,12 +69,7 @@ const DERIVED_TARGET: TargetReadModel = {
   fat_g: { effective: 64, derived: 64, source: "derived" },
 };
 
-const UPDATED_TARGET_AFTER_GOAL: TargetReadModel = {
-  calories: { effective: 1678, derived: 1678, source: "derived" },
-  protein_g: { effective: 128, derived: 128, source: "derived" },
-  carbs_g: { effective: 108, derived: 108, source: "derived" },
-  fat_g: { effective: 64, derived: 64, source: "derived" },
-};
+const ACTIVE_GOAL_SUMMARY = { direction: "loss" as const, pace: "steady" as const };
 
 const GOAL_TARGET_RESPONSE: GoalTargetResponse = {
   goal: {
@@ -138,6 +133,7 @@ function renderSettings(
             session={SESSION}
             getProfileFn={jest.fn().mockResolvedValue(PROFILE)}
             getTargetFn={jest.fn().mockResolvedValue(DERIVED_TARGET)}
+            getActiveGoalSummaryFn={jest.fn().mockResolvedValue(ACTIVE_GOAL_SUMMARY)}
             putProfileFn={jest.fn().mockResolvedValue(PROFILE)}
             createGoalFn={jest.fn().mockResolvedValue(GOAL_TARGET_RESPONSE)}
             settingsStore={mockSettingsStore()}
@@ -183,27 +179,14 @@ function press(tree: ReactTestRenderer, label: string) {
 }
 
 describe("SettingsScreen FTY-190 copy and affordances", () => {
-  it("uses neutral goal loading copy until details are known, then shows direction and pace", async () => {
-    const createGoalFn = jest.fn().mockResolvedValue(GOAL_TARGET_RESPONSE);
-    const getTargetFn = jest
-      .fn()
-      .mockResolvedValueOnce(DERIVED_TARGET)
-      .mockResolvedValueOnce(UPDATED_TARGET_AFTER_GOAL);
-    const tree = renderSettings({ createGoalFn, getTargetFn });
+  it("summarizes the loaded active goal with direction and pace", async () => {
+    const getActiveGoalSummaryFn = jest.fn().mockResolvedValue(ACTIVE_GOAL_SUMMARY);
+    const tree = renderSettings({ getActiveGoalSummaryFn });
     await act(async () => {});
 
-    expect(() => findPressable(tree, "Goal: Loading…")).not.toThrow();
-    expect(textContent(tree)).not.toContain("Active");
-
-    await act(async () => {
-      press(tree, "Goal: Loading…");
-    });
-    await act(async () => {
-      press(tree, "Save goal");
-    });
-    await act(async () => {});
-
+    expect(getActiveGoalSummaryFn).toHaveBeenCalledTimes(1);
     expect(() => findPressable(tree, "Goal: Lose · Steady")).not.toThrow();
+    expect(() => findPressable(tree, "Goal: Loading…")).toThrow();
     expect(textContent(tree)).not.toContain("Active");
   });
 

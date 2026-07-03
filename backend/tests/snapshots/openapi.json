@@ -1,18 +1,29 @@
 {
   "components": {
     "schemas": {
-      "ActiveGoalDirection": {
+      "ActiveGoalSummary": {
         "additionalProperties": false,
-        "description": "The direction of the caller's current active goal (FTY-189 read model).\n\nA goal stores only its trajectory (``start_weight_kg`` / ``target_weight_kg``),\nnot a direction column, so ``direction`` is **recovered** from that trajectory\n(``target > start`` \u2192 ``gain``, ``target < start`` \u2192 ``loss``, equal \u2192\n``maintain``). Trends reads this to color the weight delta by progress toward\nthe goal rather than \"down = good\", so a returning user with an existing goal\nis coloured correctly after a cold launch \u2014 no direction is carried in weight,\nRMR, TDEE, or the calorie target, so this read leaks nothing sensitive.",
+        "description": "The direction and recovered pace of the caller's active goal.\n\nA goal stores only its trajectory (``start_weight_kg`` / ``target_weight_kg``),\nnot direction/pace columns, so both fields are **recovered** from that\ntrajectory. Trends reads ``direction`` to color the weight delta by progress\ntoward the goal rather than \"down = good\"; Settings reads both fields to\nsummarize the active goal after a cold launch. ``pace`` is ``None`` for\nmaintenance goals and for any legacy trajectory that does not match a known\npreset.",
         "properties": {
           "direction": {
             "$ref": "#/components/schemas/GoalDirection"
+          },
+          "pace": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PacePreset"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
-          "direction"
+          "direction",
+          "pace"
         ],
-        "title": "ActiveGoalDirection",
+        "title": "ActiveGoalSummary",
         "type": "object"
       },
       "AlternativesResponse": {
@@ -2608,8 +2619,8 @@
     },
     "/api/users/{user_id}/goal": {
       "get": {
-        "description": "Read the direction of the caller's active goal (FTY-189).\n\nTrends colours the weight delta by progress toward the goal, so it needs the\nactive goal's direction for a returning user after a cold launch \u2014 the only\nauthoritative source, since no read-model otherwise carries it. Fails closed\n``404`` on cross-user access *and* when the caller simply has no active goal:\nthe two are indistinguishable (no existence oracle). The recovered direction\nis the only field returned; no weight/target number is exposed or logged.",
-        "operationId": "read_active_goal_direction_api_users__user_id__goal_get",
+        "description": "Read the direction and pace summary of the caller's active goal.\n\nTrends colours the weight delta by progress toward the goal, so it needs the\nactive goal's direction for a returning user after a cold launch \u2014 the only\nauthoritative source, since no read-model otherwise carries it. Settings also\nneeds the recovered pace to summarize the collapsed Goal row. Fails closed\n``404`` on cross-user access *and* when the caller simply has no active goal:\nthe two are indistinguishable (no existence oracle). No weight/target number\nis exposed or logged.",
+        "operationId": "read_active_goal_summary_api_users__user_id__goal_get",
         "parameters": [
           {
             "in": "path",
@@ -2643,7 +2654,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ActiveGoalDirection"
+                  "$ref": "#/components/schemas/ActiveGoalSummary"
                 }
               }
             },
@@ -2660,7 +2671,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Read Active Goal Direction",
+        "summary": "Read Active Goal Summary",
         "tags": [
           "goals"
         ]

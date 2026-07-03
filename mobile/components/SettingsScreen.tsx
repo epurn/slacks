@@ -41,6 +41,7 @@ import { Button } from '@/components/ui/Button';
 import {
   getTarget,
   createGoal,
+  getActiveGoalSummary,
   setTargetOverride,
   resetTargetOverride,
   GoalsApiError,
@@ -134,6 +135,14 @@ function settingsFormulaCopy(value?: MetabolicFormula | string | null) {
   return null;
 }
 
+function goalSummaryDetail(
+  direction: GoalDirection | null,
+  pace: PacePreset | null | undefined,
+): string {
+  if (direction === null) return 'Details unavailable';
+  return `${DIRECTION_LABELS[direction]}${pace && direction !== 'maintain' ? ` · ${PACE_LABELS[pace]}` : ''}`;
+}
+
 /** A client-side validation failure on body-metric input (carries display copy). */
 class InvalidBodyMetric extends Error {}
 
@@ -161,6 +170,7 @@ export interface SettingsScreenProps {
   getProfileFn?: typeof getProfile;
   putProfileFn?: typeof putProfile;
   createGoalFn?: typeof createGoal;
+  getActiveGoalSummaryFn?: typeof getActiveGoalSummary;
   setTargetOverrideFn?: typeof setTargetOverride;
   resetTargetOverrideFn?: typeof resetTargetOverride;
   /** Injectable on-device settings stores. */
@@ -186,6 +196,7 @@ export function SettingsScreen({
   getProfileFn = getProfile,
   putProfileFn = putProfile,
   createGoalFn = createGoal,
+  getActiveGoalSummaryFn = getActiveGoalSummary,
   setTargetOverrideFn = setTargetOverride,
   resetTargetOverrideFn = resetTargetOverride,
   settingsStore = fileAppSettingsStore,
@@ -197,7 +208,7 @@ export function SettingsScreen({
   const liveSession = useSession();
   const sessionController = useSessionController();
   const session = sessionOverride !== undefined ? sessionOverride : liveSession;
-  const goalDirectionController = useGoalDirectionController();
+  const { setGoalDirection: setKnownGoalDirection } = useGoalDirectionController();
 
   const router = useRouter();
   const { colors } = useTheme();
@@ -260,16 +271,22 @@ export function SettingsScreen({
         if (e && e.status === 404) return null;
         throw e;
       }),
+      getActiveGoalSummaryFn(apiSession),
       settingsStore.getAppearance(),
       cadenceStore.getCadence(),
     ])
-      .then(([prof, tgt, app, cad]) => {
+      .then(([prof, tgt, goalSummary, app, cad]) => {
         if (!active) return;
         setProfile(prof);
         if (tgt === null) {
           setNoTarget(true);
         } else {
           setTarget(tgt);
+        }
+        if (goalSummary !== null) {
+          setGoalDirection(goalSummary.direction);
+          setGoalPace(goalSummary.pace ?? null);
+          setKnownGoalDirection(goalSummary.direction);
         }
         setAppearance(app);
         setCadence(cad ?? DEFAULT_CADENCE);
@@ -285,7 +302,10 @@ export function SettingsScreen({
     return () => {
       active = false;
     };
-  }, [session, getProfileFn, getTargetFn, settingsStore, cadenceStore]);
+  }, [
+    session, getProfileFn, getTargetFn, getActiveGoalSummaryFn,
+    settingsStore, cadenceStore, setKnownGoalDirection,
+  ]);
 
   // ── Mini reveal animation ─────────────────────────────────────────────────
 
@@ -341,7 +361,7 @@ export function SettingsScreen({
     try {
       const reveal: GoalTargetResponse = await createGoalFn(apiSession, payload);
       setGoalDirection(reveal.target.direction);
-      goalDirectionController.setGoalDirection(reveal.target.direction);
+      setKnownGoalDirection(reveal.target.direction);
       setGoalPace(editDirection !== 'maintain' ? editPace : null);
       setEditingGoal(false);
       // Fetch the full read-model (reveal only has calories, not macros)
@@ -363,7 +383,7 @@ export function SettingsScreen({
     createGoalFn,
     getTargetFn,
     showReveal,
-    goalDirectionController,
+    setKnownGoalDirection,
   ]);
 
   // ── Body metric edit handlers ─────────────────────────────────────────────
@@ -587,17 +607,8 @@ export function SettingsScreen({
 
   const isMetric = profile?.units_preference === 'metric';
 
-  // The Goal row must never contradict the targets rendered right below it. When
-  // the target proves a goal exists but direction/pace have not hydrated into this
-  // screen, show a neutral loading treatment instead of a misleading concrete
-  // value.
   const goalIsActive = !noTarget && target !== null;
-  const goalDetail =
-    goalDirection !== null
-      ? `${DIRECTION_LABELS[goalDirection]}${goalPace && goalDirection !== 'maintain' ? ` · ${PACE_LABELS[goalPace]}` : ''}`
-      : goalIsActive
-        ? 'Loading…'
-        : 'Not set';
+  const goalDetail = goalIsActive ? goalSummaryDetail(goalDirection, goalPace) : 'Not set';
   const formulaCopy = settingsFormulaCopy(profile?.metabolic_formula);
 
   if (!session) {

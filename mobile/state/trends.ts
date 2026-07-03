@@ -172,9 +172,8 @@ export type DeltaGoalState = "toward" | "away" | "neutral";
  * `computeHeadlineDelta` already zeroes out sub-0.05 noise into "→") counts as
  * away from goal; only a genuinely stable trend is neutral.
  *
- * When the goal direction is **unknown** (`null` — e.g. a cold launch before
- * Settings/Onboarding has reported one this session; there is no `GET /goal`
- * read model to hydrate it from — see state/goalDirection.tsx), the delta is
+ * When the goal direction is **unknown** (`null` — e.g. the `GET /goal` hydrate
+ * has not returned or failed closed; see state/goalDirection.tsx), the delta is
  * neutral: with no authoritative direction we neither celebrate nor warn, so a
  * returning gain/maintain user is never mis-colored "away" by a guessed `loss`
  * default. The delta still shows the real magnitude and arrow, just without a
