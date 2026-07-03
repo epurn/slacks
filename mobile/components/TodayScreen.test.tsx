@@ -1529,19 +1529,16 @@ describe("TodayScreen polling", () => {
   afterEach(() => jest.useRealTimers());
 
   it("auto-refreshes a pending entry to its terminal status", async () => {
+    const pending = event({ id: "a", raw_text: "Oatmeal", status: "pending" });
+    const completed = event({ id: "a", raw_text: "Oatmeal", status: "completed" });
     const load = jest
       .fn()
-      .mockResolvedValueOnce([event({ id: "a", raw_text: "Oatmeal", status: "pending" })])
-      .mockResolvedValueOnce([event({ id: "a", raw_text: "Oatmeal", status: "completed" })]);
-    // The by-date item feed carries the resolved value; it only surfaces once the
-    // event-list poll reports `completed`, at which point the skeleton resolves
-    // in place into its value row (FTY-180).
-    const loadEntries = jest.fn().mockResolvedValue([
-      {
-        event: event({ id: "a", raw_text: "Oatmeal", status: "completed" }),
-        items: [foodItem({ name: "Oatmeal" })],
-      },
-    ]);
+      .mockResolvedValueOnce([pending])
+      .mockResolvedValueOnce([completed]);
+    const loadEntries = jest
+      .fn()
+      .mockResolvedValueOnce([{ event: pending, items: [] }])
+      .mockResolvedValueOnce([{ event: completed, items: [] }]);
     const tree = mount(
       <TodayScreen
         session={SESSION}
@@ -1552,17 +1549,21 @@ describe("TodayScreen polling", () => {
       />,
     );
     await act(async () => {});
-    // Pending: the shimmer skeleton, not the value (held even though the item
-    // feed already carries it, until the event-list poll says completed).
+    // Pending: the shimmer skeleton, not the raw phrase.
     expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
 
     // One interval later the screen polls, reaches the terminal status, and the
-    // value fades in over the same row — the skeleton is gone.
+    // no-item completed response gets only a bounded resolve hold.
     act(() => jest.advanceTimersByTime(1000));
     await act(async () => {});
     expect(load).toHaveBeenCalledTimes(2);
-    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(false);
-    expect(hasA11yLabel(tree, "Oatmeal, 150 kcal")).toBe(true);
+    expect(hasA11yLabel(tree, "Estimating")).toBe(true);
+
+    act(() => jest.advanceTimersByTime(200));
+    await act(async () => {});
+    expect(hasA11yLabel(tree, "Estimating")).toBe(false);
+    expect(textContent(tree)).toContain("Oatmeal");
+    expect(hasA11yLabel(tree, "Logged")).toBe(true);
 
     // Nothing is pending now, so polling stops — no further loads.
     act(() => jest.advanceTimersByTime(5000));

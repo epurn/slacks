@@ -665,9 +665,7 @@ export function TodayScreen({
     if (resolveAnimIds.size === 0) return;
     const timeout = setTimeout(() => {
       setResolveAnimIds((prev) => {
-        const next = new Set(
-          [...prev].filter((id) => (itemsByEvent[id]?.length ?? 0) === 0),
-        );
+        const next = new Set<string>();
         return next.size === prev.size ? prev : next;
       });
     }, reducedMotionDuration);
@@ -1638,11 +1636,12 @@ function ClusterView({
           // ItemTimelineRow, keyed by event id — never fall through to the
           // EntryRow placeholder below — so the pending→resolved transition stays
           // one in-place fade with zero layout shift, not a swap to a
-          // differently-sized component (FTY-180 review). The by-date feed
-          // refreshes every poll tick, so the value lands within a poll interval
-          // and fades in over this row's footprint (the completed-with-items
-          // branch above). The shimmer is labelled as still resolving so
-          // VoiceOver never announces a value that has not appeared yet.
+          // differently-sized component (FTY-180 review). This hold is bounded:
+          // if the by-date feed lags, fails, or legitimately returns no items,
+          // resolveAnimIds clears after the fade window and the terminal
+          // completed fallback below replaces the shimmer. The shimmer is
+          // labelled as still resolving so VoiceOver never announces a value
+          // that has not appeared yet.
           if (resolveAnimIds.has(event.id)) {
             return (
               <ItemTimelineRow
