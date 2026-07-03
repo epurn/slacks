@@ -233,63 +233,6 @@ export function ComingSoonDisclosureRow({
   );
 }
 
-export function Segmented<T extends string>({
-  options,
-  selected,
-  onSelect,
-  accessibilityLabel,
-  colors,
-  compact = false,
-}: {
-  options: readonly { value: T; label: string }[];
-  selected: T;
-  onSelect: (v: T) => void;
-  accessibilityLabel: string;
-  colors: SettingsColors;
-  compact?: boolean;
-}) {
-  return (
-    <View
-      accessibilityRole="radiogroup"
-      accessibilityLabel={accessibilityLabel}
-      style={[
-        styles.segmented,
-        { backgroundColor: colors.controlBackground },
-        compact && styles.segmentedCompact,
-      ]}
-    >
-      {options.map((opt) => {
-        const isSelected = opt.value === selected;
-        return (
-          <Pressable
-            key={opt.value}
-            accessibilityRole="radio"
-            accessibilityState={{ selected: isSelected }}
-            accessibilityLabel={opt.label}
-            onPress={() => onSelect(opt.value)}
-            style={[
-              styles.segment,
-              isSelected && { backgroundColor: colors.surfaceRaised },
-            ]}
-          >
-            <Text
-              style={[
-                styles.segmentLabel,
-                {
-                  color: isSelected ? colors.text : colors.textSecondary,
-                  fontWeight: isSelected ? '600' : '400',
-                },
-              ]}
-            >
-              {opt.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
 /** The numeric TextInput style shared by the override and body-metric editors. */
 export const fieldStyles = StyleSheet.create({
   numericInput: {
@@ -381,25 +324,5 @@ const styles = StyleSheet.create({
   editButtonLabel: {
     fontSize: typeScale.subhead,
     fontWeight: '600',
-  },
-  segmented: {
-    flexDirection: 'row',
-    borderRadius: radius.md,
-    padding: 2,
-    gap: 2,
-  },
-  segmentedCompact: {
-    flexShrink: 1,
-  },
-  segment: {
-    flex: 1,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.sm,
-    alignItems: 'center',
-    minHeight: 36,
-    justifyContent: 'center',
-  },
-  segmentLabel: {
-    fontSize: typeScale.footnote,
   },
 });

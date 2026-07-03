@@ -14,7 +14,11 @@ import type { SessionStore } from "@/state/sessionStore";
 import { GoalDirectionProvider } from "@/state/goalDirection";
 import type { GoalDirection } from "@/api/goals";
 import type { CadenceStore, NotificationsAdapter, WeighInCadence } from "@/state/reminderScheduler";
-import { rangeProse, type DateRangeKey } from "@/state/trends";
+import {
+  DATE_RANGE_OPTIONS,
+  rangeProse,
+  type DateRangeKey,
+} from "@/state/trends";
 import { lightPalette } from "@/theme";
 
 // TrendsScreen now uses ScreenHeader → AppIcon (expo-symbols); stub the native
@@ -133,6 +137,36 @@ function mount(element: React.ReactElement): ReactTestRenderer {
     );
   });
   return tree;
+}
+
+/**
+ * The native range `SegmentedControl` node (carries `values` + `onChange`).
+ * Several host layers share the props; the first is enough to read/drive.
+ */
+function findRangeSelector(tree: ReactTestRenderer) {
+  return tree.root.findAll(
+    (n) =>
+      n.props.testID === "trends-range-selector" &&
+      typeof n.props.onChange === "function" &&
+      Array.isArray(n.props.values),
+  )[0];
+}
+
+/** Drive the native range control to the given range key, as a tap would. */
+function selectRange(tree: ReactTestRenderer, key: DateRangeKey) {
+  const control = findRangeSelector(tree);
+  if (!control) {
+    throw new Error("range selector not found");
+  }
+  const index = DATE_RANGE_OPTIONS.findIndex((o) => o.key === key);
+  act(() => {
+    control.props.onChange({
+      nativeEvent: {
+        selectedSegmentIndex: index,
+        value: (control.props.values as string[])[index],
+      },
+    });
+  });
 }
 
 function textContent(tree: ReactTestRenderer): string {
@@ -267,7 +301,7 @@ describe("TrendsScreen — weight entries", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("TrendsScreen — range selector", () => {
-  it("renders range buttons for 1M, 3M, 6M", async () => {
+  it("renders a native range control offering 1M, 3M, 6M", async () => {
     const tree = mount(
       <TrendsScreen
         session={SESSION}
@@ -277,18 +311,12 @@ describe("TrendsScreen — range selector", () => {
       />,
     );
     await act(async () => {});
-    const btn1m = tree.root.find(
-      (n) => n.props.testID === "range-btn-1M",
+    const control = findRangeSelector(tree);
+    expect(control).toBeTruthy();
+    // The native control's segment labels, in order, are the three range labels.
+    expect(control.props.values).toEqual(
+      DATE_RANGE_OPTIONS.map((o) => o.label),
     );
-    const btn3m = tree.root.find(
-      (n) => n.props.testID === "range-btn-3M",
-    );
-    const btn6m = tree.root.find(
-      (n) => n.props.testID === "range-btn-6M",
-    );
-    expect(btn1m).toBeTruthy();
-    expect(btn3m).toBeTruthy();
-    expect(btn6m).toBeTruthy();
   });
 
   it("switching range re-fetches both weight entries and adherence data", async () => {
@@ -310,8 +338,7 @@ describe("TrendsScreen — range selector", () => {
     const initialSumCalls = getSum.mock.calls.length;
 
     // Switch to 3M
-    const btn3m = tree.root.find((n) => n.props.testID === "range-btn-3M");
-    act(() => btn3m.props.onPress());
+    selectRange(tree, "3M");
     await act(async () => {});
 
     expect(list.mock.calls.length).toBeGreaterThan(initialListCalls);
@@ -330,8 +357,7 @@ describe("TrendsScreen — range selector", () => {
     );
     await act(async () => {});
 
-    const btn3m = tree.root.find((n) => n.props.testID === "range-btn-3M");
-    act(() => btn3m.props.onPress());
+    selectRange(tree, "3M");
     await act(async () => {});
 
     const lastCall = list.mock.calls[list.mock.calls.length - 1] as [
@@ -639,8 +665,7 @@ describe("TrendsScreen — adherence fan-out removal", () => {
     await act(async () => {});
     expect(getSum).toHaveBeenCalledTimes(1); // initial 1M load
 
-    const btn3m = tree.root.find((n) => n.props.testID === "range-btn-3M");
-    act(() => btn3m.props.onPress());
+    selectRange(tree, "3M");
     await act(async () => {});
 
     // One more call for the 3M range — not 90 per-day calls
@@ -659,8 +684,7 @@ describe("TrendsScreen — adherence fan-out removal", () => {
     );
     await act(async () => {});
 
-    const btn3m = tree.root.find((n) => n.props.testID === "range-btn-3M");
-    act(() => btn3m.props.onPress());
+    selectRange(tree, "3M");
     await act(async () => {});
 
     const lastCall = getSum.mock.calls[getSum.mock.calls.length - 1] as [
@@ -1149,9 +1173,8 @@ describe("TrendsScreen — range prose", () => {
     await act(async () => {});
 
     // Switch through every range so each one's copy renders at least once.
-    for (const key of ["3M", "6M", "1M"]) {
-      const btn = tree.root.find((n) => n.props.testID === `range-btn-${key}`);
-      act(() => btn.props.onPress());
+    for (const key of ["3M", "6M", "1M"] as const) {
+      selectRange(tree, key);
       await act(async () => {});
 
       const delta = findHeadlineDeltaNode(tree);

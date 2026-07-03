@@ -9,3 +9,5 @@ export { AppIcon } from './AppIcon';
 export type { AppIconName } from './AppIcon';
 export { ScreenHeader } from './ScreenHeader';
 export { TabBarScrim } from './TabBarScrim';
+export { SegmentedControl } from './SegmentedControl';
+export type { SegmentedControlOption } from './SegmentedControl';

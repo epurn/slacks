@@ -10,6 +10,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { spacing, typeScale } from '@/theme';
 import type { GoalDirection, PacePreset } from '@/api/goals';
+import { SegmentedControl } from '@/components/ui';
 
 import {
   EditCard,
@@ -17,7 +18,6 @@ import {
   EditFieldLabel,
   GroupedCard,
   InlineError,
-  Segmented,
   SectionHeader,
   Separator,
   DisclosureRow,
@@ -57,7 +57,8 @@ export function YouSection({
       {c.editingGoal && (
         <EditCard colors={colors} testID="goal-edit-card">
           <EditFieldLabel colors={colors}>Direction</EditFieldLabel>
-          <Segmented<GoalDirection>
+          <SegmentedControl<GoalDirection>
+            testID="goal-direction-segmented-control"
             options={[
               { value: 'loss', label: 'Lose' },
               { value: 'maintain', label: 'Maintain' },
@@ -66,14 +67,14 @@ export function YouSection({
             selected={c.editDirection}
             onSelect={c.handleDirectionChange}
             accessibilityLabel="Goal direction"
-            colors={colors}
           />
           {c.editDirection !== 'maintain' && (
             <>
               <EditFieldLabel colors={colors} style={{ marginTop: spacing.sm }}>
                 Pace
               </EditFieldLabel>
-              <Segmented<PacePreset>
+              <SegmentedControl<PacePreset>
+                testID="goal-pace-segmented-control"
                 options={[
                   { value: 'gentle', label: 'Gentle' },
                   { value: 'steady', label: 'Steady' },
@@ -84,7 +85,6 @@ export function YouSection({
                 selected={c.editPace}
                 onSelect={c.setEditPace}
                 accessibilityLabel="Goal pace"
-                colors={colors}
               />
             </>
           )}

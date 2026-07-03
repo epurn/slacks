@@ -257,6 +257,38 @@ function press(tree: ReactTestRenderer, label: string) {
   });
 }
 
+/**
+ * Select a segment on a native `SegmentedControl` by its visible label. The
+ * native control exposes its labels via the `values` array and reports taps
+ * through `onChange` (with the chosen index), so we locate the control offering
+ * the label and fire its change event the way the platform would.
+ */
+function selectSegment(tree: ReactTestRenderer, label: string) {
+  const control = tree.root.findAll(
+    (n) =>
+      typeof n.props.onChange === "function" &&
+      Array.isArray(n.props.values) &&
+      (n.props.values as string[]).includes(label),
+  )[0];
+  if (!control) {
+    throw new Error(`No segmented control offers segment "${label}"`);
+  }
+  const index = (control.props.values as string[]).indexOf(label);
+  act(() => {
+    control.props.onChange({
+      nativeEvent: { selectedSegmentIndex: index, value: label },
+    });
+  });
+}
+
+/** The visible segment labels of the native control with the given testID. */
+function segmentValues(tree: ReactTestRenderer, testID: string): string[] {
+  const control = tree.root.findAll(
+    (n) => n.props.testID === testID && Array.isArray(n.props.values),
+  )[0];
+  return control ? (control.props.values as string[]) : [];
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests: calorie-target provenance / override / reset
 // ─────────────────────────────────────────────────────────────────────────────
@@ -614,7 +646,7 @@ describe("PREFERENCES persistence", () => {
     await act(async () => {});
 
     await act(async () => {
-      press(tree, "Imperial");
+      selectSegment(tree, "Imperial");
     });
 
     expect(putProfileFn).toHaveBeenCalledWith(
@@ -629,7 +661,7 @@ describe("PREFERENCES persistence", () => {
     await act(async () => {});
 
     await act(async () => {
-      press(tree, "Dark");
+      selectSegment(tree, "Dark");
     });
 
     expect(store.setAppearance).toHaveBeenCalledWith("dark");
@@ -641,7 +673,7 @@ describe("PREFERENCES persistence", () => {
     await act(async () => {});
 
     await act(async () => {
-      press(tree, "Dark");
+      selectSegment(tree, "Dark");
     });
 
     expect(onAppearanceChange).toHaveBeenCalledWith("dark");
@@ -653,7 +685,7 @@ describe("PREFERENCES persistence", () => {
     await act(async () => {});
 
     await act(async () => {
-      press(tree, "Every 2 weeks");
+      selectSegment(tree, "Every 2 weeks");
     });
 
     expect(cadenceStore.setCadence).toHaveBeenCalledWith("biweekly");
@@ -666,7 +698,7 @@ describe("PREFERENCES persistence", () => {
     await act(async () => {});
 
     await act(async () => {
-      press(tree, "Off");
+      selectSegment(tree, "Off");
     });
 
     expect(notificationsAdapter.cancelAll).toHaveBeenCalled();
@@ -683,7 +715,7 @@ describe("PREFERENCES persistence", () => {
 
     // Changing to biweekly should call cancelAll before scheduling (if any)
     await act(async () => {
-      press(tree, "Every 2 weeks");
+      selectSegment(tree, "Every 2 weeks");
     });
 
     // cancelAll is NOT called — applyReminderSettings returns early when there is no lastWeighInDate
@@ -903,10 +935,10 @@ describe("Goal editor pace validity", () => {
     });
     // Pick the loss-only 'faster' pace, then switch the direction to gain.
     await act(async () => {
-      press(tree, "Faster");
+      selectSegment(tree, "Faster");
     });
     await act(async () => {
-      press(tree, "Gain");
+      selectSegment(tree, "Gain");
     });
     await act(async () => {
       press(tree, "Save goal");
@@ -932,11 +964,13 @@ describe("Goal editor pace validity", () => {
       press(tree, "Goal: Details unavailable");
     });
     await act(async () => {
-      press(tree, "Gain");
+      selectSegment(tree, "Gain");
     });
 
-    // The loss-only preset must not be a reachable control under gain.
-    expect(() => findPressable(tree, "Faster")).toThrow();
+    // The loss-only preset must not be an offered segment under gain.
+    expect(segmentValues(tree, "goal-pace-segmented-control")).not.toContain(
+      "Faster",
+    );
   });
 });
 

@@ -32,14 +32,14 @@
     "mobile/components/SettingsScreen.test.tsx": {
       "kind": "test",
       "lane": "mobile",
-      "lines": 1154,
-      "reason": "Existing over-threshold first-party test file at FTY-200 baseline."
+      "lines": 1187,
+      "reason": "Existing over-threshold first-party test file at FTY-200 baseline; +33 in FTY-186 for the native-segmented-control selectSegment/segmentValues helpers that drive units/appearance/cadence/goal segments via the platform onChange instead of per-pill onPress."
     },
     "mobile/components/TrendsScreen.test.tsx": {
       "kind": "test",
       "lane": "mobile",
-      "lines": 1328,
-      "reason": "FTY-189 adds coverage for the goal-aware headline delta (color + narration across loss/gain/maintain, plus the unknown/no-goal-this-session case rendering neutral rather than a guessed default), range prose, human-formatted dates, and the non-color adherence cue, crossing the 1000-line test threshold; +54 in the FTY-189 review fix for the live-path test that mounts the real screen inside a session + GoalDirectionProvider hydrated from the authoritative GET /goal read, proving a returning user's existing goal colors the delta with no in-session set."
+      "lines": 1286,
+      "reason": "FTY-189 adds coverage for the goal-aware headline delta (color + narration across loss/gain/maintain, plus the unknown/no-goal-this-session case rendering neutral rather than a guessed default), range prose, human-formatted dates, and the non-color adherence cue, crossing the 1000-line test threshold; FTY-186 ratchets the baseline down after replacing the per-button range-selector assertions with the native SegmentedControl driver."
     },
     "mobile/components/CorrectionSheet.test.tsx": {
       "kind": "test",

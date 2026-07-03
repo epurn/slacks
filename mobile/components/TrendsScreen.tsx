@@ -34,7 +34,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AppIcon, ScreenHeader } from "@/components/ui";
+import { AppIcon, ScreenHeader, SegmentedControl } from "@/components/ui";
 
 import {
   WeightApiError,
@@ -371,7 +371,6 @@ export function TrendsScreen({
           onChange={(r) => {
             setRange(r);
           }}
-          colors={colors}
         />
 
         {/* Weight card */}
@@ -479,49 +478,22 @@ export function TrendsScreen({
 function RangeSelector({
   selected,
   onChange,
-  colors,
 }: {
   selected: DateRangeKey;
   onChange: (r: DateRangeKey) => void;
-  colors: { text: string; accent: string; controlBackground: string; surfaceRaised: string };
 }) {
   return (
-    <View
-      style={styles.rangeRow}
-      accessibilityRole="toolbar"
-      accessibilityLabel="Date range selector"
-    >
-      {DATE_RANGE_OPTIONS.map((opt) => {
-        const isSelected = opt.key === selected;
-        return (
-          <Pressable
-            key={opt.key}
-            testID={`range-btn-${opt.key}`}
-            accessibilityRole="button"
-            accessibilityLabel={opt.accessibilityLabel}
-            accessibilityState={{ selected: isSelected }}
-            onPress={() => onChange(opt.key)}
-            style={[
-              styles.rangeBtn,
-              {
-                backgroundColor: isSelected
-                  ? colors.accent
-                  : colors.controlBackground,
-                borderRadius: radius.md,
-              },
-            ]}
-          >
-            <Text
-              style={[
-                styles.rangeBtnLabel,
-                { color: isSelected ? colors.text : colors.text },
-              ]}
-            >
-              {opt.label}
-            </Text>
-          </Pressable>
-        );
-      })}
+    <View style={styles.rangeRow}>
+      <SegmentedControl<DateRangeKey>
+        testID="trends-range-selector"
+        options={DATE_RANGE_OPTIONS.map((opt) => ({
+          value: opt.key,
+          label: opt.label,
+        }))}
+        selected={selected}
+        onSelect={onChange}
+        accessibilityLabel="Date range selector"
+      />
     </View>
   );
 }
@@ -607,18 +579,8 @@ const styles = StyleSheet.create({
   },
 
   rangeRow: {
-    flexDirection: "row",
-    gap: spacing.sm,
     marginBottom: spacing.xs,
   },
-  rangeBtn: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.base,
-    minHeight: 44,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  rangeBtnLabel: { fontSize: typeScale.subhead, fontWeight: "600" },
 
   card: {
     padding: spacing.base,

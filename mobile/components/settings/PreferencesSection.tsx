@@ -14,10 +14,10 @@ import {
   CADENCE_OPTIONS,
   type WeighInCadence,
 } from '@/state/reminderScheduler';
+import { SegmentedControl } from '@/components/ui';
 
 import {
   GroupedCard,
-  Segmented,
   SectionHeader,
   Separator,
   type SettingsColors,
@@ -38,7 +38,8 @@ export function PreferencesSection({
       <GroupedCard colors={colors}>
         <View style={styles.prefRow}>
           <Text style={[styles.prefLabel, { color: colors.text }]}>Units</Text>
-          <Segmented<UnitsPreference>
+          <SegmentedControl<UnitsPreference>
+            testID="units-segmented-control"
             options={[
               { value: 'metric', label: 'Metric' },
               { value: 'imperial', label: 'Imperial' },
@@ -46,20 +47,19 @@ export function PreferencesSection({
             selected={c.profile?.units_preference ?? 'metric'}
             onSelect={(v) => void c.handleUnitsChange(v)}
             accessibilityLabel="Units preference"
-            colors={colors}
-            compact
+            style={styles.prefControl}
           />
         </View>
         <Separator colors={colors} />
         <View style={styles.prefRow}>
           <Text style={[styles.prefLabel, { color: colors.text }]}>Appearance</Text>
-          <Segmented<ColorSchemeOverride>
+          <SegmentedControl<ColorSchemeOverride>
+            testID="appearance-segmented-control"
             options={APPEARANCE_OPTIONS}
             selected={c.appearance}
             onSelect={(v) => void c.handleAppearanceChange(v)}
             accessibilityLabel="Appearance"
-            colors={colors}
-            compact
+            style={styles.prefControl}
           />
         </View>
         <Separator colors={colors} />
@@ -70,12 +70,12 @@ export function PreferencesSection({
           <Text style={[styles.prefSubtitle, { color: colors.textMuted }]}>
             Low-frequency · fires when a reading is due
           </Text>
-          <Segmented<WeighInCadence>
+          <SegmentedControl<WeighInCadence>
+            testID="cadence-segmented-control"
             options={CADENCE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
             selected={c.cadence}
             onSelect={(v) => void c.handleCadenceChange(v)}
             accessibilityLabel="Weigh-in cadence"
-            colors={colors}
           />
         </View>
       </GroupedCard>
@@ -100,7 +100,14 @@ const styles = StyleSheet.create({
   },
   prefLabel: {
     fontSize: typeScale.body,
+  },
+  // The inline control takes the remaining row width so its native segments
+  // size evenly beside the label.
+  prefControl: {
     flex: 1,
+    maxWidth: 220,
+    marginLeft: spacing.base,
+    alignSelf: 'center',
   },
   prefSubtitle: {
     fontSize: typeScale.footnote,

@@ -1,0 +1,102 @@
+# FTY-186 native segmented controls flow: prove the migrated native segmented
+# controls still drive their settings end-to-end on the running app, not just in
+# render tests (docs/standards/testing-standards.md).
+#
+# This story swapped every hand-rolled pill-segment group for the native
+# UISegmentedControl (@react-native-segmented-control/segmented-control). Two of
+# those controls back a network round-trip whose result is unambiguously visible,
+# so they make the strongest flow-completion proof:
+#
+#   1. Trends range (1M/3M/6M): tapping a native segment refetches the weight
+#      series for the new window and recomputes the headline delta. The prose
+#      changes from "this month" (1M, the default) to "these three months" (3M).
+#      That copy only appears once the native segment tap drove a refetch AND the
+#      recompute rendered — a dead/unwired control would keep reading "this month".
+#
+#   2. Goal Direction / Pace (Profile → YOU): the goal editor's direction and pace
+#      are now native segments. Tapping the "Steady" pace segment and saving
+#      round-trips to POST /goal and reveals the recomputed target (mini-target-
+#      reveal), then the collapsed row reflects the saved summary. This proves the
+#      native goal segments still feed the same goal-save → target-reveal path.
+#
+# The weight series / target reveal are served by the E2E mock fetch
+# (e2e/fixtures.ts, e2e/launchMode.ts), anchored to the live from/to window the
+# screen requests so the data always lands in range.
+#
+# Bundle ID: keep this literal so directory-level Maestro runs launch the app
+# under test (see smoke.yaml).
+appId: com.fatty
+---
+# Step 1: Launch in E2E mode. AuthGate routes straight to Today.
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      id: today-screen
+    timeout: 15000
+
+# ── Trends range native segmented control ────────────────────────────────────
+# Step 2: Navigate to Trends via the tab bar (tabBarAccessibilityLabel).
+- tapOn:
+    text: "Trends tab"
+- extendedWaitUntil:
+    visible:
+      id: trends-screen
+    timeout: 15000
+
+# Step 3: The default 1M range headline delta renders once the weight series
+#         loads — the "this month" prose. This is the pre-change baseline.
+- extendedWaitUntil:
+    visible:
+      text: ".*this month.*"
+    timeout: 10000
+
+# Step 4: Tap the native "3 months" range segment. On the migrated control the
+#         segment title is the tappable element (native UISegmentedControl on iOS,
+#         the library's tab rendering on Android).
+- tapOn:
+    text: "3 months"
+
+# Step 5: The range tap drove a refetch + recompute — the headline prose now reads
+#         "these three months". A dead/unwired range control would still read
+#         "this month". This is the range control's flow-completion end state.
+- extendedWaitUntil:
+    visible:
+      text: ".*these three months.*"
+    timeout: 10000
+
+# ── Goal Direction / Pace native segmented controls ──────────────────────────
+# Step 6: Open Profile from the Trends header gear ("Open profile").
+- tapOn:
+    text: "Open profile"
+- extendedWaitUntil:
+    visible:
+      text: "Profile"
+    timeout: 10000
+
+# Step 7: The cold-load Goal row summarises the seeded loss/steady goal. Open the
+#         inline goal editor, whose Direction + Pace are now native segments.
+- extendedWaitUntil:
+    visible:
+      text: ".*Goal: Lose · Steady.*"
+    timeout: 10000
+- tapOn:
+    text: ".*Goal: Lose · Steady.*"
+- assertVisible:
+    id: goal-edit-card
+
+# Step 8: Tap the native "Steady" pace segment and save. The native goal segments
+#         feed the same goal-save path: POST /goal → mini-target-reveal, then the
+#         collapsed row still reflects the saved summary.
+- tapOn:
+    text: "Steady"
+- tapOn:
+    text: "Save goal"
+- extendedWaitUntil:
+    visible:
+      id: mini-target-reveal
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      text: ".*Goal: Lose · Steady.*"
+    timeout: 10000
