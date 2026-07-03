@@ -2,27 +2,19 @@
 const { defineConfig } = require("eslint/config");
 const expoConfig = require("eslint-config-expo/flat");
 const globals = require("globals");
-const noAccentAsText = require("./eslint-rules/no-accent-as-text");
 
 module.exports = defineConfig([
   expoConfig,
   {
-    plugins: {
-      fatty: { rules: { "no-accent-as-text": noAccentAsText } },
-    },
-    rules: {
-      "fatty/no-accent-as-text": "error",
-    },
-  },
-  {
-    // Plain CommonJS Node scripts (the eslint-rules themselves), not RN/Expo code.
-    files: ["eslint-rules/**/*.js"],
+    // Plain CommonJS Node scripts (verify-hook guards like
+    // scripts/check-accent-as-text.js), not RN/Expo code.
+    files: ["scripts/**/*.js"],
     languageOptions: {
       globals: globals.node,
     },
   },
   {
-    files: ["eslint-rules/**/*.test.js"],
+    files: ["scripts/**/*.test.js"],
     languageOptions: {
       globals: { ...globals.node, ...globals.jest },
     },

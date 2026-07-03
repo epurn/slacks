@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Baseline allowlist for eslint-rules/no-accent-as-text.js — pre-existing colors.accent-as-text sites, seeded at FTY-191. Each entry is a per-file count of accent-as-text sites still present in that file, in source order; the rule exempts a file's first `count` sites and fails on anything beyond that. Per-screen application stories (FTY-207-212) drain their file's count to 0 and delete the entry as they swap to colors.accentText; the guard is fully strict once this list is empty.",
+  "description": "Baseline allowlist for scripts/check-accent-as-text.js — pre-existing colors.accent-as-text sites, seeded at FTY-191 by snapshotting the guard's own output on the live tree. Each entry is a per-file count of accent-as-text sites still present in that file, in source order; the guard exempts a file's first `count` sites and fails on anything beyond that. Per-screen application stories (FTY-207-212) drain their file's count to 0 and delete the entry as they swap to colors.accentText; the guard is fully strict once this list is empty.",
   "sites": [
     {
       "file": "components/ConfirmParsedValuesSheet.tsx",
