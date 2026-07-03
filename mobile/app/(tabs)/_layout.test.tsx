@@ -81,11 +81,15 @@ describe("TabLayout tab-bar material (FTY-185)", () => {
       }>
     )();
     expect(bg.props.tint).toBe("systemUltraThinMaterialLight");
-    // Occlusion contract: a max-intensity material that fills the entire bar
-    // footprint (absoluteFill) is what dims scrolled content beneath the tab
-    // labels instead of leaving it legible through an uncovered/low-intensity
-    // bar. Pixel-level legibility isn't assertable in the JS/Maestro harness,
-    // so the full-fill + intensity + material props are the structural proof.
+    // Occlusion contract, half one: a max-intensity material that fills the
+    // entire bar footprint (absoluteFill) is what dims scrolled content beneath
+    // the tab labels instead of leaving it legible through an uncovered/low-
+    // intensity bar. Half two — that Today content actually scrolls *beneath*
+    // this overlay — is proven in `TodayScreenTabBarOcclusion.test.tsx`.
+    // Pixel-level legibility through a native blur isn't observable in the
+    // JS/Maestro harness (the accessibility tree carries no rendered pixels),
+    // so the full-fill + intensity + material props plus the content-under-bar
+    // clearance are the structural proof of the content-under-tab-bar contract.
     expect(bg.props.intensity).toBe(100);
     expect(StyleSheet.flatten(bg.props.style)).toEqual(
       StyleSheet.flatten(StyleSheet.absoluteFill),
