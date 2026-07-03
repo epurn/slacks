@@ -9,6 +9,7 @@
 import type { SessionRecord } from '@/state/session';
 import type { ProfileDTO } from '@/api/profile';
 import type { DailySummaryDTO, TargetReadModel } from '@/api/dailySummary';
+import type { GoalTargetResponse } from '@/api/goals';
 import type { LogEventDTO, ClarificationDTO } from '@/api/logEvents';
 import type { WeightEntryDTO } from '@/api/weightEntries';
 
@@ -46,6 +47,34 @@ export const E2E_TARGET: TargetReadModel = {
   protein_g: { effective: 150, derived: 150, source: 'derived' },
   carbs_g: { effective: 200, derived: 200, source: 'derived' },
   fat_g: { effective: 65, derived: 65, source: 'derived' },
+};
+
+/**
+ * Goal + target reveal returned by `POST /goal` (FTY-106). Backs the FTY-182
+ * profile flow: saving a goal edit under the native header must resolve to the
+ * mini target-reveal, so the E2E mock has to answer the goal create the real
+ * `createGoal` client makes. The revealed calories match `E2E_TARGET` (2,000)
+ * so the reveal card and the subsequently-refetched target read-model agree.
+ */
+export const E2E_GOAL_TARGET_RESPONSE: GoalTargetResponse = {
+  goal: {
+    id: 'e2e-goal-00000000-0000-0000-0000-000000000000',
+    user_id: E2E_SESSION.userId,
+    start_weight_kg: 75,
+    start_date: '2026-01-01',
+    target_weight_kg: 72,
+    target_date: '2026-04-01',
+    is_active: true,
+  },
+  target: {
+    calories: 2000,
+    rmr_kcal: 1600,
+    tdee_kcal: 2100,
+    direction: 'loss',
+    clamped: false,
+  },
+  provenance: { source: 'derived', basis: 'goal_and_metrics' },
+  clamp: { clamped: false, reason: null },
 };
 
 /** Zero daily summary for an empty E2E day. */

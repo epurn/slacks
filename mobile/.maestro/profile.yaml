@@ -10,8 +10,11 @@
 #   2. The native large-title header renders its "Profile" title, and the first
 #      grouped section ("YOU") mounts below it. A crashed or blank Profile, or
 #      content clipped under the header/status bar instead of inset, fails here.
-#   3. The existing editing flow still behaves under the new header: tapping the
-#      Goal row opens its inline editor (goal-edit-card).
+#   3. The existing edit → target-reveal flow still behaves under the new
+#      header: tapping the Goal row opens its inline editor (goal-edit-card),
+#      changing the goal and saving reveals the updated targets
+#      (mini-target-reveal). This is the full editing path the story requires be
+#      preserved, driven end-to-end against the goal-create mock.
 #   4. Done (headerRight) dismisses back to where the gear was opened — Today.
 #      This is the dismissal the story requires and the isolated unit test can
 #      only assert against a mocked router.
@@ -41,12 +44,24 @@ appId: com.fatty
 - assertVisible:
     text: "YOU"
 
-# 3. Existing editing flow still works under the new header: the Goal row
-#    (accessibilityLabel "Goal: …") opens its inline editor.
+# 3. Existing edit → target-reveal flow still works under the new header: the
+#    Goal row (accessibilityLabel "Goal: …") opens its inline editor, and
+#    changing the goal + saving reveals the updated targets.
 - tapOn:
     text: "Goal:.*"
 - assertVisible:
     id: goal-edit-card
+# Change the goal direction (an actual edit), then save it.
+- tapOn:
+    text: "Maintain"
+- tapOn:
+    text: "Save goal"
+# The mini target-reveal appears — the goal-create round-trip completed and the
+# refetched target rendered, proving the editing path survives the new header.
+- extendedWaitUntil:
+    visible:
+      id: mini-target-reveal
+    timeout: 10000
 
 # 4. Done dismisses back to where the gear was opened — Today.
 - tapOn:
