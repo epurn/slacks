@@ -1596,8 +1596,31 @@ function ClusterView({
             );
           }
 
-          // completed with no items (rare: the estimate produced nothing to
-          // show yet) → terminal status placeholder, not a permanent shimmer.
+          // A completed event whose value rows have not arrived yet, but which
+          // just resolved from pending/processing this session (resolveAnimIds):
+          // the event-list poll reached `completed` before the by-date item feed
+          // folded its items into `itemsByEvent`. Hold the SAME loading
+          // ItemTimelineRow, keyed by event id — never fall through to the
+          // EntryRow placeholder below — so the pending→resolved transition stays
+          // one in-place fade with zero layout shift, not a swap to a
+          // differently-sized component (FTY-180 review). The by-date feed
+          // refreshes every poll tick, so the value lands within a poll interval
+          // and fades in over this row's footprint (the completed-with-items
+          // branch above). The shimmer is labelled as still resolving so
+          // VoiceOver never announces a value that has not appeared yet.
+          if (resolveAnimIds.has(event.id)) {
+            return (
+              <ItemTimelineRow
+                key={event.id}
+                loading
+                accessibilityLabel={statusPresentation("processing").accessibilityLabel}
+              />
+            );
+          }
+
+          // completed with no items and no in-flight resolve — an entry already
+          // completed on initial load, or the rare estimate that produced nothing
+          // to show → terminal status placeholder, not a permanent shimmer.
           return (
             <EntryRow
               key={event.id}

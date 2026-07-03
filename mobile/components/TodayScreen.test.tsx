@@ -550,6 +550,82 @@ describe("TodayScreen resolve in place (FTY-180)", () => {
     }
   });
 
+  it("holds the skeleton (never an EntryRow placeholder) when the event-list poll resolves completed before the by-date feed populates items", async () => {
+    // Race: within one poll the event-list read resolves the entry to `completed`
+    // a microtask before the by-date item feed folds its value rows into
+    // `itemsByEvent`. In that intermediate render the row must stay the same
+    // loading ItemTimelineRow — never fall through to the raw-text EntryRow
+    // placeholder — so the pending→resolved transition is one in-place fade with
+    // zero layout shift (FTY-180 review). Resolving the two reads in a controlled
+    // order reproduces the exact interleave.
+    jest.useFakeTimers();
+    try {
+      const pending = event({
+        id: "a",
+        raw_text: "grilled cheese sandwich",
+        status: "pending",
+      });
+      const completed = event({
+        id: "a",
+        raw_text: "grilled cheese sandwich",
+        status: "completed",
+      });
+      let resolveLoad!: (events: readonly LogEventDTO[]) => void;
+      let resolveEntries!: (entries: readonly LogEventEntryDTO[]) => void;
+      const load = jest
+        .fn()
+        .mockResolvedValueOnce([pending])
+        .mockReturnValueOnce(
+          new Promise((resolve) => {
+            resolveLoad = resolve;
+          }),
+        );
+      const loadEntries = jest
+        .fn()
+        .mockResolvedValueOnce([entry(pending, [])])
+        .mockReturnValueOnce(
+          new Promise((resolve) => {
+            resolveEntries = resolve;
+          }),
+        );
+      const tree = mount(
+        <TodayScreen
+          session={SESSION}
+          load={load}
+          loadEntries={loadEntries}
+          useActive={() => true}
+          pollIntervalMs={1000}
+        />,
+      );
+      await act(async () => {});
+
+      // Pending: shimmer skeleton, no value, no raw phrase.
+      expect(hasProgressbar(tree)).toBe(true);
+      expect(textContent(tree)).not.toContain("grilled cheese sandwich");
+
+      // Poll fires both reads. The event-list read wins the race: the entry is
+      // now completed but its items have NOT arrived yet. The row must remain the
+      // loading skeleton — not the raw-text EntryRow — with no value.
+      act(() => jest.advanceTimersByTime(1000));
+      await act(async () => {
+        resolveLoad([completed]);
+      });
+      expect(hasProgressbar(tree)).toBe(true);
+      expect(textContent(tree)).not.toContain("grilled cheese sandwich");
+      expect(textContent(tree)).not.toContain("150 kcal");
+
+      // The by-date feed then delivers the value, which fades in over the same
+      // row's footprint — the skeleton is gone and the value is shown.
+      await act(async () => {
+        resolveEntries([entry(completed, [foodItem()])]);
+      });
+      expect(hasProgressbar(tree)).toBe(false);
+      expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("holds the skeleton (no un-animated value swap) if the item feed wins the poll race before the event completes", async () => {
     // Race: the by-date feed already carries the resolved item while the event
     // list still reports the event as pending. The value row must NOT surface
@@ -1402,22 +1478,36 @@ describe("TodayScreen polling", () => {
       .fn()
       .mockResolvedValueOnce([event({ id: "a", raw_text: "Oatmeal", status: "pending" })])
       .mockResolvedValueOnce([event({ id: "a", raw_text: "Oatmeal", status: "completed" })]);
+    // The by-date item feed carries the resolved value; it only surfaces once the
+    // event-list poll reports `completed`, at which point the skeleton resolves
+    // in place into its value row (FTY-180).
+    const loadEntries = jest.fn().mockResolvedValue([
+      {
+        event: event({ id: "a", raw_text: "Oatmeal", status: "completed" }),
+        items: [foodItem({ name: "Oatmeal" })],
+      },
+    ]);
     const tree = mount(
       <TodayScreen
         session={SESSION}
         load={load}
+        loadEntries={loadEntries}
         useActive={() => true}
         pollIntervalMs={1000}
       />,
     );
     await act(async () => {});
+    // Pending: the shimmer skeleton, not the value (held even though the item
+    // feed already carries it, until the event-list poll says completed).
     expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
 
-    // One interval later the screen polls and reconciles to the terminal status.
+    // One interval later the screen polls, reaches the terminal status, and the
+    // value fades in over the same row — the skeleton is gone.
     act(() => jest.advanceTimersByTime(1000));
     await act(async () => {});
     expect(load).toHaveBeenCalledTimes(2);
-    expect(hasA11yLabel(tree, "Logged")).toBe(true);
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(false);
+    expect(hasA11yLabel(tree, "Oatmeal, 150 kcal")).toBe(true);
 
     // Nothing is pending now, so polling stops — no further loads.
     act(() => jest.advanceTimersByTime(5000));
@@ -1451,10 +1541,19 @@ describe("TodayScreen polling", () => {
       .mockResolvedValueOnce([event({ id: "a", raw_text: "Oatmeal", status: "pending" })])
       .mockRejectedValueOnce(new LogEventApiError(500, "transient"))
       .mockResolvedValueOnce([event({ id: "a", raw_text: "Oatmeal", status: "completed" })]);
+    // The by-date item feed carries the resolved value; it only surfaces once the
+    // event-list poll recovers and reports `completed` (FTY-180).
+    const loadEntries = jest.fn().mockResolvedValue([
+      {
+        event: event({ id: "a", raw_text: "Oatmeal", status: "completed" }),
+        items: [foodItem({ name: "Oatmeal" })],
+      },
+    ]);
     const tree = mount(
       <TodayScreen
         session={SESSION}
         load={load}
+        loadEntries={loadEntries}
         useActive={() => true}
         pollIntervalMs={1000}
       />,
@@ -1467,10 +1566,12 @@ describe("TodayScreen polling", () => {
     await act(async () => {});
     expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
 
-    // The next tick recovers and reconciles to the terminal status.
+    // The next tick recovers, reconciles to the terminal status, and the value
+    // resolves in place over the skeleton's footprint.
     act(() => jest.advanceTimersByTime(1000));
     await act(async () => {});
-    expect(hasA11yLabel(tree, "Logged")).toBe(true);
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(false);
+    expect(hasA11yLabel(tree, "Oatmeal, 150 kcal")).toBe(true);
   });
 });
 
@@ -2193,6 +2294,9 @@ describe("TodayScreen composer — calm, status-first", () => {
         load={load}
         create={create}
         getClarification={emptyClarification()}
+        // The created entry's resolved value row comes from the item feed; seed it
+        // so the completed entry resolves in place into its value (FTY-180).
+        items={{ "server-1": [foodItem({ name: "greek yogurt" })] }}
         useActive={INACTIVE}
       />,
     );
@@ -2215,6 +2319,7 @@ describe("TodayScreen composer — calm, status-first", () => {
         event({ id: "server-1", raw_text: "greek yogurt", status: "completed" }),
       );
     });
+    // The completed entry surfaces as its resolved value row in the one timeline.
     expect(textContent(tree)).toContain("greek yogurt");
   });
 });
