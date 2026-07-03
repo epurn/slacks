@@ -98,7 +98,7 @@ export function WeightLogSheet({
       backgroundColor={colors.surface}
       accessibilityLabel="Log weight sheet"
     >
-      <View style={styles.container}>
+      <View testID="weight-log-sheet" style={styles.container}>
         {/* Header — the native grabber and swipe-to-dismiss replace the old
             "Cancel" button, so the title carries a human-formatted date. */}
         <View style={styles.header}>
