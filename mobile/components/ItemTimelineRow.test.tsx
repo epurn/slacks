@@ -378,4 +378,45 @@ describe("ItemTimelineRow — resolve fade (FTY-180)", () => {
 
     expect(timingSpy).not.toHaveBeenCalled();
   });
+
+  it("resolves in place: one instance goes loading→resolved and fades the value in on the transition, not during loading", async () => {
+    mockReduceMotion(false);
+    // The Skeleton shimmer also drives Animated.timing (a 900ms loop step), so
+    // isolate the resolve fade by its own 220ms duration.
+    jest
+      .spyOn(Animated, "loop")
+      .mockReturnValue({ start: jest.fn(), stop: jest.fn() } as never);
+    const timingSpy = jest
+      .spyOn(Animated, "timing")
+      .mockReturnValue({ start: jest.fn(), stop: jest.fn() } as never);
+    const fadeCalls = () =>
+      timingSpy.mock.calls.filter(
+        ([, cfg]) => (cfg as { duration?: number } | undefined)?.duration === 220,
+      );
+
+    // Mount as the loading skeleton, then update the SAME tree to resolved. The
+    // timeline keys the pending row and the resolved row by the same event id, so
+    // React reuses this one instance — exactly what this asserts drives the fade.
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(<ItemTimelineRow loading accessibilityLabel="Estimating" />);
+    });
+    await act(async () => {});
+
+    // While loading, the resolve fade has not run — the shimmer owns the visuals.
+    expect(fadeCalls()).toHaveLength(0);
+
+    act(() => {
+      tree!.update(<ItemTimelineRow item={foodItem()} />);
+    });
+    await act(async () => {});
+
+    // The value row is now present (no longer a progressbar) and the fade played
+    // on the transition — the resolved value eased in over the skeleton footprint.
+    expect(
+      tree!.root.findAll((n) => n.props.accessibilityRole === "progressbar"),
+    ).toHaveLength(0);
+    expect(allA11yLabels(tree!)).toContain("Greek yogurt, 150 kcal");
+    expect(fadeCalls().length).toBeGreaterThan(0);
+  });
 });

@@ -28,12 +28,18 @@ import {
   uploadLabelImage as uploadLabelImageApi,
 } from "@/api/labelCapture";
 import {
+  confirmLabelProposal as confirmLabelProposalApi,
+  getLabelProposal as getLabelProposalApi,
+} from "@/api/labelProposal";
+import {
   LogEventApiError,
   answerClarification as answerClarificationApi,
   createLogEvent as createLogEventApi,
   getLogEventClarification as getLogEventClarificationApi,
   listTodayLogEvents as listTodayLogEventsApi,
+  listTodayLogEventEntries as listTodayLogEventEntriesApi,
   type LogEventDTO,
+  type LogEventEntryDTO,
 } from "@/api/logEvents";
 import {
   saveFood as saveFoodApi,
@@ -51,6 +57,7 @@ import { DailySummary } from "@/components/DailySummary";
 import { EntryRow } from "@/components/EntryRow";
 import { ItemTimelineRow } from "@/components/ItemTimelineRow";
 import { LabelCaptureScreen } from "@/components/LabelCaptureScreen";
+import { ConfirmParsedValuesSheet } from "@/components/ConfirmParsedValuesSheet";
 import { MacroTier } from "@/components/MacroTier";
 import { OfflineEntryRow } from "@/components/OfflineEntryRow";
 import { TypeaheadSuggestionBar } from "@/components/TypeaheadSuggestionBar";
@@ -117,6 +124,25 @@ function messageFor(error: unknown, kind: "load" | "save"): string {
  * capture flow. `load`/`create`/`session`/`useActive`/`pollIntervalMs` are
  * injectable for tests.
  */
+/**
+ * Id prefix for the synthetic saved-food row built locally on a saved-food add
+ * (FTY-053). It marks a client-built resolved row so the items-forward timeline
+ * can tell a true optimistic/saved-food row from a server-fed by-date item —
+ * server ids are UUIDs and never carry this prefix.
+ */
+const SAVED_FOOD_ITEM_ID_PREFIX = "saved-";
+
+/**
+ * Whether an item is a locally-built synthetic saved-food row (FTY-053) rather
+ * than a server-fed derived item (FTY-198). Used to gate the items-forward
+ * fallback to true optimistic/saved-food rows so a server row can only surface
+ * through the completed branch — the pending→completed transition that resolves
+ * the skeleton in place (FTY-180), never a mid-poll swap keyed by item id.
+ */
+function isSyntheticSavedFoodItem(item: DerivedItem): boolean {
+  return item.id.startsWith(SAVED_FOOD_ITEM_ID_PREFIX);
+}
+
 /** Build a synthetic resolved food item from a saved food selection (FTY-053). */
 function syntheticSavedFoodItem(
   savedFood: SavedFoodDTO,
@@ -125,7 +151,7 @@ function syntheticSavedFoodItem(
 ): DerivedFoodItemDTO {
   return {
     item_type: "food",
-    id: `saved-${savedFood.id}`,
+    id: `${SAVED_FOOD_ITEM_ID_PREFIX}${savedFood.id}`,
     user_id: userId,
     log_event_id: logEventId,
     name: savedFood.name,
@@ -207,9 +233,33 @@ function removeOptimisticEvent(
   });
 }
 
+/**
+ * Fold the server's item-forward day feed (FTY-198) into the items map, keyed by
+ * event id, so a completed entry's resolved value rows populate from real data
+ * (FTY-180). Only events the feed reports with derived items overwrite their
+ * entry — an optimistic/saved-food synthetic item (its temp event id is absent
+ * from the server feed) is preserved, and a transient empty feed never wipes a
+ * row. Returns the previous map unchanged when nothing merged, so a no-op poll
+ * causes no re-render.
+ */
+function mergeServerItems(
+  prev: Readonly<Record<string, readonly DerivedItem[]>>,
+  entries: readonly LogEventEntryDTO[],
+): Readonly<Record<string, readonly DerivedItem[]>> {
+  let next: Record<string, readonly DerivedItem[]> | null = null;
+  for (const entry of entries) {
+    if (entry.items.length > 0) {
+      next ??= { ...prev };
+      next[entry.event.id] = entry.items;
+    }
+  }
+  return next ?? prev;
+}
+
 export function TodayScreen({
   session: sessionOverride,
   load = listTodayLogEventsApi,
+  loadEntries = listTodayLogEventEntriesApi,
   create = createLogEventApi,
   getClarification = getLogEventClarificationApi,
   answerClarification = answerClarificationApi,
@@ -223,6 +273,8 @@ export function TodayScreen({
   reResolveItem = reResolveItemApi,
   uploadLabel = uploadLabelImageApi,
   labelTakePhoto,
+  getLabelProposal = getLabelProposalApi,
+  confirmLabelProposal = confirmLabelProposalApi,
   getDailySummary = getDailySummaryApi,
   outboxStore = fileOutboxStore,
   retryIntervalMs,
@@ -232,6 +284,14 @@ export function TodayScreen({
 }: {
   session?: Session;
   load?: typeof listTodayLogEventsApi;
+  /**
+   * Item-forward day feed (FTY-198): each event with its derived value rows. Read
+   * alongside `load` (which carries event envelopes only) so a completed entry's
+   * resolved value rows populate `itemsByEvent` from real server data — the data
+   * path a pending row's skeleton resolves into in place (FTY-180). Injectable
+   * for tests.
+   */
+  loadEntries?: typeof listTodayLogEventEntriesApi;
   create?: typeof createLogEventApi;
   /** Injectable clarification-question read for the clarify sheet (FTY-153). */
   getClarification?: typeof getLogEventClarificationApi;
@@ -240,9 +300,10 @@ export function TodayScreen({
   editItem?: typeof editDerivedItemApi;
   /**
    * Derived food/exercise items keyed by their `log_event_id`, rendered as
-   * editable surfaces beneath each entry (FTY-050). The item list endpoint is a
-   * later story, so this defaults to none today; edits reconcile the server's
-   * returned item back into this map.
+   * editable surfaces beneath each entry (FTY-050). Seeds the map; the item-
+   * forward by-date feed (`loadEntries`, FTY-198) folds real server items in as
+   * events reach `completed`, and edits reconcile the server's returned item back
+   * into this map.
    */
   items?: Readonly<Record<string, readonly DerivedItem[]>>;
   useActive?: () => boolean;
@@ -259,6 +320,10 @@ export function TodayScreen({
   uploadLabel?: typeof uploadLabelImageApi;
   /** Injectable photo capture for label-capture tests (FTY-064). */
   labelTakePhoto?: () => Promise<{ uri: string }>;
+  /** Injectable proposed-values read for the confirm sheet (FTY-196/197). */
+  getLabelProposal?: typeof getLabelProposalApi;
+  /** Injectable confirm action for the confirm sheet (FTY-196/197). */
+  confirmLabelProposal?: typeof confirmLabelProposalApi;
   /** Injectable daily summary fetch for tests (FTY-075). */
   getDailySummary?: typeof getDailySummaryApi;
   /** Durable offline-outbox storage (FTY-104, harvested onto Today in FTY-147). */
@@ -292,6 +357,13 @@ export function TodayScreen({
   const [reloadKey, setReloadKey] = useState(0);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [labelCaptureOpen, setLabelCaptureOpen] = useState(false);
+  // The uncounted label parse awaiting confirm/adjust (FTY-196/197). Set after a
+  // legible label upload; the confirm sheet renders it and commits it — until
+  // then it never counts. `null` when there is no proposal to confirm.
+  const [labelProposal, setLabelProposal] = useState<DerivedFoodItemDTO | null>(
+    null,
+  );
+  const [labelProposalVisible, setLabelProposalVisible] = useState(false);
   // Saved food selected from the typeahead bar (FTY-053). When set, pressing
   // "Add" creates the log event AND immediately adds a synthetic resolved item
   // with the saved food's nutrition, skipping the estimator wait.
@@ -467,6 +539,33 @@ export function TodayScreen({
     };
   }, [apiSession, load, reloadKey]);
 
+  // Load the item-forward day feed (FTY-198) and fold each entry's derived items
+  // into `itemsByEvent`, so a completed entry renders its resolved value rows
+  // (name · kcal · source) — the real-data path a pending row's skeleton
+  // resolves into in place (FTY-180). A read failure is swallowed (like the
+  // summary read): the timeline still renders from the event list, just without
+  // the value rows, and the next poll retries. Runs alongside the event list
+  // rather than replacing it so the lean reconcile/poll/optimistic machinery
+  // keeps operating on event envelopes.
+  useEffect(() => {
+    if (!apiSession) {
+      return;
+    }
+    let active = true;
+    loadEntries(apiSession).then(
+      (entries) => {
+        if (!active) return;
+        setItemsByEvent((prev) => mergeServerItems(prev, entries));
+      },
+      () => {
+        // Keep whatever items are already shown; the next poll retries.
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [apiSession, loadEntries, reloadKey]);
+
   // Load the daily summary (FTY-075): intake, macros, target, exercise burn.
   // Reuses the same session and polling mechanism as the timeline (FTY-032).
   useEffect(() => {
@@ -528,12 +627,81 @@ export function TodayScreen({
     [apiSession, submitting, create, setSubmitting, setSubmitError],
   );
 
-  // Label capture upload (FTY-064). The backend created and extracted the event
-  // in-request; add the returned event to the timeline directly and let FTY-032
-  // polling reconcile any later status change.
-  const handleLabelUploaded = useCallback((event: LogEventDTO) => {
-    setLabelCaptureOpen(false);
-    setEvents((prev) => sortByNewest([event, ...prev]));
+  // Label capture upload (FTY-064 + FTY-196/197). The backend created and
+  // extracted the event in-request; add the returned event to the timeline, then
+  // read its label proposal (FTY-196). A legible parse lands as an **uncounted
+  // proposal** — never silently counted — so instead of dropping to Today we
+  // present the confirm-parsed-values sheet (FTY-197) for the user to confirm or
+  // adjust before it counts. The proposed item is stashed into the timeline so
+  // the entry is honestly surfaced as "not yet counted" if the user dismisses.
+  //
+  // An unreadable / not-a-label result has no proposal (`null`): the existing
+  // retake-or-type handling is unchanged — the event stays in the timeline in its
+  // post-extraction status (needs_clarification / failed) with no confirm sheet.
+  const handleLabelUploaded = useCallback(
+    (event: LogEventDTO) => {
+      setLabelCaptureOpen(false);
+      setEvents((prev) => sortByNewest([event, ...prev]));
+      if (!apiSession) return;
+      getLabelProposal(apiSession, event.id).then(
+        (proposal) => {
+          if (!proposal) return; // unreadable / not-a-label — path unchanged
+          setItemsByEvent((prev) => ({
+            ...prev,
+            [event.id]: [proposal],
+          }));
+          setLabelProposal(proposal);
+          setLabelProposalVisible(true);
+        },
+        () => {
+          // Reading the proposal failed transiently; leave the event in the
+          // timeline. The user can reopen capture rather than being dead-ended.
+        },
+      );
+    },
+    [apiSession, getLabelProposal],
+  );
+
+  // Confirm the label proposal (FTY-196/197). The committed item is `resolved`
+  // and now counts: swap it into the timeline in place of the proposed item and
+  // refetch the daily summary so Today's totals update — the immediate, in-place
+  // acknowledgement, no jarring navigation ("Acknowledge every action" / "Calm by
+  // default").
+  const handleProposalConfirmed = useCallback(
+    (committed: DerivedFoodItemDTO) => {
+      setLabelProposalVisible(false);
+      setLabelProposal(null);
+      setItemsByEvent((prev) => ({
+        ...prev,
+        [committed.log_event_id]: [committed],
+      }));
+      if (!apiSession) return;
+      getDailySummary(apiSession).then(
+        (loaded) => {
+          setSummary(loaded);
+          setSummaryError(null);
+        },
+        () => {
+          // Keep the current summary; the poll loop reconciles totals shortly.
+        },
+      );
+    },
+    [apiSession, getDailySummary],
+  );
+
+  // Dismiss the confirm sheet without confirming: the proposal stays an uncounted
+  // proposal (no confirm call fired). It remains in the timeline as a "not yet
+  // counted" row the user can reopen — never silently counted, never a dead end.
+  const handleProposalDismissed = useCallback(() => {
+    setLabelProposalVisible(false);
+  }, []);
+
+  // Reopen the confirm sheet for an already-read proposal the user tapped in the
+  // timeline (they dismissed it earlier). No refetch — the stashed item is the
+  // proposal to confirm.
+  const handleReopenProposal = useCallback((item: DerivedFoodItemDTO) => {
+    setLabelProposal(item);
+    setLabelProposalVisible(true);
   }, []);
 
   // One poll: refetch the day and reconcile into the timeline, preserving any
@@ -554,6 +722,17 @@ export function TodayScreen({
         // Keep the current timeline; retry on the next interval.
       },
     );
+    // Refresh the item-forward feed too, so an entry that reached `completed`
+    // this tick shows its resolved value rows and the skeleton resolves in place
+    // on the transition (FTY-180/198).
+    loadEntries(apiSession).then(
+      (entries) => {
+        setItemsByEvent((prev) => mergeServerItems(prev, entries));
+      },
+      () => {
+        // Keep the current items; retry on the next interval.
+      },
+    );
     getDailySummary(apiSession).then(
       (loaded) => {
         setSummary(loaded);
@@ -565,7 +744,7 @@ export function TodayScreen({
         // Keep the current summary and any existing error; retry next interval.
       },
     );
-  }, [apiSession, load, getDailySummary]);
+  }, [apiSession, load, loadEntries, getDailySummary]);
 
   // Open the correction/detail sheet for a tapped timeline item (FTY-148). The
   // sheet stays put — the timeline does not navigate away — honouring "calm by
@@ -994,6 +1173,7 @@ export function TodayScreen({
           editItem={editItem}
           onItemChange={handleItemChange}
           onOpenItem={openItemSheet}
+          onOpenProposal={handleReopenProposal}
           onOpenClarify={openClarifySheet}
           onRetryFailed={(event) => void handleRetryFailed(event)}
           onEditFailedAsText={handleEditFailedAsText}
@@ -1048,6 +1228,20 @@ export function TodayScreen({
           />
         )
       ) : null}
+
+      {/* Confirm-parsed-values sheet (FTY-197): a legible label parse is shown
+          for confirm/adjust before it counts. Kept mounted while a proposal is
+          set so it animates out on dismiss without the values vanishing. */}
+      {apiSession && labelProposal ? (
+        <ConfirmParsedValuesSheet
+          item={labelProposal}
+          visible={labelProposalVisible}
+          session={apiSession}
+          onClose={handleProposalDismissed}
+          onConfirmed={handleProposalConfirmed}
+          confirm={confirmLabelProposal}
+        />
+      ) : null}
     </>
   );
 }
@@ -1060,6 +1254,7 @@ function Timeline({
   editItem,
   onItemChange,
   onOpenItem,
+  onOpenProposal,
   onOpenClarify,
   onRetryFailed,
   onEditFailedAsText,
@@ -1076,6 +1271,8 @@ function Timeline({
   editItem: typeof editDerivedItemApi;
   onItemChange: (item: DerivedItem) => void;
   onOpenItem: (item: DerivedItem, logPhrase: string) => void;
+  /** Reopen the confirm sheet for an uncounted label proposal (FTY-197). */
+  onOpenProposal: (item: DerivedFoodItemDTO) => void;
   onOpenClarify: (event: LogEventDTO) => void;
   /** Retry a failed parse as a fresh attempt (FTY-176). */
   onRetryFailed: (event: LogEventDTO) => void;
@@ -1151,6 +1348,7 @@ function Timeline({
           editItem={editItem}
           onItemChange={onItemChange}
           onOpenItem={onOpenItem}
+          onOpenProposal={onOpenProposal}
           onOpenClarify={onOpenClarify}
           onRetryFailed={onRetryFailed}
           onEditFailedAsText={onEditFailedAsText}
@@ -1170,6 +1368,7 @@ function ClusterView({
   editItem,
   onItemChange,
   onOpenItem,
+  onOpenProposal,
   onOpenClarify,
   onRetryFailed,
   onEditFailedAsText,
@@ -1183,6 +1382,7 @@ function ClusterView({
   editItem: typeof editDerivedItemApi;
   onItemChange: (item: DerivedItem) => void;
   onOpenItem: (item: DerivedItem, logPhrase: string) => void;
+  onOpenProposal: (item: DerivedFoodItemDTO) => void;
   onOpenClarify: (event: LogEventDTO) => void;
   onRetryFailed: (event: LogEventDTO) => void;
   onEditFailedAsText: (event: LogEventDTO) => void;
@@ -1212,22 +1412,51 @@ function ClusterView({
 
           const items = itemsByEvent[event.id] ?? [];
 
-          // Completed event with resolved items → show item rows (items-forward).
-          // Tapping a row opens the correction/detail sheet for that item.
+          // Completed event with items → show item rows (items-forward).
+          // A `proposed` food item is an uncounted label parse (FTY-196): render
+          // it as a "not yet counted" row whose tap reopens the confirm sheet
+          // (FTY-197) — honestly surfaced, never silently counted. A resolved
+          // item taps into the correction/detail sheet.
+          //
+          // The first item's row reuses the event id as its React key — the same
+          // key the pending skeleton used — so React preserves that one
+          // `ItemTimelineRow` instance through the pending→completed transition:
+          // the shimmer resolves into the value in place (same row, same
+          // geometry, fade-in), never a swap between differently-keyed rows
+          // (FTY-180). Any additional items are genuinely new rows keyed by item
+          // id.
           if (event.status === "completed" && items.length > 0) {
-            return items.map((item) => (
-              <ItemTimelineRow
-                key={item.id}
-                item={item}
-                needsClarification={false}
-                onPress={() => onOpenItem(item, event.raw_text)}
-              />
-            ));
+            return items.map((item, index) => {
+              const key = index === 0 ? event.id : item.id;
+              return item.item_type === "food" && item.status === "proposed" ? (
+                <ItemTimelineRow
+                  key={key}
+                  item={item}
+                  proposal
+                  onPress={() => onOpenProposal(item)}
+                />
+              ) : (
+                <ItemTimelineRow
+                  key={key}
+                  item={item}
+                  needsClarification={false}
+                  onPress={() => onOpenItem(item, event.raw_text)}
+                />
+              );
+            });
           }
 
-          // Optimistic / saved-food synthetic items (before server confirms)
-          if (items.length > 0) {
-            return items.map((item) => (
+          // Optimistic / saved-food synthetic items (before the server feed
+          // reports the entry). Only true local saved-food rows render here
+          // (FTY-053). A server-fed by-date item is never surfaced through this
+          // fallback: it can only render via the completed branch above, so a
+          // resolved value row always appears on the pending→completed
+          // transition that resolves the skeleton in place (FTY-180) — never
+          // un-animated because the by-date feed won the poll race against the
+          // event-list poll, or the event-list poll failed.
+          const syntheticItems = items.filter(isSyntheticSavedFoodItem);
+          if (syntheticItems.length > 0) {
+            return syntheticItems.map((item) => (
               <ItemTimelineRow
                 key={item.id}
                 item={item}

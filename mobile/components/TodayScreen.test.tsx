@@ -4,7 +4,11 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { TodayScreen } from "./TodayScreen";
 import type { DailySummaryDTO } from "@/api/dailySummary";
 import type { DerivedFoodItemDTO } from "@/api/derivedItems";
-import { LogEventApiError, type LogEventDTO } from "@/api/logEvents";
+import {
+  LogEventApiError,
+  type LogEventDTO,
+  type LogEventEntryDTO,
+} from "@/api/logEvents";
 import type { SavedFoodDTO } from "@/api/savedFoods";
 import type { OutboxEntry, OutboxStore } from "@/state/outbox";
 import type { Session } from "@/state/session";
@@ -60,6 +64,18 @@ jest.mock("expo-camera", () => {
 jest.mock("expo-linking", () => ({
   openSettings: jest.fn().mockResolvedValue(undefined),
 }));
+
+// The item-forward by-date feed (FTY-198) is read from a real endpoint by
+// default (FTY-180). Stub it to an empty day so tests that don't exercise item
+// rows stay hermetic — no real fetch — while tests that do pass an explicit
+// `loadEntries` prop that overrides this default.
+jest.mock("@/api/logEvents", () => {
+  const actual = jest.requireActual("@/api/logEvents");
+  return {
+    ...actual,
+    listTodayLogEventEntries: jest.fn().mockResolvedValue([]),
+  };
+});
 
 const SESSION: Session = {
   serverUrl: "https://api.example.test",
@@ -428,6 +444,116 @@ describe("TodayScreen derived items", () => {
       tree.root.findAll((n) => n.props.accessibilityRole === "progressbar")
         .length,
     ).toBeGreaterThan(0);
+  });
+});
+
+// ─── Resolve in place: real by-date item feed + skeleton→value (FTY-180) ─────
+
+describe("TodayScreen resolve in place (FTY-180)", () => {
+  function entry(
+    e: LogEventDTO,
+    items: readonly DerivedFoodItemDTO[] = [],
+  ): LogEventEntryDTO {
+    return { event: e, items };
+  }
+
+  // RN wraps hosts in several forwardRef composites, so an absolute node count is
+  // brittle. `hasProgressbar` is a robust presence check; its absence (=== 0) is
+  // the clean signal that the pending skeleton is fully gone after a resolve.
+  const hasProgressbar = (tree: ReactTestRenderer): boolean =>
+    tree.root.findAll((n) => n.props.accessibilityRole === "progressbar").length >
+    0;
+
+  it("populates a completed entry's value rows from the real by-date feed (not the items prop)", async () => {
+    const completed = event({ id: "a", raw_text: "Greek yogurt", status: "completed" });
+    const load = jest.fn().mockResolvedValue([completed]);
+    // The value rows come only from the item-forward feed — no `items` override.
+    const loadEntries = jest
+      .fn()
+      .mockResolvedValue([entry(completed, [foodItem()])]);
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        loadEntries={loadEntries}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    expect(loadEntries).toHaveBeenCalled();
+    expect(textContent(tree)).toContain("Greek yogurt");
+    expect(textContent(tree)).toContain("150 kcal");
+  });
+
+  it("resolves the pending skeleton into the value row in place on the pending→completed poll", async () => {
+    jest.useFakeTimers();
+    try {
+      const pending = event({ id: "a", raw_text: "Greek yogurt", status: "pending" });
+      const completed = event({ id: "a", raw_text: "Greek yogurt", status: "completed" });
+      const load = jest
+        .fn()
+        .mockResolvedValueOnce([pending])
+        .mockResolvedValueOnce([completed]);
+      // The feed reports no items while pending, then the resolved item once done.
+      const loadEntries = jest
+        .fn()
+        .mockResolvedValueOnce([entry(pending, [])])
+        .mockResolvedValueOnce([entry(completed, [foodItem()])]);
+      const tree = mount(
+        <TodayScreen
+          session={SESSION}
+          load={load}
+          loadEntries={loadEntries}
+          useActive={() => true}
+          pollIntervalMs={1000}
+        />,
+      );
+      await act(async () => {});
+
+      // Pending: the shimmer skeleton, no value, no raw phrase.
+      expect(hasProgressbar(tree)).toBe(true);
+      expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+      expect(textContent(tree)).not.toContain("150 kcal");
+
+      // One poll later the entry is completed and its item feed has the value.
+      act(() => jest.advanceTimersByTime(1000));
+      await act(async () => {});
+
+      // The skeleton is fully gone (no lingering placeholder) and the resolved
+      // value row is now shown — the same row resolved in place (the shared-key
+      // instance-preservation is unit-tested in ItemTimelineRow.test.tsx).
+      expect(hasProgressbar(tree)).toBe(false);
+      expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("holds the skeleton (no un-animated value swap) if the item feed wins the poll race before the event completes", async () => {
+    // Race: the by-date feed already carries the resolved item while the event
+    // list still reports the event as pending. The value row must NOT surface
+    // through the optimistic fallback — it waits for the completed branch so the
+    // resolve always animates in place (FTY-180).
+    const pending = event({ id: "a", raw_text: "Greek yogurt", status: "pending" });
+    const load = jest.fn().mockResolvedValue([pending]);
+    const loadEntries = jest
+      .fn()
+      .mockResolvedValue([entry(pending, [foodItem()])]);
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        loadEntries={loadEntries}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    expect(hasProgressbar(tree)).toBe(true);
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+    expect(textContent(tree)).not.toContain("150 kcal");
+    expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(false);
   });
 });
 
@@ -1502,6 +1628,181 @@ describe("TodayScreen label capture", () => {
     // (FTY-180), not the event's raw text.
     expect(textContent(tree)).not.toContain("nutrition label photo");
     expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+  });
+});
+
+// ─── Confirm-parsed-values sheet (FTY-197) ───────────────────────────────────
+
+describe("TodayScreen confirm-parsed-values sheet", () => {
+  const completedLabelEvent: LogEventDTO = {
+    id: "label-event-1",
+    user_id: SESSION!.userId,
+    raw_text: "Nutrition label photo",
+    status: "completed",
+    created_at: "2026-07-02T10:00:00Z",
+    updated_at: "2026-07-02T10:00:00Z",
+  };
+
+  function labelProposalItem(
+    overrides: Partial<DerivedFoodItemDTO> = {},
+  ): DerivedFoodItemDTO {
+    return foodItem({
+      id: "label-food-1",
+      log_event_id: "label-event-1",
+      name: "Granola bar",
+      unit: "bar",
+      status: "proposed",
+      calories: 190,
+      protein_g: 4,
+      carbs_g: 29,
+      fat_g: 7,
+      source: { source_type: "user_label", label: "Label scan", ref: "user_label" },
+      ...overrides,
+    });
+  }
+
+  async function uploadLabel(tree: ReactTestRenderer): Promise<void> {
+    press(tree, "Capture label");
+    await act(async () => {
+      press(tree, "Take photo");
+    });
+    await act(async () => {
+      press(tree, "Upload label");
+    });
+    // Let the proposal read resolve and open the confirm sheet.
+    await act(async () => {});
+  }
+
+  function labelProps(overrides: Record<string, unknown>) {
+    return {
+      session: SESSION,
+      load: jest.fn().mockResolvedValue([]),
+      useActive: INACTIVE,
+      uploadLabel: jest.fn().mockResolvedValue(completedLabelEvent),
+      labelTakePhoto: jest.fn().mockResolvedValue({ uri: "file:///label.jpg" }),
+      ...overrides,
+    };
+  }
+
+  it("shows the parsed values + Label scan provenance, not yet counted, after a legible upload", async () => {
+    const getLabelProposal = jest.fn().mockResolvedValue(labelProposalItem());
+    const tree = mount(<TodayScreen {...labelProps({ getLabelProposal })} />);
+    await act(async () => {});
+
+    await uploadLabel(tree);
+
+    // The proposal read was made for the uploaded event.
+    expect(getLabelProposal).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+      "label-event-1",
+    );
+    // The confirm sheet shows the parse, provenance, and the not-yet-counted state.
+    const text = textContent(tree);
+    expect(text).toContain("Granola bar");
+    expect(text).toContain("190 kcal");
+    expect(text).toContain("Label scan");
+    expect(text).toContain("Not yet counted");
+    expect(hasA11yLabel(tree, "Looks right, add it")).toBe(true);
+  });
+
+  it("confirm commits the parse and refreshes the day's totals in place", async () => {
+    const getLabelProposal = jest.fn().mockResolvedValue(labelProposalItem());
+    const confirmLabelProposal = jest
+      .fn()
+      .mockResolvedValue(labelProposalItem({ status: "resolved" }));
+    // First summary load excludes the proposal; after confirm it counts.
+    const getDailySummary = jest
+      .fn()
+      .mockResolvedValueOnce(summary({ intake: { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }, has_intake: false }))
+      .mockResolvedValue(summary({ intake: { calories: 190, protein_g: 4, carbs_g: 29, fat_g: 7 } }));
+
+    const tree = mount(
+      <TodayScreen
+        {...labelProps({ getLabelProposal, confirmLabelProposal, getDailySummary })}
+      />,
+    );
+    await act(async () => {});
+
+    await uploadLabel(tree);
+    await act(async () => {
+      press(tree, "Looks right, add it");
+    });
+
+    // Confirm called with an empty (unchanged) body; summary refetched.
+    expect(confirmLabelProposal).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+      "label-event-1",
+      {},
+    );
+    // The entry now counts: the resolved item row shows the kcal (no "not counted").
+    expect(hasA11yLabel(tree, "Granola bar, 190 kcal")).toBe(true);
+    // Sheet dismissed — the confirm affordance is gone (in-place, no navigation).
+    expect(hasA11yLabel(tree, "Looks right, add it")).toBe(false);
+  });
+
+  it("adjusting a value sends the corrected number to the confirm action", async () => {
+    const getLabelProposal = jest.fn().mockResolvedValue(labelProposalItem());
+    const confirmLabelProposal = jest
+      .fn()
+      .mockResolvedValue(labelProposalItem({ status: "resolved", calories: 250 }));
+    const tree = mount(
+      <TodayScreen {...labelProps({ getLabelProposal, confirmLabelProposal })} />,
+    );
+    await act(async () => {});
+
+    await uploadLabel(tree);
+    press(tree, "Adjust values");
+    typeInto(tree, "Calories value", "250");
+    await act(async () => {
+      press(tree, "Add adjusted values");
+    });
+
+    expect(confirmLabelProposal).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+      "label-event-1",
+      { calories: 250 },
+    );
+  });
+
+  it("never silently counts: dismissing leaves an uncounted proposal, re-openable", async () => {
+    const getLabelProposal = jest.fn().mockResolvedValue(labelProposalItem());
+    const confirmLabelProposal = jest.fn();
+    const tree = mount(
+      <TodayScreen {...labelProps({ getLabelProposal, confirmLabelProposal })} />,
+    );
+    await act(async () => {});
+
+    await uploadLabel(tree);
+    // Dismiss without confirming.
+    press(tree, "Close");
+
+    expect(confirmLabelProposal).not.toHaveBeenCalled();
+    // The proposal is honestly surfaced in the timeline as "not yet counted".
+    expect(
+      tree.root.findAll(
+        (n) => n.props.accessibilityLabel === "Granola bar, 190 kcal, not yet counted",
+      ).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("leaves the unreadable path unchanged when there is no proposal", async () => {
+    // A not-a-label / unreadable disposition yields a null proposal.
+    const getLabelProposal = jest.fn().mockResolvedValue(null);
+    const failedEvent: LogEventDTO = { ...completedLabelEvent, status: "failed" };
+    const tree = mount(
+      <TodayScreen
+        {...labelProps({
+          getLabelProposal,
+          uploadLabel: jest.fn().mockResolvedValue(failedEvent),
+        })}
+      />,
+    );
+    await act(async () => {});
+
+    await uploadLabel(tree);
+
+    // No confirm sheet is presented for a null proposal.
+    expect(hasA11yLabel(tree, "Looks right, add it")).toBe(false);
   });
 });
 

@@ -1,0 +1,76 @@
+# FTY-187 Trends hierarchy flow: cadence card gone, compact Log weight opens
+# the weight sheet.
+#
+# This story moved weigh-in cadence out of Trends (it now lives only in
+# Profile → Preferences) and shrank the amber "Log weight" banner into a
+# compact secondary control on the weight card. The change is user-facing, so
+# per docs/standards/testing-standards.md it needs a flow-completion E2E, not
+# just render tests.
+#
+# The flow reaches Trends, proves the weight card is data-present (not an
+# empty/error state), asserts the cadence card is absent, taps the compact
+# Log weight control, and drives the weight sheet to its open, usable end state.
+#
+# Load-bearing assertions:
+#   - `.*this month.*` (step 4): the headline delta renders only when weight
+#     entries load (computeHeadlineDelta returns null with none) — a data-starved
+#     Trends would fail here rather than going green on the always-mounted card.
+#   - `WEIGH-IN REMINDER` absent (step 5): the exact section label the removed
+#     cadence card rendered (git HEAD~1 TrendsScreen.tsx:486). Asserting it after
+#     the screen is confirmed present makes the absence meaningful, not trivial.
+#   - `weight-log-sheet` visible + `Weight in kg` (steps 7–8): the tap opens the
+#     real sheet with its usable weight input, the flow's successful end state.
+#
+# The weight series and adherence range are served by the E2E mock fetch
+# (e2eWeightEntries / e2eDailySummaryRange in e2e/fixtures.ts), anchored to the
+# live from/to window the screen requests so the data always lands in range.
+#
+# Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
+# directory-level Maestro runs launch the installed app under test reliably.
+appId: com.fatty
+---
+# Step 1: Launch in E2E mode. AuthGate routes straight to Today.
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      id: today-screen
+    timeout: 15000
+
+# Step 2: Navigate to Trends via the tab bar (tabBarAccessibilityLabel).
+- tapOn:
+    text: "Trends tab"
+- extendedWaitUntil:
+    visible:
+      id: trends-screen
+    timeout: 15000
+
+# Step 3: The weight card is data-present, not empty/error. The 1M-range headline
+#         delta ("… this month") renders only once the weight entries load.
+- extendedWaitUntil:
+    visible:
+      text: ".*this month.*"
+    timeout: 10000
+
+# Step 4: Cadence card is gone from Trends (FTY-187). The weigh-in reminder /
+#         cadence selector no longer renders here — it lives only in Preferences.
+#         Asserted after the screen is confirmed present so the absence is real.
+- assertNotVisible:
+    text: "WEIGH-IN REMINDER"
+- assertNotVisible:
+    id: "cadence-option-weekly"
+
+# Step 5: Tap the compact, secondary Log weight control on the weight card.
+- tapOn:
+    id: log-weight-btn
+
+# Step 6: The weight log sheet opens — the flow's successful end state.
+- extendedWaitUntil:
+    visible:
+      id: weight-log-sheet
+    timeout: 10000
+
+# Step 7: …and it is usable, not data-starved: the weight input surface (its
+#         "Weight in kg" accessibility label) is present in the open sheet.
+- assertVisible:
+    text: "Weight in kg"

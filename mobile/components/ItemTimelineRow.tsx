@@ -12,14 +12,28 @@ function formatKcal(n: number | null): string {
 
 /**
  * Fades resolved item content in over the skeleton's footprint (FTY-180): a
- * short one-shot opacity transition from 0 to 1 on mount. Under Reduce Motion
- * the resolve is an instant swap — the value never animates in — mirroring
- * the `Skeleton` component's own motion opt-out.
+ * short one-shot opacity transition from 0 to 1 when the row resolves. Under
+ * Reduce Motion the resolve is an instant swap — the value never animates in —
+ * mirroring the `Skeleton` component's own motion opt-out.
+ *
+ * The fade keys off `loading` rather than mount so a single row instance can
+ * resolve in place: the timeline reuses the same `ItemTimelineRow` (shared key)
+ * when a pending row's estimate lands, so this instance transitions
+ * loading→resolved without unmounting. While loading, the value is pinned at 0
+ * (the Skeleton owns the visuals) so the fade always plays from nothing when the
+ * resolved content mounts — never swallowed by a mount-fade that finished during
+ * the pending period, and with no flash of pre-set opacity.
  */
-function useResolveFadeOpacity(): Animated.Value {
+function useResolveFadeOpacity(loading: boolean): Animated.Value {
   // eslint-disable-next-line react-hooks/refs
   const opacity = useRef(new Animated.Value(0)).current;
   useEffect(() => {
+    if (loading) {
+      // Skeleton branch is rendered (opacity unused); hold at 0 so the eventual
+      // resolve fades in from nothing rather than snapping in fully opaque.
+      opacity.setValue(0);
+      return;
+    }
     let mounted = true;
     AccessibilityInfo.isReduceMotionEnabled().then(
       (reduced) => {
@@ -28,6 +42,10 @@ function useResolveFadeOpacity(): Animated.Value {
           opacity.setValue(1);
           return;
         }
+        // The value is already 0 here — from the initial `Animated.Value(0)` on a
+        // fresh resolved mount, or pinned to 0 by the loading branch when this
+        // instance transitioned loading→resolved in place — so the fade always
+        // plays from nothing.
         Animated.timing(opacity, {
           toValue: 1,
           duration: 220,
@@ -41,7 +59,7 @@ function useResolveFadeOpacity(): Animated.Value {
     return () => {
       mounted = false;
     };
-  }, [opacity]);
+  }, [loading, opacity]);
   return opacity;
 }
 
@@ -57,6 +75,8 @@ type ItemTimelineRowProps =
       item: DerivedItem;
       /** True when the parent log event is needs_clarification. */
       needsClarification?: boolean;
+      /** True for an uncounted label proposal awaiting confirm (FTY-196/197). */
+      proposal?: boolean;
       onPress?: () => void;
     };
 
@@ -67,7 +87,10 @@ type ItemTimelineRowProps =
  * "needs a detail" (needs_clarification parent) entries render muted with a
  * gentle inline tag and are visibly uncounted — they do not appear in hero
  * figures per the finalized-state filter, so no extra math needed here.
- * Tapping calls `onPress` (stub for FTY-100 detail sheet).
+ * A `proposal` row (FTY-197) is a legible label parse held uncounted (FTY-196):
+ * it shows its parsed kcal but muted, tagged "not counted", and invites a tap to
+ * confirm — honestly surfaced, never silently counted.
+ * Tapping calls `onPress` (opens the detail / confirm sheet).
  *
  * `loading` drives the "thinking" state (FTY-180): a pending/processing entry
  * with no resolved item yet renders a `Skeleton` shimmer in the exact same
@@ -78,8 +101,9 @@ type ItemTimelineRowProps =
 export function ItemTimelineRow(props: ItemTimelineRowProps) {
   const { colors } = useTheme();
   // Called unconditionally (rules-of-hooks): its value is only read once the
-  // row resolves, but the loading branch returns early below.
-  const opacity = useResolveFadeOpacity();
+  // row resolves, but the loading branch returns early below. Passing `loading`
+  // lets a reused instance fade its value in when it transitions in place.
+  const opacity = useResolveFadeOpacity(props.loading === true);
 
   if (props.loading) {
     return (
@@ -116,7 +140,7 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
     );
   }
 
-  const { item, needsClarification = false, onPress } = props;
+  const { item, needsClarification = false, proposal = false, onPress } = props;
 
   const name = item.name;
   const kcal =
@@ -124,14 +148,24 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
   const source = item.item_type === "food" ? item.source : null;
   const is_edited = item.is_edited ?? false;
 
-  const textColor = needsClarification ? colors.textMuted : colors.text;
-  const kcalColor = needsClarification ? colors.textMuted : colors.textSecondary;
+  // Both uncounted states render muted; only their tag / kcal treatment differ.
+  const uncounted = needsClarification || proposal;
+  const textColor = uncounted ? colors.textMuted : colors.text;
+  const kcalColor = uncounted ? colors.textMuted : colors.textSecondary;
 
   const a11yLabel = needsClarification
     ? `${name}, needs a detail, uncounted`
-    : item.item_type === "food"
-      ? `${name}, ${kcal !== null ? Math.round(kcal) : 0} kcal`
-      : `${name}, ${kcal !== null ? Math.round(kcal) : 0} kcal burned`;
+    : proposal
+      ? `${name}, ${kcal !== null ? Math.round(kcal) : 0} kcal, not yet counted`
+      : item.item_type === "food"
+        ? `${name}, ${kcal !== null ? Math.round(kcal) : 0} kcal`
+        : `${name}, ${kcal !== null ? Math.round(kcal) : 0} kcal burned`;
+
+  const a11yHint = needsClarification
+    ? "Tap to add the missing detail"
+    : proposal
+      ? "Tap to confirm before it counts"
+      : "Tap to view details";
 
   return (
     <Animated.View style={{ opacity }}>
@@ -144,7 +178,7 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
         onPress={onPress}
         accessibilityRole="button"
         accessibilityLabel={a11yLabel}
-        accessibilityHint={needsClarification ? "Tap to add the missing detail" : "Tap to view details"}
+        accessibilityHint={a11yHint}
       >
         {/* Provenance icon — always on */}
         <ProvenanceIcon source={source} is_edited={is_edited} />
@@ -158,19 +192,20 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
           {name}
         </Text>
 
-        {/* "needs a detail" tag */}
-        {needsClarification ? (
+        {/* Uncounted tag: "needs a detail" (clarify) or "not counted" (proposal) */}
+        {uncounted ? (
           <View
             style={[styles.needsDetailTag, { backgroundColor: colors.controlBackground }]}
             accessibilityElementsHidden
           >
             <Text style={[styles.needsDetailText, { color: colors.textMuted }]}>
-              needs a detail
+              {needsClarification ? "needs a detail" : "not counted"}
             </Text>
           </View>
         ) : null}
 
-        {/* Kcal — right-aligned */}
+        {/* Kcal — right-aligned. A proposal shows its parsed kcal (muted); a
+            needs-a-detail row has no value yet, so it shows an em dash. */}
         <Text
           style={[styles.kcal, { color: kcalColor }]}
           accessibilityElementsHidden

@@ -4,13 +4,18 @@
  * Layout (§4b): weight outcome up top, intake behaviour beneath it. The EWMA
  * smoothed trend line — not any single reading — is the visual lead.
  *
- * Five features:
+ * Four features:
  *   1. Smoothed weight-trend line (EWMA) over raw daily points with range selector
  *      and headline delta.
  *   2. Intake-adherence summary (avg kcal vs. target, days-on-target, strip).
  *   3. Past-day drilldown — tapping a day opens that day's timeline.
- *   4. "Log weight" sheet — opens a numeric entry, seeded with the last value.
- *   5. Weigh-in reminder — cadence preference + due-only local notification.
+ *   4. "Log weight" — a compact, secondary control on the weight card that opens
+ *      a numeric entry sheet, seeded with the last value.
+ *
+ * Weigh-in cadence lives only in Profile → Preferences (FTY-187; §4c). Logging a
+ * weight here still persists the last-weigh-in date and reschedules the
+ * due-only reminder via `onWeightLogged`, since that's the only place the date
+ * updates and Preferences' cadence control reads it.
  *
  * Privacy: no weight or nutrition values in logs, error messages, or
  * notification bodies.
@@ -65,11 +70,7 @@ import {
   type AdherenceSummary,
 } from "@/state/trends";
 import {
-  DEFAULT_CADENCE,
-  CADENCE_OPTIONS,
-  applyReminderSettings,
   onWeightLogged,
-  type WeighInCadence,
   type NotificationsAdapter,
   type CadenceStore,
 } from "@/state/reminderScheduler";
@@ -260,27 +261,6 @@ export function TrendsScreen({
     [rawSummaries, allDates],
   );
 
-  // ── Cadence ───────────────────────────────────────────────────────────────
-  const [cadence, setCadenceState] = useState<WeighInCadence>(DEFAULT_CADENCE);
-
-  useEffect(() => {
-    if (!store) return;
-    store.getCadence().then((c) => {
-      if (c) setCadenceState(c);
-    });
-  }, [store]);
-
-  const handleCadenceChange = useCallback(
-    (newCadence: WeighInCadence) => {
-      setCadenceState(newCadence);
-      if (store && notifications) {
-        const lastDate = entries.length > 0 ? entries[entries.length - 1]!.effective_date : null;
-        void applyReminderSettings(newCadence, lastDate, store, notifications);
-      }
-    },
-    [store, notifications, entries],
-  );
-
   // ── Log weight sheet ───────────────────────────────────────────────────────
   const [sheetVisible, setSheetVisible] = useState(false);
   const lastEntry: WeightEntryDTO | null =
@@ -323,6 +303,7 @@ export function TrendsScreen({
   return (
     <>
       <ScrollView
+        testID="trends-screen"
         style={[styles.screen, { backgroundColor: colors.surface }]}
         contentContainerStyle={[
           styles.content,
@@ -415,15 +396,13 @@ export function TrendsScreen({
             width={chartWidth}
           />
           <Pressable
+            testID="log-weight-btn"
             accessibilityRole="button"
             accessibilityLabel="Log weight"
             onPress={() => setSheetVisible(true)}
-            style={[
-              styles.logWeightBtn,
-              { backgroundColor: colors.accent, borderRadius: radius.md },
-            ]}
+            style={styles.logWeightBtn}
           >
-            <Text style={[styles.logWeightLabel, { color: colors.accentForeground }]}>
+            <Text style={[styles.logWeightLabel, { color: colors.accentText }]}>
               + Log weight
             </Text>
           </Pressable>
@@ -473,23 +452,6 @@ export function TrendsScreen({
               />
             </>
           )}
-        </View>
-
-        {/* Reminder settings card */}
-        <View
-          style={[
-            styles.card,
-            { backgroundColor: colors.surfaceRaised, borderRadius: radius.lg },
-          ]}
-        >
-          <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
-            WEIGH-IN REMINDER
-          </Text>
-          <CadencePicker
-            selected={cadence}
-            onChange={handleCadenceChange}
-            colors={colors}
-          />
         </View>
       </ScrollView>
 
@@ -601,53 +563,6 @@ function AdherenceSummaryRow({
   );
 }
 
-function CadencePicker({
-  selected,
-  onChange,
-  colors,
-}: {
-  selected: WeighInCadence;
-  onChange: (c: WeighInCadence) => void;
-  colors: {
-    text: string;
-    textSecondary: string;
-    accent: string;
-    controlBackground: string;
-    separator: string;
-  };
-}) {
-  return (
-    <View style={styles.cadenceList}>
-      {CADENCE_OPTIONS.map((opt, i) => {
-        const isSelected = opt.value === selected;
-        return (
-          <Pressable
-            key={opt.value}
-            testID={`cadence-option-${opt.value}`}
-            accessibilityRole="radio"
-            accessibilityLabel={opt.label}
-            accessibilityState={{ checked: isSelected }}
-            onPress={() => onChange(opt.value)}
-            style={[
-              styles.cadenceOption,
-              i < CADENCE_OPTIONS.length - 1
-                ? { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator }
-                : undefined,
-            ]}
-          >
-            <Text style={[styles.cadenceLabel, { color: colors.text }]}>
-              {opt.label}
-            </Text>
-            {isSelected ? (
-              <Text style={[styles.checkmark, { color: colors.accent }]}>✓</Text>
-            ) : null}
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
 // ─────────────────────────────────────────────────────────────────────────────
@@ -716,11 +631,15 @@ const styles = StyleSheet.create({
   },
 
   logWeightBtn: {
-    paddingVertical: spacing.md,
-    alignItems: "center",
+    alignSelf: "flex-end",
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
     minHeight: 44,
+    minWidth: 44,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  logWeightLabel: { fontSize: typeScale.callout, fontWeight: "600" },
+  logWeightLabel: { fontSize: typeScale.subhead, fontWeight: "600" },
 
   loadingText: { fontSize: typeScale.body },
   emptyText: { fontSize: typeScale.body },
@@ -736,15 +655,4 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   retryLabel: { fontSize: typeScale.callout, fontWeight: "600" },
-
-  cadenceList: { gap: 0 },
-  cadenceOption: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: spacing.md,
-    minHeight: 44,
-  },
-  cadenceLabel: { fontSize: typeScale.body },
-  checkmark: { fontSize: typeScale.body, fontWeight: "700" },
 });

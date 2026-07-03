@@ -35,12 +35,6 @@
       "lines": 1608,
       "reason": "Existing over-threshold first-party source file at FTY-200 baseline."
     },
-    "mobile/components/OnboardingScreen.tsx": {
-      "kind": "source",
-      "lane": "mobile",
-      "lines": 986,
-      "reason": "Existing over-threshold first-party source file at FTY-200 baseline; +4 in FTY-189 publishing the created goal's direction to the cross-screen goalDirection controller so Trends' headline delta can be goal-aware."
-    },
     "mobile/components/SettingsScreen.test.tsx": {
       "kind": "test",
       "lane": "mobile",
@@ -62,14 +56,15 @@
     "mobile/components/TodayScreen.test.tsx": {
       "kind": "test",
       "lane": "mobile",
-      "lines": 2056,
-      "reason": "Existing over-threshold first-party test file at FTY-200 baseline; +82 in FTY-175 for clarify answer-round-trip coverage (chip resolve, free-text resolve, error path, in-place poll, chip render from payload); +123 in the FTY-175 review fix covering the submit-time question-id re-read (fallback answer resolves after a failed read, re-read failure surfaced, empty-payload honesty); +43 in FTY-180 updating the pending-row assertions for the new skeleton placeholder (raw text no longer visible while pending; a11y-label based duplicate-row regression guards for the optimistic-to-server reconcile paths)."
+      "lines": 2357,
+      "reason": "Existing over-threshold first-party test file at FTY-200 baseline; +82 in FTY-175 for clarify answer-round-trip coverage (chip resolve, free-text resolve, error path, in-place poll, chip render from payload); +123 in the FTY-175 review fix covering the submit-time question-id re-read (fallback answer resolves after a failed read, re-read failure surfaced, empty-payload honesty); +175 in FTY-197 for the confirm-parsed-values sheet flow (shows the parse + Label scan provenance + not-yet-counted after a legible upload, confirm commits and refreshes totals in place, adjust sends the corrected value, never-silent dismiss leaves an uncounted re-openable proposal, and the unreadable null-proposal path stays unchanged); +43 in FTY-180 updating the pending-row assertions for the new skeleton placeholder (raw text no longer visible while pending; a11y-label based duplicate-row regression guards for the optimistic-to-server reconcile paths) and the review-fix coverage wiring the real by-date item feed so completed events resolve in place."
+
     },
     "mobile/components/TodayScreen.tsx": {
       "kind": "source",
       "lane": "mobile",
-      "lines": 1431,
-      "reason": "Existing over-threshold first-party source file at FTY-200 baseline; +13 in FTY-178 to mount the hero above the composer and the macro tier separately beneath it (macro rework is FTY-179); +6 in FTY-175 wiring the FTY-170 clarify payload (question id + chips) and the answer round-trip that resolves the same entry in place; +16 in the FTY-175 review fix re-reading the question id at submit time so the free-text fallback stays non-blocking; +1 in FTY-179 passing the daily-summary target read-model into MacroTier so the macro chips measure against their effective targets; +16 in FTY-180 splitting the status placeholder branch so pending/processing renders the ItemTimelineRow skeleton (resolve-in-place, FTY-180) while completed-with-no-items keeps the EntryRow terminal placeholder."
+      "lines": 1660,
+      "reason": "Existing over-threshold first-party source file at FTY-200 baseline; +13 in FTY-178 to mount the hero above the composer and the macro tier separately beneath it (macro rework is FTY-179); +6 in FTY-175 wiring the FTY-170 clarify payload (question id + chips) and the answer round-trip that resolves the same entry in place; +16 in the FTY-175 review fix re-reading the question id at submit time so the free-text fallback stays non-blocking; +1 in FTY-179 passing the daily-summary target read-model into MacroTier so the macro chips measure against their effective targets; +120 in FTY-197 wiring the confirm-parsed-values sheet: reading the FTY-196 label proposal after upload, presenting the sheet, committing the confirmed item into the timeline + refetching the summary in place, and surfacing an undismissed proposal as a re-openable not-yet-counted row; +16 in FTY-180 splitting the status placeholder branch so pending/processing renders the ItemTimelineRow skeleton (resolve-in-place) while completed-with-no-items keeps the EntryRow terminal placeholder, and the review fix loading the real by-date item feed so a completed event's derived items resolve in the same row geometry."
     }
   },
   "boundary_imports": [
