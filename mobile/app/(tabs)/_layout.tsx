@@ -1,4 +1,6 @@
+import { BlurView } from 'expo-blur';
 import { Tabs } from 'expo-router';
+import { StyleSheet } from 'react-native';
 
 import { AppIcon } from '@/components/ui';
 import { useTheme } from '@/theme';
@@ -16,16 +18,15 @@ import { useTheme } from '@/theme';
  * duplicate title and no per-screen top-inset inconsistency.
  *
  * Standard native tab bar — two equal SF-Symbol-style tabs, no raised center
- * button, semi-transparent background that approximates the system ultraThin
- * material (requires expo-blur BlurView for the true UIBlurEffect; using the
- * native translucent tab bar background for now — TODO when expo-blur is added).
+ * button. The bar is backed by a real `expo-blur` `BlurView` at the system
+ * `.ultraThin` material (FTY-185), so scrolled content dims/occludes beneath it
+ * as it does under any native iOS tab bar rather than reading fully legible
+ * through the labels. The material follows light/dark; the container stays
+ * `position: 'absolute'` with a transparent background so the blur shows and the
+ * content scrolls under it (screens reserve bottom inset for the last row).
  */
 export default function TabLayout() {
   const { colors, isDark } = useTheme();
-
-  const tabBarBg = isDark
-    ? 'rgba(28,28,30,0.92)'
-    : 'rgba(242,242,247,0.92)';
 
   return (
     <Tabs
@@ -33,11 +34,22 @@ export default function TabLayout() {
         headerShown: false,
         tabBarActiveTintColor: colors.tabActive,
         tabBarInactiveTintColor: colors.tabInactive,
+        tabBarBackground: () => (
+          <BlurView
+            tint={
+              isDark
+                ? 'systemUltraThinMaterialDark'
+                : 'systemUltraThinMaterialLight'
+            }
+            intensity={100}
+            style={StyleSheet.absoluteFill}
+          />
+        ),
         tabBarStyle: {
           position: 'absolute',
-          backgroundColor: tabBarBg,
+          backgroundColor: 'transparent',
           borderTopColor: colors.separator,
-          borderTopWidth: 0.5,
+          borderTopWidth: StyleSheet.hairlineWidth,
         },
       }}
     >

@@ -65,10 +65,14 @@ appId: com.fatty
 - assertNotVisible:
     text: ".*greek yogurt and banana.*"
 
-# Step 6: Tap Refresh to load the completed event and item-forward day feed
-#         (/log-events/by-date), which carries two resolved derived items.
-- tapOn:
-    text: "Refresh"
+# Step 6: Pull to refresh to load the completed event and item-forward day feed
+#         (/log-events/by-date), which carries two resolved derived items. FTY-185
+#         swapped the header Refresh button for the standard RefreshControl pull,
+#         so the flow drags the timeline down from its top to trigger the refetch.
+- swipe:
+    start: 50%, 35%
+    end: 50%, 90%
+    duration: 800
 
 # Step 7: Load-bearing assertion — the resolved value rows are visible,
 #         populated from the by-date feed's real derived items. ItemTimelineRow

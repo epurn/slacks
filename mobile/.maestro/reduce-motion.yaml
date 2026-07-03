@@ -50,9 +50,13 @@ appId: com.fatty
       id: today-timeline-with-entries
     timeout: 10000
 
-# Step 5: Refresh to load the item-forward by-date feed carrying the item.
-- tapOn:
-    text: "Refresh"
+# Step 5: Pull to refresh to load the item-forward by-date feed carrying the item.
+#         FTY-185 swapped the header Refresh button for the standard RefreshControl
+#         pull, so the flow drags the timeline down from its top to trigger it.
+- swipe:
+    start: 50%, 35%
+    end: 50%, 90%
+    duration: 800
 
 # Step 6: Under Reduce Motion the resolve beat is a simple fade — but the value
 #         rows still appear (no spring, no motion, same end state).

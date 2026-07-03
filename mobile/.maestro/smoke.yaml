@@ -67,8 +67,12 @@ appId: com.fatty
 - inputText: "coffee large"
 - tapOn:
     text: "Add entry"
-- tapOn:
-    text: "Refresh"
+# FTY-185 swapped the header Refresh button for the standard RefreshControl pull,
+# so the flow drags the timeline down from its top to trigger the refetch.
+- swipe:
+    start: 50%, 35%
+    end: 50%, 90%
+    duration: 800
 - extendedWaitUntil:
     visible:
       text: ".*120 of 2,000 kcal, 6 percent, 1,880 remaining.*"

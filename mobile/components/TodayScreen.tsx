@@ -1,4 +1,11 @@
-import { Modal, Pressable, ScrollView, StyleSheet } from "react-native";
+import { useCallback, useState } from "react";
+import {
+  Modal,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
@@ -26,7 +33,7 @@ import {
   saveFood as saveFoodApi,
   searchSavedFoods as searchSavedFoodsApi,
 } from "@/api/savedFoods";
-import { AppIcon, ScreenHeader } from "@/components/ui";
+import { AppIcon, ScreenHeader, TabBarScrim } from "@/components/ui";
 import { BarcodeScannerScreen } from "@/components/BarcodeScannerScreen";
 import { ConnectionBanner } from "@/components/ConnectionBanner";
 import { DailySummary } from "@/components/DailySummary";
@@ -212,6 +219,27 @@ export function TodayScreen({
     now,
   });
 
+  // Pull-to-refresh (FTY-185): the standard iOS `RefreshControl` idiom replaces
+  // the old header refresh button. It reuses the existing `refresh` handler —
+  // only the trigger changes. The platform spinner should track a *pull*, not
+  // every load (the initial fetch and summary/timeline retries also drive
+  // `phase === "loading"`), so `refreshing` is its own state set on pull and
+  // cleared the moment that load settles. Clearing happens by adjusting state
+  // during render off a tracked phase transition (React's documented
+  // alternative to a setState-in-effect), not from an effect.
+  const [refreshing, setRefreshing] = useState(false);
+  const [trackedPhase, setTrackedPhase] = useState(phase);
+  if (phase !== trackedPhase) {
+    setTrackedPhase(phase);
+    if (refreshing && phase !== "loading") {
+      setRefreshing(false);
+    }
+  }
+  const onPullToRefresh = useCallback(() => {
+    setRefreshing(true);
+    refresh();
+  }, [refresh]);
+
   if (!session) {
     return <SignInRequired insetTop={insets.top + 24} />;
   }
@@ -268,33 +296,33 @@ export function TodayScreen({
           { paddingBottom: insets.bottom + 96 },
         ]}
         keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onPullToRefresh}
+            // VoiceOver reads the native refresh state; the label names the
+            // action for the pull gesture and the spinner.
+            accessibilityLabel="Refresh today"
+          />
+        }
       >
         <ScreenHeader
           title="Today"
           actions={
-            <>
+            // Refresh moved to a standard pull-to-refresh `RefreshControl` on the
+            // timeline (FTY-185) — the header no longer carries a manual-refresh
+            // button, keeping the dashboard chrome calm.
+            onPressProfile ? (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Refresh"
-                accessibilityState={{ disabled: phase === "loading" }}
-                disabled={phase === "loading"}
-                onPress={() => void refresh()}
+                accessibilityLabel="Open profile"
+                accessibilityHint="Opens profile and settings"
+                onPress={onPressProfile}
                 style={styles.headerAction}
               >
-                <AppIcon name="arrow.clockwise" size={20} color={colors.accent} />
+                <AppIcon name="gear" size={22} color={colors.text} />
               </Pressable>
-              {onPressProfile ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Open profile"
-                  accessibilityHint="Opens profile and settings"
-                  onPress={onPressProfile}
-                  style={styles.headerAction}
-                >
-                  <AppIcon name="gear" size={22} color={colors.text} />
-                </Pressable>
-              ) : null}
-            </>
+            ) : null
           }
         />
 
@@ -351,6 +379,14 @@ export function TodayScreen({
           onRetry={() => void refresh()}
         />
       </ScrollView>
+
+      {/* FTY-185: the dimming fade that occludes scrolled timeline content as it
+          slides beneath the floating, blurred tab bar. The native blur alone
+          doesn't guarantee content is illegible through the tab labels, so this
+          app-drawn gradient fades the last rows into the surface. Its height
+          matches the reserved bottom clearance above so the fade spans exactly
+          the zone content scrolls through before it reaches the bar. */}
+      <TabBarScrim height={insets.bottom + 96} />
 
       <TodaySheetHost
         apiSession={apiSession}

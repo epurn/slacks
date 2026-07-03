@@ -51,10 +51,14 @@ appId: com.fatty
       id: today-timeline-with-entries
     timeout: 10000
 
-# Step 5: Tap Refresh to load the item-forward day feed, which carries the
+# Step 5: Pull to refresh to load the item-forward day feed, which carries the
 #         entry's resolved derived item (the row the correction sheet opens on).
-- tapOn:
-    text: "Refresh"
+#         FTY-185 swapped the header Refresh button for the standard RefreshControl
+#         pull, so the flow drags the timeline down from its top to trigger it.
+- swipe:
+    start: 50%, 35%
+    end: 50%, 90%
+    duration: 800
 
 # Step 6: The resolved value row is visible, populated from the by-date feed.
 #         ItemTimelineRow exposes the collapsed a11y label "Oatmeal, 140 kcal".

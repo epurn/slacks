@@ -8,3 +8,4 @@ export type { ProvenancePresentation } from './ProvenanceIcon';
 export { AppIcon } from './AppIcon';
 export type { AppIconName } from './AppIcon';
 export { ScreenHeader } from './ScreenHeader';
+export { TabBarScrim } from './TabBarScrim';
