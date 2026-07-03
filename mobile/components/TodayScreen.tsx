@@ -75,7 +75,6 @@ import {
 import {
   useSession,
   toApiSession,
-  type ApiSession,
   type Session,
 } from "@/state/session";
 import {
@@ -316,10 +315,10 @@ export function TodayScreen({
   editItem?: typeof editDerivedItemApi;
   /**
    * Derived food/exercise items keyed by their `log_event_id`, rendered as
-   * editable surfaces beneath each entry (FTY-050). Seeds the map; the item-
-   * forward by-date feed (`loadEntries`, FTY-198) folds real server items in as
-   * events reach `completed`, and edits reconcile the server's returned item back
-   * into this map.
+   * `ItemTimelineRow`s that open the correction sheet on press (FTY-050). Seeds
+   * the map; the item-forward by-date feed (`loadEntries`, FTY-198) folds real
+   * server items in as events reach `completed`, and edits reconcile the
+   * server's returned item back into this map.
    */
   items?: Readonly<Record<string, readonly DerivedItem[]>>;
   useActive?: () => boolean;
@@ -1267,9 +1266,6 @@ export function TodayScreen({
           itemsByEvent={itemsByEvent}
           offlineStateById={offlineStateById}
           resolveAnimIds={resolveAnimIds}
-          session={apiSession}
-          editItem={editItem}
-          onItemChange={handleItemChange}
           onOpenItem={openItemSheet}
           onOpenProposal={handleReopenProposal}
           onOpenClarify={openClarifySheet}
@@ -1278,7 +1274,6 @@ export function TodayScreen({
           phase={phase}
           loadError={loadError}
           onRetry={() => void refresh()}
-          saveFood={saveFood}
         />
       </ScrollView>
 
@@ -1349,9 +1344,6 @@ function Timeline({
   itemsByEvent,
   offlineStateById,
   resolveAnimIds,
-  session,
-  editItem,
-  onItemChange,
   onOpenItem,
   onOpenProposal,
   onOpenClarify,
@@ -1360,7 +1352,6 @@ function Timeline({
   phase,
   loadError,
   onRetry,
-  saveFood,
 }: {
   events: readonly LogEventDTO[];
   itemsByEvent: Readonly<Record<string, readonly DerivedItem[]>>;
@@ -1368,9 +1359,6 @@ function Timeline({
   offlineStateById: ReadonlyMap<string, OutboxSyncState>;
   /** Event ids whose value row should ease in — the entry-resolve beat (FTY-181). */
   resolveAnimIds: ReadonlySet<string>;
-  session: ApiSession | null;
-  editItem: typeof editDerivedItemApi;
-  onItemChange: (item: DerivedItem) => void;
   onOpenItem: (item: DerivedItem, logPhrase: string) => void;
   /** Reopen the confirm sheet for an uncounted label proposal (FTY-197). */
   onOpenProposal: (item: DerivedFoodItemDTO) => void;
@@ -1382,7 +1370,6 @@ function Timeline({
   phase: Phase;
   loadError: string | null;
   onRetry: () => void;
-  saveFood: typeof saveFoodApi;
 }) {
   const { colors } = useTheme();
 
@@ -1446,15 +1433,11 @@ function Timeline({
           itemsByEvent={itemsByEvent}
           offlineStateById={offlineStateById}
           resolveAnimIds={resolveAnimIds}
-          session={session}
-          editItem={editItem}
-          onItemChange={onItemChange}
           onOpenItem={onOpenItem}
           onOpenProposal={onOpenProposal}
           onOpenClarify={onOpenClarify}
           onRetryFailed={onRetryFailed}
           onEditFailedAsText={onEditFailedAsText}
-          saveFood={saveFood}
           colors={colors}
         />
       ))}
@@ -1467,30 +1450,22 @@ function ClusterView({
   itemsByEvent,
   offlineStateById,
   resolveAnimIds,
-  session,
-  editItem,
-  onItemChange,
   onOpenItem,
   onOpenProposal,
   onOpenClarify,
   onRetryFailed,
   onEditFailedAsText,
-  saveFood,
   colors,
 }: {
   cluster: { anchorTime: string; events: readonly LogEventDTO[] };
   itemsByEvent: Readonly<Record<string, readonly DerivedItem[]>>;
   offlineStateById: ReadonlyMap<string, OutboxSyncState>;
   resolveAnimIds: ReadonlySet<string>;
-  session: ApiSession | null;
-  editItem: typeof editDerivedItemApi;
-  onItemChange: (item: DerivedItem) => void;
   onOpenItem: (item: DerivedItem, logPhrase: string) => void;
   onOpenProposal: (item: DerivedFoodItemDTO) => void;
   onOpenClarify: (event: LogEventDTO) => void;
   onRetryFailed: (event: LogEventDTO) => void;
   onEditFailedAsText: (event: LogEventDTO) => void;
-  saveFood: typeof saveFoodApi;
   colors: ReturnType<typeof useTheme>["colors"];
 }) {
   return (
@@ -1602,11 +1577,6 @@ function ClusterView({
               <EntryRow
                 key={event.id}
                 event={event}
-                items={[]}
-                session={session}
-                editItem={editItem}
-                onItemChange={onItemChange}
-                saveFoodFn={saveFood}
                 onPress={() => onOpenClarify(event)}
               />
             );
@@ -1619,11 +1589,6 @@ function ClusterView({
               <EntryRow
                 key={event.id}
                 event={event}
-                items={[]}
-                session={session}
-                editItem={editItem}
-                onItemChange={onItemChange}
-                saveFoodFn={saveFood}
                 onRetry={() => onRetryFailed(event)}
                 onEditAsText={() => onEditFailedAsText(event)}
               />
@@ -1661,17 +1626,7 @@ function ClusterView({
           // completed with no items and no in-flight resolve — an entry already
           // completed on initial load, or the rare estimate that produced nothing
           // to show → terminal status placeholder, not a permanent shimmer.
-          return (
-            <EntryRow
-              key={event.id}
-              event={event}
-              items={[]}
-              session={session}
-              editItem={editItem}
-              onItemChange={onItemChange}
-              saveFoodFn={saveFood}
-            />
-          );
+          return <EntryRow key={event.id} event={event} />;
         })}
       </View>
     </View>

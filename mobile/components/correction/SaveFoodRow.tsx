@@ -26,10 +26,7 @@ export function SaveFoodRow({
     <View style={styles.saveFoodSection}>
       <Pressable
         onPress={onSave}
-        style={[
-          styles.saveFoodButton,
-          { backgroundColor: status === "saved" ? colors.controlBackground : colors.controlBackground },
-        ]}
+        style={[styles.saveFoodButton, { backgroundColor: colors.controlBackground }]}
         accessibilityRole="button"
         accessibilityLabel="Save as food"
         disabled={disabled}

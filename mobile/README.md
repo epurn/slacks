@@ -8,8 +8,9 @@ non-terminal the timeline **auto-refreshes** it to its terminal status without a
 manual refresh (FTY-032, the ADR-0002 polling mechanism); a manual refresh is
 also provided.
 
-A resolved food/exercise item under an entry is **editable in place** (FTY-050):
-the user can correct calories, macros, servings, and exercise burn. Each edit
+A resolved food/exercise item under an entry is **correctable** (FTY-050):
+tapping it opens the correction sheet where the user can correct calories,
+macros, servings, and exercise burn. Each edit
 sends one `PATCH` per field to the FTY-051 edit endpoint and re-renders the
 **current** values the server returns — including the server-rescaled
 calories/macros from a servings edit (the UI never computes the rescale). Edits
@@ -39,7 +40,7 @@ app/                 file-based routes (Expo Router)
   profile.tsx        the profile capture route ("/profile")
 api/                 typed clients for the backend (config, profile, logEvents,
                      derivedItems)
-components/          presentational UI (TodayScreen, EntryRow, EditableItemRow,
+components/          presentational UI (TodayScreen, EntryRow, ItemTimelineRow,
                      StatusIcon, ProfileForm, ProfileScreen)
 state/               local state + pure logic (today.ts, derivedItems.ts,
                      polling.ts, useScreenActive.ts, profile.ts, session.ts)
@@ -58,11 +59,11 @@ restructuring the shell.
 
 `api/derivedItems.ts` is the typed client for the FTY-051 derived-item edit API
 (`PATCH …/derived-items/{type}/{id}`); `state/derivedItems.ts` holds the
-editable-item presentation logic: the per-type editable field vocabulary,
+correction presentation logic: the per-type editable field vocabulary,
 current-vs-estimated reading, the edited indicator predicate, value formatting,
 and the optimistic single-field apply (which never rescales locally).
-`components/EditableItemRow.tsx` is the editable item surface `EntryRow` renders
-beneath an entry. The item list endpoint is a later story, so `TodayScreen`
+`components/ItemTimelineRow.tsx` renders each resolved item in the timeline and
+opens `components/CorrectionSheet.tsx` on press for correction. `TodayScreen`
 seeds derived items from an injectable map keyed by event id and reconciles each
 edit's server result back into it.
 
