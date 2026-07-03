@@ -42,6 +42,7 @@ import {
   E2E_FAILED_RAW_TEXT,
   E2E_FAILED_EVENT,
   E2E_FAILED_RETRY_EVENT,
+  E2E_GOAL_TARGET_RESPONSE,
   E2E_SAVED_FOOD,
   E2E_SAVED_FOOD_EVENT_ID,
   E2E_SAVED_FOOD_ITEM_ID,
@@ -69,7 +70,7 @@ import { toApiSession } from '@/state/session';
 // eslint-disable-next-line import/first
 import { getProfile } from '@/api/profile';
 // eslint-disable-next-line import/first
-import { getTarget } from '@/api/goals';
+import { createGoal, getTarget } from '@/api/goals';
 // eslint-disable-next-line import/first
 import {
   listTodayLogEvents,
@@ -355,6 +356,21 @@ describe('E2E mock serves the URLs the real API clients request', () => {
   it('getTarget resolves to the target fixture', async () => {
     const target = await getTarget(apiSession, mockFetch);
     expect(target.calories.effective).toBe(2000);
+  });
+
+  // FTY-182 profile flow: saving a goal edit under the native header POSTs
+  // /goal via the real createGoal client and must resolve to the reveal the
+  // mini-target-reveal renders — proving the mock answers the goal create the
+  // app actually makes (a 404 here would silently break the profile.yaml save).
+  it('createGoal resolves to the goal + target reveal fixture', async () => {
+    const reveal = await createGoal(
+      apiSession,
+      { direction: 'maintain' },
+      mockFetch,
+    );
+    expect(reveal.goal.id).toBe(E2E_GOAL_TARGET_RESPONSE.goal.id);
+    expect(reveal.target.calories).toBe(2000);
+    expect(reveal.clamp.clamped).toBe(false);
   });
 
   it('listTodayLogEvents resolves to an empty timeline (with the ?day= query)', async () => {

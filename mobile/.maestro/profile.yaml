@@ -1,0 +1,72 @@
+# FTY-182 profile flow: open Profile from Today, prove the reachable native-header
+# user path end-to-end.
+#
+# The route unit test (__tests__/profile-route.test.tsx) stubs SettingsScreen and
+# only inspects the Stack.Screen options, so it cannot prove the real wiring. This
+# flow drives the actual user path on a running device against the E2E fetch mock
+# (which serves /profile and /target — see e2e/fixtures.ts), so the grouped
+# settings content really loads under the native header:
+#   1. From Today, tap the header gear ("Open profile") — the route push.
+#   2. The native large-title header renders its "Profile" title, and the first
+#      grouped section ("YOU") mounts below it. A crashed or blank Profile, or
+#      content clipped under the header/status bar instead of inset, fails here.
+#   3. The existing edit → target-reveal flow still behaves under the new
+#      header: tapping the Goal row opens its inline editor (goal-edit-card),
+#      changing the goal and saving reveals the updated targets
+#      (mini-target-reveal). This is the full editing path the story requires be
+#      preserved, driven end-to-end against the goal-create mock.
+#   4. Done (headerRight) dismisses back to where the gear was opened — Today.
+#      This is the dismissal the story requires and the isolated unit test can
+#      only assert against a mocked router.
+#
+# Bundle ID: keep this literal so directory-level Maestro runs launch the app
+# under test (see smoke.yaml).
+appId: com.fatty
+---
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      id: today-screen
+    timeout: 15000
+
+# 1. Open Profile from the Today header gear (accessibilityLabel "Open profile").
+- tapOn:
+    text: "Open profile"
+
+# 2. The native header title renders, and the first grouped section mounts below
+#    it — proving the route wiring and that content is inset, not a blank/crashed
+#    screen or rows clipped under the status-bar clock.
+- extendedWaitUntil:
+    visible:
+      text: "Profile"
+    timeout: 10000
+- assertVisible:
+    text: "YOU"
+
+# 3. Existing edit → target-reveal flow still works under the new header: the
+#    Goal row (accessibilityLabel "Goal: …") opens its inline editor, and
+#    changing the goal + saving reveals the updated targets.
+- tapOn:
+    text: "Goal:.*"
+- assertVisible:
+    id: goal-edit-card
+# Change the goal direction (an actual edit), then save it.
+- tapOn:
+    text: "Maintain"
+- tapOn:
+    text: "Save goal"
+# The mini target-reveal appears — the goal-create round-trip completed and the
+# refetched target rendered, proving the editing path survives the new header.
+- extendedWaitUntil:
+    visible:
+      id: mini-target-reveal
+    timeout: 10000
+
+# 4. Done dismisses back to where the gear was opened — Today.
+- tapOn:
+    id: profile-done
+- extendedWaitUntil:
+    visible:
+      id: today-screen
+    timeout: 10000

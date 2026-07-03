@@ -32,6 +32,7 @@ import {
   E2E_SERVER_URL,
   E2E_FIXTURE_MAP,
   E2E_DAILY_SUMMARY,
+  E2E_GOAL_TARGET_RESPONSE,
   E2E_CLARIFY_EVENT,
   E2E_CLARIFICATION,
   E2E_CLARIFY_PROCESSING_EVENT,
@@ -443,6 +444,16 @@ export function createE2EMockFetch(): typeof fetch {
       const q = (queryParam(url, 'q') ?? '').trim().toLowerCase();
       const match = q.length > 0 && E2E_SAVED_FOOD.name.toLowerCase().includes(q);
       return json({ items: match ? [E2E_SAVED_FOOD] : [], limit: 10 });
+    }
+
+    // /goal — POST creates/replaces the active goal and returns the goal +
+    // target reveal (FTY-106). Backs the FTY-182 profile flow: saving a goal
+    // edit under the native header resolves to the mini target-reveal, then
+    // SettingsScreen refetches GET /target (served below) for the full macros.
+    // Only POST is answered; GET /goal still 404s so getActiveGoalDirection
+    // keeps returning null (an absent goal) as the other flows expect.
+    if (pathEnd.endsWith('/goal') && method === 'POST') {
+      return json(E2E_GOAL_TARGET_RESPONSE, 201);
     }
 
     // Static fixtures (profile, target).
