@@ -4,7 +4,11 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { TodayScreen } from "./TodayScreen";
 import type { DailySummaryDTO } from "@/api/dailySummary";
 import type { DerivedFoodItemDTO } from "@/api/derivedItems";
-import { LogEventApiError, type LogEventDTO } from "@/api/logEvents";
+import {
+  LogEventApiError,
+  type LogEventDTO,
+  type LogEventEntryDTO,
+} from "@/api/logEvents";
 import type { SavedFoodDTO } from "@/api/savedFoods";
 import type { OutboxEntry, OutboxStore } from "@/state/outbox";
 import type { Session } from "@/state/session";
@@ -76,6 +80,18 @@ jest.mock("expo-camera", () => {
 jest.mock("expo-linking", () => ({
   openSettings: jest.fn().mockResolvedValue(undefined),
 }));
+
+// The item-forward by-date feed (FTY-198) is read from a real endpoint by
+// default (FTY-180). Stub it to an empty day so tests that don't exercise item
+// rows stay hermetic — no real fetch — while tests that do pass an explicit
+// `loadEntries` prop that overrides this default.
+jest.mock("@/api/logEvents", () => {
+  const actual = jest.requireActual("@/api/logEvents");
+  return {
+    ...actual,
+    listTodayLogEventEntries: jest.fn().mockResolvedValue([]),
+  };
+});
 
 const SESSION: Session = {
   serverUrl: "https://api.example.test",
@@ -149,6 +165,21 @@ function textContent(tree: ReactTestRenderer): string {
 
 function hasA11yLabel(tree: ReactTestRenderer, label: string): boolean {
   return tree.root.findAll((n) => n.props.accessibilityLabel === label).length > 0;
+}
+
+/**
+ * Count pending/processing skeleton rows (FTY-180) by their host container —
+ * `accessibilityRole="progressbar"` plus the status label. Matching on both
+ * props (not just the label) avoids double-counting the `ItemTimelineRow`
+ * composite fiber, whose own props also carry `accessibilityLabel` alongside
+ * the host `View` it renders.
+ */
+function countPendingRows(tree: ReactTestRenderer, label: string): number {
+  return tree.root.findAll(
+    (n) =>
+      n.props.accessibilityRole === "progressbar" &&
+      n.props.accessibilityLabel === label,
+  ).length;
 }
 
 function typeInto(tree: ReactTestRenderer, label: string, value: string): void {
@@ -243,7 +274,9 @@ describe("TodayScreen", () => {
     expect(load).toHaveBeenCalledTimes(1);
     const content = textContent(tree);
     expect(content).toContain("Oatmeal");
-    expect(content).toContain("Cold brew");
+    // The pending entry renders a skeleton, not its raw text (FTY-180) — the
+    // "thinking" state fills in place with no literal "Waiting"/"thinking" copy.
+    expect(content).not.toContain("Cold brew");
     // Pending and completed are distinguished by accessible status labels.
     expect(hasA11yLabel(tree, "Logged")).toBe(true);
     expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
@@ -272,10 +305,12 @@ describe("TodayScreen", () => {
     expect(textContent(tree)).toContain("Your session has expired.");
     expect(hasA11yLabel(tree, "Try again")).toBe(true);
 
-    // Retrying re-fetches and renders the recovered day.
+    // Retrying re-fetches and renders the recovered day. The recovered entry is
+    // pending, so it renders as a skeleton (FTY-180) rather than its raw text —
+    // the accessible status label is the proof the day reloaded.
     press(tree, "Try again");
     await act(async () => {});
-    expect(textContent(tree)).toContain("Oatmeal");
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
   });
 
   it("shows a submitted entry immediately as pending, then reconciles", async () => {
@@ -307,15 +342,22 @@ describe("TodayScreen", () => {
       "greek yogurt",
       expect.any(String),
     );
-    expect(textContent(tree)).toContain("greek yogurt");
+    // A pending entry renders as a skeleton, not its raw text (FTY-180) — the
+    // accessible status label is the acknowledgement that the row landed.
+    expect(textContent(tree)).not.toContain("greek yogurt");
     expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+    const pendingRowsBeforeReconcile = countPendingRows(tree, "Waiting to estimate");
 
     await act(async () => {
       resolveCreate(
         event({ id: "server-1", raw_text: "greek yogurt", status: "pending" }),
       );
     });
-    expect(textContent(tree)).toContain("greek yogurt");
+    // Reconciled to the server event in place — still the same single pending
+    // row, no duplicate spawned by the swap.
+    expect(countPendingRows(tree, "Waiting to estimate")).toBe(
+      pendingRowsBeforeReconcile,
+    );
   });
 
   it("rolls back and restores input when create fails", async () => {
@@ -399,7 +441,7 @@ describe("TodayScreen derived items", () => {
     expect(textContent(tree)).toContain("150 kcal");
   });
 
-  it("shows a pending placeholder row for an event without derived items yet", async () => {
+  it("shows a skeleton, not raw text, for a pending event without derived items yet", async () => {
     const load = jest
       .fn()
       .mockResolvedValue([event({ id: "b", raw_text: "Cold brew", status: "pending" })]);
@@ -413,9 +455,259 @@ describe("TodayScreen derived items", () => {
     );
     await act(async () => {});
 
-    // Pending events without items show a status placeholder (raw_text + status icon)
-    expect(textContent(tree)).toContain("Cold brew");
+    // Pending events without items render the "thinking" skeleton sized to the
+    // resolved row (FTY-180) — never the raw phrase or literal "Waiting" text.
+    expect(textContent(tree)).not.toContain("Cold brew");
+    expect(textContent(tree)).not.toContain("Waiting");
     expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+    expect(
+      tree.root.findAll((n) => n.props.accessibilityRole === "progressbar")
+        .length,
+    ).toBeGreaterThan(0);
+  });
+});
+
+// ─── Resolve in place: real by-date item feed + skeleton→value (FTY-180) ─────
+
+describe("TodayScreen resolve in place (FTY-180)", () => {
+  function entry(
+    e: LogEventDTO,
+    items: readonly DerivedFoodItemDTO[] = [],
+  ): LogEventEntryDTO {
+    return { event: e, items };
+  }
+
+  // RN wraps hosts in several forwardRef composites, so an absolute node count is
+  // brittle. `hasProgressbar` is a robust presence check; its absence (=== 0) is
+  // the clean signal that the pending skeleton is fully gone after a resolve.
+  const hasProgressbar = (tree: ReactTestRenderer): boolean =>
+    tree.root.findAll((n) => n.props.accessibilityRole === "progressbar").length >
+    0;
+
+  it("populates a completed entry's value rows from the real by-date feed (not the items prop)", async () => {
+    const completed = event({ id: "a", raw_text: "Greek yogurt", status: "completed" });
+    const load = jest.fn().mockResolvedValue([completed]);
+    // The value rows come only from the item-forward feed — no `items` override.
+    const loadEntries = jest
+      .fn()
+      .mockResolvedValue([entry(completed, [foodItem()])]);
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        loadEntries={loadEntries}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    expect(loadEntries).toHaveBeenCalled();
+    expect(textContent(tree)).toContain("Greek yogurt");
+    expect(textContent(tree)).toContain("150 kcal");
+  });
+
+  it("resolves the pending skeleton into the value row in place on the pending→completed poll", async () => {
+    jest.useFakeTimers();
+    try {
+      const pending = event({ id: "a", raw_text: "Greek yogurt", status: "pending" });
+      const completed = event({ id: "a", raw_text: "Greek yogurt", status: "completed" });
+      const load = jest
+        .fn()
+        .mockResolvedValueOnce([pending])
+        .mockResolvedValueOnce([completed]);
+      // The feed reports no items while pending, then the resolved item once done.
+      const loadEntries = jest
+        .fn()
+        .mockResolvedValueOnce([entry(pending, [])])
+        .mockResolvedValueOnce([entry(completed, [foodItem()])]);
+      const tree = mount(
+        <TodayScreen
+          session={SESSION}
+          load={load}
+          loadEntries={loadEntries}
+          useActive={() => true}
+          pollIntervalMs={1000}
+        />,
+      );
+      await act(async () => {});
+
+      // Pending: the shimmer skeleton, no value, no raw phrase.
+      expect(hasProgressbar(tree)).toBe(true);
+      expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+      expect(textContent(tree)).not.toContain("150 kcal");
+
+      // One poll later the entry is completed and its item feed has the value.
+      act(() => jest.advanceTimersByTime(1000));
+      await act(async () => {});
+
+      // The skeleton is fully gone (no lingering placeholder) and the resolved
+      // value row is now shown — the same row resolved in place (the shared-key
+      // instance-preservation is unit-tested in ItemTimelineRow.test.tsx).
+      expect(hasProgressbar(tree)).toBe(false);
+      expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("restores secondary item rows after a multi-item completion resolves from a pending skeleton", async () => {
+    jest.useFakeTimers();
+    try {
+      const pending = event({ id: "a", raw_text: "Greek yogurt and banana", status: "pending" });
+      const completed = event({
+        id: "a",
+        raw_text: "Greek yogurt and banana",
+        status: "completed",
+      });
+      const banana = foodItem({
+        id: "item-b",
+        name: "Banana",
+        calories: 105,
+      });
+      const load = jest
+        .fn()
+        .mockResolvedValueOnce([pending])
+        .mockResolvedValueOnce([completed]);
+      const loadEntries = jest
+        .fn()
+        .mockResolvedValueOnce([entry(pending, [])])
+        .mockResolvedValueOnce([entry(completed, [foodItem(), banana])]);
+      const tree = mount(
+        <TodayScreen
+          session={SESSION}
+          load={load}
+          loadEntries={loadEntries}
+          useActive={() => true}
+          pollIntervalMs={1000}
+        />,
+      );
+      await act(async () => {});
+
+      expect(hasProgressbar(tree)).toBe(true);
+      expect(textContent(tree)).not.toContain("Greek yogurt and banana");
+
+      act(() => jest.advanceTimersByTime(1000));
+      await act(async () => {});
+
+      expect(hasProgressbar(tree)).toBe(false);
+
+      act(() => jest.advanceTimersByTime(200));
+      await act(async () => {});
+
+      expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(true);
+      expect(hasA11yLabel(tree, "Banana, 105 kcal")).toBe(true);
+      expect(textContent(tree)).toContain("Banana");
+
+      press(tree, "Banana, 105 kcal");
+      expect(hasA11yLabel(tree, "Increase amount")).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("holds the skeleton (never an EntryRow placeholder) when the event-list poll resolves completed before the by-date feed populates items", async () => {
+    // Race: within one poll the event-list read resolves the entry to `completed`
+    // a microtask before the by-date item feed folds its value rows into
+    // `itemsByEvent`. In that intermediate render the row must stay the same
+    // loading ItemTimelineRow — never fall through to the raw-text EntryRow
+    // placeholder — so the pending→resolved transition is one in-place fade with
+    // zero layout shift (FTY-180 review). Resolving the two reads in a controlled
+    // order reproduces the exact interleave.
+    jest.useFakeTimers();
+    try {
+      const pending = event({
+        id: "a",
+        raw_text: "grilled cheese sandwich",
+        status: "pending",
+      });
+      const completed = event({
+        id: "a",
+        raw_text: "grilled cheese sandwich",
+        status: "completed",
+      });
+      let resolveLoad!: (events: readonly LogEventDTO[]) => void;
+      const load = jest
+        .fn()
+        .mockResolvedValueOnce([pending])
+        .mockReturnValueOnce(
+          new Promise((resolve) => {
+            resolveLoad = resolve;
+          }),
+        )
+        .mockResolvedValue([completed]);
+      const loadEntries = jest
+        .fn()
+        .mockResolvedValueOnce([entry(pending, [])])
+        .mockReturnValueOnce(new Promise<readonly LogEventEntryDTO[]>(() => null))
+        .mockResolvedValue([entry(completed, [foodItem()])]);
+      const tree = mount(
+        <TodayScreen
+          session={SESSION}
+          load={load}
+          loadEntries={loadEntries}
+          useActive={() => true}
+          pollIntervalMs={1000}
+        />,
+      );
+      await act(async () => {});
+
+      // Pending: shimmer skeleton, no value, no raw phrase.
+      expect(hasProgressbar(tree)).toBe(true);
+      expect(textContent(tree)).not.toContain("grilled cheese sandwich");
+
+      // Poll fires both reads. The event-list read wins the race: the entry is
+      // now completed but its items have NOT arrived yet. The row must remain the
+      // loading skeleton — not the raw-text EntryRow — with no value.
+      act(() => jest.advanceTimersByTime(1000));
+      await act(async () => {
+        resolveLoad([completed]);
+      });
+      expect(hasProgressbar(tree)).toBe(true);
+      expect(textContent(tree)).not.toContain("grilled cheese sandwich");
+      expect(textContent(tree)).not.toContain("150 kcal");
+
+      // Even past the fade window, the row holds shared geometry until items arrive.
+      act(() => jest.advanceTimersByTime(200));
+      await act(async () => {});
+      expect(hasProgressbar(tree)).toBe(true);
+      expect(textContent(tree)).not.toContain("grilled cheese sandwich");
+      expect(textContent(tree)).not.toContain("150 kcal");
+
+      expect(loadEntries).toHaveBeenCalledTimes(2);
+      act(() => jest.advanceTimersByTime(1000));
+      await act(async () => {});
+      expect(loadEntries).toHaveBeenCalledTimes(3);
+      expect(hasProgressbar(tree)).toBe(false);
+      expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("holds the skeleton (no un-animated value swap) if the item feed wins the poll race before the event completes", async () => {
+    // Race: the by-date feed already carries the resolved item while the event
+    // list still reports the event as pending. The value row must NOT surface
+    // through the optimistic fallback — it waits for the completed branch so the
+    // resolve always animates in place (FTY-180).
+    const pending = event({ id: "a", raw_text: "Greek yogurt", status: "pending" });
+    const load = jest.fn().mockResolvedValue([pending]);
+    const loadEntries = jest
+      .fn()
+      .mockResolvedValue([entry(pending, [foodItem()])]);
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        loadEntries={loadEntries}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    expect(hasProgressbar(tree)).toBe(true);
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+    expect(textContent(tree)).not.toContain("150 kcal");
+    expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(false);
   });
 });
 
@@ -1108,10 +1400,11 @@ describe("TodayScreen failed-parse rows (FTY-176)", () => {
       expect.any(String),
     );
     // The failed row is superseded in place by the new pending attempt — no
-    // stale duplicate, and it is now a waiting-to-estimate row.
+    // stale duplicate, and it is now a waiting-to-estimate skeleton row
+    // (FTY-180), not the raw text.
     expect(hasA11yLabel(tree, "Retry")).toBe(false);
     expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
-    expect(textContent(tree)).toContain("asdfghjkl");
+    expect(textContent(tree)).not.toContain("asdfghjkl");
   });
 
   it("Edit as text prefills the composer with the failed text and supersedes the row", async () => {
@@ -1239,25 +1532,40 @@ describe("TodayScreen polling", () => {
   afterEach(() => jest.useRealTimers());
 
   it("auto-refreshes a pending entry to its terminal status", async () => {
+    const pending = event({ id: "a", raw_text: "Oatmeal", status: "pending" });
+    const completed = event({ id: "a", raw_text: "Oatmeal", status: "completed" });
     const load = jest
       .fn()
-      .mockResolvedValueOnce([event({ id: "a", raw_text: "Oatmeal", status: "pending" })])
-      .mockResolvedValueOnce([event({ id: "a", raw_text: "Oatmeal", status: "completed" })]);
+      .mockResolvedValueOnce([pending])
+      .mockResolvedValueOnce([completed]);
+    const loadEntries = jest
+      .fn()
+      .mockResolvedValueOnce([{ event: pending, items: [] }])
+      .mockResolvedValueOnce([{ event: completed, items: [] }]);
     const tree = mount(
       <TodayScreen
         session={SESSION}
         load={load}
+        loadEntries={loadEntries}
         useActive={() => true}
         pollIntervalMs={1000}
       />,
     );
     await act(async () => {});
+    // Pending: the shimmer skeleton, not the raw phrase.
     expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
 
-    // One interval later the screen polls and reconciles to the terminal status.
+    // One interval later the screen polls, reaches the terminal status, and the
+    // no-item completed response gets only a bounded resolve hold.
     act(() => jest.advanceTimersByTime(1000));
     await act(async () => {});
     expect(load).toHaveBeenCalledTimes(2);
+    expect(hasA11yLabel(tree, "Estimating")).toBe(true);
+
+    act(() => jest.advanceTimersByTime(200));
+    await act(async () => {});
+    expect(hasA11yLabel(tree, "Estimating")).toBe(false);
+    expect(textContent(tree)).toContain("Oatmeal");
     expect(hasA11yLabel(tree, "Logged")).toBe(true);
 
     // Nothing is pending now, so polling stops — no further loads.
@@ -1292,10 +1600,19 @@ describe("TodayScreen polling", () => {
       .mockResolvedValueOnce([event({ id: "a", raw_text: "Oatmeal", status: "pending" })])
       .mockRejectedValueOnce(new LogEventApiError(500, "transient"))
       .mockResolvedValueOnce([event({ id: "a", raw_text: "Oatmeal", status: "completed" })]);
+    // The by-date item feed carries the resolved value; it only surfaces once the
+    // event-list poll recovers and reports `completed` (FTY-180).
+    const loadEntries = jest.fn().mockResolvedValue([
+      {
+        event: event({ id: "a", raw_text: "Oatmeal", status: "completed" }),
+        items: [foodItem({ name: "Oatmeal" })],
+      },
+    ]);
     const tree = mount(
       <TodayScreen
         session={SESSION}
         load={load}
+        loadEntries={loadEntries}
         useActive={() => true}
         pollIntervalMs={1000}
       />,
@@ -1308,10 +1625,12 @@ describe("TodayScreen polling", () => {
     await act(async () => {});
     expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
 
-    // The next tick recovers and reconciles to the terminal status.
+    // The next tick recovers, reconciles to the terminal status, and the value
+    // resolves in place over the skeleton's footprint.
     act(() => jest.advanceTimersByTime(1000));
     await act(async () => {});
-    expect(hasA11yLabel(tree, "Logged")).toBe(true);
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(false);
+    expect(hasA11yLabel(tree, "Oatmeal, 150 kcal")).toBe(true);
   });
 });
 
@@ -1373,17 +1692,22 @@ describe("TodayScreen barcode scanning", () => {
     const [, rawText] = create.mock.calls[0];
     expect(rawText).toBe("5901234123457");
 
-    // Entry appears immediately as pending before create resolves
-    expect(textContent(tree)).toContain("5901234123457");
+    // Entry appears immediately as pending before create resolves — a skeleton
+    // (FTY-180), not the scanned barcode text.
+    expect(textContent(tree)).not.toContain("5901234123457");
     expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+    const pendingRowsBeforeReconcile = countPendingRows(tree, "Waiting to estimate");
 
-    // Reconcile with server response
+    // Reconcile with server response — still the same single pending row, no
+    // duplicate spawned by the swap.
     await act(async () => {
       resolveCreate(
         event({ id: "server-1", raw_text: "5901234123457", status: "pending" }),
       );
     });
-    expect(textContent(tree)).toContain("5901234123457");
+    expect(countPendingRows(tree, "Waiting to estimate")).toBe(
+      pendingRowsBeforeReconcile,
+    );
   });
 
   it("rolls back and surfaces an error when the barcode submit fails", async () => {
@@ -1480,8 +1804,9 @@ describe("TodayScreen label capture", () => {
       press(tree, "Upload label");
     });
 
-    // The uploaded event appears on the timeline as pending.
-    expect(textContent(tree)).toContain("nutrition label photo");
+    // The uploaded event appears on the timeline as pending — a skeleton
+    // (FTY-180), not the event's raw text.
+    expect(textContent(tree)).not.toContain("nutrition label photo");
     expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
   });
 });
@@ -1950,13 +2275,15 @@ describe("TodayScreen typeahead suggestion bar", () => {
       press(tree, "Add entry");
     });
 
-    // Normal entry created; no synthetic item.
+    // Normal entry created; no synthetic item, so it renders the pending
+    // skeleton (FTY-180), not its raw text.
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ userId: SESSION!.userId }),
       "banana",
       expect.any(String),
     );
-    expect(textContent(tree)).toContain("banana");
+    expect(textContent(tree)).not.toContain("banana");
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
   });
 
   it("rolls back the synthetic item when create fails after a suggestion is tapped", async () => {
@@ -2026,6 +2353,9 @@ describe("TodayScreen composer — calm, status-first", () => {
         load={load}
         create={create}
         getClarification={emptyClarification()}
+        // The created entry's resolved value row comes from the item feed; seed it
+        // so the completed entry resolves in place into its value (FTY-180).
+        items={{ "server-1": [foodItem({ name: "greek yogurt" })] }}
         useActive={INACTIVE}
       />,
     );
@@ -2035,7 +2365,9 @@ describe("TodayScreen composer — calm, status-first", () => {
     press(tree, "Add entry");
 
     // Immediate acknowledgement in the canonical timeline; composer cleared.
-    expect(textContent(tree)).toContain("greek yogurt");
+    // The pending row is a skeleton (FTY-180), not the raw text — the
+    // accessible status label is the acknowledgement.
+    expect(textContent(tree)).not.toContain("greek yogurt");
     expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
     expect(inputValue(tree, "Log food or exercise")).toBe("");
     // There is exactly one timeline — no harvested "Added this session" feed.
@@ -2046,6 +2378,7 @@ describe("TodayScreen composer — calm, status-first", () => {
         event({ id: "server-1", raw_text: "greek yogurt", status: "completed" }),
       );
     });
+    // The completed entry surfaces as its resolved value row in the one timeline.
     expect(textContent(tree)).toContain("greek yogurt");
   });
 });

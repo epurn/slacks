@@ -4,7 +4,9 @@ import {
   createLogEvent,
   getLogEventClarification,
   listTodayLogEvents,
+  listTodayLogEventEntries,
   type LogEventDTO,
+  type LogEventEntryDTO,
   type LogEventSession,
 } from "./logEvents";
 
@@ -77,6 +79,42 @@ describe("listTodayLogEvents", () => {
     await expect(
       listTodayLogEvents(SESSION, undefined, fetchMock),
     ).rejects.toBeInstanceOf(LogEventApiError);
+  });
+});
+
+describe("listTodayLogEventEntries", () => {
+  const ENTRY: LogEventEntryDTO = { event: DTO, items: [] };
+
+  it("GETs the owner's by-date entries with a bearer token, defaulting the day", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(okResponse([ENTRY]));
+
+    const result = await listTodayLogEventEntries(SESSION, undefined, fetchMock);
+
+    expect(result).toEqual([ENTRY]);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      "https://api.example.test/api/users/11111111-1111-1111-1111-111111111111/log-events/by-date",
+    );
+    expect(init.method).toBe("GET");
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      "Bearer test-token",
+    );
+  });
+
+  it("includes an explicit day as a query parameter", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(okResponse([]));
+
+    await listTodayLogEventEntries(SESSION, "2026-06-26", fetchMock);
+
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toContain("/log-events/by-date?day=2026-06-26");
+  });
+
+  it("maps a 401 to a session-expired error", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(errorResponse(401));
+    await expect(
+      listTodayLogEventEntries(SESSION, undefined, fetchMock),
+    ).rejects.toMatchObject({ name: "LogEventApiError", status: 401 });
   });
 });
 

@@ -85,16 +85,25 @@ import {
   optimisticLogEvent,
   reconcileEvents,
   sortByNewest,
+  statusPresentation,
 } from "@/state/today";
 import { useScreenActive } from "@/state/useScreenActive";
 import { useSubmitLog, type SubmitLogBridge } from "@/state/useSubmitLog";
-import { useTheme, spacing, typeScale, radius } from "@/theme";
+import { useTheme, spacing, typeScale, radius, reducedMotionDuration } from "@/theme";
 import { entryResolvedHaptic } from "@/theme/haptics";
 
 /** Maximum raw-text length, mirrored from the FTY-030 contract. */
 const MAX_RAW_TEXT_LENGTH = 2000;
 
 type Phase = "loading" | "ready" | "error";
+
+function itemTimelineRowTestID(eventId: string): string {
+  return `item-timeline-row-${eventId}`;
+}
+
+function itemTimelineExtraRowTestID(eventId: string, itemId: string): string {
+  return `item-timeline-row-${eventId}-${itemId}`;
+}
 
 /** Map an API/network failure to a plain, nonjudgmental message. */
 function messageFor(error: unknown, kind: "load" | "save"): string {
@@ -134,9 +143,11 @@ const SAVED_FOOD_ITEM_ID_PREFIX = "saved-";
 
 /**
  * Whether an item is a locally-built synthetic saved-food row (FTY-053) rather
- * than a server-fed derived item. Used to gate the items-forward fallback to
- * true optimistic/saved-food rows so a server row can only surface through the
- * completed branch — the pending→completed transition that arms beat 1 (FTY-181).
+ * than a server-fed derived item (FTY-198). Used to gate the items-forward
+ * fallback to true optimistic/saved-food rows so a server row can only surface
+ * through the completed branch — the pending→completed transition that resolves
+ * the skeleton in place (FTY-180) and arms the entry-resolve beat (FTY-181),
+ * never a mid-poll swap keyed by item id.
  */
 function isSyntheticSavedFoodItem(item: DerivedItem): boolean {
   return item.id.startsWith(SAVED_FOOD_ITEM_ID_PREFIX);
@@ -232,13 +243,14 @@ function removeOptimisticEvent(
   });
 }
 
+function hasOwn(object: object, key: PropertyKey): boolean {
+  return Object.prototype.hasOwnProperty.call(object, key);
+}
+
 /**
- * Fold the server's item-forward day feed (FTY-198) into the items map, keyed by
- * event id. Only events the feed reports with derived items overwrite their entry
- * — an optimistic/saved-food synthetic item (its temp event id is absent from the
- * server feed) is preserved, and a transient empty feed never wipes a row. Returns
- * the previous map unchanged when nothing merged, so a no-op poll causes no
- * re-render.
+ * Fold the item-forward feed into the items map. Derived items replace prior
+ * rows; completed empty entries are recorded as a settled-empty `[]` without
+ * wiping existing items.
  */
 function mergeServerItems(
   prev: Readonly<Record<string, readonly DerivedItem[]>>,
@@ -249,6 +261,12 @@ function mergeServerItems(
     if (entry.items.length > 0) {
       next ??= { ...prev };
       next[entry.event.id] = entry.items;
+    } else if (
+      entry.event.status === "completed" &&
+      !hasOwn(prev, entry.event.id)
+    ) {
+      next ??= { ...prev };
+      next[entry.event.id] = [];
     }
   }
   return next ?? prev;
@@ -285,7 +303,8 @@ export function TodayScreen({
   /**
    * Item-forward day feed (FTY-198): each event with its derived value rows. Read
    * alongside `load` (which carries event envelopes only) so a completed entry's
-   * resolved value rows populate `itemsByEvent` from real server data — the
+   * resolved value rows populate `itemsByEvent` from real server data — the data
+   * path a pending row's skeleton resolves into in place (FTY-180) and the
    * entry-resolve beat's (FTY-181) real data path. Injectable for tests.
    */
   loadEntries?: typeof listTodayLogEventEntriesApi;
@@ -297,9 +316,10 @@ export function TodayScreen({
   editItem?: typeof editDerivedItemApi;
   /**
    * Derived food/exercise items keyed by their `log_event_id`, rendered as
-   * editable surfaces beneath each entry (FTY-050). The item list endpoint is a
-   * later story, so this defaults to none today; edits reconcile the server's
-   * returned item back into this map.
+   * editable surfaces beneath each entry (FTY-050). Seeds the map; the item-
+   * forward by-date feed (`loadEntries`, FTY-198) folds real server items in as
+   * events reach `completed`, and edits reconcile the server's returned item back
+   * into this map.
    */
   items?: Readonly<Record<string, readonly DerivedItem[]>>;
   useActive?: () => boolean;
@@ -554,6 +574,28 @@ export function TodayScreen({
     };
   }, [apiSession, load, reloadKey]);
 
+  // Load the item-forward day feed (FTY-198) beside the event list so completed
+  // entries can render value rows from real server data (FTY-180/181). A read
+  // failure is swallowed; the next poll retries without replacing the timeline.
+  useEffect(() => {
+    if (!apiSession) {
+      return;
+    }
+    let active = true;
+    loadEntries(apiSession).then(
+      (entries) => {
+        if (!active) return;
+        setItemsByEvent((prev) => mergeServerItems(prev, entries));
+      },
+      () => {
+        // Keep whatever items are already shown; the next poll retries.
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [apiSession, loadEntries, reloadKey]);
+
   // Load the daily summary (FTY-075): intake, macros, target, exercise burn.
   // Reuses the same session and polling mechanism as the timeline (FTY-032).
   useEffect(() => {
@@ -578,32 +620,6 @@ export function TodayScreen({
       active = false;
     };
   }, [apiSession, getDailySummary, reloadKey]);
-
-  // Load the item-forward day feed (FTY-198) and fold each entry's derived items
-  // into `itemsByEvent`, so a completed entry renders its resolved value rows
-  // (name · kcal · source) — the entry-resolve beat's real data path (FTY-181).
-  // A read failure is swallowed (like the summary read): the timeline still
-  // renders from the event list, just without the value rows, and the next poll
-  // retries. Runs alongside the event list rather than replacing it so the lean
-  // reconcile/poll/optimistic machinery keeps operating on event envelopes.
-  useEffect(() => {
-    if (!apiSession) {
-      return;
-    }
-    let active = true;
-    loadEntries(apiSession).then(
-      (entries) => {
-        if (!active) return;
-        setItemsByEvent((prev) => mergeServerItems(prev, entries));
-      },
-      () => {
-        // Keep whatever items are already shown; the next poll retries.
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [apiSession, loadEntries, reloadKey]);
 
   // Beat 1 detection (render phase). Compute the set of completed event ids and,
   // once seeded, diff it against the last-seen set: any newly-completed id is a
@@ -633,24 +649,35 @@ export function TodayScreen({
           for (const id of fresh) next.add(id);
           return next;
         });
-        // Advance the counter by one per freshly-resolved event so the effect
-        // below fires a distinct soft tap for each — a batch of completions in a
-        // single poll is once-per-event, not one tap total (FTY-181 review).
         setResolveBeatCount((n) => n + fresh.length);
       }
     }
   }
 
-  // Fire one entry-resolve haptic per newly-resolved event. The count advances by
-  // the number of fresh completions each render; firing the delta since the last
-  // run keeps it once-per-event across a multi-completion poll batch, and the ref
-  // — never advanced on the seed render — skips the mount tick.
+  // Fire one entry-resolve haptic per newly-resolved event.
   useEffect(() => {
     const unfired = resolveBeatCount - firedResolveBeats.current;
     if (unfired <= 0) return;
     firedResolveBeats.current = resolveBeatCount;
     for (let i = 0; i < unfired; i++) entryResolvedHaptic();
   }, [resolveBeatCount]);
+
+  useEffect(() => {
+    if (resolveAnimIds.size === 0) return;
+    const timeout = setTimeout(() => {
+      setResolveAnimIds((prev) => {
+        let next: Set<string> | null = null;
+        for (const id of prev) {
+          if (hasOwn(itemsByEvent, id)) {
+            next ??= new Set(prev);
+            next.delete(id);
+          }
+        }
+        return next ?? prev;
+      });
+    }, reducedMotionDuration);
+    return () => clearTimeout(timeout);
+  }, [itemsByEvent, resolveAnimIds]);
 
   // Barcode scan entry point (FTY-063). Mirrors the text-composer submit flow:
   // dismiss the scanner, show the barcode as a pending optimistic entry, then
@@ -784,8 +811,8 @@ export function TodayScreen({
       },
     );
     // Refresh the item-forward feed too, so an entry that reached `completed`
-    // this tick shows its resolved value rows and the entry-resolve beat can
-    // fire on the transition (FTY-181/198).
+    // this tick shows its resolved value rows, the skeleton resolves in place,
+    // and the entry-resolve beat can fire on the transition (FTY-180/181/198).
     loadEntries(apiSession).then(
       (entries) => {
         setItemsByEvent((prev) => mergeServerItems(prev, entries));
@@ -995,13 +1022,22 @@ export function TodayScreen({
     });
   }, []);
 
-  // Poll while a non-terminal event is visible and the screen is active (the
-  // app is foregrounded and this route is focused). Pausing during an in-flight
-  // create lets that round-trip own the optimistic entry, avoiding a poll/create
-  // race; polling resumes automatically once it settles if work remains.
+  const hasFreshResolveAwaitingItems = useMemo(() => {
+    for (const id of resolveAnimIds) {
+      if (!hasOwn(itemsByEvent, id)) return true;
+    }
+    return false;
+  }, [itemsByEvent, resolveAnimIds]);
+
+  // Poll while an event is in flight, or while a fresh completion is still
+  // waiting for the item-forward feed to settle. That keeps the skeleton on the
+  // same row if `/log-events/by-date` lags the event list.
   const isActive = useActive();
   const shouldPoll =
-    phase === "ready" && isActive && !submitting && hasPendingWork(events);
+    phase === "ready" &&
+    isActive &&
+    !submitting &&
+    (hasPendingWork(events) || hasFreshResolveAwaitingItems);
   useIntervalPolling(shouldPoll, pollIntervalMs, pollOnce);
 
   // Offline-queued captures (FTY-104, harvested onto Today in FTY-147). Each
@@ -1480,34 +1516,61 @@ function ClusterView({
 
           const items = itemsByEvent[event.id] ?? [];
 
-          // Completed event with items → show item rows (items-forward).
-          // A `proposed` food item is an uncounted label parse (FTY-196): render
-          // it as a "not yet counted" row whose tap reopens the confirm sheet
-          // (FTY-197) — honestly surfaced, never silently counted. A resolved
-          // item taps into the correction/detail sheet.
+          // Completed items are item-forward: proposed rows reopen confirm,
+          // resolved rows open correction. Fresh multi-item resolves briefly
+          // summarize extras until the marker clears.
           if (event.status === "completed" && items.length > 0) {
-            // Beat 1 — entry resolve. The value row eases in once on a genuine
-            // pending→resolved transition (never for a `proposed` label parse,
-            // which is an uncounted confirm-me row, not a resolve).
+            // Beat 1 — only genuine pending→resolved counted rows animate.
             const animateResolve = resolveAnimIds.has(event.id);
-            return items.map((item) =>
-              item.item_type === "food" && item.status === "proposed" ? (
+            const rowTestID = itemTimelineRowTestID(event.id);
+            if (animateResolve && items.length > 1) {
+              const firstItem = items[0];
+              if (!firstItem) return null;
+              return firstItem.item_type === "food" && firstItem.status === "proposed" ? (
                 <ItemTimelineRow
-                  key={item.id}
-                  item={item}
+                  key={event.id}
+                  item={firstItem}
                   proposal
-                  onPress={() => onOpenProposal(item)}
+                  onPress={() => onOpenProposal(firstItem)}
+                  testID={rowTestID}
                 />
               ) : (
                 <ItemTimelineRow
-                  key={item.id}
+                  key={event.id}
+                  item={firstItem}
+                  additionalItems={items.slice(1)}
+                  needsClarification={false}
+                  onPress={() => onOpenItem(firstItem, event.raw_text)}
+                  animateResolve
+                  testID={rowTestID}
+                />
+              );
+            }
+            return items.map((item, index) => {
+              const key = index === 0 ? event.id : item.id;
+              const testID =
+                index === 0
+                  ? rowTestID
+                  : itemTimelineExtraRowTestID(event.id, item.id);
+              return item.item_type === "food" && item.status === "proposed" ? (
+                <ItemTimelineRow
+                  key={key}
+                  item={item}
+                  proposal
+                  onPress={() => onOpenProposal(item)}
+                  testID={testID}
+                />
+              ) : (
+                <ItemTimelineRow
+                  key={key}
                   item={item}
                   needsClarification={false}
                   onPress={() => onOpenItem(item, event.raw_text)}
                   animateResolve={animateResolve}
+                  testID={testID}
                 />
-              ),
-            );
+              );
+            });
           }
 
           // Optimistic / saved-food synthetic items (before the server feed
@@ -1515,9 +1578,10 @@ function ClusterView({
           // (FTY-053). A server-fed by-date item is never surfaced through this
           // fallback: it can only render via the completed branch above, so a
           // resolved value row always appears on the pending→completed
-          // transition that arms beat 1 (resolve animation + haptic) — never
-          // un-animated because the by-date feed won the poll race against the
-          // event-list poll, or the event-list poll failed (FTY-181 review).
+          // transition that resolves the skeleton in place (FTY-180) and arms
+          // beat 1 (resolve animation + haptic, FTY-181) — never un-animated
+          // because the by-date feed won the poll race against the event-list
+          // poll, or the event-list poll failed (FTY-181 review).
           const syntheticItems = items.filter(isSyntheticSavedFoodItem);
           if (syntheticItems.length > 0) {
             return syntheticItems.map((item) => (
@@ -1526,6 +1590,7 @@ function ClusterView({
                 item={item}
                 needsClarification={false}
                 onPress={() => onOpenItem(item, event.raw_text)}
+                testID={itemTimelineExtraRowTestID(event.id, item.id)}
               />
             ));
           }
@@ -1565,7 +1630,37 @@ function ClusterView({
             );
           }
 
-          // pending / processing / completed-with-no-items → status placeholder
+          // pending / processing with no resolved item yet → the "thinking"
+          // state: a Skeleton shimmer sized to the resolved ItemTimelineRow it
+          // will become (FTY-180), so the row resolves in place with no
+          // layout shift. Never the literal "Waiting"/"Estimating" text.
+          if (event.status === "pending" || event.status === "processing") {
+            return (
+              <ItemTimelineRow
+                key={event.id}
+                loading
+                accessibilityLabel={statusPresentation(event.status).accessibilityLabel}
+                testID={itemTimelineRowTestID(event.id)}
+              />
+            );
+          }
+
+          // Freshly completed and still waiting on by-date items: hold the same
+          // loading row. Items fade in; confirmed no-items falls through below.
+          if (resolveAnimIds.has(event.id)) {
+            return (
+              <ItemTimelineRow
+                key={event.id}
+                loading
+                accessibilityLabel={statusPresentation("processing").accessibilityLabel}
+                testID={itemTimelineRowTestID(event.id)}
+              />
+            );
+          }
+
+          // completed with no items and no in-flight resolve — an entry already
+          // completed on initial load, or the rare estimate that produced nothing
+          // to show → terminal status placeholder, not a permanent shimmer.
           return (
             <EntryRow
               key={event.id}
