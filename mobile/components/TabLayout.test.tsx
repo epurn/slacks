@@ -1,7 +1,7 @@
 import { StyleSheet } from "react-native";
 import { act, create } from "react-test-renderer";
 
-import TabLayout from "./_layout";
+import TabLayout from "@/app/(tabs)/_layout";
 import { ThemeProvider } from "@/theme";
 
 // Capture the `screenOptions` the layout hands to expo-router's `Tabs` so the
