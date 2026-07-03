@@ -41,7 +41,6 @@ import { Button } from '@/components/ui/Button';
 import {
   getTarget,
   createGoal,
-  getActiveGoalSummary,
   setTargetOverride,
   resetTargetOverride,
   GoalsApiError,
@@ -170,7 +169,6 @@ export interface SettingsScreenProps {
   getProfileFn?: typeof getProfile;
   putProfileFn?: typeof putProfile;
   createGoalFn?: typeof createGoal;
-  getActiveGoalSummaryFn?: typeof getActiveGoalSummary;
   setTargetOverrideFn?: typeof setTargetOverride;
   resetTargetOverrideFn?: typeof resetTargetOverride;
   /** Injectable on-device settings stores. */
@@ -196,7 +194,6 @@ export function SettingsScreen({
   getProfileFn = getProfile,
   putProfileFn = putProfile,
   createGoalFn = createGoal,
-  getActiveGoalSummaryFn = getActiveGoalSummary,
   setTargetOverrideFn = setTargetOverride,
   resetTargetOverrideFn = resetTargetOverride,
   settingsStore = fileAppSettingsStore,
@@ -208,7 +205,10 @@ export function SettingsScreen({
   const liveSession = useSession();
   const sessionController = useSessionController();
   const session = sessionOverride !== undefined ? sessionOverride : liveSession;
-  const { setGoalDirection: setKnownGoalDirection } = useGoalDirectionController();
+  const {
+    goalDirection: sessionGoalDirection,
+    setGoalDirection: setKnownGoalDirection,
+  } = useGoalDirectionController();
 
   const router = useRouter();
   const { colors } = useTheme();
@@ -271,22 +271,16 @@ export function SettingsScreen({
         if (e && e.status === 404) return null;
         throw e;
       }),
-      getActiveGoalSummaryFn(apiSession),
       settingsStore.getAppearance(),
       cadenceStore.getCadence(),
     ])
-      .then(([prof, tgt, goalSummary, app, cad]) => {
+      .then(([prof, tgt, app, cad]) => {
         if (!active) return;
         setProfile(prof);
         if (tgt === null) {
           setNoTarget(true);
         } else {
           setTarget(tgt);
-        }
-        if (goalSummary !== null) {
-          setGoalDirection(goalSummary.direction);
-          setGoalPace(goalSummary.pace ?? null);
-          setKnownGoalDirection(goalSummary.direction);
         }
         setAppearance(app);
         setCadence(cad ?? DEFAULT_CADENCE);
@@ -302,10 +296,7 @@ export function SettingsScreen({
     return () => {
       active = false;
     };
-  }, [
-    session, getProfileFn, getTargetFn, getActiveGoalSummaryFn,
-    settingsStore, cadenceStore, setKnownGoalDirection,
-  ]);
+  }, [session, getProfileFn, getTargetFn, settingsStore, cadenceStore]);
 
   // ── Mini reveal animation ─────────────────────────────────────────────────
 
@@ -331,12 +322,14 @@ export function SettingsScreen({
 
   // ── Goal edit handlers ────────────────────────────────────────────────────
 
+  const currentGoalDirection = goalDirection ?? sessionGoalDirection;
+
   const openGoalEdit = useCallback(() => {
     setActionError(null);
-    setEditDirection(goalDirection ?? 'loss');
+    setEditDirection(currentGoalDirection ?? 'loss');
     setEditPace(goalPace ?? 'steady');
     setEditingGoal(true);
-  }, [goalDirection, goalPace]);
+  }, [currentGoalDirection, goalPace]);
 
   // `faster` is a loss-only pace preset; `gain` rejects it (422). Clamp it back
   // to `steady` when leaving `loss` so the editor can never submit the
@@ -608,7 +601,9 @@ export function SettingsScreen({
   const isMetric = profile?.units_preference === 'metric';
 
   const goalIsActive = !noTarget && target !== null;
-  const goalDetail = goalIsActive ? goalSummaryDetail(goalDirection, goalPace) : 'Not set';
+  const goalDetail = goalIsActive
+    ? goalSummaryDetail(currentGoalDirection, goalPace)
+    : 'Not set';
   const formulaCopy = settingsFormulaCopy(profile?.metabolic_formula);
 
   if (!session) {

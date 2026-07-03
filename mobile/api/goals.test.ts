@@ -2,7 +2,6 @@ import {
   GoalsApiError,
   createGoal,
   getActiveGoalDirection,
-  getActiveGoalSummary,
   getTarget,
   resetTargetOverride,
   setTargetOverride,
@@ -126,15 +125,13 @@ describe("getTarget", () => {
   });
 });
 
-describe("getActiveGoalSummary", () => {
-  it("GETs the goal read model and returns its direction and pace", async () => {
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValue(okResponse({ direction: "gain", pace: "steady" }));
+describe("getActiveGoalDirection", () => {
+  it("GETs the goal read model and returns its direction", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(okResponse({ direction: "gain" }));
 
-    const result = await getActiveGoalSummary(SESSION, fetchMock);
+    const result = await getActiveGoalDirection(SESSION, fetchMock);
 
-    expect(result).toEqual({ direction: "gain", pace: "steady" });
+    expect(result).toBe("gain");
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(`${ENCODED_BASE}/goal`);
     expect(init.method).toBe("GET");
@@ -145,24 +142,14 @@ describe("getActiveGoalSummary", () => {
 
   it("maps a 404 (no active goal / fail-closed) to null, not an error", async () => {
     const fetchMock = jest.fn().mockResolvedValue(errorResponse(404));
-    await expect(getActiveGoalSummary(SESSION, fetchMock)).resolves.toBeNull();
+    await expect(getActiveGoalDirection(SESSION, fetchMock)).resolves.toBeNull();
   });
 
   it("still throws a GoalsApiError on a non-404 failure (e.g. 401)", async () => {
     const fetchMock = jest.fn().mockResolvedValue(errorResponse(401));
     await expect(
-      getActiveGoalSummary(SESSION, fetchMock),
+      getActiveGoalDirection(SESSION, fetchMock),
     ).rejects.toMatchObject({ name: "GoalsApiError", status: 401 });
-  });
-});
-
-describe("getActiveGoalDirection", () => {
-  it("returns only the direction from the goal summary", async () => {
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValue(okResponse({ direction: "gain", pace: "steady" }));
-
-    await expect(getActiveGoalDirection(SESSION, fetchMock)).resolves.toBe("gain");
   });
 });
 

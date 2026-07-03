@@ -24,6 +24,9 @@ jest.mock("expo-router", () => ({
   })),
 }));
 
+const mockSetKnownGoalDirection = jest.fn();
+let mockKnownGoalDirection: "loss" | "gain" | "maintain" | null = "loss";
+
 jest.mock("@/state/session", () => {
   const original = jest.requireActual<typeof import("@/state/session")>(
     "@/state/session",
@@ -40,6 +43,14 @@ jest.mock("@/state/session", () => {
     })),
   };
 });
+
+jest.mock("@/state/goalDirection", () => ({
+  useGoalDirectionController: jest.fn(() => ({
+    goalDirection: mockKnownGoalDirection,
+    setGoalDirection: mockSetKnownGoalDirection,
+    clearGoalDirection: jest.fn(),
+  })),
+}));
 
 jest
   .spyOn(AccessibilityInfo, "isReduceMotionEnabled")
@@ -69,8 +80,6 @@ const DERIVED_TARGET: TargetReadModel = {
   fat_g: { effective: 64, derived: 64, source: "derived" },
 };
 
-const ACTIVE_GOAL_SUMMARY = { direction: "loss" as const, pace: "steady" as const };
-
 const GOAL_TARGET_RESPONSE: GoalTargetResponse = {
   goal: {
     id: "aaaa",
@@ -96,6 +105,11 @@ const SAFE_AREA_METRICS = {
   frame: { x: 0, y: 0, width: 390, height: 844 },
   insets: { top: 47, left: 0, right: 0, bottom: 34 },
 };
+
+beforeEach(() => {
+  mockKnownGoalDirection = "loss";
+  mockSetKnownGoalDirection.mockClear();
+});
 
 function mockSettingsStore(): AppSettingsStore {
   return {
@@ -133,7 +147,6 @@ function renderSettings(
             session={SESSION}
             getProfileFn={jest.fn().mockResolvedValue(PROFILE)}
             getTargetFn={jest.fn().mockResolvedValue(DERIVED_TARGET)}
-            getActiveGoalSummaryFn={jest.fn().mockResolvedValue(ACTIVE_GOAL_SUMMARY)}
             putProfileFn={jest.fn().mockResolvedValue(PROFILE)}
             createGoalFn={jest.fn().mockResolvedValue(GOAL_TARGET_RESPONSE)}
             settingsStore={mockSettingsStore()}
@@ -179,15 +192,30 @@ function press(tree: ReactTestRenderer, label: string) {
 }
 
 describe("SettingsScreen FTY-190 copy and affordances", () => {
-  it("summarizes the loaded active goal with direction and pace", async () => {
-    const getActiveGoalSummaryFn = jest.fn().mockResolvedValue(ACTIVE_GOAL_SUMMARY);
-    const tree = renderSettings({ getActiveGoalSummaryFn });
+  it("updates the collapsed goal row with direction and pace after a saved goal edit", async () => {
+    const createGoalFn = jest.fn().mockResolvedValue(GOAL_TARGET_RESPONSE);
+    const getTargetFn = jest.fn().mockResolvedValue(DERIVED_TARGET);
+    const tree = renderSettings({ createGoalFn, getTargetFn });
     await act(async () => {});
 
-    expect(getActiveGoalSummaryFn).toHaveBeenCalledTimes(1);
+    expect(() => findPressable(tree, "Goal: Lose")).not.toThrow();
+    expect(textContent(tree)).not.toContain("Active");
+
+    await act(async () => {
+      press(tree, "Goal: Lose");
+    });
+    await act(async () => {
+      press(tree, "Save goal");
+    });
+    await act(async () => {});
+
+    expect(createGoalFn).toHaveBeenCalledWith(
+      expect.anything(),
+      { direction: "loss", pace: "steady" },
+    );
+    expect(mockSetKnownGoalDirection).toHaveBeenCalledWith("loss");
     expect(() => findPressable(tree, "Goal: Lose · Steady")).not.toThrow();
     expect(() => findPressable(tree, "Goal: Loading…")).toThrow();
-    expect(textContent(tree)).not.toContain("Active");
   });
 
   it("renders export and delete account as non-tappable coming-soon disclosures", async () => {

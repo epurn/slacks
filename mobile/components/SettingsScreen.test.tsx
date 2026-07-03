@@ -102,7 +102,6 @@ const DERIVED_TARGET: TargetReadModel = {
   carbs_g: { effective: 148, derived: 148, source: "derived" },
   fat_g: { effective: 64, derived: 64, source: "derived" },
 };
-const ACTIVE_GOAL_SUMMARY = { direction: "loss" as const, pace: "steady" as const };
 /** Target read-model with calorie override in force. */
 const OVERRIDDEN_CALORIE_TARGET: TargetReadModel = {
   calories: { effective: 2000, derived: 1800, source: "user" },
@@ -215,7 +214,6 @@ function renderSettings(
             session={SESSION}
             getProfileFn={jest.fn().mockResolvedValue(PROFILE)}
             getTargetFn={jest.fn().mockResolvedValue(DERIVED_TARGET)}
-            getActiveGoalSummaryFn={jest.fn().mockResolvedValue(ACTIVE_GOAL_SUMMARY)}
             putProfileFn={jest.fn().mockResolvedValue(PROFILE)}
             createGoalFn={jest.fn().mockResolvedValue(GOAL_TARGET_RESPONSE)}
             setTargetOverrideFn={
@@ -468,7 +466,7 @@ describe("Mini target-reveal", () => {
 
     // Open goal edit and save
     await act(async () => {
-      press(tree, "Goal: Lose · Steady");
+      press(tree, "Goal: Details unavailable");
     });
     await act(async () => {
       press(tree, "Save goal");
@@ -492,7 +490,7 @@ describe("Mini target-reveal", () => {
     await act(async () => {});
 
     await act(async () => {
-      press(tree, "Goal: Lose · Steady");
+      press(tree, "Goal: Details unavailable");
     });
     await act(async () => {
       press(tree, "Save goal");
@@ -862,12 +860,12 @@ describe("No sensitive values in logs", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("Goal row honesty", () => {
-  it("summarizes the loaded active goal when a target exists", async () => {
+  it("keeps an active goal neutral when only the target is loaded", async () => {
     const tree = renderSettings({
       getTargetFn: jest.fn().mockResolvedValue(DERIVED_TARGET),
     });
     await act(async () => {});
-    expect(() => findPressable(tree, "Goal: Lose · Steady")).not.toThrow();
+    expect(() => findPressable(tree, "Goal: Details unavailable")).not.toThrow();
     expect(() => findPressable(tree, "Goal: Loading…")).toThrow();
     expect(textContent(tree)).not.toContain("Active");
     expect(textContent(tree)).not.toContain("Not set");
@@ -900,7 +898,7 @@ describe("Goal editor pace validity", () => {
 
     // Open the goal editor (defaults to the loss direction).
     await act(async () => {
-      press(tree, "Goal: Lose · Steady");
+      press(tree, "Goal: Details unavailable");
     });
     // Pick the loss-only 'faster' pace, then switch the direction to gain.
     await act(async () => {
@@ -930,7 +928,7 @@ describe("Goal editor pace validity", () => {
     await act(async () => {});
 
     await act(async () => {
-      press(tree, "Goal: Lose · Steady");
+      press(tree, "Goal: Details unavailable");
     });
     await act(async () => {
       press(tree, "Gain");
@@ -1025,7 +1023,7 @@ describe("Mini-reveal clamp note", () => {
     const tree = renderSettings({ createGoalFn, getTargetFn });
     await act(async () => {});
     await act(async () => {
-      press(tree, "Goal: Lose · Steady");
+      press(tree, "Goal: Details unavailable");
     });
     await act(async () => {
       press(tree, "Save goal");
@@ -1051,7 +1049,7 @@ describe("Mini-reveal clamp note", () => {
     const tree = renderSettings({ createGoalFn, getTargetFn });
     await act(async () => {});
     await act(async () => {
-      press(tree, "Goal: Lose · Steady");
+      press(tree, "Goal: Details unavailable");
     });
     await act(async () => {
       press(tree, "Save goal");
