@@ -45,12 +45,13 @@ appId: com.fatty
 - assertVisible:
     text: "YOU"
 
-# 3. Existing edit → target-reveal flow still works under the new header: the
-#    Goal row (accessibilityLabel "Goal: …") opens its inline editor, and saving
-#    through the real Settings path reveals updated targets and updates the row
+# 3. A returning user's active goal summarises as its real direction on load
+#    (GET /goal → loss), never the dead "Details unavailable" state. The Goal
+#    row (accessibilityLabel "Goal: …") then opens its inline editor, and saving
+#    through the real Settings path reveals updated targets and upgrades the row
 #    to direction + pace copy.
 - assertVisible:
-    text: "Goal: Details unavailable"
+    text: "Goal: Lose"
 - tapOn:
     text: "Goal:.*"
 - assertVisible:

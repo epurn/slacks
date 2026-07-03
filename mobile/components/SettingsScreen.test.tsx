@@ -216,6 +216,7 @@ function renderSettings(
             getTargetFn={jest.fn().mockResolvedValue(DERIVED_TARGET)}
             putProfileFn={jest.fn().mockResolvedValue(PROFILE)}
             createGoalFn={jest.fn().mockResolvedValue(GOAL_TARGET_RESPONSE)}
+            getActiveGoalDirectionFn={jest.fn().mockResolvedValue(null)}
             setTargetOverrideFn={
               jest.fn().mockResolvedValue(OVERRIDDEN_CALORIE_TARGET)
             }

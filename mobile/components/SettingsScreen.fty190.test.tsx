@@ -80,13 +80,6 @@ const DERIVED_TARGET: TargetReadModel = {
   fat_g: { effective: 64, derived: 64, source: "derived" },
 };
 
-const UNMATCHED_TARGET: TargetReadModel = {
-  calories: { effective: 1800, derived: 1800, source: "derived" },
-  protein_g: { effective: 128, derived: 128, source: "derived" },
-  carbs_g: { effective: 148, derived: 148, source: "derived" },
-  fat_g: { effective: 64, derived: 64, source: "derived" },
-};
-
 const GOAL_TARGET_RESPONSE: GoalTargetResponse = {
   goal: {
     id: "aaaa",
@@ -112,7 +105,6 @@ const SAFE_AREA_METRICS = {
   frame: { x: 0, y: 0, width: 390, height: 844 },
   insets: { top: 47, left: 0, right: 0, bottom: 34 },
 };
-const CURRENT_DATE = new Date("2026-06-28T12:00:00Z");
 
 beforeEach(() => {
   mockKnownGoalDirection = "loss";
@@ -157,10 +149,10 @@ function renderSettings(
             getTargetFn={jest.fn().mockResolvedValue(DERIVED_TARGET)}
             putProfileFn={jest.fn().mockResolvedValue(PROFILE)}
             createGoalFn={jest.fn().mockResolvedValue(GOAL_TARGET_RESPONSE)}
+            getActiveGoalDirectionFn={jest.fn().mockResolvedValue("loss")}
             settingsStore={mockSettingsStore()}
             cadenceStore={mockCadenceStore()}
             notificationsAdapter={mockNotifications()}
-            currentDateFn={() => CURRENT_DATE}
             {...props}
           />
         </ThemeProvider>
@@ -201,25 +193,32 @@ function press(tree: ReactTestRenderer, label: string) {
 }
 
 describe("SettingsScreen FTY-190 copy and affordances", () => {
-  it("summarizes a loaded active goal with direction and pace before any edit", async () => {
+  it("summarizes a loaded active goal by its real direction, then adds pace after an in-session edit", async () => {
+    // Seam is empty on a cold launch: the direction must come from the
+    // authoritative goal fetch, not an in-session edit.
+    mockKnownGoalDirection = null;
     const createGoalFn = jest.fn().mockResolvedValue(GOAL_TARGET_RESPONSE);
-    const getTargetFn = jest.fn().mockResolvedValue(DERIVED_TARGET);
-    const tree = renderSettings({ createGoalFn, getTargetFn });
+    const getActiveGoalDirectionFn = jest.fn().mockResolvedValue("loss");
+    const tree = renderSettings({ createGoalFn, getActiveGoalDirectionFn });
     await act(async () => {});
 
-    expect(() => findPressable(tree, "Goal: Lose · Steady")).not.toThrow();
-    expect(() => findPressable(tree, "Goal: Lose")).toThrow();
+    // A loaded active goal reads as its real direction — never the dead
+    // `Details unavailable` state, never `Active`.
+    expect(() => findPressable(tree, "Goal: Lose")).not.toThrow();
     expect(() => findPressable(tree, "Goal: Details unavailable")).toThrow();
+    expect(() => findPressable(tree, "Goal: Loading…")).toThrow();
     expect(textContent(tree)).not.toContain("Active");
 
     await act(async () => {
-      press(tree, "Goal: Lose · Steady");
+      press(tree, "Goal: Lose");
     });
     await act(async () => {
       press(tree, "Save goal");
     });
     await act(async () => {});
 
+    // Pace is only known once it is chosen this session; the row then upgrades
+    // to direction + pace.
     expect(createGoalFn).toHaveBeenCalledWith(
       expect.anything(),
       { direction: "loss", pace: "steady" },
@@ -229,14 +228,16 @@ describe("SettingsScreen FTY-190 copy and affordances", () => {
     expect(() => findPressable(tree, "Goal: Loading…")).toThrow();
   });
 
-  it("does not render a bare direction when loaded target data does not identify pace", async () => {
+  it("summarizes a maintain goal without a pace and never as a dead state", async () => {
+    mockKnownGoalDirection = null;
     const tree = renderSettings({
-      getTargetFn: jest.fn().mockResolvedValue(UNMATCHED_TARGET),
+      getActiveGoalDirectionFn: jest.fn().mockResolvedValue("maintain"),
     });
     await act(async () => {});
 
-    expect(() => findPressable(tree, "Goal: Details unavailable")).not.toThrow();
-    expect(() => findPressable(tree, "Goal: Lose")).toThrow();
+    expect(() => findPressable(tree, "Goal: Maintain")).not.toThrow();
+    expect(() => findPressable(tree, "Goal: Details unavailable")).toThrow();
+    expect(() => findPressable(tree, "Goal: Loading…")).toThrow();
     expect(textContent(tree)).not.toContain("Active");
   });
 

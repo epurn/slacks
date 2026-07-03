@@ -41,6 +41,7 @@ import { Button } from '@/components/ui/Button';
 import {
   getTarget,
   createGoal,
+  getActiveGoalDirection,
   setTargetOverride,
   resetTargetOverride,
   GoalsApiError,
@@ -85,10 +86,7 @@ import {
 } from '@/theme';
 import type { TargetReadModel } from '@/api/dailySummary';
 import type { ProfileDTO } from '@/api/profile';
-import {
-  goalSummaryDetail,
-  inferLoadedGoalPace,
-} from './settingsGoalSummary';
+import { goalSummaryDetail } from './settingsGoalSummary';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -153,6 +151,7 @@ export interface SettingsScreenProps {
   getProfileFn?: typeof getProfile;
   putProfileFn?: typeof putProfile;
   createGoalFn?: typeof createGoal;
+  getActiveGoalDirectionFn?: typeof getActiveGoalDirection;
   setTargetOverrideFn?: typeof setTargetOverride;
   resetTargetOverrideFn?: typeof resetTargetOverride;
   /** Injectable on-device settings stores. */
@@ -161,8 +160,6 @@ export interface SettingsScreenProps {
   notificationsAdapter?: NotificationsAdapter;
   /** App version string for the About row. */
   appVersion?: string;
-  /** Injectable clock for deterministic target-derived pace recovery tests. */
-  currentDateFn?: () => Date;
   /**
    * Callback invoked when the user changes the appearance preference so the
    * root ThemeProvider can be updated. Injectable for tests.
@@ -180,13 +177,13 @@ export function SettingsScreen({
   getProfileFn = getProfile,
   putProfileFn = putProfile,
   createGoalFn = createGoal,
+  getActiveGoalDirectionFn = getActiveGoalDirection,
   setTargetOverrideFn = setTargetOverride,
   resetTargetOverrideFn = resetTargetOverride,
   settingsStore = fileAppSettingsStore,
   cadenceStore = fileCadenceStore,
   notificationsAdapter = expoNotificationsAdapter,
   appVersion = '1.0.0',
-  currentDateFn = () => new Date(),
   onAppearanceChange,
 }: SettingsScreenProps = {}) {
   const liveSession = useSession();
@@ -258,10 +255,15 @@ export function SettingsScreen({
         if (e && e.status === 404) return null;
         throw e;
       }),
+      // Authoritative direction of the returning user's active goal so the
+      // collapsed Goal row summarises the real goal on a cold load instead of
+      // depending on an in-session edit. A load failure degrades to the
+      // in-memory cross-screen direction rather than blocking settings.
+      getActiveGoalDirectionFn(apiSession).catch(() => null),
       settingsStore.getAppearance(),
       cadenceStore.getCadence(),
     ])
-      .then(([prof, tgt, app, cad]) => {
+      .then(([prof, tgt, dir, app, cad]) => {
         if (!active) return;
         setProfile(prof);
         if (tgt === null) {
@@ -269,6 +271,7 @@ export function SettingsScreen({
         } else {
           setTarget(tgt);
         }
+        if (dir !== null) setGoalDirection(dir);
         setAppearance(app);
         setCadence(cad ?? DEFAULT_CADENCE);
       })
@@ -283,7 +286,14 @@ export function SettingsScreen({
     return () => {
       active = false;
     };
-  }, [session, getProfileFn, getTargetFn, settingsStore, cadenceStore]);
+  }, [
+    session,
+    getProfileFn,
+    getTargetFn,
+    getActiveGoalDirectionFn,
+    settingsStore,
+    cadenceStore,
+  ]);
 
   // ── Mini reveal animation ─────────────────────────────────────────────────
 
@@ -310,14 +320,10 @@ export function SettingsScreen({
   // ── Goal edit handlers ────────────────────────────────────────────────────
 
   const currentGoalDirection = goalDirection ?? sessionGoalDirection;
-  const currentGoalPace =
-    goalPace ??
-    inferLoadedGoalPace({
-      direction: currentGoalDirection,
-      profile,
-      target,
-      today: currentDateFn(),
-    });
+  // Pace is only known once the goal is created/edited this session; it is
+  // never persisted back or inferred from target numbers. When unknown, the
+  // collapsed row falls back to the direction summary.
+  const currentGoalPace = goalPace;
 
   const openGoalEdit = useCallback(() => {
     setActionError(null);
