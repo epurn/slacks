@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { Circle, Polyline, Svg } from "react-native-svg";
 
 import type { WeightEntryDTO } from "@/api/weightEntries";
 import type { UnitsPreference } from "@/state/profile";
@@ -27,9 +28,10 @@ interface WeightTrendChartProps {
 
 /**
  * Weight trend chart for FTY-074. Renders the user's logged weight entries as a
- * simple line chart over the fetched range, using React Native Views (no external
- * charting dependency). Handles loading, error, empty, and sparse single-point
- * states so the chart never looks broken.
+ * simple line chart over the fetched range, drawn with `react-native-svg`: the
+ * weight series is a single `Polyline` and the data points are `Circle`s. Handles
+ * loading, error, empty, and sparse single-point states so the chart never looks
+ * broken.
  *
  * Values are displayed in the user's preferred units; the canonical kg from
  * FTY-070 responses is converted at render time via `kgToDisplay`.
@@ -170,8 +172,28 @@ function ChartCanvas({
     v,
   }));
 
+  const linePoints = points.map((p) => `${p.x},${p.y}`).join(" ");
+
   return (
     <View style={{ height: CHART_H, width }}>
+      {/* Plot canvas: the weight line and its data-point dots. */}
+      <Svg width={width} height={CHART_H} style={StyleSheet.absoluteFill}>
+        {/* Weight series — one polyline through every point, in order */}
+        <Polyline
+          points={linePoints}
+          fill="none"
+          stroke={colors.accent}
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+
+        {/* Data point dots */}
+        {points.map((p, i) => (
+          <Circle key={`dot-${i}`} cx={p.x} cy={p.y} r={DOT_R} fill={colors.accent} />
+        ))}
+      </Svg>
+
       {/* Y-axis max label */}
       <Text
         style={[styles.axisLabel, { position: "absolute", top: PAD.top - 8, left: 0, width: PAD.left - 4 }]}
@@ -182,49 +204,6 @@ function ChartCanvas({
           style={[styles.axisLabel, { position: "absolute", top: PAD.top + plotH - 8, left: 0, width: PAD.left - 4 }]}
         >{`${minV} ${unit}`}</Text>
       ) : null}
-
-      {/* Line segments: thin rotated Views between adjacent data points */}
-      {points.slice(1).map((p, i) => {
-        const p0 = points[i];
-        const dx = p.x - p0.x;
-        const dy = p.y - p0.y;
-        const len = Math.sqrt(dx * dx + dy * dy);
-        const angle = Math.atan2(dy, dx) * (180 / Math.PI);
-        const cx = (p0.x + p.x) / 2;
-        const cy = (p0.y + p.y) / 2;
-        return (
-          <View
-            key={`seg-${i}`}
-            testID={`weight-segment-${i}`}
-            style={{
-              position: "absolute",
-              left: cx - len / 2,
-              top: cy - 1,
-              width: len,
-              height: 2,
-              backgroundColor: colors.accent,
-              transform: [{ rotate: `${angle}deg` }],
-            }}
-          />
-        );
-      })}
-
-      {/* Data point dots */}
-      {points.map((p, i) => (
-        <View
-          key={`dot-${i}`}
-          testID={`weight-dot-${i}`}
-          style={{
-            position: "absolute",
-            left: p.x - DOT_R,
-            top: p.y - DOT_R,
-            width: DOT_R * 2,
-            height: DOT_R * 2,
-            borderRadius: DOT_R,
-            backgroundColor: colors.accent,
-          }}
-        />
-      ))}
 
       {/* X-axis: first and last date */}
       <Text
