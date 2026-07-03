@@ -410,19 +410,23 @@ export function TodayScreen({
   >(() => new Set());
 
   // Beat 1 — entry resolve. Detect pending→`completed` (counted) transitions so a
-  // resolve fires the soft-tap haptic exactly once and eases the resolved value's
-  // row in. `seenCompleted` is `null` until the first events load seeds it, so an
-  // already-completed entry present on initial load never beats on mount. The
-  // detection runs in render (the "adjust state on prop change" pattern used
-  // elsewhere in this file), and a monotonic `resolveBeatSignal` hands the actual
-  // haptic to an effect — a side effect must not run during render.
+  // resolve fires the soft-tap haptic once per resolved event and eases the
+  // resolved value's row in. `seenCompleted` is `null` until the first events load
+  // seeds it, so an already-completed entry present on initial load never beats on
+  // mount. The detection runs in render (the "adjust state on prop change" pattern
+  // used elsewhere in this file), and a `resolveBeatCount` — advanced by the number
+  // of freshly-resolved events each reconciliation — hands the actual haptics to an
+  // effect (a side effect must not run during render). The effect fires the delta
+  // since it last ran, so a poll batch where several entries complete at once beats
+  // once per event, not one tap total (FTY-181 review).
   const [seenCompleted, setSeenCompleted] = useState<ReadonlySet<string> | null>(
     null,
   );
   const [resolveAnimIds, setResolveAnimIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  const [resolveBeatSignal, setResolveBeatSignal] = useState(0);
+  const [resolveBeatCount, setResolveBeatCount] = useState(0);
+  const firedResolveBeats = useRef(0);
 
   // The submit machine reads the latest selected saved food at submit time, and
   // each in-flight submit stashes its saved food by optimistic id so the right
@@ -629,17 +633,24 @@ export function TodayScreen({
           for (const id of fresh) next.add(id);
           return next;
         });
-        // Bump the signal so the effect below fires one soft tap for this resolve.
-        setResolveBeatSignal((n) => n + 1);
+        // Advance the counter by one per freshly-resolved event so the effect
+        // below fires a distinct soft tap for each — a batch of completions in a
+        // single poll is once-per-event, not one tap total (FTY-181 review).
+        setResolveBeatCount((n) => n + fresh.length);
       }
     }
   }
 
-  // Fire the entry-resolve haptic when the signal advances. Kept in an effect so
-  // the side effect never runs during render; the >0 guard skips the mount tick.
+  // Fire one entry-resolve haptic per newly-resolved event. The count advances by
+  // the number of fresh completions each render; firing the delta since the last
+  // run keeps it once-per-event across a multi-completion poll batch, and the ref
+  // — never advanced on the seed render — skips the mount tick.
   useEffect(() => {
-    if (resolveBeatSignal > 0) entryResolvedHaptic();
-  }, [resolveBeatSignal]);
+    const unfired = resolveBeatCount - firedResolveBeats.current;
+    if (unfired <= 0) return;
+    firedResolveBeats.current = resolveBeatCount;
+    for (let i = 0; i < unfired; i++) entryResolvedHaptic();
+  }, [resolveBeatCount]);
 
   // Barcode scan entry point (FTY-063). Mirrors the text-composer submit flow:
   // dismiss the scanner, show the barcode as a pending optimistic entry, then

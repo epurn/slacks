@@ -790,6 +790,7 @@ function AmountStepper({
         </Text>
         <Pressable
           onPress={onStepUp}
+          testID="today-correction-increase"
           style={[styles.stepperButton, { backgroundColor: colors.controlBackground }]}
           accessibilityLabel="Increase amount"
           accessibilityRole="button"

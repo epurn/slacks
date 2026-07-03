@@ -67,16 +67,25 @@ appId: com.fatty
 - tapOn:
     text: ".*Oatmeal, 140 kcal.*"
 
-# Step 8: The correction sheet opened data-present — the portion stepper is here.
+# Step 8: The correction sheet opened data-present. Assert the "Portion" section
+#         label first (a plain, always-rendered Text — the most reliable open
+#         marker), so a sheet that never opened fails here with a clear signal,
+#         then wait for the portion stepper by its stable testID rather than the
+#         button's accessibility label — the robust selector the other flows use
+#         (add-a-detail-row, clarify-question), resilient to Modal-render timing.
 - extendedWaitUntil:
     visible:
-      text: "Increase amount"
+      text: "Portion"
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      id: "today-correction-increase"
     timeout: 10000
 
 # Step 9: Step the portion up — a successful PATCH commits the correction, which
 #         is what fires the correction-saved beat (haptic + confirmation pulse).
 - tapOn:
-    text: "Increase amount"
+    id: "today-correction-increase"
 
 # Step 10: Load-bearing assertion — the sheet shows the server-recomputed value
 #          (175 kcal for the larger portion). It appears only once the correction

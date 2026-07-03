@@ -2353,6 +2353,47 @@ describe("TodayScreen — beat 1: entry resolve (FTY-181)", () => {
       jest.useRealTimers();
     }
   });
+
+  it("fires once per event when two pending entries resolve in the same reconciliation", async () => {
+    jest.useFakeTimers();
+    try {
+      // Two entries are pending on the first load, then both reconcile to
+      // completed in the SAME poll batch. The resolve beat is once-per-event, so
+      // a batch of two fresh completions must fire two soft taps — not one tap
+      // coalesced across the batch (FTY-181 review).
+      const pendingA = event({ id: "a", raw_text: "Oatmeal", status: "pending" });
+      const pendingB = event({ id: "b", raw_text: "Yogurt", status: "pending" });
+      const completedA = event({ id: "a", raw_text: "Oatmeal", status: "completed" });
+      const completedB = event({ id: "b", raw_text: "Yogurt", status: "completed" });
+      const load = jest
+        .fn()
+        .mockResolvedValueOnce([pendingA, pendingB])
+        .mockResolvedValue([completedA, completedB]);
+      mount(
+        <TodayScreen
+          session={SESSION}
+          load={load}
+          useActive={() => true}
+          pollIntervalMs={1000}
+        />,
+      );
+      await act(async () => {});
+      // Both seeded pending on the first load — nothing resolved yet.
+      expect(mockEntryResolvedHaptic).not.toHaveBeenCalled();
+
+      // One poll reconciles BOTH entries to completed at once → two beats.
+      act(() => jest.advanceTimersByTime(1000));
+      await act(async () => {});
+      expect(mockEntryResolvedHaptic).toHaveBeenCalledTimes(2);
+
+      // A further poll returning the same completed pair must not re-fire.
+      act(() => jest.advanceTimersByTime(1000));
+      await act(async () => {});
+      expect(mockEntryResolvedHaptic).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });
 
 describe("TodayScreen — beat 3: target reached through the real screen (FTY-181)", () => {
