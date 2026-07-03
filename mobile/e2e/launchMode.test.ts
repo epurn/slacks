@@ -60,6 +60,10 @@ import {
   E2E_TARGET_RAW_TEXT,
   E2E_TARGET_EVENT_ID,
   E2E_TARGET_ITEM,
+  E2E_OCCLUSION_RAW_TEXT,
+  E2E_OCCLUSION_EVENT_ID,
+  E2E_OCCLUSION_ITEMS,
+  E2E_OCCLUSION_TOTAL_CALORIES,
 } from './fixtures';
 // eslint-disable-next-line import/first
 import { formatWallClockTime } from '@/state/today';
@@ -921,6 +925,65 @@ describe('FTY-181 target-reached flow: stateful mock transitions', () => {
   });
 
   it('the target branch does not disturb the clarify phase machine', async () => {
+    const mockFetch = createE2EMockFetch();
+    const created = await createLogEvent(apiSession, 'coffee', undefined, mockFetch);
+    expect(created.status).toBe('needs_clarification');
+  });
+});
+
+// ─── FTY-185 tab-bar occlusion flow stateful mock ────────────────────────────
+//
+// Proves the data path tab-bar-occlusion.yaml relies on: the "big mixed plate"
+// seed resolves to a single completed event carrying a long, distinct list of
+// derived items — a timeline taller than one screen — so the flow can scroll its
+// rows under the floating tab bar. Keyed on its own raw_text, independent of the
+// resolve / correction / target / clarify machines.
+
+describe('FTY-185 tab-bar occlusion flow: stateful mock transitions', () => {
+  const apiSession = toApiSession(E2E_SESSION);
+
+  it('POST the occlusion seed returns a pending entry first', async () => {
+    const mockFetch = createE2EMockFetch();
+    const created = await createLogEvent(
+      apiSession,
+      E2E_OCCLUSION_RAW_TEXT,
+      undefined,
+      mockFetch,
+    );
+    expect(created.id).toBe(E2E_OCCLUSION_EVENT_ID);
+    expect(created.status).toBe('pending');
+  });
+
+  it('after refresh the feed carries one completed event with a screen-overflowing item list', async () => {
+    const mockFetch = createE2EMockFetch();
+    // Before the log the item-forward feed is empty (empty day).
+    expect(
+      await listTodayLogEventEntries(apiSession, '2026-01-01', mockFetch),
+    ).toHaveLength(0);
+    await createLogEvent(apiSession, E2E_OCCLUSION_RAW_TEXT, undefined, mockFetch);
+    // After the log, a pull-to-refresh GET sees the same event completed with the
+    // full derived-item list — one timeline row each, enough to scroll under the
+    // floating tab bar.
+    const entries = await listTodayLogEventEntries(apiSession, '2026-01-01', mockFetch);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.event.id).toBe(E2E_OCCLUSION_EVENT_ID);
+    expect(entries[0]?.items).toHaveLength(E2E_OCCLUSION_ITEMS.length);
+    // More rows than fit on a single simulator screen — the premise of the
+    // scroll-under-the-bar assertion.
+    expect(entries[0]?.items.length).toBeGreaterThanOrEqual(10);
+    // The first and last rows the flow anchors its scroll assertions on.
+    expect(entries[0]?.items[0]?.name).toBe('Scrambled eggs');
+    expect(entries[0]?.items.at(-1)?.name).toBe('Banana');
+    // The plain event list also lists the completed entry so a poll keeps the row.
+    const events = await listTodayLogEvents(apiSession, '2026-01-01', mockFetch);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.id).toBe(E2E_OCCLUSION_EVENT_ID);
+    // The day totals count the full plate.
+    const summary = await getDailySummary(apiSession, '2026-01-01', mockFetch);
+    expect(summary.intake.calories).toBe(E2E_OCCLUSION_TOTAL_CALORIES);
+  });
+
+  it('the occlusion branch does not disturb the clarify phase machine', async () => {
     const mockFetch = createE2EMockFetch();
     const created = await createLogEvent(apiSession, 'coffee', undefined, mockFetch);
     expect(created.status).toBe('needs_clarification');
