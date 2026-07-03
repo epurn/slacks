@@ -92,9 +92,21 @@ appId: com.fatty
     text: ".*mifflin_st_jeor.*"
 
 # 4. Units and Appearance segmented rows carry visible associated row labels.
+#    FTY-186's native segmented control changed the Units/Appearance row
+#    heights, so after scrolling to "Units" the "Appearance" row (directly
+#    below it in the same PREFERENCES card) can sit below the fold. Scroll to
+#    each row before asserting it rather than relying on the "Units" scroll to
+#    also bring "Appearance" into view.
 - scrollUntilVisible:
     element:
       text: "Units"
+    direction: DOWN
+    timeout: 10000
+- assertVisible:
+    text: "Units"
+- scrollUntilVisible:
+    element:
+      text: "Appearance"
     direction: DOWN
     timeout: 10000
 - assertVisible:

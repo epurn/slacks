@@ -1,4 +1,5 @@
-# FTY-194: Barcode scanner "Type it instead" fallback — flow-completion E2E.
+# FTY-194/FTY-225: Barcode scanner "Type it instead" fallback — flow-completion
+# E2E, driven to the resolved end state.
 #
 # The barcode surface must never dead-end: when a scan is unsupported or the
 # product isn't found, tapping "Type it instead" dismisses the full-screen
@@ -7,7 +8,8 @@
 # natural-language logging (design §3: "Barcode not found → fall back to the NL
 # composer (pre-filled)"). Renderer tests cover the wiring in isolation; this
 # flow proves the real mounted path — Today → open scanner → Type it instead →
-# pre-filled composer — end to end on the running app.
+# pre-filled composer → submit → resolved, counted item — end to end on the
+# running app.
 #
 # Camera note: the simulator has no camera, so `useCameraPermissions` never
 # leaves `undetermined` and the scanner's granted chrome would never render.
@@ -19,11 +21,18 @@
 # Flow:
 #   Today (empty day) → tap "Scan barcode" → scanner mounts with the
 #   "Point at a barcode" guidance → tap "Type it instead" → the scanner
-#   dismisses and the composer holds the seeded "1 serving of " starter.
+#   dismisses and the composer holds the seeded "1 serving of " starter →
+#   complete it ("greek yogurt") and submit → the entry lands pending
+#   (skeleton) → pull to refresh → the resolved "Greek yogurt, 130 kcal" row is
+#   on the timeline, the hero counts it, and the item's detail sheet shows its
+#   serving line ("1 serving" portion of the logged "1 serving of greek
+#   yogurt") — the resolved end state per docs/standards/testing-standards.md
+#   (FTY-225: a real resolved item, never a pending/fallback state).
 #
 # If the fallback were a dead end (scanner never dismissed, or the composer left
-# blank), the guidance would linger or the seed text would be absent and the
-# closing assertions would go red — the gap this flow guards.
+# blank), the guidance would linger or the seed text would be absent; if the
+# seeded entry never resolved to a counted item, the resolved-row / counted-hero
+# assertions would go red — the gaps this flow guards.
 #
 # Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
 # directory-level Maestro runs launch the installed app under test reliably.
@@ -71,8 +80,13 @@ appId: com.fatty
 #         packaged-food starter ("1 serving of "), the running start the fallback
 #         promises. A fallback that only closed the scanner (no seed) would leave
 #         the placeholder composer and fail here.
+#         Surrounding `.*` keeps the selector cross-platform: iOS exposes the
+#         composer as "<accessibilityLabel> <value>" in the accessibility tree
+#         ("Log food or exercise 1 serving of "), Android as the bare value, and
+#         Maestro text matching is a full-string regex — same fix as the
+#         composer selector in failed-parse.yaml / clarify.yaml.
 - assertVisible:
-    text: "1 serving of"
+    text: ".*1 serving of.*"
 
 # Step 8: Prove the composer is genuinely *focused*, not merely pre-filled. The
 #         fallback defers focus until the full-screen scanner Modal has finished
@@ -83,4 +97,61 @@ appId: com.fatty
 #         guards), the text would not append and the closing assertion goes red.
 - inputText: "greek yogurt"
 - assertVisible:
-    text: "1 serving of greek yogurt"
+    text: ".*1 serving of greek yogurt.*"
+
+# Step 9: Submit the completed manual entry. The mock (see createE2EMockFetch,
+#         keyed on the seeded "1 serving of greek yogurt" raw text) returns the
+#         stored event as pending first, so the entry lands as a skeleton row —
+#         reconciled to the server row id, counted as nothing yet.
+- tapOn:
+    text: "Add entry"
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-with-entries
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      id: "item-timeline-row-e2e-barcode-event-00000000-0000-0000-0000-000000000000"
+    timeout: 10000
+
+# Step 10: Pull to refresh to load the completed event and the item-forward
+#          by-date feed carrying the resolved packaged-food item (same
+#          RefreshControl drag as resolve.yaml, per the FTY-185 idiom).
+- swipe:
+    start: 50%, 35%
+    end: 50%, 90%
+    duration: 800
+
+# Step 11: Load-bearing assertion — the manual entry resolved to a real item row
+#          (name + calories via the row's accessibility label), not a skeleton
+#          or the raw phrase. The row keeps the same event-keyed id through the
+#          pending→resolved transition.
+- extendedWaitUntil:
+    visible:
+      text: ".*Greek yogurt, 130 kcal.*"
+    timeout: 10000
+- assertVisible:
+    id: "item-timeline-row-e2e-barcode-event-00000000-0000-0000-0000-000000000000"
+
+# Step 12: The resolved item is *counted* — the CalorieHero label includes its
+#          130 kcal against the 2,000 target, proving the entry flows through to
+#          the day totals, not just the row.
+- extendedWaitUntil:
+    visible:
+      text: ".*130 of 2,000 kcal.*"
+    timeout: 10000
+
+# Step 13: The resolved item shows its serving line. Tapping the row opens the
+#          detail sheet, which renders the logged "1 serving of greek yogurt"
+#          phrase in its provenance block and the item's own serving in the
+#          portion stepper ("Amount: 1 serving" — amount + unit from the
+#          resolved item, not the echoed input). The composer was cleared on
+#          submit, so neither text can match anything but the sheet.
+- tapOn:
+    text: ".*Greek yogurt, 130 kcal.*"
+- extendedWaitUntil:
+    visible:
+      text: ".*1 serving of greek yogurt.*"
+    timeout: 10000
+- assertVisible:
+    text: ".*Amount: 1 serving.*"
