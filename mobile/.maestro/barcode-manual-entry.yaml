@@ -1,0 +1,75 @@
+# FTY-194: Barcode scanner "Type it instead" fallback — flow-completion E2E.
+#
+# The barcode surface must never dead-end: when a scan is unsupported or the
+# product isn't found, tapping "Type it instead" dismisses the full-screen
+# scanner Modal and lands the user in the Today composer, pre-filled with an
+# editable packaged-food starter and focused — a running start into
+# natural-language logging (design §3: "Barcode not found → fall back to the NL
+# composer (pre-filled)"). Renderer tests cover the wiring in isolation; this
+# flow proves the real mounted path — Today → open scanner → Type it instead →
+# pre-filled composer — end to end on the running app.
+#
+# Camera note: the simulator has no camera, so `useCameraPermissions` never
+# leaves `undetermined` and the scanner's granted chrome would never render.
+# The E2E build defaults the permission hook to a granted stub
+# (E2E_CAMERA_PERMISSION_GRANTED, see launchMode.ts) — the hermetic equivalent
+# of the OS grant, mirroring the Reduce Motion override — so the reticle,
+# guidance, torch, and "Type it instead" affordance mount for real here.
+#
+# Flow:
+#   Today (empty day) → tap "Scan barcode" → scanner mounts with the
+#   "Point at a barcode" guidance → tap "Type it instead" → the scanner
+#   dismisses and the composer holds the seeded "1 serving of " starter.
+#
+# If the fallback were a dead end (scanner never dismissed, or the composer left
+# blank), the guidance would linger or the seed text would be absent and the
+# closing assertions would go red — the gap this flow guards.
+#
+# Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
+# directory-level Maestro runs launch the installed app under test reliably.
+appId: com.fatty
+---
+# Step 1: Launch in E2E mode. The mock starts with an empty, zero-intake day.
+- launchApp:
+    clearState: false
+
+# Step 2: Assert the app reaches Today and the timeline is in the ready state.
+- extendedWaitUntil:
+    visible:
+      id: today-screen
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-ready
+    timeout: 15000
+
+# Step 3: Open the barcode scanner from the composer's scan affordance.
+- tapOn:
+    text: "Scan barcode"
+
+# Step 4: The scanner mounts over the live feed. Its "Point at a barcode"
+#         guidance is the proof the granted chrome rendered (permission granted
+#         via the E2E stub), so the manual fallback is reachable.
+- extendedWaitUntil:
+    visible:
+      text: "Point at a barcode"
+    timeout: 10000
+
+# Step 5: Take the never-a-dead-end escape hatch.
+- tapOn:
+    text: "Type it instead"
+
+# Step 6: The scanner Modal dismisses — the guidance is gone and Today is back.
+- extendedWaitUntil:
+    notVisible:
+      text: "Point at a barcode"
+    timeout: 10000
+- assertVisible:
+    id: today-screen
+
+# Step 7: Load-bearing assertion — the composer is pre-filled with the editable
+#         packaged-food starter ("1 serving of "), the running start the fallback
+#         promises. A fallback that only closed the scanner (no seed) would leave
+#         the placeholder composer and fail here.
+- assertVisible:
+    text: "1 serving of"

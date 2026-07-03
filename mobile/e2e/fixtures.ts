@@ -6,6 +6,8 @@
  * machine paths, or private data.
  */
 
+import { type PermissionResponse, PermissionStatus } from 'expo';
+
 import type { SessionRecord } from '@/state/session';
 import type { ProfileDTO } from '@/api/profile';
 import type { DailySummaryDTO, TargetReadModel } from '@/api/dailySummary';
@@ -21,6 +23,25 @@ import type { SavedFoodDTO } from '@/api/savedFoods';
 import type { SourceCandidate } from '@/api/corrections';
 
 export const E2E_SERVER_URL = 'http://localhost:8000';
+
+/**
+ * Granted camera-permission response for the barcode-scanner E2E flow (FTY-194).
+ *
+ * The iOS simulator has no camera, so `useCameraPermissions` never leaves the
+ * `undetermined` state and the scanner's granted chrome — the reticle, torch,
+ * and the "Type it instead" fallback — never renders. This synthetic granted
+ * response is the hermetic equivalent of the OS permission grant (mirroring the
+ * Reduce Motion override in launchMode.ts): it lets `barcode-manual-entry.yaml`
+ * drive the real Today → scanner → "Type it instead" → pre-filled composer path
+ * without a device camera or a flaky system permission dialog. Fabricated for
+ * testing only; it carries no real permission state.
+ */
+export const E2E_CAMERA_PERMISSION_GRANTED: PermissionResponse = {
+  status: PermissionStatus.GRANTED,
+  granted: true,
+  canAskAgain: true,
+  expires: 'never',
+};
 
 /**
  * Synthetic session — NOT a real credential. The token is an obviously fake

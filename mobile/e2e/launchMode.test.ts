@@ -23,6 +23,7 @@ import {
   applyE2EReduceMotion,
   e2eSessionStore,
   e2eConnectionStore,
+  e2eCameraPermissionsHook,
   installE2EMockFetch,
   createE2EMockFetch,
   setupE2EMode,
@@ -313,6 +314,22 @@ describe('e2eConnectionStore', () => {
 
     await e2eConnectionStore.clear();
     expect(await e2eConnectionStore.load()).toBe(E2E_SERVER_URL);
+  });
+});
+
+// ─── e2eCameraPermissionsHook ────────────────────────────────────────────────
+
+describe('e2eCameraPermissionsHook', () => {
+  it('reports camera access already granted so the scanner chrome renders', () => {
+    const [permission] = e2eCameraPermissionsHook();
+    expect(permission?.granted).toBe(true);
+    expect(permission?.status).toBe('granted');
+  });
+
+  it('request and get resolve to the same granted response (never asks the OS)', async () => {
+    const [permission, request, get] = e2eCameraPermissionsHook();
+    await expect(request()).resolves.toEqual(permission);
+    await expect(get()).resolves.toEqual(permission);
   });
 });
 
