@@ -94,6 +94,17 @@ import { entryResolvedHaptic } from "@/theme/haptics";
 /** Maximum raw-text length, mirrored from the FTY-030 contract. */
 const MAX_RAW_TEXT_LENGTH = 2000;
 
+/**
+ * Composer seed for the barcode scanner's "Type it instead" fallback (FTY-194).
+ * The camera can't hand us a product name, so the fallback drops the user into
+ * the natural-language composer with an editable packaged-food starter — a
+ * running start, never a blank dead end (design §3: "Barcode not found → fall
+ * back to the NL composer (pre-filled)"). The trailing space leaves the caret
+ * ready for the product name. It asserts no nutrition and counts nothing until
+ * the user completes and submits it, so nothing is fabricated.
+ */
+const BARCODE_MANUAL_ENTRY_SEED = "1 serving of ";
+
 type Phase = "loading" | "ready" | "error";
 
 function itemTimelineRowTestID(eventId: string): string {
@@ -715,13 +726,18 @@ export function TodayScreen({
   );
 
   // "Type it instead" from the scanner (FTY-194). The barcode surface must never
-  // dead-end: dismiss the scanner and focus the composer so a failed/unsupported
-  // scan flows straight into natural-language logging. No scan data is carried —
-  // the composer keeps its current (empty) contents, just focused.
+  // dead-end: dismiss the scanner and land the user in a *pre-filled*, focused
+  // composer so a failed/unsupported scan flows straight into natural-language
+  // logging (design §3: "Barcode not found → fall back to the NL composer
+  // (pre-filled)"). The camera carries no scan data, so we seed a packaged-food
+  // starter the user completes — never a fabricated number, and it counts nothing
+  // until submitted. Anything the user had already typed is preserved, not
+  // clobbered; only an empty composer is seeded.
   const handleManualEntry = useCallback(() => {
     setScannerOpen(false);
+    if (text.trim() === "") setText(BARCODE_MANUAL_ENTRY_SEED);
     inputRef.current?.focus();
-  }, []);
+  }, [setText, text]);
 
   // Label capture upload (FTY-064 + FTY-196/197). The backend created and
   // extracted the event in-request; add the returned event to the timeline, then

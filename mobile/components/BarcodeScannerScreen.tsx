@@ -16,8 +16,9 @@
  * FTY-060 pipeline resolves it.
  *
  * The "Type it instead" affordance carries no scan data: it calls `onManualEntry`
- * so the host dismisses the scanner and lands the user in the Today composer
- * (focused) to type the product — never any partial/failed scan bytes.
+ * so the host dismisses the scanner and lands the user in the Today composer,
+ * pre-filled with an editable starter and focused, to type the product — never
+ * any partial/failed scan bytes.
  *
  * Security: camera stream ephemeral — no frames, no images, no URIs are
  * captured or sent. Only the barcode string passes through `onBarcodeScanned`.

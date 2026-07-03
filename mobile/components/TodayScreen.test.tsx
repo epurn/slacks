@@ -1739,7 +1739,7 @@ describe("TodayScreen barcode scanning", () => {
     expect(textContent(tree)).toContain("Log your first thing");
   });
 
-  it("'Type it instead' dismisses the scanner and focuses the composer (never a dead end)", async () => {
+  it("'Type it instead' dismisses the scanner and lands in a pre-filled, focused composer (never a dead end)", async () => {
     const load = jest.fn().mockResolvedValue([]);
     const tree = mount(
       <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
@@ -1763,10 +1763,31 @@ describe("TodayScreen barcode scanning", () => {
 
     press(tree, "Type it instead");
 
-    // The scanner is dismissed and the composer is focused so the user types the
-    // product — the barcode surface never dead-ends into a feed with only "close".
+    // The scanner is dismissed and the composer is pre-filled with an editable
+    // packaged-food starter AND focused, so the user finishes the product name —
+    // the barcode surface never dead-ends into a feed with only "close", and it
+    // never drops the user into a blank field (design §3: "Barcode not found →
+    // NL composer (pre-filled)").
     expect(hasA11yLabel(tree, "Close scanner")).toBe(false);
+    expect(inputValue(tree, "Log food or exercise")).toBe("1 serving of ");
     expect(focusSpy).toHaveBeenCalled();
+  });
+
+  it("'Type it instead' keeps text the user already typed instead of clobbering it", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
+    await act(async () => {});
+
+    // The user typed a partial entry before reaching for the scanner.
+    typeInto(tree, "Log food or exercise", "greek yogurt");
+
+    press(tree, "Scan barcode");
+    press(tree, "Type it instead");
+
+    // Their in-progress text is preserved — only an empty composer is seeded.
+    expect(inputValue(tree, "Log food or exercise")).toBe("greek yogurt");
   });
 });
 
