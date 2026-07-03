@@ -9,7 +9,7 @@
 import type { SessionRecord } from '@/state/session';
 import type { ProfileDTO } from '@/api/profile';
 import type { DailySummaryDTO, TargetReadModel } from '@/api/dailySummary';
-import type { GoalTargetResponse, PacePreset } from '@/api/goals';
+import type { GoalTargetResponse } from '@/api/goals';
 import type {
   LogEventDTO,
   LogEventEntryDTO,
@@ -83,14 +83,6 @@ export const E2E_GOAL_TARGET_RESPONSE: GoalTargetResponse = {
   provenance: { source: 'derived', basis: 'goal_and_metrics' },
   clamp: { clamped: false, reason: null },
 };
-
-/**
- * The pace preset the returning user's active goal (`GET /goal`) recovers on a
- * cold load. Paired with `E2E_GOAL_TARGET_RESPONSE.target.direction` (`loss`), it
- * lets the Settings Goal row summarise the real goal as `Lose · Steady` before any
- * in-session edit — the FTY-190 acceptance criterion the launch flow proves.
- */
-export const E2E_ACTIVE_GOAL_PACE: PacePreset = 'steady';
 
 /** Zero daily summary for an empty E2E day. */
 export const E2E_DAILY_SUMMARY: DailySummaryDTO = {

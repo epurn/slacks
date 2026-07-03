@@ -31,21 +31,16 @@ export type PacePreset = 'gentle' | 'steady' | 'faster';
 export type OverridableTargetKey = 'calories' | 'protein' | 'carbs' | 'fat';
 
 /**
- * The caller's current active goal, summarised (`GET /goal`, FTY-189/FTY-190).
+ * The direction of the caller's current active goal (`GET /goal`, FTY-189).
  *
- * The single authoritative source of a returning user's goal: neither the
- * daily-summary nor the target read-model carries direction or pace, and the
- * in-memory cross-screen seam only knows a goal created/edited *this* session.
- * Both fields are recovered server-side from the persisted trajectory — direction
- * from its sign, pace as the exact inverse of the band it was derived from — so a
- * cold launch reads the real goal. `pace` is `null` for a maintain goal or a
- * legacy goal off the band grid. Trends reads `direction` to colour the weight
- * delta by progress toward the goal; Settings reads both to summarise the Goal row
- * as direction + pace.
+ * The single authoritative source of a returning user's goal direction: neither
+ * the daily-summary nor the target read-model carries it, and the in-memory
+ * cross-screen seam only knows a direction created/edited *this* session. Trends
+ * reads this on mount so an existing goal colours the weight delta by progress
+ * toward the goal after a cold launch instead of reading as neutral.
  */
-export interface ActiveGoal {
+export interface ActiveGoalDirection {
   readonly direction: GoalDirection;
-  readonly pace: PacePreset | null;
 }
 
 /** Persisted goal representation returned by the goal endpoint. */
@@ -147,20 +142,19 @@ export async function createGoal(
 }
 
 /**
- * Read the caller's current active goal (direction + recovered pace), or `null`
- * when there is none (FTY-189/FTY-190). A `404` — the fail-closed "no active
- * goal" (or cross-user) response — is mapped to `null` rather than thrown: an
- * absent goal is an expected state (a user who has not set one), and the caller
- * treats `null` as an unknown/neutral goal, never a guessed default. `pace` is
- * `null` for a maintain goal or a legacy goal off the band grid. Any other status
- * still throws a `GoalsApiError`.
+ * Read the direction of the caller's current active goal, or `null` when there
+ * is none (FTY-189). A `404` — the fail-closed "no active goal" (or cross-user)
+ * response — is mapped to `null` rather than thrown: an absent goal is an
+ * expected state (a user who has not set one), and the caller treats `null` as an
+ * unknown/neutral direction, never a guessed default. Any other status still
+ * throws a `GoalsApiError`.
  */
-export async function getActiveGoal(
+export async function getActiveGoalDirection(
   session: GoalsSession,
   fetchImpl: typeof fetch = fetch,
-): Promise<ActiveGoal | null> {
+): Promise<GoalDirection | null> {
   try {
-    const model = await request<ActiveGoal>(
+    const model = await request<ActiveGoalDirection>(
       userScopedUrl(session, 'goal'),
       {
         method: 'GET',
@@ -170,26 +164,13 @@ export async function getActiveGoal(
         fetchImpl,
       },
     );
-    return { direction: model.direction, pace: model.pace ?? null };
+    return model.direction;
   } catch (error) {
     if (error instanceof GoalsApiError && error.status === 404) {
       return null;
     }
     throw error;
   }
-}
-
-/**
- * Read just the direction of the caller's active goal, or `null` when there is
- * none. A thin projection of {@link getActiveGoal} for callers (Trends) that only
- * colour by direction and never surface pace.
- */
-export async function getActiveGoalDirection(
-  session: GoalsSession,
-  fetchImpl: typeof fetch = fetch,
-): Promise<GoalDirection | null> {
-  const goal = await getActiveGoal(session, fetchImpl);
-  return goal ? goal.direction : null;
 }
 
 /**

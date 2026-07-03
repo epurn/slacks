@@ -39,7 +39,7 @@
       "kind": "source",
       "lane": "mobile",
       "lines": 2003,
-      "reason": "Existing over-threshold first-party source file at FTY-200 baseline; +4 in FTY-189 publishing the saved goal's direction to the cross-screen goalDirection controller so Trends' headline delta can be goal-aware; +4 in FTY-182 switching the scroll view to the native large-title header's automatic content inset (dropping the hand-padded status-bar magic number) with a comment explaining why; +8 in FTY-190 hydrating the active goal's direction + pace from the extended GET /goal read-model so the collapsed Goal row summarises a returning user's goal as direction + pace on a cold load (pace is recovered server-side from the persisted trajectory, not cached on-device or inferred client-side)."
+      "reason": "Existing over-threshold first-party source file at FTY-200 baseline; +4 in FTY-189 publishing the saved goal's direction to the cross-screen goalDirection controller so Trends' headline delta can be goal-aware; +4 in FTY-182 switching the scroll view to the native large-title header's automatic content inset (dropping the hand-padded status-bar magic number) with a comment explaining why; +8 in FTY-190 hydrating the active goal's direction from the existing GET /goal direction read-model on a cold load so the collapsed Goal row summarises a returning user's goal by its real direction (never the dead 'Active' state) and reads plain-language calculation-preference copy, with the Data & About rows now non-tappable Coming soon disclosures (no API/contract change; pace is surfaced only from the user's own in-session edit)."
     },
     "mobile/components/TrendsScreen.test.tsx": {
       "kind": "test",

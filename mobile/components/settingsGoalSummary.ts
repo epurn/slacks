@@ -15,15 +15,15 @@ const DIRECTION_LABELS: Record<GoalDirection, string> = {
 /**
  * Collapsed Goal-row summary for the caller's active goal.
  *
- * Both direction and pace are recovered from the real goal on a cold load
- * (`GET /goal`, FTY-189/FTY-190) — pace is the exact inverse of the band the
- * persisted trajectory was derived from, never guessed or reverse-engineered from
- * target numbers, and never persisted on-device. A directional goal summarises as
- * direction + pace (`Lose · Steady`). Maintain goals have no pace and read as
- * `Maintain`. When pace is genuinely absent (a legacy goal off the band grid) the
- * row still summarises the real goal by its direction alone (`Lose`) rather than
- * collapsing to a dead `Details unavailable` or inventing a pace. Only a genuinely
- * unknown direction (no active goal loaded) stays neutral.
+ * Direction is recovered from the real goal on a cold load (`GET /goal`, the
+ * FTY-189 direction read model) so the row shows the real goal — never the dead
+ * "Active" state. Pace is known only from the user's own goal edit this session;
+ * it is never guessed or reverse-engineered from target numbers, and never
+ * persisted on-device. A directional goal with a known pace summarises as
+ * direction + pace (`Lose · Steady`); before an in-session edit it summarises by
+ * its direction alone (`Lose`). Maintain goals have no pace and read as
+ * `Maintain`. Only a genuinely unknown direction (no active goal loaded) stays
+ * neutral (`Details unavailable`).
  */
 export function goalSummaryDetail(
   direction: GoalDirection | null,
