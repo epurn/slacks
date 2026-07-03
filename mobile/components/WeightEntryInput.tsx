@@ -24,6 +24,12 @@ interface WeightEntryInputProps {
    * pre-fill the input with the user's last logged weight.
    */
   initialValue?: number;
+  /**
+   * Raise the keyboard on mount. Weight logging is a deliberate single-field
+   * entry sheet (FTY-183), so the field auto-focuses on present — distinct from
+   * the Today composer, which never auto-raises the keyboard.
+   */
+  autoFocus?: boolean;
 }
 
 /**
@@ -40,6 +46,7 @@ export function WeightEntryInput({
   submitError,
   onSubmit,
   initialValue,
+  autoFocus = false,
 }: WeightEntryInputProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -61,6 +68,8 @@ export function WeightEntryInput({
           onChangeText={setWeightText}
           keyboardType="decimal-pad"
           editable={!submitting}
+          autoFocus={autoFocus}
+          selectTextOnFocus
           style={styles.input}
         />
         <Text style={styles.unit} importantForAccessibility="no">
@@ -73,6 +82,7 @@ export function WeightEntryInput({
         </Text>
       ) : null}
       <Pressable
+        testID="weight-log-submit"
         accessibilityRole="button"
         accessibilityLabel="Log weight"
         accessibilityState={{ disabled: !canSubmit }}

@@ -17,6 +17,8 @@ import type {
 } from '@/api/logEvents';
 import type { DerivedFoodItemDTO } from '@/api/derivedItems';
 import type { WeightEntryDTO } from '@/api/weightEntries';
+import type { SavedFoodDTO } from '@/api/savedFoods';
+import type { SourceCandidate } from '@/api/corrections';
 
 export const E2E_SERVER_URL = 'http://localhost:8000';
 
@@ -380,6 +382,119 @@ export function e2eDailySummaryRange(
   });
 }
 
+// ─── FTY-183 correction-sheet save-path fixtures ──────────────────────────────
+//
+// Back the correction.yaml Maestro flow, which drives the CorrectionSheet's
+// medium → large detent save path end-to-end. The only E2E-reachable way to put
+// a tappable, resolved food item on the Today timeline is the saved-food
+// synthetic-item path (TodayScreen selects a saved food from the typeahead, then
+// inserts a resolved synthetic item on submit — server-side item hydration is a
+// later story). So the flow: pick this saved food → its item lands on the
+// timeline → tap it to open the sheet at the medium detent → open Change-match
+// (the sheet expands to the large detent) → pick a candidate → the re-resolve
+// commits and the item re-renders with the new source/values.
+
+/**
+ * The saved food the correction flow selects from the composer typeahead. Its
+ * name is prefix-searchable ("Chicken…") so the FTY-053 suggestion chip appears
+ * as the user types. Submitting it inserts a resolved synthetic item carrying
+ * these values, which renders as a tappable timeline row.
+ */
+export const E2E_SAVED_FOOD: SavedFoodDTO = {
+  id: 'e2e-saved-food-00000000-0000-0000-0000-000000000000',
+  user_id: E2E_SESSION.userId,
+  name: 'Chicken burrito bowl',
+  calories: 640,
+  protein_g: 42,
+  carbs_g: 56,
+  fat_g: 22,
+  serving_size: 1,
+  serving_unit: 'bowl',
+  source: 'saved_from_correction',
+  created_at: '2026-01-01T08:00:00Z',
+  updated_at: '2026-01-01T08:00:00Z',
+};
+
+/**
+ * The derived-item id TodayScreen builds for the saved-food synthetic item
+ * (`saved-${savedFood.id}`). The re-resolve response echoes this id so the
+ * edit reconciles back onto the same timeline row.
+ */
+export const E2E_SAVED_FOOD_ITEM_ID = `saved-${E2E_SAVED_FOOD.id}`;
+
+/** Stable id for the completed log event the saved-food submit resolves to. */
+export const E2E_SAVED_FOOD_EVENT_ID =
+  'e2e-saved-food-event-00000000-0000-0000-0000-000000000000';
+
+/**
+ * The completed log event GET /log-events returns once the saved food is
+ * submitted. Keyed on the saved food's name so it drives state independently of
+ * the clarify ("coffee") and failed-parse (gibberish) phase machines. The
+ * timeline renders the client-built synthetic item; this event only has to exist
+ * and stay `completed` under a stable id so a poll never drops the row.
+ */
+export const E2E_SAVED_FOOD_EVENT: LogEventDTO = {
+  id: E2E_SAVED_FOOD_EVENT_ID,
+  user_id: E2E_SESSION.userId,
+  raw_text: E2E_SAVED_FOOD.name,
+  status: 'completed',
+  created_at: '2026-01-01T12:00:00Z',
+  updated_at: '2026-01-01T12:00:00Z',
+};
+
+/**
+ * The alternative source the Change-match panel offers (FTY-093). Its
+ * accessibility label ("Select {name}, {kcal} kcal per 100g") is the tappable
+ * candidate row the flow picks to re-resolve the item.
+ */
+export const E2E_SOURCE_CANDIDATE: SourceCandidate = {
+  source_type: 'trusted_nutrition_database',
+  source_ref: 'usda_fdc:171477',
+  name: 'Chicken, grilled, USDA',
+  basis: 'per_100g',
+  calories: 165,
+  protein_g: 31,
+  carbs_g: 0,
+  fat_g: 3.6,
+};
+
+/**
+ * The item after re-resolving to the USDA candidate: the **same** id and
+ * log_event_id (so it reconciles back onto the same row — no duplicate), an
+ * honest new provenance label ("USDA"), and server-recomputed values at the
+ * current portion. Its distinctive `calories` (415, clearly different from the
+ * saved food's 640) is what correction.yaml asserts to prove the re-resolve
+ * committed and the sheet + timeline re-rendered the new values.
+ */
+export const E2E_RERESOLVED_ITEM: DerivedFoodItemDTO = {
+  item_type: 'food',
+  id: E2E_SAVED_FOOD_ITEM_ID,
+  user_id: E2E_SESSION.userId,
+  log_event_id: E2E_SAVED_FOOD_EVENT_ID,
+  name: E2E_SOURCE_CANDIDATE.name,
+  quantity_text: `${E2E_SAVED_FOOD.serving_size} ${E2E_SAVED_FOOD.serving_unit}`,
+  unit: E2E_SAVED_FOOD.serving_unit,
+  amount: E2E_SAVED_FOOD.serving_size,
+  status: 'resolved',
+  grams: null,
+  calories: 415,
+  protein_g: 78,
+  carbs_g: 0,
+  fat_g: 9,
+  calories_estimated: E2E_SAVED_FOOD.calories,
+  protein_g_estimated: E2E_SAVED_FOOD.protein_g,
+  carbs_g_estimated: E2E_SAVED_FOOD.carbs_g,
+  fat_g_estimated: E2E_SAVED_FOOD.fat_g,
+  source: {
+    source_type: 'trusted_nutrition_database',
+    label: 'USDA',
+    ref: E2E_SOURCE_CANDIDATE.source_ref,
+  },
+  is_edited: false,
+  created_at: '2026-01-01T08:00:00Z',
+  updated_at: '2026-01-01T12:05:00Z',
+};
+
 // ─── FTY-181 entry-resolve (beat 1) item-forward fixtures ─────────────────────
 //
 // The signature entry-resolve beat eases a resolved entry's *value row* in when
@@ -467,13 +582,13 @@ export const E2E_RESOLVE_SUMMARY: DailySummaryDTO = {
 // The correction-saved beat fires once per successful correction commit. To
 // reach it on the real screen a resolved value row must be tappable, the
 // correction sheet must open against it, and an amount step must commit a new
-// server value — the visible confirmation the beat rides. correction.yaml drives
+// server value — the visible confirmation the beat rides. correction-beat.yaml drives
 // exactly that: log "oatmeal" → it resolves with a real 140-kcal item on the
 // by-date feed → tap the row → step the portion up → the sheet shows the
 // server-recomputed 175 kcal (the commit the beat's haptic accompanies). Keyed on
 // its own raw_text so it stays independent of the resolve/clarify/failed flows.
 
-/** The input correction.yaml submits. Distinct from every other flow's text. */
+/** The input correction-beat.yaml submits. Distinct from every other flow's text. */
 export const E2E_CORRECTION_RAW_TEXT = 'oatmeal';
 
 /** Stable id for the correction flow's completed event. */
@@ -497,7 +612,7 @@ export const E2E_CORRECTION_EVENT: LogEventDTO = {
 /**
  * The resolved derived item the by-date feed carries for the correction event.
  * ItemTimelineRow renders its accessibility label as "Oatmeal, 140 kcal" — the
- * row correction.yaml taps to open the correction sheet.
+ * row correction-beat.yaml taps to open the correction sheet.
  */
 export const E2E_CORRECTION_ITEM: DerivedFoodItemDTO = {
   item_type: 'food',
@@ -537,7 +652,7 @@ export const E2E_CORRECTION_ENTRY: LogEventEntryDTO = {
 /**
  * The item the PATCH /derived-items/food/{id} returns after an amount step — the
  * server-recomputed portion (1.25 cups → 175 kcal, `is_edited: true`). The
- * correction sheet swaps this in and the 175-kcal value is what correction.yaml
+ * correction sheet swaps this in and the 175-kcal value is what correction-beat.yaml
  * asserts: the correction committed on the real data path, so the beat fired.
  */
 export const E2E_CORRECTION_EDITED_ITEM: DerivedFoodItemDTO = {

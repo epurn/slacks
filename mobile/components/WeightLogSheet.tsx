@@ -1,17 +1,23 @@
 /**
- * Weight log sheet for FTY-101. A bottom-sheet-style modal for logging a
- * body-weight entry from the Trends screen.
+ * Weight log sheet for FTY-101. A true small (fit-to-content) native sheet for
+ * logging a body-weight entry from the Trends screen (FTY-183).
  *
  * Defaults to today's date and seeds the input with the user's last logged
  * weight (in display units). Converts to canonical kg at the API boundary
  * per the FTY-070 contract. After a successful save, calls onSaved so the
  * parent can re-fetch and reschedule the reminder.
  *
+ * Presentation: a compact `NativeSheet` sized to its one field (rather than the
+ * old full-screen `formSheet` page that was ~90% empty). The numeric field
+ * auto-focuses on present so the keyboard is up immediately — the deliberate
+ * single-field entry exception (distinct from the Today composer's
+ * no-auto-focus rule). The date title is human-formatted ("Today", "July 1"),
+ * never a raw ISO string.
+ *
  * Privacy: weight values are never emitted to logs or error messages.
  */
 
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useCallback, useState } from "react";
 
 import {
@@ -19,6 +25,7 @@ import {
   createWeightEntry as createWeightEntryApi,
   type WeightEntryDTO,
 } from "@/api/weightEntries";
+import { NativeSheet } from "@/components/ui/NativeSheet";
 import { WeightEntryInput } from "@/components/WeightEntryInput";
 import type { UnitsPreference } from "@/state/profile";
 import { formatHumanDate, kgToDisplay } from "@/state/weightEntries";
@@ -56,7 +63,6 @@ export function WeightLogSheet({
   create = createWeightEntryApi,
 }: WeightLogSheetProps) {
   const { colors } = useTheme();
-  const insets = useSafeAreaInsets();
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -82,43 +88,37 @@ export function WeightLogSheet({
   );
 
   return (
-    <Modal
+    <NativeSheet
       visible={visible}
-      animationType="slide"
-      presentationStyle="formSheet"
-      onRequestClose={onClose}
+      onClose={onClose}
+      // A compact sheet sized to its single field — not a full-screen page.
+      detents="fitToContents"
+      grabberVisible
+      cornerRadius={radius.xl}
+      backgroundColor={colors.surface}
+      accessibilityLabel="Log weight sheet"
     >
-      <View
-        testID="weight-log-sheet"
-        style={[
-          styles.container,
-          {
-            backgroundColor: colors.surface,
-            paddingTop: insets.top + spacing.base,
-            paddingBottom: insets.bottom + spacing.xl,
-          },
-        ]}
-      >
-        {/* Header */}
+      <View testID="weight-log-sheet" style={styles.container}>
+        {/* Header — the native grabber and swipe-to-dismiss are the primary
+            dismissal, but a visible, labeled "Cancel" control is kept so the
+            affordance is reachable with VoiceOver and by users who don't drag
+            the sheet. The title carries a human-formatted date. */}
         <View style={styles.header}>
-          <Text style={[styles.title, { color: colors.text }]}>
-            Log weight
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Close"
-            onPress={onClose}
-            style={styles.closeBtn}
-          >
-            <Text style={[styles.closeBtnLabel, { color: colors.accent }]}>
-              Cancel
+          <View style={styles.headerTitles}>
+            <Text style={[styles.title, { color: colors.text }]}>Log weight</Text>
+            <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>
+              {formatHumanDate(today, today)}
             </Text>
+          </View>
+          <Pressable
+            onPress={onClose}
+            accessibilityLabel="Cancel"
+            accessibilityRole="button"
+            style={styles.closeButton}
+          >
+            <Text style={[styles.closeLabel, { color: colors.accent }]}>Cancel</Text>
           </Pressable>
         </View>
-
-        <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>
-          {formatHumanDate(today, today)}
-        </Text>
 
         <View
           style={[
@@ -131,42 +131,48 @@ export function WeightLogSheet({
             submitting={submitting}
             submitError={submitError}
             initialValue={seedValue}
+            autoFocus
             onSubmit={(w) => void handleSubmit(w)}
           />
         </View>
       </View>
-    </Modal>
+    </NativeSheet>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
     paddingHorizontal: spacing.base,
+    paddingTop: spacing.base,
+    paddingBottom: spacing.xl,
+    gap: spacing.base,
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+  headerTitles: {
+    flex: 1,
+    gap: 2,
   },
   title: {
     fontSize: typeScale.title2,
     fontWeight: "700",
   },
-  closeBtn: {
-    minWidth: 44,
-    minHeight: 44,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  closeBtnLabel: {
-    fontSize: typeScale.body,
-    fontWeight: "500",
-  },
   dateLabel: {
     fontSize: typeScale.subhead,
-    marginBottom: spacing.base,
+  },
+  closeButton: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: "flex-end",
+    justifyContent: "center",
+  },
+  closeLabel: {
+    fontSize: typeScale.callout,
+    fontWeight: "600",
   },
   inputCard: {
     padding: spacing.base,

@@ -1,5 +1,4 @@
 import { act, create as render, type ReactTestRenderer } from "react-test-renderer";
-import { Modal } from "react-native";
 
 import {
   CorrectionSheet,
@@ -98,10 +97,6 @@ function allText(tree: ReactTestRenderer): string {
     .join(" ");
 }
 
-function modalAnimationType(tree: ReactTestRenderer): string {
-  return tree.root.findByType(Modal).props.animationType as string;
-}
-
 beforeEach(() => mockReduceMotion(false));
 afterEach(() => jest.restoreAllMocks());
 
@@ -123,20 +118,11 @@ describe("CorrectionSheet accessibility details", () => {
     expect(allText(tree)).toContain(longPhrase);
   });
 
-  it("uses the slide modal animation when Reduce Motion is off", async () => {
-    let tree!: ReactTestRenderer;
-    await act(async () => {
-      tree = render(
-        <ThemeProvider override="light">
-          <CorrectionSheet {...defaultProps()} />
-        </ThemeProvider>,
-      );
-    });
-    await act(async () => {});
-    expect(modalAnimationType(tree)).toBe("slide");
-  });
-
-  it("uses no modal animation when Reduce Motion is enabled", async () => {
+  it("delegates present/dismiss motion to the native sheet (honours Reduce Motion)", async () => {
+    // The old hand-faked Modal switched its own animationType off Reduce Motion.
+    // The native sheet's presentation controller honours Reduce Motion itself, so
+    // there is no JS animation flag to toggle — the sheet renders the same under
+    // either setting, and the motion is the system's to reduce.
     mockReduceMotion(true);
     let tree!: ReactTestRenderer;
     await act(async () => {
@@ -147,6 +133,6 @@ describe("CorrectionSheet accessibility details", () => {
       );
     });
     await act(async () => {});
-    expect(modalAnimationType(tree)).toBe("none");
+    expect(allText(tree)).toContain("Turkey breast");
   });
 });

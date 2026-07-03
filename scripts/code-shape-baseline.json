@@ -32,8 +32,8 @@
     "mobile/components/CorrectionSheet.tsx": {
       "kind": "source",
       "lane": "mobile",
-      "lines": 1608,
-      "reason": "Existing over-threshold first-party source file at FTY-200 baseline."
+      "lines": 1416,
+      "reason": "Existing over-threshold first-party source file at FTY-200 baseline; ratcheted down in FTY-183 (native sheet replaces the hand-faked Modal + backdrop + maxHeight/handle logic) while integrating the FTY-181 correction-saved beat (success haptic + confirmation pulse) — a large net reduction from the pre-native 1608."
     },
     "mobile/components/SettingsScreen.test.tsx": {
       "kind": "test",

@@ -20,21 +20,17 @@
 
 import {
   useCallback,
-  useEffect,
   useRef,
   useState,
 } from "react";
 import {
-  AccessibilityInfo,
   Animated,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
-  type AccessibilityRole,
 } from "react-native";
 
 import {
@@ -54,6 +50,7 @@ import {
   type NutritionSnapshot,
 } from "@/api/savedFoods";
 import { ClarifyMode, type ClarificationData } from "@/components/ClarifyMode";
+import { NativeSheet } from "@/components/ui/NativeSheet";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { AppIcon } from "@/components/ui/AppIcon";
 import {
@@ -143,10 +140,13 @@ function formatAmount(amount: number | null): string {
  * The correction sheet. Call with `visible={true}` to present it over the
  * current screen; `onClose` is called when the user dismisses it.
  *
- * Height: the sheet uses a medium `maxHeight` by default and switches to a large
- * `maxHeight` when the Change-match search or the advanced override panel opens;
- * it stays medium for the quick-fix path (amount / save). This approximates
- * sheet detents with a plain `Modal`; it is not a draggable native sheet.
+ * Presentation: a real native sheet (`NativeSheet`) with medium → large detents.
+ * It opens at the medium detent — timeline visible behind, undimmed — for the
+ * quick-fix path (amount / save), and expands to the large detent when the
+ * Change-match search or advanced override panel opens (there the detents narrow
+ * to large-only so UIKit animates the growth, and the content behind dims to
+ * focus the search). The grabber, swipe-to-dismiss, and Reduce Motion come from
+ * the native presentation controller.
  */
 export function CorrectionSheet({
   item: initialItem,
@@ -173,29 +173,6 @@ export function CorrectionSheet({
     pulse();
   }, [pulse]);
   const [item, setItem] = useState<DerivedItem>(initialItem);
-  // Unknown starts motion-free; if the system says Reduce Motion is off, the
-  // sheet can use its normal slide animation on subsequent presentations.
-  const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-    AccessibilityInfo.isReduceMotionEnabled().then(
-      (enabled) => {
-        if (mounted) setReduceMotion(enabled);
-      },
-      () => {
-        if (mounted) setReduceMotion(true);
-      },
-    );
-    const subscription = AccessibilityInfo.addEventListener(
-      "reduceMotionChanged",
-      (enabled) => setReduceMotion(enabled),
-    );
-    return () => {
-      mounted = false;
-      subscription.remove();
-    };
-  }, []);
 
   // Resync local item when prop changes (parent may push a confirmed edit).
   const [syncedItem, setSyncedItem] = useState<DerivedItem>(initialItem);
@@ -215,15 +192,11 @@ export function CorrectionSheet({
     setMode(needsClarification ? "clarify" : "normal");
   }
 
-  // Large detent when Change-match or override is open.
+  // The Change-match or advanced-override panel wants the large detent. Narrowing
+  // the allowed detents to large-only makes UIKit animate the sheet up to it; the
+  // quick-fix path (amount / save / clarify) stays at the medium detent with the
+  // timeline visible behind.
   const expanded = mode === "change-match" || mode === "override";
-
-  // Clarify-mode pins a minimum height so the question + free-text input + "Done"
-  // always render at a usable height. The body is a flex:1 ScrollView, which
-  // collapses to a near-zero strip when the sheet hugs its (short) clarify
-  // content — the live RC bug this story fixes. A floor gives it room in both
-  // states: question present, and question absent/loading.
-  const clarifying = mode === "clarify";
 
   // ─── Amount stepper state ───────────────────────────────────────────────────
   const [amountPending, setAmountPending] = useState(false);
@@ -477,200 +450,184 @@ export function CorrectionSheet({
     food !== null && food.calories !== null && !!logPhrase;
 
   const sheetBg = colors.surfaceRaised;
-  const animationType = reduceMotion === false ? "slide" : "none";
 
   // ─── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <Modal
+    <NativeSheet
       visible={visible}
-      transparent
-      animationType={animationType}
-      presentationStyle="overFullScreen"
-      onRequestClose={onClose}
-      accessibilityViewIsModal
+      onClose={onClose}
+      // Medium → large. When a panel wants the room, narrow to large-only so
+      // UIKit animates the growth (see `expanded`).
+      detents={expanded ? [1.0] : [0.5, 1.0]}
+      // Medium stays undimmed → timeline visible behind the quick fix; the
+      // large-only expanded state dims to focus the search/override.
+      largestUndimmedDetentIndex={expanded ? "none" : 0}
+      initialDetentIndex={0}
+      grabberVisible
+      cornerRadius={radius.xl}
+      backgroundColor={sheetBg}
+      accessibilityLabel={`${item.name} details`}
     >
-      <View style={styles.overlay}>
-        {/* Backdrop — tapping closes the sheet */}
-        <Pressable
-          style={StyleSheet.absoluteFill}
-          onPress={onClose}
-          accessibilityLabel="Close sheet"
-          accessibilityRole={"button" as AccessibilityRole}
-        />
+      {/* Beat 2 — a brief confirmation pulse on a successful correction. The
+          native sheet owns its presentation motion; this only animates the
+          content on save. `usePulse` degrades to a fade under Reduce Motion. */}
+      <Animated.View
+        style={[styles.sheetBody, { opacity, transform: [{ scale }] }]}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
+            {item.name}
+          </Text>
+          <Pressable
+            onPress={onClose}
+            accessibilityLabel="Close"
+            accessibilityRole="button"
+            style={styles.closeButton}
+          >
+            <Text style={[styles.closeLabel, { color: colors.accent }]}>Done</Text>
+          </Pressable>
+        </View>
 
-        {/* Sheet */}
-        <Animated.View
-          style={[
-            styles.sheet,
-            { backgroundColor: sheetBg, opacity, transform: [{ scale }] },
-            expanded ? styles.sheetLarge : styles.sheetMedium,
-            clarifying ? styles.sheetClarify : null,
-          ]}
+        <ScrollView
+          style={styles.scrollContent}
+          contentContainerStyle={styles.scrollInner}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          {/* Decorative grabber (non-draggable; hidden from assistive tech) */}
-          <View
-            style={styles.handleContainer}
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-          >
-            <View style={[styles.handle, { backgroundColor: colors.textMuted }]} />
-          </View>
-
-          {/* Header */}
-          <View style={styles.header}>
-            <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
-              {item.name}
-            </Text>
-            <Pressable
-              onPress={onClose}
-              accessibilityLabel="Close"
-              accessibilityRole="button"
-              style={styles.closeButton}
-            >
-              <Text style={[styles.closeLabel, { color: colors.accent }]}>Done</Text>
-            </Pressable>
-          </View>
-
-          <ScrollView
-            style={styles.scrollContent}
-            contentContainerStyle={styles.scrollInner}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-          >
-            {mode === "clarify" ? (
-              <ClarifyMode
-                clarificationData={clarificationData}
-                clarifyText={clarifyText}
-                onChangeClarifyText={setClarifyText}
-                onSubmitAnswer={handleClarifyAnswer}
-                submitting={clarifySubmitting}
-                colors={colors}
+          {mode === "clarify" ? (
+            <ClarifyMode
+              clarificationData={clarificationData}
+              clarifyText={clarifyText}
+              onChangeClarifyText={setClarifyText}
+              onSubmitAnswer={handleClarifyAnswer}
+              submitting={clarifySubmitting}
+              colors={colors}
+              logPhrase={logPhrase}
+            />
+          ) : (
+            <>
+              {/* Evidence / provenance block */}
+              <ProvenanceBlock
+                source={source}
+                isEdited={isEdited}
+                provenancePres={provenancePres}
+                isRoughEstimate={isRoughEstimate}
                 logPhrase={logPhrase}
+                onMakeExact={openChangeMatch}
+                colors={colors}
               />
-            ) : (
-              <>
-                {/* Evidence / provenance block */}
-                <ProvenanceBlock
-                  source={source}
-                  isEdited={isEdited}
-                  provenancePres={provenancePres}
-                  isRoughEstimate={isRoughEstimate}
-                  logPhrase={logPhrase}
-                  onMakeExact={openChangeMatch}
+
+              {/* Separator */}
+              <View style={[styles.separator, { backgroundColor: colors.separator }]} />
+
+              {/* Amount stepper (food only) */}
+              {food !== null ? (
+                <AmountStepper
+                  amount={currentAmount}
+                  unit={unit}
+                  quantityText={food.quantity_text}
+                  kcal={kcal}
+                  protein={food.protein_g}
+                  carbs={food.carbs_g}
+                  fat={food.fat_g}
+                  pending={amountPending}
+                  error={amountError}
+                  onStepDown={() => void handleAmountStep(-0.25)}
+                  onStepUp={() => void handleAmountStep(0.25)}
                   colors={colors}
                 />
+              ) : null}
 
-                {/* Separator */}
-                <View style={[styles.separator, { backgroundColor: colors.separator }]} />
+              {/* Change match lever */}
+              {food !== null && mode !== "change-match" ? (
+                <>
+                  <View style={[styles.separator, { backgroundColor: colors.separator }]} />
+                  <Pressable
+                    onPress={openChangeMatch}
+                    style={styles.leverButton}
+                    accessibilityRole="button"
+                    accessibilityLabel="Change match"
+                    accessibilityHint="Find a different food source for this entry"
+                  >
+                    <Text style={[styles.leverLabel, { color: colors.accent }]}>
+                      Change match
+                    </Text>
+                    <Text style={[styles.leverChevron, { color: colors.textMuted }]}>›</Text>
+                  </Pressable>
+                </>
+              ) : null}
 
-                {/* Amount stepper (food only) */}
-                {food !== null ? (
-                  <AmountStepper
-                    amount={currentAmount}
-                    unit={unit}
-                    quantityText={food.quantity_text}
-                    kcal={kcal}
-                    protein={food.protein_g}
-                    carbs={food.carbs_g}
-                    fat={food.fat_g}
-                    pending={amountPending}
-                    error={amountError}
-                    onStepDown={() => void handleAmountStep(-0.25)}
-                    onStepUp={() => void handleAmountStep(0.25)}
+              {/* Change-match panel */}
+              {mode === "change-match" ? (
+                <ChangMatchPanel
+                  query={matchQuery}
+                  onQueryChange={handleCandidateSearch}
+                  candidates={candidates}
+                  loading={candidatesLoading}
+                  error={candidatesError}
+                  reResolving={reResolving}
+                  reResolveError={reResolveError}
+                  onPickCandidate={(c) => void handlePickCandidate(c)}
+                  onCancel={() => {
+                    cancelPendingSearch();
+                    setMode("normal");
+                    setMatchQuery("");
+                    setCandidates([]);
+                    setCandidatesError(null);
+                  }}
+                  colors={colors}
+                />
+              ) : null}
+
+              {/* Advanced override lever */}
+              {food !== null && mode !== "override" && mode !== "change-match" ? (
+                <>
+                  <View style={[styles.separator, { backgroundColor: colors.separator }]} />
+                  <AdvancedLeverRow
+                    food={food}
+                    onOpenOverride={openOverride}
                     colors={colors}
                   />
-                ) : null}
+                </>
+              ) : null}
 
-                {/* Change match lever */}
-                {food !== null && mode !== "change-match" ? (
-                  <>
-                    <View style={[styles.separator, { backgroundColor: colors.separator }]} />
-                    <Pressable
-                      onPress={openChangeMatch}
-                      style={styles.leverButton}
-                      accessibilityRole="button"
-                      accessibilityLabel="Change match"
-                      accessibilityHint="Find a different food source for this entry"
-                    >
-                      <Text style={[styles.leverLabel, { color: colors.accent }]}>
-                        Change match
-                      </Text>
-                      <Text style={[styles.leverChevron, { color: colors.textMuted }]}>›</Text>
-                    </Pressable>
-                  </>
-                ) : null}
+              {/* Override panel */}
+              {mode === "override" ? (
+                <OverridePanel
+                  field={overrideField}
+                  draft={overrideDraft}
+                  saving={overrideSaving}
+                  error={overrideError}
+                  onChangeDraft={setOverrideDraft}
+                  onSubmit={() => void submitOverride()}
+                  onCancel={() => {
+                    setMode("normal");
+                    setOverrideDraft("");
+                    setOverrideError(null);
+                  }}
+                  colors={colors}
+                />
+              ) : null}
 
-                {/* Change-match panel */}
-                {mode === "change-match" ? (
-                  <ChangMatchPanel
-                    query={matchQuery}
-                    onQueryChange={handleCandidateSearch}
-                    candidates={candidates}
-                    loading={candidatesLoading}
-                    error={candidatesError}
-                    reResolving={reResolving}
-                    reResolveError={reResolveError}
-                    onPickCandidate={(c) => void handlePickCandidate(c)}
-                    onCancel={() => {
-                      cancelPendingSearch();
-                      setMode("normal");
-                      setMatchQuery("");
-                      setCandidates([]);
-                      setCandidatesError(null);
-                    }}
+              {/* Save as food */}
+              {canSaveFood && mode === "normal" ? (
+                <>
+                  <View style={[styles.separator, { backgroundColor: colors.separator }]} />
+                  <SaveFoodRow
+                    status={saveFoodStatus}
+                    error={saveFoodError}
+                    onSave={() => void handleSaveFood()}
                     colors={colors}
                   />
-                ) : null}
-
-                {/* Advanced override lever */}
-                {food !== null && mode !== "override" && mode !== "change-match" ? (
-                  <>
-                    <View style={[styles.separator, { backgroundColor: colors.separator }]} />
-                    <AdvancedLeverRow
-                      food={food}
-                      onOpenOverride={openOverride}
-                      colors={colors}
-                    />
-                  </>
-                ) : null}
-
-                {/* Override panel */}
-                {mode === "override" ? (
-                  <OverridePanel
-                    field={overrideField}
-                    draft={overrideDraft}
-                    saving={overrideSaving}
-                    error={overrideError}
-                    onChangeDraft={setOverrideDraft}
-                    onSubmit={() => void submitOverride()}
-                    onCancel={() => {
-                      setMode("normal");
-                      setOverrideDraft("");
-                      setOverrideError(null);
-                    }}
-                    colors={colors}
-                  />
-                ) : null}
-
-                {/* Save as food */}
-                {canSaveFood && mode === "normal" ? (
-                  <>
-                    <View style={[styles.separator, { backgroundColor: colors.separator }]} />
-                    <SaveFoodRow
-                      status={saveFoodStatus}
-                      error={saveFoodError}
-                      onSave={() => void handleSaveFood()}
-                      colors={colors}
-                    />
-                  </>
-                ) : null}
-              </>
-            )}
-          </ScrollView>
-        </Animated.View>
-      </View>
-    </Modal>
+                </>
+              ) : null}
+            </>
+          )}
+        </ScrollView>
+      </Animated.View>
+    </NativeSheet>
   );
 }
 
@@ -1140,39 +1097,11 @@ function SaveFoodRow({
 // ─── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  overlay: {
+  // The native sheet owns the rounded top, grabber, and detent height; the body
+  // just fills it. `flex: 1` lets the ScrollView scroll within the current detent.
+  sheetBody: {
     flex: 1,
-    justifyContent: "flex-end",
-    backgroundColor: "rgba(0,0,0,0.35)",
-  },
-  sheet: {
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    overflow: "hidden",
-  },
-  sheetMedium: {
-    maxHeight: "55%",
-  },
-  sheetLarge: {
-    maxHeight: "90%",
-  },
-  // Clarify-mode height floor: the body's flex:1 ScrollView collapses to a
-  // near-zero strip when the sheet hugs short clarify content, so pin a minimum
-  // height that keeps the question + free-text input + "Done" usable. Stays under
-  // sheetMedium's 55% max, so the sheet never grows past the medium detent.
-  sheetClarify: {
-    minHeight: "42%",
-  },
-  handleContainer: {
-    alignItems: "center",
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xs,
-  },
-  handle: {
-    width: 36,
-    height: 4,
-    borderRadius: radius.full,
-    opacity: 0.35,
+    paddingTop: spacing.sm,
   },
   header: {
     flexDirection: "row",
