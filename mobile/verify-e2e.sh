@@ -28,7 +28,7 @@
 #                     build bounded.
 #   E2E_MAESTRO_TIMEOUT_SECONDS
 #                     Maximum time to let Maestro run before failing with a clear
-#                     timeout (default: 300).
+#                     timeout (default: 420).
 
 set -euo pipefail
 
@@ -52,7 +52,7 @@ METRO_PORT="8081"
 METRO_LOG="${E2E_METRO_LOG:-${TMPDIR:-/tmp}/fatty-e2e-metro.log}"
 METRO_PID=""
 METRO_STATUS_ERROR=""
-MAESTRO_TIMEOUT_SECONDS="${E2E_MAESTRO_TIMEOUT_SECONDS:-300}"
+MAESTRO_TIMEOUT_SECONDS="${E2E_MAESTRO_TIMEOUT_SECONDS:-420}"
 
 # A clean build (no cache) is the local default for a deterministic binary. CI
 # sets E2E_BUILD_CACHE to reuse the cached Gradle state so the emulator build

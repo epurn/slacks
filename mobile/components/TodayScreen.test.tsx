@@ -550,6 +550,65 @@ describe("TodayScreen resolve in place (FTY-180)", () => {
     }
   });
 
+  it("keeps a multi-item completion in one event-keyed row when resolving from a pending skeleton", async () => {
+    jest.useFakeTimers();
+    try {
+      const pending = event({ id: "a", raw_text: "Greek yogurt and banana", status: "pending" });
+      const completed = event({
+        id: "a",
+        raw_text: "Greek yogurt and banana",
+        status: "completed",
+      });
+      const banana = foodItem({
+        id: "item-b",
+        name: "Banana",
+        calories: 105,
+      });
+      const load = jest
+        .fn()
+        .mockResolvedValueOnce([pending])
+        .mockResolvedValueOnce([completed]);
+      const loadEntries = jest
+        .fn()
+        .mockResolvedValueOnce([entry(pending, [])])
+        .mockResolvedValueOnce([entry(completed, [foodItem(), banana])]);
+      const tree = mount(
+        <TodayScreen
+          session={SESSION}
+          load={load}
+          loadEntries={loadEntries}
+          useActive={() => true}
+          pollIntervalMs={1000}
+        />,
+      );
+      await act(async () => {});
+
+      const pendingRow = tree.root.findByProps({ testID: "item-timeline-row-a" });
+      const pendingGeometry = resolvedStyle(pendingRow);
+      expect(hasProgressbar(tree)).toBe(true);
+      expect(textContent(tree)).not.toContain("Greek yogurt and banana");
+
+      act(() => jest.advanceTimersByTime(1000));
+      await act(async () => {});
+
+      const resolvedRow = tree.root.findByProps({ testID: "item-timeline-row-a" });
+      const resolvedGeometry = resolvedStyle(resolvedRow);
+      expect(hasProgressbar(tree)).toBe(false);
+      expect(hasA11yLabel(tree, "Greek yogurt and 1 more item, 255 kcal total")).toBe(true);
+      expect(textContent(tree)).toContain("Greek yogurt + 1");
+      expect(textContent(tree)).not.toContain("Banana");
+      expect(
+        tree.root.findAllByProps({ testID: "item-timeline-row-a-item-b" }),
+      ).toHaveLength(0);
+      expect(resolvedGeometry.minHeight).toBe(pendingGeometry.minHeight);
+      expect(resolvedGeometry.paddingVertical).toBe(pendingGeometry.paddingVertical);
+      expect(resolvedGeometry.paddingHorizontal).toBe(pendingGeometry.paddingHorizontal);
+      expect(resolvedGeometry.gap).toBe(pendingGeometry.gap);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("holds the skeleton (never an EntryRow placeholder) when the event-list poll resolves completed before the by-date feed populates items", async () => {
     // Race: within one poll the event-list read resolves the entry to `completed`
     // a microtask before the by-date item feed folds its value rows into

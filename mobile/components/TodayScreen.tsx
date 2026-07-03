@@ -97,6 +97,14 @@ const MAX_RAW_TEXT_LENGTH = 2000;
 
 type Phase = "loading" | "ready" | "error";
 
+function itemTimelineRowTestID(eventId: string): string {
+  return `item-timeline-row-${eventId}`;
+}
+
+function itemTimelineExtraRowTestID(eventId: string, itemId: string): string {
+  return `item-timeline-row-${eventId}-${itemId}`;
+}
+
 /** Map an API/network failure to a plain, nonjudgmental message. */
 function messageFor(error: unknown, kind: "load" | "save"): string {
   if (error instanceof LogEventApiError) {
@@ -1493,26 +1501,54 @@ function ClusterView({
           // (FTY-197) — honestly surfaced, never silently counted. A resolved
           // item taps into the correction/detail sheet.
           //
-          // The first item's row reuses the event id as its React key — the same
-          // key the pending skeleton used — so React preserves that one
-          // `ItemTimelineRow` instance through the pending→completed transition:
-          // the shimmer resolves into the value in place (same row, same
-          // geometry, fade-in), never a swap between differently-keyed rows
-          // (FTY-180). Any additional items are genuinely new rows keyed by item
-          // id.
+          // A fresh pending→completed resolve must stay one row: the skeleton
+          // was one `ItemTimelineRow`, so a multi-item completion summarizes
+          // additional items into that same event-keyed row instead of mounting
+          // item-keyed extras that would push neighbors down (FTY-180 review).
+          // Already-completed rows that did not just resolve keep the historical
+          // per-item affordances, so each item remains directly editable.
           if (event.status === "completed" && items.length > 0) {
             // Beat 1 — entry resolve. The value row eases in once on a genuine
             // pending→resolved transition (never for a `proposed` label parse,
             // which is an uncounted confirm-me row, not a resolve).
             const animateResolve = resolveAnimIds.has(event.id);
+            const rowTestID = itemTimelineRowTestID(event.id);
+            if (animateResolve && items.length > 1) {
+              const firstItem = items[0];
+              if (!firstItem) return null;
+              return firstItem.item_type === "food" && firstItem.status === "proposed" ? (
+                <ItemTimelineRow
+                  key={event.id}
+                  item={firstItem}
+                  proposal
+                  onPress={() => onOpenProposal(firstItem)}
+                  testID={rowTestID}
+                />
+              ) : (
+                <ItemTimelineRow
+                  key={event.id}
+                  item={firstItem}
+                  additionalItems={items.slice(1)}
+                  needsClarification={false}
+                  onPress={() => onOpenItem(firstItem, event.raw_text)}
+                  animateResolve
+                  testID={rowTestID}
+                />
+              );
+            }
             return items.map((item, index) => {
               const key = index === 0 ? event.id : item.id;
+              const testID =
+                index === 0
+                  ? rowTestID
+                  : itemTimelineExtraRowTestID(event.id, item.id);
               return item.item_type === "food" && item.status === "proposed" ? (
                 <ItemTimelineRow
                   key={key}
                   item={item}
                   proposal
                   onPress={() => onOpenProposal(item)}
+                  testID={testID}
                 />
               ) : (
                 <ItemTimelineRow
@@ -1521,6 +1557,7 @@ function ClusterView({
                   needsClarification={false}
                   onPress={() => onOpenItem(item, event.raw_text)}
                   animateResolve={animateResolve}
+                  testID={testID}
                 />
               );
             });
@@ -1543,6 +1580,7 @@ function ClusterView({
                 item={item}
                 needsClarification={false}
                 onPress={() => onOpenItem(item, event.raw_text)}
+                testID={itemTimelineExtraRowTestID(event.id, item.id)}
               />
             ));
           }
@@ -1592,6 +1630,7 @@ function ClusterView({
                 key={event.id}
                 loading
                 accessibilityLabel={statusPresentation(event.status).accessibilityLabel}
+                testID={itemTimelineRowTestID(event.id)}
               />
             );
           }
@@ -1614,6 +1653,7 @@ function ClusterView({
                 key={event.id}
                 loading
                 accessibilityLabel={statusPresentation("processing").accessibilityLabel}
+                testID={itemTimelineRowTestID(event.id)}
               />
             );
           }

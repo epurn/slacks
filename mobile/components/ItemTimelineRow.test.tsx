@@ -146,6 +146,27 @@ describe("ItemTimelineRow — food item", () => {
     expect(label).toContain("205 kcal");
   });
 
+  it("summarizes additional items into the same row for multi-item resolves", () => {
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(
+        <ItemTimelineRow
+          item={foodItem({ name: "Greek yogurt", calories: 140 })}
+          additionalItems={[
+            foodItem({ id: "item-2", name: "Banana", calories: 105 }),
+          ]}
+        />,
+      );
+    });
+
+    const text = allText(tree!);
+    expect(text).toContain("Greek yogurt + 1");
+    expect(text).toContain("245 kcal");
+    expect(firstA11yLabel(tree!)).toBe(
+      "Greek yogurt and 1 more item, 245 kcal total",
+    );
+  });
+
   it("is_edited item shows ✎ source icon with 'Edited by you' label", () => {
     let tree: ReactTestRenderer;
     act(() => {

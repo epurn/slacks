@@ -597,14 +597,15 @@ describe('FTY-176 failed-parse flow: stateful mock transitions', () => {
 // ─── FTY-181 entry-resolve-flow stateful mock ────────────────────────────────
 //
 // Proves the resolve.yaml Maestro flow's data path: a log resolves to a completed
-// entry whose real derived item rides the item-forward by-date feed, so the
-// entry-resolve beat's value row is reachable on the real screen data. Keyed on
-// its own raw_text, independent of the clarify and failed phase machines.
+// pending entry whose real derived items ride the item-forward by-date feed once
+// the event list refreshes, so the entry-resolve beat's one-row multi-item value
+// path is reachable on the real screen data. Keyed on its own raw_text,
+// independent of the clarify and failed phase machines.
 
 describe('FTY-181 entry-resolve flow: stateful mock transitions', () => {
   const apiSession = toApiSession(E2E_SESSION);
 
-  it('POST the resolve text returns a completed entry', async () => {
+  it('POST the resolve text returns a pending entry first', async () => {
     const mockFetch = createE2EMockFetch();
     const created = await createLogEvent(
       apiSession,
@@ -613,31 +614,32 @@ describe('FTY-181 entry-resolve flow: stateful mock transitions', () => {
       mockFetch,
     );
     expect(created.id).toBe(E2E_RESOLVE_EVENT_ID);
-    expect(created.status).toBe('completed');
+    expect(created.status).toBe('pending');
   });
 
-  it('the by-date feed carries the resolved derived item once the entry resolves', async () => {
+  it('the event list and by-date feed carry the completed multi-item entry after refresh', async () => {
     const mockFetch = createE2EMockFetch();
     // Before the log the item-forward feed is empty (empty day).
     expect(
       await listTodayLogEventEntries(apiSession, '2026-01-01', mockFetch),
     ).toHaveLength(0);
     await createLogEvent(apiSession, E2E_RESOLVE_RAW_TEXT, undefined, mockFetch);
-    // After the log the feed carries the completed entry WITH its derived value
-    // row — the real data source ItemTimelineRow renders for the resolve beat.
+    // After the log, refresh/poll sees the same event completed while the feed
+    // carries two derived items. Today summarizes those into one event-keyed row
+    // during the pending→completed resolve, not item-keyed extra rows.
     const entries = await listTodayLogEventEntries(apiSession, '2026-01-01', mockFetch);
     expect(entries).toHaveLength(1);
     expect(entries[0]?.event.id).toBe(E2E_RESOLVE_EVENT_ID);
-    expect(entries[0]?.items).toHaveLength(1);
+    expect(entries[0]?.items).toHaveLength(2);
     expect(entries[0]?.items[0]?.name).toBe(E2E_RESOLVE_ITEM.name);
     // The plain event list also lists the completed entry so a Refresh/poll keeps
     // the reconciled row while its items ride the feed above.
     const events = await listTodayLogEvents(apiSession, '2026-01-01', mockFetch);
     expect(events).toHaveLength(1);
     expect(events[0]?.id).toBe(E2E_RESOLVE_EVENT_ID);
-    // The day totals count the resolved item's 140 kcal.
+    // The day totals count both resolved items.
     const summary = await getDailySummary(apiSession, '2026-01-01', mockFetch);
-    expect(summary.intake.calories).toBe(140);
+    expect(summary.intake.calories).toBe(245);
   });
 
   it('the resolve branch does not disturb the clarify phase machine', async () => {

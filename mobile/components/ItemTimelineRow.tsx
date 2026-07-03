@@ -10,21 +10,45 @@ function formatKcal(n: number | null): string {
   return `${Math.round(n)} kcal`;
 }
 
+function kcalOf(item: DerivedItem): number | null {
+  return item.item_type === "food" ? item.calories : item.active_calories;
+}
+
+function totalKcal(items: readonly DerivedItem[]): number | null {
+  let total = 0;
+  for (const item of items) {
+    const kcal = kcalOf(item);
+    if (kcal === null) return null;
+    total += kcal;
+  }
+  return total;
+}
+
 type ItemTimelineRowProps =
   | {
       /** True while the event is pending/processing — no resolved item yet. */
       loading: true;
       /** Screen-reader label conveying the in-progress status (e.g. "Estimating"). */
       accessibilityLabel: string;
+      /** Stable row id for E2E checks that assert the skeleton resolves in place. */
+      testID?: string;
     }
   | {
       loading?: false;
       item: DerivedItem;
+      /**
+       * Additional derived items for the same log event, summarized into this
+       * one row during a fresh pending→resolved transition so the timeline does
+       * not grow from one skeleton into several item-keyed rows.
+       */
+      additionalItems?: readonly DerivedItem[];
       /** True when the parent log event is needs_clarification. */
       needsClarification?: boolean;
       /** True for an uncounted label proposal awaiting confirm (FTY-196/197). */
       proposal?: boolean;
       onPress?: () => void;
+      /** Stable row id for E2E checks that assert the value resolves in place. */
+      testID?: string;
       /**
        * Beat 1 — entry resolve (FTY-181). When true, the row eases its value in
        * once (shimmer → value) with `gentleSpring` (a simple fade under Reduce
@@ -64,11 +88,13 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
   // arms the entry-resolve fade (beat 1) for that transition (FTY-180/181).
   const fadeOpacity = useResolveFade(
     props.loading !== true && props.animateResolve === true,
+    props.loading === true,
   );
 
   if (props.loading) {
     return (
       <View
+        testID={props.testID}
         style={[styles.row, { borderBottomColor: colors.separator }]}
         accessibilityRole="progressbar"
         accessibilityLabel={props.accessibilityLabel}
@@ -101,26 +127,45 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
     );
   }
 
-  const { item, needsClarification = false, proposal = false, onPress } = props;
+  const {
+    item,
+    additionalItems = [],
+    needsClarification = false,
+    proposal = false,
+    onPress,
+    testID,
+  } = props;
+  const allItems = additionalItems.length > 0
+    ? [item, ...additionalItems]
+    : [item];
+  const additionalCount = allItems.length - 1;
 
   const name = item.name;
-  const kcal =
-    item.item_type === "food" ? item.calories : item.active_calories;
+  const kcal = totalKcal(allItems);
   const source = item.item_type === "food" ? item.source : null;
   const is_edited = item.is_edited ?? false;
+  const displayName = additionalCount > 0 ? `${name} + ${additionalCount}` : name;
 
   // Both uncounted states render muted; only their tag / kcal treatment differ.
   const uncounted = needsClarification || proposal;
   const textColor = uncounted ? colors.textMuted : colors.text;
   const kcalColor = uncounted ? colors.textMuted : colors.textSecondary;
 
+  const labelName =
+    additionalCount > 0
+      ? `${name} and ${additionalCount} more ${
+          additionalCount === 1 ? "item" : "items"
+        }`
+      : name;
+  const allExercise = allItems.every((row) => row.item_type === "exercise");
+  const kcalLabel = `${kcal !== null ? Math.round(kcal) : 0} kcal${
+    allExercise ? " burned" : additionalCount > 0 ? " total" : ""
+  }`;
   const a11yLabel = needsClarification
-    ? `${name}, needs a detail, uncounted`
+    ? `${labelName}, needs a detail, uncounted`
     : proposal
       ? `${name}, ${kcal !== null ? Math.round(kcal) : 0} kcal, not yet counted`
-      : item.item_type === "food"
-        ? `${name}, ${kcal !== null ? Math.round(kcal) : 0} kcal`
-        : `${name}, ${kcal !== null ? Math.round(kcal) : 0} kcal burned`;
+      : `${labelName}, ${kcalLabel}`;
 
   const a11yHint = needsClarification
     ? "Tap to add the missing detail"
@@ -129,8 +174,9 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
       : "Tap to view details";
 
   return (
-    <Animated.View style={{ opacity: fadeOpacity }}>
+    <Animated.View style={{ opacity: props.animateResolve === true ? fadeOpacity : 1 }}>
       <Pressable
+        testID={testID}
         style={({ pressed }) => [
           styles.row,
           { borderBottomColor: colors.separator },
@@ -150,7 +196,7 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
           numberOfLines={1}
           accessibilityElementsHidden
         >
-          {name}
+          {displayName}
         </Text>
 
         {/* Uncounted tag: "needs a detail" (clarify) or "not counted" (proposal) */}

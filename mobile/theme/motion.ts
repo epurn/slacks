@@ -127,16 +127,25 @@ export function usePulse(): {
  * fade. The fade plays once — a static (already-resolved) row stays fully opaque
  * and never re-animates on re-render.
  */
-export function useResolveFade(active: boolean): Animated.Value {
+export function useResolveFade(
+  active: boolean,
+  startsHidden = false,
+): Animated.Value {
   // Nullable form: the fade plays once, so it must wait for the setting to be
   // known before choosing spring-vs-fade — otherwise every resolve would take the
   // fallback fade before the read settles.
   const reduceMotion = useReduceMotionState();
-  const [opacity] = useState(() => new Animated.Value(active ? 0 : 1));
+  const [opacity] = useState(
+    () => new Animated.Value(active || startsHidden ? 0 : 1),
+  );
   const played = useRef(false);
 
   useEffect(() => {
-    if (!active || played.current || reduceMotion === null) return;
+    if (!active) {
+      opacity.setValue(startsHidden ? 0 : 1);
+      return;
+    }
+    if (played.current || reduceMotion === null) return;
     played.current = true;
     opacity.setValue(0);
     if (reduceMotion) {
@@ -148,7 +157,7 @@ export function useResolveFade(active: boolean): Animated.Value {
     } else {
       Animated.spring(opacity, { ...gentleSpring, toValue: 1 }).start();
     }
-  }, [active, reduceMotion, opacity]);
+  }, [active, reduceMotion, opacity, startsHidden]);
 
   return opacity;
 }

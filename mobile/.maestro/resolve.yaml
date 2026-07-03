@@ -4,20 +4,23 @@
 # in when it transitions pending→completed. That value row (name · kcal · source)
 # only renders when the Today feed carries the entry's derived items — the
 # item-forward `/log-events/by-date` read (FTY-198). This flow proves the beat's
-# value row is reachable on the real screen data path: it drives a log to a
-# resolved entry and asserts the resolved item row appears, populated from the
-# by-date feed's real derived item — not an injected `items` prop.
+# value row is reachable on the real screen data path and that a multi-item
+# completion stays one event-keyed row: it drives a log to a visible pending
+# skeleton, refreshes it to a completed two-item entry, and asserts the resolved
+# summary row appears without a second item row.
 #
 # If the by-date feed were not wired (the pre-fix state the reviewer flagged),
 # `itemsByEvent` would stay empty, the completed entry would render as a
-# status-only placeholder, and the value-row assertion below would go red —
-# exactly the data-starved gap this flow guards against.
+# status-only placeholder, and the value-row assertion below would go red. If a
+# multi-item resolve grew from one skeleton into item-keyed rows, the "Banana"
+# row absence assertion would go red — exactly the layout-shift gap this flow
+# guards against.
 #
 # Flow:
-#   Today (empty day) → submit "greek yogurt" → the entry resolves to completed
-#   (optimistic pending → completed reconcile arms the beat) → tap Refresh to
-#   load the item-forward feed → the resolved value row "Greek yogurt, 140 kcal"
-#   appears and the hero counts the 140-kcal entry.
+#   Today (empty day) → submit "greek yogurt and banana" → the entry appears as
+#   one pending skeleton row → tap Refresh to load the completed event and
+#   item-forward feed → the resolved summary row "Greek yogurt and 1 more item,
+#   245 kcal total" appears on the same row id and the hero counts the entry.
 #
 # Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
 # directory-level Maestro runs launch the installed app under test reliably.
@@ -38,44 +41,59 @@ appId: com.fatty
       id: today-timeline-ready
     timeout: 15000
 
-# Step 3: Submit "greek yogurt" — the mock resolves it straight to a completed
-#         entry. The client shows it optimistically as pending, then reconciles
-#         to completed; that pending→completed transition is what arms the beat.
+# Step 3: Submit "greek yogurt and banana" — the mock returns the stored event as
+#         pending first so the skeleton is visible on-device.
 - tapOn:
     text: "Log food or exercise"
-- inputText: "greek yogurt"
+- inputText: "greek yogurt and banana"
 - tapOn:
     text: "Add entry"
 
-# Step 4: Wait for the timeline to show entries (the reconciled completed entry).
+# Step 4: Wait for the timeline to show entries (the reconciled pending entry).
 - extendedWaitUntil:
     visible:
       id: today-timeline-with-entries
     timeout: 10000
 
-# Step 5: Tap Refresh to load the item-forward day feed (/log-events/by-date),
-#         which carries the entry's resolved derived item. (A manual refresh is
-#         needed because the entry resolves synchronously in the mock, so there
-#         is no pending-poll window that would otherwise fetch the items.)
+# Step 5: The pending row is a skeleton (progressbar label only), keyed by the
+#         same event row id the resolved value will use. The raw phrase must not
+#         appear as visible timeline copy.
+- extendedWaitUntil:
+    visible:
+      id: "item-timeline-row-e2e-resolve-event-00000000-0000-0000-0000-000000000000"
+    timeout: 10000
+- assertVisible:
+    text: ".*Waiting to estimate.*"
+- assertNotVisible:
+    text: ".*greek yogurt and banana.*"
+
+# Step 6: Tap Refresh to load the completed event and item-forward day feed
+#         (/log-events/by-date), which carries two resolved derived items.
 - tapOn:
     text: "Refresh"
 
-# Step 6: Load-bearing assertion — the resolved value row is visible, populated
-#         from the by-date feed's real derived item. ItemTimelineRow exposes the
-#         collapsed accessibility label "Greek yogurt, 140 kcal" (its inner Texts
-#         are hidden from the a11y tree, and Android mirrors it as the content
-#         description), so Maestro matches the anchored label with wildcards.
-#         A data-starved Today (items not wired) would render a status-only
-#         placeholder instead and fail here.
+# Step 7: Load-bearing assertion — the resolved value row is visible, populated
+#         from the by-date feed's real derived items. ItemTimelineRow exposes the
+#         collapsed accessibility label "Greek yogurt and 1 more item, 245 kcal
+#         total" (its inner Texts are hidden from the a11y tree, and Android
+#         mirrors it as the content description), so Maestro matches the anchored
+#         label with wildcards. The same row id remains visible after resolve,
+#         and the second item is summarized rather than mounted as its own row.
 - extendedWaitUntil:
     visible:
-      text: ".*Greek yogurt, 140 kcal.*"
+      id: "item-timeline-row-e2e-resolve-event-00000000-0000-0000-0000-000000000000"
     timeout: 10000
+- extendedWaitUntil:
+    visible:
+      text: ".*Greek yogurt and 1 more item, 245 kcal total.*"
+    timeout: 10000
+- assertNotVisible:
+    text: ".*Banana, 105 kcal.*"
 
-# Step 7: The entry counts — the CalorieHero label includes the 140 kcal the
-#         resolved item contributes (E2E_RESOLVE_SUMMARY), proving the resolved
+# Step 8: The entry counts — the CalorieHero label includes the 245 kcal the
+#         resolved items contribute (E2E_RESOLVE_SUMMARY), proving the resolved
 #         value flows through to the day totals, not just the row.
 - extendedWaitUntil:
     visible:
-      text: ".*140 of 2,000 kcal.*"
+      text: ".*245 of 2,000 kcal.*"
     timeout: 10000

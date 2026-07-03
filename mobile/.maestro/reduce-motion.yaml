@@ -36,14 +36,15 @@ appId: com.fatty
       id: today-timeline-ready
     timeout: 15000
 
-# Step 3: Submit a log — the mock resolves it straight to a completed entry.
+# Step 3: Submit a log — the mock returns it pending first so the same
+#         skeleton→value resolve path runs under Reduce Motion.
 - tapOn:
     text: "Log food or exercise"
-- inputText: "greek yogurt"
+- inputText: "greek yogurt and banana"
 - tapOn:
     text: "Add entry"
 
-# Step 4: Wait for the reconciled completed entry.
+# Step 4: Wait for the reconciled pending entry.
 - extendedWaitUntil:
     visible:
       id: today-timeline-with-entries
@@ -57,13 +58,13 @@ appId: com.fatty
 #         row still eases in and is present (no spring, no motion, same end state).
 - extendedWaitUntil:
     visible:
-      text: ".*Greek yogurt, 140 kcal.*"
+      text: ".*Greek yogurt and 1 more item, 245 kcal total.*"
     timeout: 10000
 
 # Step 7: The bar sets its value with no spring and the entry counts — the hero
-#         reflects the 140-kcal item, proving the no-motion path reaches the day
+#         reflects the 245-kcal entry, proving the no-motion path reaches the day
 #         totals just like the motion path.
 - extendedWaitUntil:
     visible:
-      text: ".*140 of 2,000 kcal.*"
+      text: ".*245 of 2,000 kcal.*"
     timeout: 10000
