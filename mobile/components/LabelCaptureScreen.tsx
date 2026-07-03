@@ -40,6 +40,7 @@ import {
 } from "@/api/labelCapture";
 import { useTheme } from "@/theme/ThemeContext";
 import type { ColorPalette } from "@/theme/colors";
+import { AppIcon } from "@/components/ui";
 import {
   CameraCapture,
   type CameraCaptureProps,
@@ -49,6 +50,8 @@ import type { LogEventDTO } from "@/api/logEvents";
 
 const RATIONALE =
   "Fatty uses the camera to photograph nutrition labels so you can log packaged foods accurately.";
+
+const FRAMING_HINT = "Fit the nutrition label inside the frame";
 
 type Phase = "camera" | "preview" | "uploading" | "error";
 
@@ -105,6 +108,7 @@ export function LabelCaptureScreen({
   const [photo, setPhoto] = useState<CapturedPhoto | null>(null);
   const [savePhoto, setSavePhoto] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [torchOn, setTorchOn] = useState(false);
 
   const defaultUpload = useCallback(
     (imageUri: string, save: boolean) =>
@@ -122,6 +126,11 @@ export function LabelCaptureScreen({
 
   const doTakePhoto = takePhoto ?? defaultTakePhoto;
   const doUpload = upload ?? defaultUpload;
+
+  // The flash control only exists in the camera/error phases, so gate the torch
+  // to those phases: once the user leaves (preview/uploading), the torch turns
+  // off even though `torchOn` is retained for when they return to framing.
+  const torchActive = torchOn && (phase === "camera" || phase === "error");
 
   const handleShutter = useCallback(async () => {
     try {
@@ -168,8 +177,21 @@ export function LabelCaptureScreen({
             ref={cameraRef}
             style={StyleSheet.absoluteFill}
             facing="back"
+            enableTorch={torchActive}
             accessibilityLabel="Camera viewfinder"
           />
+
+          {(phase === "camera" || phase === "error") && (
+            <FramingGuide colors={colors} />
+          )}
+
+          {(phase === "camera" || phase === "error") && (
+            <FlashToggle
+              torchOn={torchOn}
+              onToggle={() => setTorchOn((prev) => !prev)}
+              colors={colors}
+            />
+          )}
 
           {/* Overlay controls rendered on top of the viewfinder */}
           <View style={styles.overlay}>
@@ -206,6 +228,50 @@ export function LabelCaptureScreen({
         </View>
       )}
     </CameraCapture>
+  );
+}
+
+function FramingGuide({ colors }: { colors: ColorPalette }) {
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  return (
+    <View style={styles.framingGuideContainer} pointerEvents="none">
+      <View style={styles.framingGuideFrame} />
+      <Text
+        style={styles.framingHintText}
+        accessibilityRole="text"
+        accessibilityLabel={FRAMING_HINT}
+      >
+        {FRAMING_HINT}
+      </Text>
+    </View>
+  );
+}
+
+function FlashToggle({
+  torchOn,
+  onToggle,
+  colors,
+}: {
+  torchOn: boolean;
+  onToggle: () => void;
+  colors: ColorPalette;
+}) {
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Flash"
+      accessibilityHint="Toggles the camera flash for the label photo"
+      accessibilityState={{ selected: torchOn }}
+      onPress={onToggle}
+      style={styles.flashButton}
+    >
+      <AppIcon
+        name={torchOn ? "bolt.fill" : "bolt.slash.fill"}
+        size={20}
+        color="#FFFFFF"
+      />
+    </Pressable>
   );
 }
 
@@ -316,6 +382,46 @@ function makeStyles(colors: ColorPalette) {
     shutterControls: {
       alignItems: "center",
       gap: 16,
+    },
+    framingGuideContainer: {
+      position: "absolute",
+      top: "16%",
+      left: 0,
+      right: 0,
+      alignItems: "center",
+      gap: 12,
+    },
+    framingGuideFrame: {
+      // Overlay guide on the live camera feed, not a themed surface — fixed
+      // translucent white to stay legible over any label/background.
+      width: "76%",
+      aspectRatio: 0.72,
+      borderWidth: 3,
+      borderColor: "rgba(255,255,255,0.85)",
+      borderRadius: 16,
+    },
+    framingHintText: {
+      // Sits over the live camera feed — fixed white for contrast, matching
+      // the other camera-overlay text in this file.
+      color: "#FFFFFF",
+      fontSize: 15,
+      fontWeight: "500",
+      textAlign: "center",
+      paddingHorizontal: 24,
+      backgroundColor: "rgba(0,0,0,0.5)",
+      borderRadius: 8,
+      paddingVertical: 6,
+    },
+    flashButton: {
+      position: "absolute",
+      top: 60,
+      left: 20,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: "rgba(0,0,0,0.6)",
+      alignItems: "center",
+      justifyContent: "center",
     },
     errorText: {
       color: colors.coral,
