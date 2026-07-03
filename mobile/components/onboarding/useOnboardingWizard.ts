@@ -37,6 +37,7 @@ import {
   type UnitsPreference,
 } from '@/state/profile';
 import { useGoalDirectionController } from '@/state/goalDirection';
+import { fileGoalPaceStore, type GoalPaceStore } from '@/state/goalPace';
 import type { Session } from '@/state/session';
 import { toApiSession } from '@/state/session';
 
@@ -47,6 +48,7 @@ export interface UseOnboardingWizardParams {
   detectUnitsFn?: () => UnitsPreference;
   detectTimezoneFn?: () => string;
   currentYearFn?: () => number;
+  goalPaceStore?: GoalPaceStore;
 }
 
 export interface OnboardingWizard {
@@ -86,6 +88,7 @@ export function useOnboardingWizard({
   detectUnitsFn = detectUnitsPreference,
   detectTimezoneFn = detectTimezone,
   currentYearFn = () => new Date().getFullYear(),
+  goalPaceStore = fileGoalPaceStore,
 }: UseOnboardingWizardParams): OnboardingWizard {
   const goalDirectionController = useGoalDirectionController();
 
@@ -199,6 +202,13 @@ export function useOnboardingWizard({
 
       setReveal(goalResponse);
       goalDirectionController.setGoalDirection(goalResponse.target.direction);
+      // Remember the chosen pace on-device so a later cold load of Settings can
+      // summarise this goal as direction + pace, not direction alone. Best-effort
+      // and fire-and-forget — it must never fail the onboarding save.
+      void goalPaceStore.setGoalPace(
+        session.userId,
+        goalState.direction === 'maintain' ? null : goalState.pace,
+      );
 
       // Fade in the reveal card.
       revealOpacity.setValue(0);
@@ -229,6 +239,7 @@ export function useOnboardingWizard({
     currentYearFn,
     revealOpacity,
     goalDirectionController,
+    goalPaceStore,
   ]);
 
   const isMetric = measurements.unitsPreference === 'metric';

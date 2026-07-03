@@ -45,9 +45,10 @@ appId: com.fatty
 - assertVisible:
     text: "YOU"
 
-# 3. A returning user's active goal summarises as its real direction on load
-#    (GET /goal → loss), never the dead "Details unavailable" state. The Goal
-#    row (accessibilityLabel "Goal: …") then opens its inline editor, and saving
+# 3. On this first launch the device has not yet remembered a pace for the user,
+#    so the active goal summarises by its real direction (GET /goal → loss) —
+#    honest, and never the dead "Details unavailable" state. The Goal row
+#    (accessibilityLabel "Goal: …") then opens its inline editor, and saving
 #    through the real Settings path reveals updated targets and upgrades the row
 #    to direction + pace copy.
 - assertVisible:
@@ -74,3 +75,22 @@ appId: com.fatty
     visible:
       id: today-screen
     timeout: 10000
+
+# 5. Returning-user cold load: the pace just chosen is remembered on-device, so a
+#    fresh relaunch (JS state cleared, on-device storage kept) summarises the goal
+#    as direction + pace straight from GET /goal + the remembered pace — no
+#    in-session edit — proving the returning-user summary FTY-190 requires.
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      id: today-screen
+    timeout: 15000
+- tapOn:
+    text: "Open profile"
+- extendedWaitUntil:
+    visible:
+      text: "Profile"
+    timeout: 10000
+- assertVisible:
+    text: "Goal: Lose · Steady"
