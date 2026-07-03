@@ -30,6 +30,8 @@ import {
   useCameraPermission,
   type CameraPermission,
 } from "@/state/cameraPermission";
+import { useTheme } from "@/theme/ThemeContext";
+import type { ColorPalette } from "@/theme/colors";
 import type { PermissionResponse } from "expo";
 
 export interface CameraCaptureProps {
@@ -60,6 +62,7 @@ export function CameraCapture({
   children,
   permissionsHook,
 }: CameraCaptureProps) {
+  const { colors } = useTheme();
   const permission = useCameraPermission(
     permissionsHook as Parameters<typeof useCameraPermission>[0],
   );
@@ -91,6 +94,7 @@ export function CameraCapture({
       permission={permission}
       rationale={rationale}
       onClose={onClose}
+      colors={colors}
     />
   );
 }
@@ -99,12 +103,22 @@ function PermissionGate({
   permission,
   rationale,
   onClose,
+  colors,
 }: {
   permission: CameraPermission;
   rationale: string;
   onClose: () => void;
+  colors: ColorPalette;
 }) {
   const isBlocked = permission.status === "blocked";
+  const accentButton = [
+    styles.primaryButton,
+    { backgroundColor: colors.accent },
+  ];
+  const accentButtonLabel = [
+    styles.primaryButtonLabel,
+    { color: colors.accentForeground },
+  ];
 
   return (
     <View style={styles.container}>
@@ -128,18 +142,18 @@ function PermissionGate({
             accessibilityRole="button"
             accessibilityLabel="Open Settings"
             onPress={() => void openSettings()}
-            style={styles.primaryButton}
+            style={accentButton}
           >
-            <Text style={styles.primaryButtonLabel}>Open Settings</Text>
+            <Text style={accentButtonLabel}>Open Settings</Text>
           </Pressable>
         ) : (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Allow camera access"
             onPress={() => void permission.request()}
-            style={styles.primaryButton}
+            style={accentButton}
           >
-            <Text style={styles.primaryButtonLabel}>Allow Camera Access</Text>
+            <Text style={accentButtonLabel}>Allow Camera Access</Text>
           </Pressable>
         )}
       </View>
@@ -182,7 +196,6 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   primaryButton: {
-    backgroundColor: "#0A84FF",
     borderRadius: 10,
     paddingVertical: 14,
     paddingHorizontal: 28,
@@ -191,7 +204,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   primaryButtonLabel: {
-    color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "600",
   },

@@ -1,7 +1,24 @@
+import { Animated } from "react-native";
 import { act, create as render, type ReactTestRenderer } from "react-test-renderer";
 
 import { DailySummary } from "./DailySummary";
 import type { DailySummaryDTO, TargetReadModel } from "@/api/dailySummary";
+import { mockReduceMotion } from "@/testUtils/reduceMotion";
+
+// The hero (CalorieHero) now eases its bar with a spring and reads Reduce Motion.
+// Stub the async read synchronously and finish animations immediately so these
+// render tests don't leak an animation loop or an unwrapped async setState.
+const FAKE_ANIM = { start: (cb?: (r: { finished: boolean }) => void) => cb?.({ finished: true }), stop: () => {} };
+
+beforeEach(() => {
+  mockReduceMotion(false);
+  jest.spyOn(Animated, "spring").mockReturnValue(FAKE_ANIM as never);
+  jest.spyOn(Animated, "timing").mockReturnValue(FAKE_ANIM as never);
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
 
 // expo-symbols is a native module — stub SymbolView (used by the burn line's
 // AppIcon) with a View so these render tests don't touch native code.

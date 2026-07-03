@@ -68,6 +68,10 @@ app under test reliably. If the app ID changes, update `app.json` and every flow
 | `failed-parse.yaml` | Failed-parse UX: submit gibberish → "Couldn't read that" row appears with Retry + Edit-as-text (never a static dead end) → tap Retry → the failed row is superseded in place by a fresh pending attempt, no stale duplicate (FTY-176) |
 | `profile.yaml` | Profile native header: tap the Today gear → the "Profile" native large-title header renders with the grouped settings inset below it → the Goal row still opens its inline editor → Done dismisses back to Today (FTY-182) |
 | `trends.yaml` | Trends hierarchy: open Trends → weight card renders real data → the cadence card is absent (it moved to Preferences) → tap the compact Log weight control → the weight sheet opens usable, not data-starved (FTY-187) |
+| `resolve.yaml` | Entry-resolve beat (beat 1) real data-path: submit a log → it resolves to a completed entry → Refresh loads the item-forward `/log-events/by-date` feed → the resolved value row ("Greek yogurt, 140 kcal") renders from real derived-item data and counts in the hero (a data-starved Today, items not wired, fails here) (FTY-181) |
+| `correction.yaml` | Correction-saved beat (beat 2) real data-path: submit a log → it resolves → tap the resolved row → the correction sheet opens → step the portion up → the sheet shows the server-recomputed value ("175 kcal"), the successful commit the correction-saved beat rides (FTY-181) |
+| `target.yaml` | Target-reached beat (beat 3) real data-path: hero mounts under target ("0 of 2,000 kcal", seeds not-reached) → submit a large log → Refresh → the day summary crosses the target and the hero flips to its over-budget end state ("2,100 of 2,000 kcal, 100 over budget"), the crossing the target-reached beat rides (FTY-181) |
+| `reduce-motion.yaml` | Reduce Motion (all beats): under the reduce-motion build the harness forces `isReduceMotionEnabled` true, so the beats take their no-motion branch; the resolve value row still eases in (a fade, not a spring) and counts, proving the no-motion path reaches the same successful end state. Run via `E2E_REDUCE_MOTION=1 ./verify-e2e.sh` (see below) (FTY-181) |
 
 ## E2E launch mode (deterministic boot)
 
@@ -83,6 +87,30 @@ The gate is hard-closed in release builds: `__DEV__` is `false` at compile time
 in a production bundle, making the E2E branch dead code that Metro eliminates.
 The `EXPO_PUBLIC_FATTY_E2E=true` env var is the second gate; it is set only by
 `verify-e2e.sh` at build time, never by default. See `e2e/launchMode.ts`.
+
+## Reduce Motion pass (FTY-181)
+
+The signature motion beats degrade to a no-motion path under Reduce Motion (a
+simple fade / value-set, no spring — see `theme/motion.ts`). Maestro cannot
+toggle the OS `isReduceMotionEnabled` flag, so the reduce-motion E2E build sets a
+second env var and the launch harness overrides that accessibility read — the
+hermetic equivalent of the OS toggle:
+
+```sh
+cd mobile
+E2E_REDUCE_MOTION=1 ./verify-e2e.sh
+```
+
+This forces Reduce Motion on for the whole run, so `reduce-motion.yaml` (and every
+other flow) exercises the beats' no-motion branch end-to-end and proves they still
+reach the same successful state — the resolved value row eases in with a fade (not
+a spring) and counts in the hero. The default `./verify-e2e.sh` leaves the var
+unset (`false`), so behaviour is unchanged and the beats run with full motion.
+
+The animation *curve* itself (spring vs fade) is not exposed in the accessibility
+tree, so the branch **selection** is asserted by the `theme/motion.ts` and
+`CalorieHero` component tests; this pass guards that the no-motion path reaches the
+same end state on a real device.
 
 ## Adding a new flow
 
