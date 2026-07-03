@@ -25,6 +25,7 @@ sensitive derived body data and are never logged — only ids appear in diagnost
 
 from __future__ import annotations
 
+import math
 import uuid
 from datetime import date, timedelta
 from typing import NamedTuple
@@ -226,6 +227,41 @@ def direction_of(goal: Goal) -> GoalDirection:
     if goal.target_weight_kg < goal.start_weight_kg:
         return GoalDirection.LOSS
     return GoalDirection.MAINTAIN
+
+
+def pace_of(goal: Goal) -> PacePreset | None:
+    """Recover a goal's pace preset from its persisted trajectory (FTY-190).
+
+    Like :func:`direction_of`, a goal stores no ``pace`` column — the pace was
+    consumed exactly once, to derive the trajectory in :func:`derive_trajectory`
+    (``delta = fraction × start_weight × horizon``). This is that derivation's
+    *exact inverse*: recover the weekly fraction from the stored start/target
+    weights over the same fixed :data:`PLANNING_HORIZON_WEEKS`, then match it back
+    to the band it was generated from. Because each band is a distinct constant
+    and the trajectory is a pure function of it, the recovery is exact (not a
+    guess or an ambiguous inference from arbitrary numbers).
+
+    ``maintain`` goals have no pace and return ``None``. A trajectory that lands
+    on no band — a legacy or hand-seeded goal off the band grid — also returns
+    ``None`` so the caller falls back to a direction-only summary rather than
+    inventing a pace. Pace is a coarse rate *preset* (gentle/steady/faster), not a
+    body number, so surfacing it leaks nothing sensitive that ``direction`` does
+    not already.
+    """
+
+    direction = direction_of(goal)
+    if direction is GoalDirection.MAINTAIN:
+        return None
+    if goal.start_weight_kg <= 0:
+        return None
+
+    fraction = abs(goal.target_weight_kg - goal.start_weight_kg) / (
+        goal.start_weight_kg * PLANNING_HORIZON_WEEKS
+    )
+    for preset, band_fraction in PACE_WEEKLY_FRACTION[direction].items():
+        if math.isclose(fraction, band_fraction, rel_tol=1e-9, abs_tol=1e-12):
+            return preset
+    return None
 
 
 def read_active_goal(session: Session, owner_id: uuid.UUID, current_user: User) -> Goal | None:

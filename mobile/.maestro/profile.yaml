@@ -45,14 +45,15 @@ appId: com.fatty
 - assertVisible:
     text: "YOU"
 
-# 3. On a cold load the pace is not carried on any fetchable read-model, so the
-#    active goal summarises by its real direction (GET /goal → loss) — honest,
-#    and never the dead "Details unavailable"/"Active" state. The Goal row
+# 3. On a cold load the active goal summarises as its real direction + pace
+#    (GET /goal → loss + steady, both recovered server-side from the persisted
+#    trajectory) — the FTY-190 acceptance criterion, with no in-session edit and
+#    never the dead "Details unavailable"/"Active"/"Loading…" state. The Goal row
 #    (accessibilityLabel "Goal: …") then opens its inline editor, and saving
-#    through the real Settings path reveals updated targets and upgrades the row
-#    to direction + pace copy for the session.
+#    through the real Settings path reveals updated targets and keeps the
+#    direction + pace summary for the session.
 - assertVisible:
-    text: "Goal: Lose"
+    text: "Goal: Lose · Steady"
 - tapOn:
     text: "Goal:.*"
 - assertVisible:
@@ -76,10 +77,10 @@ appId: com.fatty
       id: today-screen
     timeout: 10000
 
-# 5. Returning-user cold load: the pace just chosen is remembered on-device, so a
-#    fresh relaunch (JS state cleared, on-device storage kept) summarises the goal
-#    as direction + pace straight from GET /goal + the remembered pace — no
-#    in-session edit — proving the returning-user summary FTY-190 requires.
+# 5. Returning-user cold load: a fresh relaunch (JS state cleared) summarises the
+#    goal as direction + pace straight from GET /goal — both fields recovered
+#    server-side from the persisted trajectory, no in-session edit and no on-device
+#    cache — proving the returning-user summary FTY-190 requires.
 - launchApp:
     clearState: false
 - extendedWaitUntil:

@@ -70,7 +70,7 @@ import { toApiSession } from '@/state/session';
 // eslint-disable-next-line import/first
 import { getProfile } from '@/api/profile';
 // eslint-disable-next-line import/first
-import { createGoal, getActiveGoalDirection, getTarget } from '@/api/goals';
+import { createGoal, getActiveGoal, getActiveGoalDirection, getTarget } from '@/api/goals';
 // eslint-disable-next-line import/first
 import {
   listTodayLogEvents,
@@ -358,7 +358,12 @@ describe('E2E mock serves the URLs the real API clients request', () => {
     expect(target.calories.effective).toBe(2000);
   });
 
-  it('getActiveGoalDirection resolves to the active goal fixture', async () => {
+  it('getActiveGoal resolves to the active goal fixture (direction + pace)', async () => {
+    const goal = await getActiveGoal(apiSession, mockFetch);
+    expect(goal).toEqual({ direction: 'loss', pace: 'steady' });
+  });
+
+  it('getActiveGoalDirection resolves to the active goal fixture direction', async () => {
     const direction = await getActiveGoalDirection(apiSession, mockFetch);
     expect(direction).toBe('loss');
   });

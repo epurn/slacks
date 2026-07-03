@@ -149,7 +149,9 @@ function renderSettings(
             getTargetFn={jest.fn().mockResolvedValue(DERIVED_TARGET)}
             putProfileFn={jest.fn().mockResolvedValue(PROFILE)}
             createGoalFn={jest.fn().mockResolvedValue(GOAL_TARGET_RESPONSE)}
-            getActiveGoalDirectionFn={jest.fn().mockResolvedValue("loss")}
+            getActiveGoalFn={jest
+              .fn()
+              .mockResolvedValue({ direction: "loss", pace: "steady" })}
             settingsStore={mockSettingsStore()}
             cadenceStore={mockCadenceStore()}
             notificationsAdapter={mockNotifications()}
@@ -193,35 +195,40 @@ function press(tree: ReactTestRenderer, label: string) {
 }
 
 describe("SettingsScreen FTY-190 copy and affordances", () => {
-  it("summarizes a returning user's loaded goal by its real direction on a cold load", async () => {
-    // The returning-user case: the in-memory seam is empty on a cold launch, so
-    // the direction comes from the authoritative `GET /goal` fetch. Pace is not
-    // carried on any fetchable read-model and is never replayed from a local
-    // cache, so the row honestly summarises the real goal by its direction
-    // (`Lose`) rather than inventing or showing a possibly-stale pace — and
-    // never the dead `Active` / `Details unavailable` states the story removes.
+  it("summarizes a returning user's loaded goal as direction + pace on a cold load", async () => {
+    // The core FTY-190 acceptance criterion: the in-memory seam is empty on a
+    // cold launch, so both direction *and* pace come from the authoritative
+    // `GET /goal` fetch (each recovered server-side from the persisted
+    // trajectory). The row summarises the real loss/steady goal as
+    // `Lose · Steady` — never the dead `Active` / `Details unavailable` /
+    // `Loading…` states the story removes, and without any in-session edit.
     mockKnownGoalDirection = null;
     const tree = renderSettings({
-      getActiveGoalDirectionFn: jest.fn().mockResolvedValue("loss"),
+      getActiveGoalFn: jest
+        .fn()
+        .mockResolvedValue({ direction: "loss", pace: "steady" }),
     });
     await act(async () => {});
 
-    expect(() => findPressable(tree, "Goal: Lose")).not.toThrow();
+    expect(() => findPressable(tree, "Goal: Lose · Steady")).not.toThrow();
+    expect(() => findPressable(tree, "Goal: Lose")).toThrow();
     expect(() => findPressable(tree, "Goal: Details unavailable")).toThrow();
     expect(() => findPressable(tree, "Goal: Loading…")).toThrow();
     expect(textContent(tree)).not.toContain("Active");
   });
 
-  it("upgrades the goal row to direction + pace after an in-session edit, without persisting the pace", async () => {
-    // Direction is authoritative on a cold load; pace becomes known only once the
-    // user edits the goal this session. The chosen pace upgrades the row to
-    // direction + pace for the session but is deliberately not written to any
-    // on-device store — the goal itself round-tripped to the server.
+  it("summarizes a loaded goal by direction alone when the server recovers no pace, then upgrades on edit", async () => {
+    // A legacy goal off the band grid recovers a direction but no pace, so the
+    // row honestly summarises it by direction (`Lose`) rather than inventing a
+    // pace or collapsing to a dead state. Editing it this session upgrades the
+    // row to direction + pace once the real goal round-trips to the server.
     mockKnownGoalDirection = null;
     const createGoalFn = jest.fn().mockResolvedValue(GOAL_TARGET_RESPONSE);
     const tree = renderSettings({
       createGoalFn,
-      getActiveGoalDirectionFn: jest.fn().mockResolvedValue("loss"),
+      getActiveGoalFn: jest
+        .fn()
+        .mockResolvedValue({ direction: "loss", pace: null }),
     });
     await act(async () => {});
 
@@ -250,7 +257,9 @@ describe("SettingsScreen FTY-190 copy and affordances", () => {
   it("summarizes a maintain goal without a pace and never as a dead state", async () => {
     mockKnownGoalDirection = null;
     const tree = renderSettings({
-      getActiveGoalDirectionFn: jest.fn().mockResolvedValue("maintain"),
+      getActiveGoalFn: jest
+        .fn()
+        .mockResolvedValue({ direction: "maintain", pace: null }),
     });
     await act(async () => {});
 

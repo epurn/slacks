@@ -41,6 +41,7 @@ from app.services.goals import (
     create_goal_with_target,
     derive_trajectory,
     direction_of,
+    pace_of,
     read_active_goal,
 )
 from app.services.targets import (
@@ -272,6 +273,51 @@ def test_direction_of_recovers_direction_from_trajectory(session: Session) -> No
         session, user.id, user, GoalTargetRequest(direction=GoalDirection.MAINTAIN)
     )
     assert direction_of(maintain) is GoalDirection.MAINTAIN
+
+
+def test_pace_of_recovers_pace_from_trajectory(session: Session) -> None:
+    # pace_of is the exact inverse of the pace→trajectory derivation: every
+    # (direction, pace) the endpoint accepts round-trips back to the same preset.
+    user = _make_user_with_profile(session)
+    for direction, pace in (
+        (GoalDirection.LOSS, PacePreset.GENTLE),
+        (GoalDirection.LOSS, PacePreset.STEADY),
+        (GoalDirection.LOSS, PacePreset.FASTER),
+        (GoalDirection.GAIN, PacePreset.GENTLE),
+        (GoalDirection.GAIN, PacePreset.STEADY),
+    ):
+        goal, _ = create_goal_with_target(
+            session,
+            user.id,
+            user,
+            GoalTargetRequest(direction=direction, pace=pace),
+        )
+        assert pace_of(goal) is pace
+
+
+def test_pace_of_is_none_for_maintain(session: Session) -> None:
+    # A maintain goal has no pace (target == start), so there is nothing to recover.
+    user = _make_user_with_profile(session)
+    maintain, _ = create_goal_with_target(
+        session, user.id, user, GoalTargetRequest(direction=GoalDirection.MAINTAIN)
+    )
+    assert pace_of(maintain) is None
+
+
+def test_pace_of_is_none_for_off_grid_trajectory(session: Session) -> None:
+    # A legacy/hand-seeded trajectory that lands on no band recovers no pace,
+    # so the caller falls back to a direction-only summary rather than guessing.
+    user = _make_user_with_profile(session)
+    goal, _ = create_goal_with_target(
+        session,
+        user.id,
+        user,
+        GoalTargetRequest(direction=GoalDirection.LOSS, pace=PacePreset.STEADY),
+    )
+    # Nudge the target off every band's exact fraction.
+    goal.target_weight_kg = goal.start_weight_kg - 0.137
+    assert direction_of(goal) is GoalDirection.LOSS
+    assert pace_of(goal) is None
 
 
 def test_read_active_goal_returns_the_active_goal(session: Session) -> None:
@@ -543,7 +589,24 @@ def test_api_read_active_goal_direction(client: TestClient) -> None:
 
     resp = client.get(f"/api/users/{user_id}/goal", headers={"Authorization": auth})
     assert resp.status_code == 200
-    assert resp.json() == {"direction": "gain"}
+    # The read recovers both the direction and the pace preset the goal was
+    # created with, so a returning user's Settings row can summarise the real
+    # goal as direction + pace on a cold load (FTY-190).
+    assert resp.json() == {"direction": "gain", "pace": "steady"}
+
+
+def test_api_read_active_goal_maintain_has_null_pace(client: TestClient) -> None:
+    user_id, auth = _register(client, "goal-read-maintain@example.com")
+    _complete_profile(client, user_id, auth)
+    client.post(
+        f"/api/users/{user_id}/goal",
+        headers={"Authorization": auth},
+        json={"direction": "maintain"},
+    )
+
+    resp = client.get(f"/api/users/{user_id}/goal", headers={"Authorization": auth})
+    assert resp.status_code == 200
+    assert resp.json() == {"direction": "maintain", "pace": None}
 
 
 def test_api_read_active_goal_direction_404_when_no_goal(client: TestClient) -> None:
