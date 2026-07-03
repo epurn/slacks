@@ -20,7 +20,10 @@ import { useTheme, typeScale } from "@/theme";
  * background to the grouped-list surface. The background/text colours come from the
  * app's *resolved* appearance rather than the raw system scheme, so a Light/Dark/System
  * override is honoured. The gear pushes this screen, so we hide the back chevron and
- * present a Done action (right) that dismisses back to where the gear was opened.
+ * present a Done action (right) that dismisses back to where the gear was opened. The
+ * Done label (and header tint) use `accentText`, the AA-safe amber, rather than the raw
+ * decorative `accent`: as normal-size text the accent falls below the contrast bar on
+ * the light surface, whereas `accentText` meets WCAG AA on both surfaces.
  */
 export default function ProfileRoute() {
   const { setAppearance } = useAppearanceController();
@@ -43,7 +46,7 @@ export default function ProfileRoute() {
           headerShadowVisible: false,
           headerLargeTitleShadowVisible: false,
           headerBackVisible: false,
-          headerTintColor: colors.accent,
+          headerTintColor: colors.accentText,
           headerTitleStyle: { color: colors.text },
           headerLargeTitleStyle: { color: colors.text },
           headerRight: () => (
@@ -55,7 +58,7 @@ export default function ProfileRoute() {
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               style={styles.doneButton}
             >
-              <Text style={[styles.doneLabel, { color: colors.accent }]}>
+              <Text style={[styles.doneLabel, { color: colors.accentText }]}>
                 Done
               </Text>
             </Pressable>

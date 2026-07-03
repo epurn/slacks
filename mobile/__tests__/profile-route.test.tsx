@@ -14,9 +14,11 @@
  */
 
 import React from "react";
+import { StyleSheet } from "react-native";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
 import { ThemeProvider } from "@/theme";
+import { lightPalette, darkPalette } from "@/theme/colors";
 import ProfileRoute from "@/app/profile";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -91,6 +93,31 @@ describe("Profile native header", () => {
       done.props.onPress();
     });
     expect(mockBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the Done label with the AA-safe accent text token, not raw accent", () => {
+    // The visible Done text is normal-size, so it must meet the WCAG AA contrast bar
+    // on the light surface. The decorative `accent` token fails there (~2.14:1); the
+    // AA-safe `accentText` is required for both light and dark surfaces.
+    for (const scheme of ["light", "dark"] as const) {
+      mockCapturedOptions = null;
+      renderRoute(scheme);
+      const palette = scheme === "light" ? lightPalette : darkPalette;
+
+      let headerTree!: ReactTestRenderer;
+      act(() => {
+        headerTree = create(<>{mockCapturedOptions.headerRight()}</>);
+      });
+      const label = headerTree.root.find(
+        (n) =>
+          (n.type as unknown as string) === "Text" &&
+          n.props.children === "Done",
+      );
+      const { color } = StyleSheet.flatten(label.props.style);
+      expect(color).toBe(palette.accentText);
+    }
+    // On the light surface the decorative accent fails AA (~2.14:1); accentText does not.
+    expect(lightPalette.accentText).not.toBe(lightPalette.accent);
   });
 
   it("keeps the header opaque so content is inset, not floated under it", () => {
