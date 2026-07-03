@@ -94,7 +94,7 @@ export default function DayScreen() {
           onPress={handleBack}
           style={styles.backBtn}
         >
-          <Text style={[styles.backLabel, { color: colors.accent }]}>‹ Trends</Text>
+          <Text style={[styles.backLabel, { color: colors.accentText }]}>‹ Trends</Text>
         </Pressable>
         <Text
           style={[styles.dateTitle, { color: colors.text }]}
