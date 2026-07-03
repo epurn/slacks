@@ -1,0 +1,69 @@
+# FTY-181: Reduce Motion — the signature beats degrade with no motion.
+#
+# Under Reduce Motion every signature beat drops its spring/scale motion: beat 1
+# (entry resolve) becomes a simple opacity fade, beats 2/3 (correction saved /
+# target reached) become a brief opacity dip, and the hero bar sets its value
+# with no spring (see theme/motion.ts). Maestro cannot toggle the OS
+# `isReduceMotionEnabled` flag, so this flow is meant to run against the
+# reduce-motion E2E build, where the harness forces Reduce Motion on
+# (`E2E_REDUCE_MOTION=1 ./verify-e2e.sh` — see the README). The launch harness
+# overrides `AccessibilityInfo.isReduceMotionEnabled` to `true`, the exact read
+# the beats branch on, so the beats take their no-motion path.
+#
+# What this proves on-device: under Reduce Motion the beats still *complete* on
+# their no-motion branch — the resolved value row appears (a fade, not a spring)
+# and counts in the hero. A crash, a stuck-hidden row, or a data-starved beat on
+# the no-motion path would fail here. (Animation curves — spring vs fade — are not
+# in the accessibility tree, so the branch *selection* itself is asserted by the
+# theme/motion.ts + CalorieHero component tests; this flow guards that the
+# no-motion path reaches the same successful end state.)
+#
+# Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
+# directory-level Maestro runs launch the installed app under test reliably.
+appId: com.fatty
+---
+# Step 1: Launch in E2E mode (reduce-motion build forces Reduce Motion on).
+- launchApp:
+    clearState: false
+
+# Step 2: Assert the app reaches Today and the timeline is ready.
+- extendedWaitUntil:
+    visible:
+      id: today-screen
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-ready
+    timeout: 15000
+
+# Step 3: Submit a log — the mock resolves it straight to a completed entry.
+- tapOn:
+    text: "Log food or exercise"
+- inputText: "greek yogurt"
+- tapOn:
+    text: "Add entry"
+
+# Step 4: Wait for the reconciled completed entry.
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-with-entries
+    timeout: 10000
+
+# Step 5: Refresh to load the item-forward by-date feed carrying the item.
+- tapOn:
+    text: "Refresh"
+
+# Step 6: Under Reduce Motion the resolve beat is a simple fade — but the value
+#         row still eases in and is present (no spring, no motion, same end state).
+- extendedWaitUntil:
+    visible:
+      text: ".*Greek yogurt, 140 kcal.*"
+    timeout: 10000
+
+# Step 7: The bar sets its value with no spring and the entry counts — the hero
+#         reflects the 140-kcal item, proving the no-motion path reaches the day
+#         totals just like the motion path.
+- extendedWaitUntil:
+    visible:
+      text: ".*140 of 2,000 kcal.*"
+    timeout: 10000
