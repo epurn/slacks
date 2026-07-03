@@ -1,7 +1,9 @@
+import { Animated } from "react-native";
 import { act, create as render, type ReactTestRenderer } from "react-test-renderer";
 
 import { ItemTimelineRow } from "./ItemTimelineRow";
 import type { DerivedFoodItemDTO, DerivedExerciseItemDTO, ItemSourceDTO } from "@/api/derivedItems";
+import { mockReduceMotion } from "@/testUtils/reduceMotion";
 
 // expo-symbols is a native module — replace SymbolView with a View stub that
 // exposes the symbol name via testID (same pattern as AppIcon.test.tsx); the
@@ -100,6 +102,22 @@ function allText(tree: ReactTestRenderer): string {
     .map((n) => n.props.children as string)
     .join(" ");
 }
+
+// A fake Animated driver that finishes synchronously, so the resolve-fade
+// animation never keeps a loop ticking after teardown. Spies still record calls.
+const FAKE_ANIM = { start: (cb?: (r: { finished: boolean }) => void) => cb?.({ finished: true }), stop: () => {} };
+
+beforeEach(() => {
+  // Reduce Motion off by default (synchronous stub) so the resolve fade takes
+  // its spring path and no async setState leaks past `act`.
+  mockReduceMotion(false);
+  jest.spyOn(Animated, "spring").mockReturnValue(FAKE_ANIM as never);
+  jest.spyOn(Animated, "timing").mockReturnValue(FAKE_ANIM as never);
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
 
 describe("ItemTimelineRow — food item", () => {
   it("shows name, kcal, and always-on source icon", () => {
@@ -231,5 +249,31 @@ describe("ItemTimelineRow — needs_clarification", () => {
     });
 
     expect(onPress).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ItemTimelineRow — beat 1: resolve fade", () => {
+  it("eases the value in with a spring when the row resolves (animateResolve)", () => {
+    act(() => {
+      render(<ItemTimelineRow item={foodItem()} animateResolve />);
+    });
+    expect(Animated.spring).toHaveBeenCalled();
+  });
+
+  it("does not animate a row that is not a fresh resolve (default)", () => {
+    act(() => {
+      render(<ItemTimelineRow item={foodItem()} />);
+    });
+    expect(Animated.spring).not.toHaveBeenCalled();
+    expect(Animated.timing).not.toHaveBeenCalled();
+  });
+
+  it("degrades to a simple fade (no spring) under Reduce Motion", () => {
+    mockReduceMotion(true);
+    act(() => {
+      render(<ItemTimelineRow item={foodItem()} animateResolve />);
+    });
+    expect(Animated.spring).not.toHaveBeenCalled();
+    expect(Animated.timing).toHaveBeenCalled();
   });
 });

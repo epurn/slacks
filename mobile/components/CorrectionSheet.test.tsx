@@ -32,6 +32,19 @@ import {
 import { SavedFoodApiError, type SavedFoodDTO } from "@/api/savedFoods";
 import type { ApiSession } from "@/state/session";
 import { mockReduceMotion } from "@/testUtils/reduceMotion";
+import { correctionSavedHaptic } from "@/theme/haptics";
+
+// The correction-saved beat's haptic is mocked so a successful commit can be
+// asserted without a native Taptic Engine.
+jest.mock("@/theme/haptics", () => ({
+  correctionSavedHaptic: jest.fn(),
+  entryResolvedHaptic: jest.fn(),
+  targetReachedHaptic: jest.fn(),
+}));
+
+const mockCorrectionSavedHaptic = correctionSavedHaptic as jest.MockedFunction<
+  typeof correctionSavedHaptic
+>;
 
 // expo-symbols is a native module — replace SymbolView with a View stub that
 // exposes the symbol name via testID (same pattern as AppIcon.test.tsx); the
@@ -226,6 +239,7 @@ function defaultProps(overrides: Partial<CorrectionSheetBaseProps> = {}) {
 // Mock AccessibilityInfo for all tests (isReduceMotionEnabled returns false by default).
 beforeEach(() => {
   mockReduceMotion(false);
+  mockCorrectionSavedHaptic.mockClear();
 });
 
 afterEach(() => {
@@ -950,5 +964,60 @@ describe("light and dark theme", () => {
       );
     });
     expect(allText(tree)).toContain("Turkey breast");
+  });
+});
+
+// ─── Beat 2: correction saved (FTY-181) ─────────────────────────────────────────
+
+describe("beat 2 — correction saved haptic", () => {
+  it("fires once when an amount step commits successfully", async () => {
+    const editItem = jest
+      .fn()
+      .mockResolvedValue(food({ amount: 1.25, calories: 150 }));
+    const tree = mount(<CorrectionSheet {...defaultProps({ editItem })} />);
+    await pressAsync(tree, "Increase amount");
+    expect(mockCorrectionSavedHaptic).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fire when the amount step fails on the server", async () => {
+    const editItem = jest
+      .fn()
+      .mockRejectedValue(new DerivedItemApiError(500, "boom"));
+    const tree = mount(<CorrectionSheet {...defaultProps({ editItem })} />);
+    await pressAsync(tree, "Increase amount");
+    expect(mockCorrectionSavedHaptic).not.toHaveBeenCalled();
+  });
+
+  it("fires once when a re-resolve (change match) commits successfully", async () => {
+    const reResolve = jest.fn().mockResolvedValue(food({ calories: 180 }));
+    const listCandidates = jest.fn().mockResolvedValue([candidate()]);
+    const tree = mount(
+      <CorrectionSheet {...defaultProps({ reResolve, listCandidates })} />,
+    );
+    await pressAsync(tree, "Change match");
+    await pressAsync(
+      tree,
+      "Select Turkey breast, roasted, 135 kcal per 100g",
+    );
+    expect(mockCorrectionSavedHaptic).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fire on a validation error in the advanced override", async () => {
+    const editItem = jest.fn();
+    const tree = mount(<CorrectionSheet {...defaultProps({ editItem })} />);
+    await pressAsync(tree, "Override Calories, currently 120 kcal");
+    typeInto(tree, "Calories value", "-5");
+    await pressAsync(tree, "Save Calories override");
+    expect(editItem).not.toHaveBeenCalled();
+    expect(mockCorrectionSavedHaptic).not.toHaveBeenCalled();
+  });
+
+  it("fires once when an advanced override commits successfully", async () => {
+    const editItem = jest.fn().mockResolvedValue(food({ calories: 200, is_edited: true }));
+    const tree = mount(<CorrectionSheet {...defaultProps({ editItem })} />);
+    await pressAsync(tree, "Override Calories, currently 120 kcal");
+    typeInto(tree, "Calories value", "200");
+    await pressAsync(tree, "Save Calories override");
+    expect(mockCorrectionSavedHaptic).toHaveBeenCalledTimes(1);
   });
 });

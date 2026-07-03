@@ -23,6 +23,7 @@
  *     returns false.
  */
 
+import { AccessibilityInfo } from 'react-native';
 import { markOnboardingComplete } from '@/state/onboardingComplete';
 import type { SessionStore } from '@/state/sessionStore';
 import type { ServerConnectionStore } from '@/state/serverConnectionStore';
@@ -40,6 +41,19 @@ import {
   E2E_FAILED_RAW_TEXT,
   E2E_FAILED_EVENT,
   E2E_FAILED_RETRY_EVENT,
+  E2E_RESOLVE_RAW_TEXT,
+  E2E_RESOLVE_EVENT,
+  E2E_RESOLVE_ENTRY,
+  E2E_RESOLVE_SUMMARY,
+  E2E_CORRECTION_RAW_TEXT,
+  E2E_CORRECTION_EVENT,
+  E2E_CORRECTION_ENTRY,
+  E2E_CORRECTION_ITEM_ID,
+  E2E_CORRECTION_EDITED_ITEM,
+  E2E_TARGET_RAW_TEXT,
+  E2E_TARGET_EVENT,
+  E2E_TARGET_ENTRY,
+  E2E_TARGET_SUMMARY,
   e2eWeightEntries,
   e2eDailySummaryRange,
   E2E_SAVED_FOOD,
@@ -57,6 +71,21 @@ import {
 export function isE2EMode(): boolean {
   if (!__DEV__) return false;
   return process.env.EXPO_PUBLIC_FATTY_E2E === 'true';
+}
+
+/**
+ * True when the E2E harness should force Reduce Motion ON (FTY-181).
+ *
+ * The signature beats degrade to a simple fade / value-set (no spring) under
+ * Reduce Motion. Maestro cannot toggle the OS `isReduceMotionEnabled` flag, so a
+ * reduce-motion E2E build sets this second env var and the harness overrides the
+ * accessibility read — the hermetic equivalent of the OS toggle — letting the
+ * `reduce-motion.yaml` flow verify the beats still complete on their no-motion
+ * branch. Gated behind `isE2EMode()` so it is dead code in release builds.
+ */
+export function isE2EReduceMotionMode(): boolean {
+  if (!isE2EMode()) return false;
+  return process.env.EXPO_PUBLIC_FATTY_E2E_REDUCE_MOTION === 'true';
 }
 
 /**
@@ -117,10 +146,31 @@ export const e2eConnectionStore: ServerConnectionStore = {
  * same binary: stage 0 → first gibberish POST returns a `failed` event; stage 1
  * → a Retry POST returns a fresh `pending` attempt. GET reflects the stage so a
  * poll never drops the reconciled server row.
+ *
+ * The FTY-181 signature-beat flows each run off their own stage keyed on a
+ * distinct `raw_text`, independent of every machine above:
+ *   - `resolveStage` (beat 1): a log resolves to a completed entry whose item
+ *     rides the by-date feed so the resolve value row is reachable.
+ *   - `correctionStage` (beat 2): the log resolves to a tappable resolved row;
+ *     a PATCH to its item returns the recomputed value the correction beat rides.
+ *   - `targetStage` (beat 3): a single large entry resolves and the day summary
+ *     crosses the calorie target, so the hero flips to its over-budget state.
  */
 export function createE2EMockFetch(): typeof fetch {
   let phase: 0 | 1 | 2 = 0;
   let failedStage: 0 | 1 | 2 = 0;
+  // FTY-181 entry-resolve flow: 0 before the log, 1 once the resolve entry is
+  // created. Keyed on its own raw_text so it stays independent of the clarify
+  // "coffee" phase machine and the gibberish failed flow.
+  let resolveStage: 0 | 1 = 0;
+  // FTY-181 correction-saved (beat 2) flow: 0 before the log, 1 once the
+  // correction entry (a tappable resolved row) is created. A PATCH to its item
+  // then returns the recomputed value the beat rides. Keyed on its own raw_text.
+  let correctionStage: 0 | 1 = 0;
+  // FTY-181 target-reached (beat 3) flow: 0 before the log, 1 once the large
+  // entry that crosses the calorie target is created, flipping the day summary
+  // over target. Keyed on its own raw_text.
+  let targetStage: 0 | 1 = 0;
   // How phase 2 was reached — decides which day-list GET serves (see above).
   let resolvedVia: 'answer' | 'resubmit' | null = null;
   // FTY-183 correction flow: set once the saved food is submitted so GET
@@ -174,6 +224,33 @@ export function createE2EMockFetch(): typeof fetch {
 
     const pathEnd = url.split('?')[0];
 
+    // /log-events/by-date — the item-forward day feed (FTY-198): each event with
+    // its derived items. This is the read the entry-resolve beat (FTY-181) needs,
+    // since the value row only renders when the feed carries the entry's items.
+    // The clarify/smoke/failed flows serve `items: []` so their rows keep
+    // rendering the raw phrase (no value row); only the resolve flow carries a
+    // real item, so resolve.yaml can assert the resolved value row on-device.
+    // Matched before `/log-events` because the URL suffix is more specific.
+    if (pathEnd.endsWith('/log-events/by-date')) {
+      if (failedStage === 1) return json([{ event: E2E_FAILED_EVENT, items: [] }]);
+      if (failedStage === 2)
+        return json([{ event: E2E_FAILED_RETRY_EVENT, items: [] }]);
+      if (resolveStage === 1) return json([E2E_RESOLVE_ENTRY]);
+      if (correctionStage === 1) return json([E2E_CORRECTION_ENTRY]);
+      if (targetStage === 1) return json([E2E_TARGET_ENTRY]);
+      if (phase === 0) return json([]);
+      if (phase === 1) return json([{ event: E2E_CLARIFY_EVENT, items: [] }]);
+      return json([
+        {
+          event:
+            resolvedVia === 'answer'
+              ? E2E_CLARIFY_RESOLVED_EVENT
+              : E2E_RESOLVED_EVENT,
+          items: [],
+        },
+      ]);
+    }
+
     // /log-events — POST advances state and returns the next event;
     // GET returns the state-appropriate event list.
     if (pathEnd.endsWith('/log-events')) {
@@ -197,6 +274,27 @@ export function createE2EMockFetch(): typeof fetch {
           savedFoodCreated = true;
           return json(E2E_SAVED_FOOD_EVENT, 201);
         }
+        // FTY-181 entry-resolve flow: a plain text log resolves straight to a
+        // completed entry (the client's optimistic `pending`→`completed`
+        // reconcile is the transition that arms the beat). Keyed on its own
+        // raw_text so it never disturbs the clarify phase machine.
+        if (rawTextOf(init) === E2E_RESOLVE_RAW_TEXT) {
+          resolveStage = 1;
+          return json(E2E_RESOLVE_EVENT, 201);
+        }
+        // FTY-181 correction-saved (beat 2): the log resolves to a completed
+        // entry whose resolved row is tappable; the PATCH below then commits the
+        // correction the beat rides. Keyed on its own raw_text.
+        if (rawTextOf(init) === E2E_CORRECTION_RAW_TEXT) {
+          correctionStage = 1;
+          return json(E2E_CORRECTION_EVENT, 201);
+        }
+        // FTY-181 target-reached (beat 3): a single large entry resolves and the
+        // day summary crosses the calorie target, arming the crossing beat.
+        if (rawTextOf(init) === E2E_TARGET_RAW_TEXT) {
+          targetStage = 1;
+          return json(E2E_TARGET_EVENT, 201);
+        }
         if (phase === 0) {
           phase = 1;
           return json(E2E_CLARIFY_EVENT, 201);
@@ -212,6 +310,13 @@ export function createE2EMockFetch(): typeof fetch {
       // FTY-183 correction flow: keep serving the completed saved-food event so
       // its resolved timeline row survives a poll while the sheet is open.
       if (savedFoodCreated) return json([E2E_SAVED_FOOD_EVENT]);
+      // The resolve flow's GET lists the completed entry so a Refresh/poll keeps
+      // the reconciled row (its items ride the by-date feed above).
+      if (resolveStage === 1) return json([E2E_RESOLVE_EVENT]);
+      // The correction / target flows likewise list their completed entry so a
+      // poll never drops the reconciled row (their items ride the feed above).
+      if (correctionStage === 1) return json([E2E_CORRECTION_EVENT]);
+      if (targetStage === 1) return json([E2E_TARGET_EVENT]);
       if (phase === 0) return json([]);
       if (phase === 1) return json([E2E_CLARIFY_EVENT]);
       // Resolved via the answer round-trip → the SAME event, now completed
@@ -220,6 +325,17 @@ export function createE2EMockFetch(): typeof fetch {
       return json([
         resolvedVia === 'answer' ? E2E_CLARIFY_RESOLVED_EVENT : E2E_RESOLVED_EVENT,
       ]);
+    }
+
+    // /derived-items/{type}/{id} — the FTY-092 correction commit (a single-field
+    // PATCH). The correction-saved beat (FTY-181, beat 2) fires on a successful
+    // commit, so the mock echoes the recomputed item for the correction flow's
+    // amount step; correction.yaml asserts its 175-kcal value on-device. Matched
+    // on the item id so it never intercepts an unrelated PATCH.
+    if (method === 'PATCH' && pathEnd.includes('/derived-items/')) {
+      if (pathEnd.endsWith(`/${E2E_CORRECTION_ITEM_ID}`)) {
+        return json(E2E_CORRECTION_EDITED_ITEM);
+      }
     }
 
     // /clarification/answers — the first-class clarify resolve (FTY-170). A
@@ -250,8 +366,15 @@ export function createE2EMockFetch(): typeof fetch {
       return json(from && to ? e2eDailySummaryRange(from, to) : []);
     }
 
-    // /daily-summary — returns non-zero intake once the entry is resolved.
+    // /daily-summary — returns non-zero intake once the entry is resolved
+    // (the resolve flow's 140-kcal item, or the clarify/smoke 120-kcal coffee).
+    // The target flow returns the over-budget 2,100-kcal summary so the hero
+    // crosses its calorie target and beat 3 arms; the correction flow keeps the
+    // pre-edit 140 kcal (its beat rides the PATCH, not the day total).
     if (pathEnd.endsWith('/daily-summary')) {
+      if (resolveStage === 1) return json(E2E_RESOLVE_SUMMARY);
+      if (targetStage === 1) return json(E2E_TARGET_SUMMARY);
+      if (correctionStage === 1) return json(E2E_RESOLVE_SUMMARY);
       return json(phase === 2 ? E2E_RESOLVED_SUMMARY : E2E_DAILY_SUMMARY);
     }
 
@@ -348,15 +471,34 @@ export function installE2EMockFetch(): void {
 }
 
 /**
+ * Force Reduce Motion ON for the reduce-motion E2E build (FTY-181). No-op unless
+ * isE2EReduceMotionMode() — so it never affects the default motion-on suite or a
+ * release build. Overrides `AccessibilityInfo.isReduceMotionEnabled` to resolve
+ * `true`, the read the signature beats (theme/motion.ts) branch on; this is the
+ * hermetic equivalent of the OS accessibility toggle Maestro cannot flip.
+ */
+export function applyE2EReduceMotion(): void {
+  if (!isE2EReduceMotionMode()) return;
+  // The RN typings declare the static as read-only; the runtime object is a
+  // plain singleton the harness may override, mirroring the fetch override above.
+  (AccessibilityInfo as unknown as Record<string, unknown>)[
+    'isReduceMotionEnabled'
+  ] = () => Promise.resolve(true);
+}
+
+/**
  * One-shot E2E mode setup called at app startup (from app/_layout.tsx).
  * No-op when isE2EMode() is false.
  *
  *  - Installs the mock fetch so all API calls use fixture responses.
  *  - Marks onboarding complete for the E2E user so AuthGate skips the async
  *    profile/goals check and routes straight to Today.
+ *  - Forces Reduce Motion on when the reduce-motion E2E build is active, so the
+ *    signature beats take their no-motion branch for the reduce-motion flow.
  */
 export function setupE2EMode(): void {
   if (!isE2EMode()) return;
   installE2EMockFetch();
   markOnboardingComplete(E2E_SESSION.userId);
+  applyE2EReduceMotion();
 }

@@ -1,0 +1,97 @@
+# FTY-181: Correction-saved beat (beat 2) — real data-path guard.
+#
+# The signature correction-saved beat (beat 2) fires a success haptic + a
+# confirmation pulse once per *successful* correction commit. Reaching it on the
+# real screen requires a resolved value row that is tappable, a correction sheet
+# that opens against that item, and an amount step that commits a new server
+# value — the visible confirmation the beat rides. This flow drives exactly that
+# on the real screen data path (the item-forward `/log-events/by-date` feed,
+# FTY-198), not injected props.
+#
+# If the correction commit were unreachable (row data-starved, sheet not wired,
+# or the PATCH not applied), the recomputed value below would never appear and
+# the assertion would go red — the gap this flow guards.
+#
+# Flow:
+#   Today (empty day) → submit "oatmeal" → it resolves to a completed entry →
+#   tap Refresh to load the by-date feed → the resolved value row
+#   "Oatmeal, 140 kcal" appears → tap it to open the correction sheet → step the
+#   portion up → the sheet shows the server-recomputed "175 kcal" (the commit the
+#   correction-saved beat accompanies).
+#
+# Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
+# directory-level Maestro runs launch the installed app under test reliably.
+appId: com.fatty
+---
+# Step 1: Launch in E2E mode. The mock starts with an empty day.
+- launchApp:
+    clearState: false
+
+# Step 2: Assert the app reaches Today and the timeline is in the ready state.
+- extendedWaitUntil:
+    visible:
+      id: today-screen
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-ready
+    timeout: 15000
+
+# Step 3: Submit "oatmeal" — the mock resolves it straight to a completed entry
+#         with a real derived item on the by-date feed.
+- tapOn:
+    text: "Log food or exercise"
+- inputText: "oatmeal"
+- tapOn:
+    text: "Add entry"
+
+# Step 4: Wait for the reconciled completed entry on the timeline.
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-with-entries
+    timeout: 10000
+
+# Step 5: Tap Refresh to load the item-forward day feed, which carries the
+#         entry's resolved derived item (the row the correction sheet opens on).
+- tapOn:
+    text: "Refresh"
+
+# Step 6: The resolved value row is visible, populated from the by-date feed.
+#         ItemTimelineRow exposes the collapsed a11y label "Oatmeal, 140 kcal".
+- extendedWaitUntil:
+    visible:
+      text: ".*Oatmeal, 140 kcal.*"
+    timeout: 10000
+
+# Step 7: Tap the resolved row to open the correction sheet against the item.
+- tapOn:
+    text: ".*Oatmeal, 140 kcal.*"
+
+# Step 8: The correction sheet opened data-present. Assert the "Portion" section
+#         label first (a plain, always-rendered Text — the most reliable open
+#         marker), so a sheet that never opened fails here with a clear signal,
+#         then wait for the portion stepper by its stable testID rather than the
+#         button's accessibility label — the robust selector the other flows use
+#         (add-a-detail-row, clarify-question), resilient to Modal-render timing.
+- extendedWaitUntil:
+    visible:
+      text: "Portion"
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      id: "today-correction-increase"
+    timeout: 10000
+
+# Step 9: Step the portion up — a successful PATCH commits the correction, which
+#         is what fires the correction-saved beat (haptic + confirmation pulse).
+- tapOn:
+    id: "today-correction-increase"
+
+# Step 10: Load-bearing assertion — the sheet shows the server-recomputed value
+#          (175 kcal for the larger portion). It appears only once the correction
+#          commit lands, so this proves the beat's real data path end-to-end. A
+#          sheet that never applied the commit would still read "140 kcal" here.
+- extendedWaitUntil:
+    visible:
+      text: ".*175 kcal.*"
+    timeout: 10000

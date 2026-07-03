@@ -1,8 +1,9 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { DerivedItem } from "@/api/derivedItems";
 import { ProvenanceIcon } from "@/components/ui";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
+import { useResolveFade } from "@/theme/motion";
 
 function formatKcal(n: number | null): string {
   if (n === null) return "—";
@@ -26,6 +27,7 @@ export function ItemTimelineRow({
   needsClarification = false,
   proposal = false,
   onPress,
+  animateResolve = false,
 }: {
   item: DerivedItem;
   /** True when the parent log event is needs_clarification. */
@@ -33,8 +35,16 @@ export function ItemTimelineRow({
   /** True for an uncounted label proposal awaiting confirm (FTY-196/197). */
   proposal?: boolean;
   onPress?: () => void;
+  /**
+   * Beat 1 — entry resolve. When true, the row eases its value in (shimmer →
+   * value) once with `gentleSpring` (a simple fade under Reduce Motion). Set only
+   * for a genuine pending→resolved transition, never on initial mount, so the
+   * app does not fade every row on load.
+   */
+  animateResolve?: boolean;
 }) {
   const { colors } = useTheme();
+  const fadeOpacity = useResolveFade(animateResolve);
 
   const name = item.name;
   const kcal =
@@ -62,7 +72,8 @@ export function ItemTimelineRow({
       : "Tap to view details";
 
   return (
-    <Pressable
+    <Animated.View style={{ opacity: fadeOpacity }}>
+      <Pressable
       style={({ pressed }) => [
         styles.row,
         { borderBottomColor: colors.separator },
@@ -105,7 +116,8 @@ export function ItemTimelineRow({
       >
         {needsClarification ? "—" : formatKcal(kcal)}
       </Text>
-    </Pressable>
+      </Pressable>
+    </Animated.View>
   );
 }
 
