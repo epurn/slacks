@@ -26,6 +26,7 @@ import {
 } from "react";
 import {
   AccessibilityInfo,
+  Animated,
   Modal,
   Pressable,
   ScrollView,
@@ -62,6 +63,8 @@ import {
 import type { ApiSession } from "@/state/session";
 import { formatValue } from "@/state/derivedItems";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
+import { usePulse } from "@/theme/motion";
+import { correctionSavedHaptic } from "@/theme/haptics";
 
 export type { ClarificationData } from "@/components/ClarifyMode";
 
@@ -161,6 +164,14 @@ export function CorrectionSheet({
   saveFood = saveFoodApi,
 }: CorrectionSheetProps) {
   const { colors } = useTheme();
+  // Beat 2 — correction saved. A brief confirmation pulse + success haptic fires
+  // once per *successful* commit (amount step, re-resolve, value override), never
+  // on a validation error or an API failure.
+  const { scale, opacity, pulse } = usePulse();
+  const fireCorrectionSaved = useCallback(() => {
+    correctionSavedHaptic();
+    pulse();
+  }, [pulse]);
   const [item, setItem] = useState<DerivedItem>(initialItem);
   // Unknown starts motion-free; if the system says Reduce Motion is off, the
   // sheet can use its normal slide animation on subsequent presentations.
@@ -288,6 +299,7 @@ export function CorrectionSheet({
         const updated = await editItem(session, "food", food.id, "quantity", next);
         setItem(updated);
         onItemChange?.(updated);
+        fireCorrectionSaved();
       } catch (err) {
         setItem(prior);
         setAmountError(messageForError(err, "adjust the amount"));
@@ -295,7 +307,7 @@ export function CorrectionSheet({
         setAmountPending(false);
       }
     },
-    [item, editItem, session, onItemChange],
+    [item, editItem, session, onItemChange, fireCorrectionSaved],
   );
 
   // ─── Change match ────────────────────────────────────────────────────────────
@@ -364,13 +376,14 @@ export function CorrectionSheet({
         setMode("normal");
         setMatchQuery("");
         setCandidates([]);
+        fireCorrectionSaved();
       } catch (err) {
         setReResolveError(messageForError(err, "apply that match"));
       } finally {
         setReResolving(false);
       }
     },
-    [item, reResolve, session, onItemChange, cancelPendingSearch],
+    [item, reResolve, session, onItemChange, cancelPendingSearch, fireCorrectionSaved],
   );
 
   // ─── Advanced override ───────────────────────────────────────────────────────
@@ -399,13 +412,14 @@ export function CorrectionSheet({
       onItemChange?.(updated);
       setMode("normal");
       setOverrideDraft("");
+      fireCorrectionSaved();
     } catch (err) {
       setItem(prior);
       setOverrideError(messageForError(err, "save that override"));
     } finally {
       setOverrideSaving(false);
     }
-  }, [item, editItem, session, onItemChange, overrideField, overrideDraft]);
+  }, [item, editItem, session, onItemChange, overrideField, overrideDraft, fireCorrectionSaved]);
 
   // ─── Clarify ─────────────────────────────────────────────────────────────────
 
@@ -486,10 +500,10 @@ export function CorrectionSheet({
         />
 
         {/* Sheet */}
-        <View
+        <Animated.View
           style={[
             styles.sheet,
-            { backgroundColor: sheetBg },
+            { backgroundColor: sheetBg, opacity, transform: [{ scale }] },
             expanded ? styles.sheetLarge : styles.sheetMedium,
             clarifying ? styles.sheetClarify : null,
           ]}
@@ -654,7 +668,7 @@ export function CorrectionSheet({
               </>
             )}
           </ScrollView>
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -776,6 +790,7 @@ function AmountStepper({
         </Text>
         <Pressable
           onPress={onStepUp}
+          testID="today-correction-increase"
           style={[styles.stepperButton, { backgroundColor: colors.controlBackground }]}
           accessibilityLabel="Increase amount"
           accessibilityRole="button"
