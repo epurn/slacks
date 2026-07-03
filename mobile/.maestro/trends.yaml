@@ -96,11 +96,16 @@ appId: com.fatty
 - eraseText: 8
 - inputText: "70"
 
-# Step 9: Dismiss the keyboard so the bottom-anchored submit button clears the
-#         soft keyboard, then tap it by its stable testID. Using the id (not the
-#         "Log weight" text) disambiguates the submit control from the sheet's
-#         own "Log weight" header title and the card's "+ Log weight" trigger.
-- hideKeyboard
+# Step 9: Tap the submit button by its stable testID. On the non-iOS fallback the
+#         sheet is a bottom-anchored Modal; the emulator resizes the window for the
+#         soft keyboard (adjustResize), so the whole sheet — including this button —
+#         sits above the keyboard and is directly tappable (steps 6–7 already
+#         asserted the sheet's content visible with the keyboard up). We do NOT
+#         `hideKeyboard` first: on Android that issues a back-press, which fires the
+#         Modal's `onRequestClose` and dismisses the sheet before we can tap. Using
+#         the id (not the "Log weight" text) disambiguates the submit control from
+#         the sheet's own "Log weight" header title and the card's "+ Log weight"
+#         trigger.
 - tapOn:
     id: weight-log-submit
 

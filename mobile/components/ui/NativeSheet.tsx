@@ -100,14 +100,26 @@ const SHEET_SCREEN_ID = "native-sheet-content";
 /** Corner radius used by the non-iOS fallback when the caller sets none. */
 const FALLBACK_CORNER_RADIUS = 16;
 
-/** Track the OS Reduce-Motion setting so the fallback sheet can drop its slide. */
+/**
+ * Track the OS Reduce-Motion setting so the fallback sheet can drop its slide.
+ *
+ * Defaults fail-closed: we assume Reduce Motion is enabled until
+ * `AccessibilityInfo.isReduceMotionEnabled()` resolves, so the fallback `Modal`
+ * never slides on its first presentation for a user who has the setting on but
+ * whose value we have not read yet. A read failure is likewise treated as
+ * Reduce Motion enabled.
+ */
 function useReduceMotion(): boolean {
-  const [reduceMotion, setReduceMotion] = useState(false);
+  const [reduceMotion, setReduceMotion] = useState(true);
   useEffect(() => {
     let mounted = true;
-    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
-      if (mounted) setReduceMotion(enabled);
-    });
+    void AccessibilityInfo.isReduceMotionEnabled()
+      .then((enabled) => {
+        if (mounted) setReduceMotion(enabled);
+      })
+      .catch(() => {
+        if (mounted) setReduceMotion(true);
+      });
     const subscription = AccessibilityInfo.addEventListener(
       "reduceMotionChanged",
       setReduceMotion,
