@@ -1,66 +1,13 @@
-import { useEffect, useRef } from "react";
-import { AccessibilityInfo, Animated, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { DerivedItem } from "@/api/derivedItems";
 import { ProvenanceIcon, Skeleton } from "@/components/ui";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
+import { useResolveFade } from "@/theme/motion";
 
 function formatKcal(n: number | null): string {
   if (n === null) return "—";
   return `${Math.round(n)} kcal`;
-}
-
-/**
- * Fades resolved item content in over the skeleton's footprint (FTY-180): a
- * short one-shot opacity transition from 0 to 1 when the row resolves. Under
- * Reduce Motion the resolve is an instant swap — the value never animates in —
- * mirroring the `Skeleton` component's own motion opt-out.
- *
- * The fade keys off `loading` rather than mount so a single row instance can
- * resolve in place: the timeline reuses the same `ItemTimelineRow` (shared key)
- * when a pending row's estimate lands, so this instance transitions
- * loading→resolved without unmounting. While loading, the value is pinned at 0
- * (the Skeleton owns the visuals) so the fade always plays from nothing when the
- * resolved content mounts — never swallowed by a mount-fade that finished during
- * the pending period, and with no flash of pre-set opacity.
- */
-function useResolveFadeOpacity(loading: boolean): Animated.Value {
-  // eslint-disable-next-line react-hooks/refs
-  const opacity = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    if (loading) {
-      // Skeleton branch is rendered (opacity unused); hold at 0 so the eventual
-      // resolve fades in from nothing rather than snapping in fully opaque.
-      opacity.setValue(0);
-      return;
-    }
-    let mounted = true;
-    AccessibilityInfo.isReduceMotionEnabled().then(
-      (reduced) => {
-        if (!mounted) return;
-        if (reduced) {
-          opacity.setValue(1);
-          return;
-        }
-        // The value is already 0 here — from the initial `Animated.Value(0)` on a
-        // fresh resolved mount, or pinned to 0 by the loading branch when this
-        // instance transitioned loading→resolved in place — so the fade always
-        // plays from nothing.
-        Animated.timing(opacity, {
-          toValue: 1,
-          duration: 220,
-          useNativeDriver: true,
-        }).start();
-      },
-      () => {
-        if (mounted) opacity.setValue(1);
-      },
-    );
-    return () => {
-      mounted = false;
-    };
-  }, [loading, opacity]);
-  return opacity;
 }
 
 type ItemTimelineRowProps =
@@ -78,6 +25,17 @@ type ItemTimelineRowProps =
       /** True for an uncounted label proposal awaiting confirm (FTY-196/197). */
       proposal?: boolean;
       onPress?: () => void;
+      /**
+       * Beat 1 — entry resolve (FTY-181). When true, the row eases its value in
+       * once (shimmer → value) with `gentleSpring` (a simple fade under Reduce
+       * Motion). Set only for a genuine pending→resolved transition, never on
+       * initial mount, so the app does not fade every row on load. The timeline
+       * keys the first resolved row by the same event id the pending skeleton
+       * used, so this fade plays on that reused instance — the shimmer resolves
+       * into the value in place (FTY-180), never a swap between differently-keyed
+       * rows.
+       */
+      animateResolve?: boolean;
     };
 
 /**
@@ -96,14 +54,17 @@ type ItemTimelineRowProps =
  * with no resolved item yet renders a `Skeleton` shimmer in the exact same
  * container geometry (row height, insets, icon slot, kcal column width) this
  * component uses once resolved, so the row never jumps or reflows when the
- * estimate lands — the values simply fade in over the placeholder's footprint.
+ * estimate lands — the values simply fade in over the placeholder's footprint
+ * (the entry-resolve beat, FTY-181).
  */
 export function ItemTimelineRow(props: ItemTimelineRowProps) {
   const { colors } = useTheme();
-  // Called unconditionally (rules-of-hooks): its value is only read once the
-  // row resolves, but the loading branch returns early below. Passing `loading`
-  // lets a reused instance fade its value in when it transitions in place.
-  const opacity = useResolveFadeOpacity(props.loading === true);
+  // Called unconditionally (rules-of-hooks): the loading branch returns early
+  // below, but a reused instance transitions loading→resolved in place, so this
+  // arms the entry-resolve fade (beat 1) for that transition (FTY-180/181).
+  const fadeOpacity = useResolveFade(
+    props.loading !== true && props.animateResolve === true,
+  );
 
   if (props.loading) {
     return (
@@ -168,7 +129,7 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
       : "Tap to view details";
 
   return (
-    <Animated.View style={{ opacity }}>
+    <Animated.View style={{ opacity: fadeOpacity }}>
       <Pressable
         style={({ pressed }) => [
           styles.row,

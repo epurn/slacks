@@ -38,11 +38,10 @@ jest.mock("expo-camera", () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { View } = require("react-native");
   return {
-    CameraView: jest.fn().mockImplementation(() =>
-      React.createElement(View, {
-        testID: "camera-view",
-        accessibilityLabel: "Camera viewfinder",
-      }),
+    // Forwards props (notably `enableTorch`) onto the stub so tests can assert
+    // the flash toggle is actually wired to the CameraView.
+    CameraView: jest.fn().mockImplementation((props: Record<string, unknown>) =>
+      React.createElement(View, { ...props, testID: "camera-view" }),
     ),
   };
 });
@@ -50,6 +49,28 @@ jest.mock("expo-camera", () => {
 jest.mock("expo-linking", () => ({
   openSettings: jest.fn().mockResolvedValue(undefined),
 }));
+
+// expo-symbols is a native module — stub SymbolView so the flash toggle icon
+// renders (same pattern as ConfirmParsedValuesSheet.test.tsx / AppIcon.test.tsx).
+jest.mock("expo-symbols", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const React = require("react");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { View } = require("react-native");
+  return {
+    SymbolView: ({
+      name,
+      accessibilityLabel,
+    }: {
+      name: string;
+      accessibilityLabel?: string;
+    }) =>
+      React.createElement(View, {
+        testID: `sf-symbol-${String(name)}`,
+        accessibilityLabel,
+      }),
+  };
+});
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -318,6 +339,107 @@ describe("LabelCaptureScreen – capture and preview", () => {
     // Back to camera: shutter visible, preview controls gone.
     expect(hasA11yLabel(tree, "Take photo")).toBe(true);
     expect(hasA11yLabel(tree, "Upload label")).toBe(false);
+  });
+});
+
+// ─── Capture chrome (framing guide, hint, flash) ─────────────────────────────
+
+describe("LabelCaptureScreen – capture chrome", () => {
+  it("shows the framing guide hint and a flash toggle in the camera phase", () => {
+    const tree = mount(
+      <LabelCaptureScreen
+        session={SESSION}
+        onUploaded={jest.fn()}
+        onClose={jest.fn()}
+        permissionsHook={makeGrantedHook()}
+      />,
+    );
+
+    expect(hasA11yLabel(tree, "Fit the nutrition label inside the frame")).toBe(true);
+    expect(hasA11yLabel(tree, "Flash")).toBe(true);
+  });
+
+  it("flash is off by default and toggles enableTorch + accessibility state on tap", () => {
+    const tree = mount(
+      <LabelCaptureScreen
+        session={SESSION}
+        onUploaded={jest.fn()}
+        onClose={jest.fn()}
+        permissionsHook={makeGrantedHook()}
+      />,
+    );
+
+    const camera = () => tree.root.find((n) => n.props.testID === "camera-view");
+    const flashButton = () =>
+      tree.root.find(
+        (n) => n.props.accessibilityLabel === "Flash" && typeof n.props.onPress === "function",
+      );
+
+    expect(camera().props.enableTorch).toBe(false);
+    expect(flashButton().props.accessibilityState).toEqual({ selected: false });
+
+    act(() => {
+      flashButton().props.onPress();
+    });
+
+    expect(camera().props.enableTorch).toBe(true);
+    expect(flashButton().props.accessibilityState).toEqual({ selected: true });
+  });
+
+  it("hides the framing guide and flash toggle once in the preview phase", async () => {
+    const tree = mount(
+      <LabelCaptureScreen
+        session={SESSION}
+        onUploaded={jest.fn()}
+        onClose={jest.fn()}
+        permissionsHook={makeGrantedHook()}
+        takePhoto={jest.fn().mockResolvedValue({ uri: "file:///captured-label.jpg" })}
+        upload={jest.fn().mockResolvedValue(makeEvent())}
+      />,
+    );
+
+    await act(async () => {
+      press(tree, "Take photo");
+    });
+
+    expect(hasA11yLabel(tree, "Fit the nutrition label inside the frame")).toBe(false);
+    expect(hasA11yLabel(tree, "Flash")).toBe(false);
+  });
+
+  it("turns the torch off when leaving the camera phase even if flash was on", async () => {
+    const tree = mount(
+      <LabelCaptureScreen
+        session={SESSION}
+        onUploaded={jest.fn()}
+        onClose={jest.fn()}
+        permissionsHook={makeGrantedHook()}
+        takePhoto={jest.fn().mockResolvedValue({ uri: "file:///captured-label.jpg" })}
+        upload={jest.fn().mockResolvedValue(makeEvent())}
+      />,
+    );
+
+    const camera = () => tree.root.find((n) => n.props.testID === "camera-view");
+    const flashButton = () =>
+      tree.root.find(
+        (n) => n.props.accessibilityLabel === "Flash" && typeof n.props.onPress === "function",
+      );
+
+    // Turn the flash on while framing.
+    act(() => {
+      flashButton().props.onPress();
+    });
+    expect(camera().props.enableTorch).toBe(true);
+
+    // Take the photo → preview. The flash control is hidden, so the torch must
+    // not stay lit while the CameraView is still mounted.
+    await act(async () => {
+      press(tree, "Take photo");
+    });
+    expect(camera().props.enableTorch).toBe(false);
+
+    // Returning to framing re-lights the torch (the toggle state is retained).
+    press(tree, "Retake photo");
+    expect(camera().props.enableTorch).toBe(true);
   });
 });
 

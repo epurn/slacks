@@ -1,5 +1,5 @@
-import { act, create as render, type ReactTestRenderer } from "react-test-renderer";
 import { Animated } from "react-native";
+import { act, create as render, type ReactTestRenderer } from "react-test-renderer";
 
 import { ItemTimelineRow } from "./ItemTimelineRow";
 import type { DerivedFoodItemDTO, DerivedExerciseItemDTO, ItemSourceDTO } from "@/api/derivedItems";
@@ -102,6 +102,22 @@ function allText(tree: ReactTestRenderer): string {
     .map((n) => n.props.children as string)
     .join(" ");
 }
+
+// A fake Animated driver that finishes synchronously, so the resolve-fade
+// animation never keeps a loop ticking after teardown. Spies still record calls.
+const FAKE_ANIM = { start: (cb?: (r: { finished: boolean }) => void) => cb?.({ finished: true }), stop: () => {} };
+
+beforeEach(() => {
+  // Reduce Motion off by default (synchronous stub) so the resolve fade takes
+  // its spring path and no async setState leaks past `act`.
+  mockReduceMotion(false);
+  jest.spyOn(Animated, "spring").mockReturnValue(FAKE_ANIM as never);
+  jest.spyOn(Animated, "timing").mockReturnValue(FAKE_ANIM as never);
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
 
 describe("ItemTimelineRow — food item", () => {
   it("shows name, kcal, and always-on source icon", () => {
@@ -350,66 +366,32 @@ describe("ItemTimelineRow — loading (FTY-180)", () => {
   });
 });
 
-describe("ItemTimelineRow — resolve fade (FTY-180)", () => {
+describe("ItemTimelineRow — beat 1: resolve fade (FTY-180/181)", () => {
   afterEach(() => jest.restoreAllMocks());
 
-  it("fades the resolved value in on mount when Reduce Motion is off", async () => {
+  it("resolves in place: one instance goes loading→resolved and eases the value in on the transition, not during loading (animateResolve)", () => {
     mockReduceMotion(false);
-    const timingSpy = jest
-      .spyOn(Animated, "timing")
-      .mockReturnValue({ start: jest.fn(), stop: jest.fn() } as never);
-
-    act(() => {
-      render(<ItemTimelineRow item={foodItem()} />);
-    });
-    await act(async () => {});
-
-    expect(timingSpy).toHaveBeenCalled();
-  });
-
-  it("skips the fade animation under Reduce Motion — an instant, not animated, resolve", async () => {
-    mockReduceMotion(true);
-    const timingSpy = jest.spyOn(Animated, "timing");
-
-    act(() => {
-      render(<ItemTimelineRow item={foodItem()} />);
-    });
-    await act(async () => {});
-
-    expect(timingSpy).not.toHaveBeenCalled();
-  });
-
-  it("resolves in place: one instance goes loading→resolved and fades the value in on the transition, not during loading", async () => {
-    mockReduceMotion(false);
-    // The Skeleton shimmer also drives Animated.timing (a 900ms loop step), so
-    // isolate the resolve fade by its own 220ms duration.
+    // The Skeleton shimmer drives Animated.loop/timing; the resolve fade is a
+    // spring (Reduce Motion off), so assert on spring to isolate the beat.
     jest
       .spyOn(Animated, "loop")
       .mockReturnValue({ start: jest.fn(), stop: jest.fn() } as never);
-    const timingSpy = jest
-      .spyOn(Animated, "timing")
-      .mockReturnValue({ start: jest.fn(), stop: jest.fn() } as never);
-    const fadeCalls = () =>
-      timingSpy.mock.calls.filter(
-        ([, cfg]) => (cfg as { duration?: number } | undefined)?.duration === 220,
-      );
 
-    // Mount as the loading skeleton, then update the SAME tree to resolved. The
-    // timeline keys the pending row and the resolved row by the same event id, so
-    // React reuses this one instance — exactly what this asserts drives the fade.
+    // Mount as the loading skeleton, then update the SAME tree to resolved with
+    // animateResolve. The timeline keys the pending row and the first resolved
+    // row by the same event id, so React reuses this one instance — exactly what
+    // drives the in-place fade.
     let tree: ReactTestRenderer;
     act(() => {
       tree = render(<ItemTimelineRow loading accessibilityLabel="Estimating" />);
     });
-    await act(async () => {});
 
     // While loading, the resolve fade has not run — the shimmer owns the visuals.
-    expect(fadeCalls()).toHaveLength(0);
+    expect(Animated.spring).not.toHaveBeenCalled();
 
     act(() => {
-      tree!.update(<ItemTimelineRow item={foodItem()} />);
+      tree!.update(<ItemTimelineRow item={foodItem()} animateResolve />);
     });
-    await act(async () => {});
 
     // The value row is now present (no longer a progressbar) and the fade played
     // on the transition — the resolved value eased in over the skeleton footprint.
@@ -417,6 +399,30 @@ describe("ItemTimelineRow — resolve fade (FTY-180)", () => {
       tree!.root.findAll((n) => n.props.accessibilityRole === "progressbar"),
     ).toHaveLength(0);
     expect(allA11yLabels(tree!)).toContain("Greek yogurt, 150 kcal");
-    expect(fadeCalls().length).toBeGreaterThan(0);
+    expect(Animated.spring).toHaveBeenCalled();
+  });
+
+  it("eases the value in with a spring when the row resolves (animateResolve)", () => {
+    act(() => {
+      render(<ItemTimelineRow item={foodItem()} animateResolve />);
+    });
+    expect(Animated.spring).toHaveBeenCalled();
+  });
+
+  it("does not animate a row that is not a fresh resolve (default)", () => {
+    act(() => {
+      render(<ItemTimelineRow item={foodItem()} />);
+    });
+    expect(Animated.spring).not.toHaveBeenCalled();
+    expect(Animated.timing).not.toHaveBeenCalled();
+  });
+
+  it("degrades to a simple fade (no spring) under Reduce Motion", () => {
+    mockReduceMotion(true);
+    act(() => {
+      render(<ItemTimelineRow item={foodItem()} animateResolve />);
+    });
+    expect(Animated.spring).not.toHaveBeenCalled();
+    expect(Animated.timing).toHaveBeenCalled();
   });
 });

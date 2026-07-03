@@ -35,6 +35,19 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 PLATFORM="${PLATFORM:-ios}"
+# FTY-181 reduce-motion pass: set E2E_REDUCE_MOTION=1 to build/run the suite with
+# Reduce Motion forced on (the harness overrides AccessibilityInfo — Maestro can't
+# toggle the OS flag), exercising the signature beats' no-motion branch end to
+# end. Unset (the default) → the var resolves to "false" so behaviour is
+# unchanged. Exported once so every child process (prebuild/metro/build) inherits
+# it; it only takes effect inside E2E mode, which the FATTY_E2E gate already
+# guards.
+if [ -n "${E2E_REDUCE_MOTION:-}" ]; then
+  export EXPO_PUBLIC_FATTY_E2E_REDUCE_MOTION="true"
+  echo "==> [verify-e2e] Reduce Motion: FORCED ON (reduce-motion pass)"
+else
+  export EXPO_PUBLIC_FATTY_E2E_REDUCE_MOTION="false"
+fi
 METRO_PORT="8081"
 METRO_LOG="${E2E_METRO_LOG:-${TMPDIR:-/tmp}/fatty-e2e-metro.log}"
 METRO_PID=""

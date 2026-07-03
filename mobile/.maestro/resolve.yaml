@@ -1,0 +1,81 @@
+# FTY-181: Entry-resolve beat — real data-path guard.
+#
+# The signature entry-resolve beat (beat 1) eases a resolved entry's *value row*
+# in when it transitions pending→completed. That value row (name · kcal · source)
+# only renders when the Today feed carries the entry's derived items — the
+# item-forward `/log-events/by-date` read (FTY-198). This flow proves the beat's
+# value row is reachable on the real screen data path: it drives a log to a
+# resolved entry and asserts the resolved item row appears, populated from the
+# by-date feed's real derived item — not an injected `items` prop.
+#
+# If the by-date feed were not wired (the pre-fix state the reviewer flagged),
+# `itemsByEvent` would stay empty, the completed entry would render as a
+# status-only placeholder, and the value-row assertion below would go red —
+# exactly the data-starved gap this flow guards against.
+#
+# Flow:
+#   Today (empty day) → submit "greek yogurt" → the entry resolves to completed
+#   (optimistic pending → completed reconcile arms the beat) → tap Refresh to
+#   load the item-forward feed → the resolved value row "Greek yogurt, 140 kcal"
+#   appears and the hero counts the 140-kcal entry.
+#
+# Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
+# directory-level Maestro runs launch the installed app under test reliably.
+appId: com.fatty
+---
+# Step 1: Launch in E2E mode. The mock starts with an empty day.
+- launchApp:
+    clearState: false
+
+# Step 2: Assert the app reaches Today and the timeline is in the ready,
+#         empty-day state (reuses the FTY-160 Today markers).
+- extendedWaitUntil:
+    visible:
+      id: today-screen
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-ready
+    timeout: 15000
+
+# Step 3: Submit "greek yogurt" — the mock resolves it straight to a completed
+#         entry. The client shows it optimistically as pending, then reconciles
+#         to completed; that pending→completed transition is what arms the beat.
+- tapOn:
+    text: "Log food or exercise"
+- inputText: "greek yogurt"
+- tapOn:
+    text: "Add entry"
+
+# Step 4: Wait for the timeline to show entries (the reconciled completed entry).
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-with-entries
+    timeout: 10000
+
+# Step 5: Tap Refresh to load the item-forward day feed (/log-events/by-date),
+#         which carries the entry's resolved derived item. (A manual refresh is
+#         needed because the entry resolves synchronously in the mock, so there
+#         is no pending-poll window that would otherwise fetch the items.)
+- tapOn:
+    text: "Refresh"
+
+# Step 6: Load-bearing assertion — the resolved value row is visible, populated
+#         from the by-date feed's real derived item. ItemTimelineRow exposes the
+#         collapsed accessibility label "Greek yogurt, 140 kcal" (its inner Texts
+#         are hidden from the a11y tree, and Android mirrors it as the content
+#         description), so Maestro matches the anchored label with wildcards.
+#         A data-starved Today (items not wired) would render a status-only
+#         placeholder instead and fail here.
+- extendedWaitUntil:
+    visible:
+      text: ".*Greek yogurt, 140 kcal.*"
+    timeout: 10000
+
+# Step 7: The entry counts — the CalorieHero label includes the 140 kcal the
+#         resolved item contributes (E2E_RESOLVE_SUMMARY), proving the resolved
+#         value flows through to the day totals, not just the row.
+- extendedWaitUntil:
+    visible:
+      text: ".*140 of 2,000 kcal.*"
+    timeout: 10000
