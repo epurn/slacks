@@ -32,6 +32,7 @@ import {
   E2E_SERVER_URL,
   E2E_FIXTURE_MAP,
   E2E_DAILY_SUMMARY,
+  E2E_GOAL_TARGET_RESPONSE,
   E2E_CLARIFY_EVENT,
   E2E_CLARIFICATION,
   E2E_CLARIFY_PROCESSING_EVENT,
@@ -58,6 +59,10 @@ import {
   E2E_TARGET_SUMMARY,
   e2eWeightEntries,
   e2eDailySummaryRange,
+  E2E_SAVED_FOOD,
+  E2E_SAVED_FOOD_EVENT,
+  E2E_SOURCE_CANDIDATE,
+  E2E_RERESOLVED_ITEM,
 } from './fixtures';
 
 /**
@@ -172,6 +177,15 @@ export function createE2EMockFetch(): typeof fetch {
   let targetStage: 0 | 1 = 0;
   // How phase 2 was reached — decides which day-list GET serves (see above).
   let resolvedVia: 'answer' | 'resubmit' | null = null;
+  // FTY-183 correction flow: set once the saved food is submitted so GET
+  // /log-events keeps returning its completed event (a poll never drops the row
+  // the CorrectionSheet is opened from). Keyed on the saved food's raw_text, it
+  // stays independent of the clarify/failed phase machines above.
+  let savedFoodCreated = false;
+  // FTY-183 weight flow: the last weight (kg) saved via POST /weight-entries.
+  // Once set, GET upserts today's point to it so the refetched Trends headline
+  // reflects the save — the load-bearing proof the save round-tripped.
+  let savedWeightKg: number | null = null;
 
   const rawTextOf = (init?: RequestInit): string | undefined => {
     if (typeof init?.body !== 'string') return undefined;
@@ -256,6 +270,14 @@ export function createE2EMockFetch(): typeof fetch {
           failedStage = 2;
           return json(E2E_FAILED_RETRY_EVENT, 201);
         }
+        // FTY-183 correction flow: submitting the saved food resolves straight to
+        // a completed event (keyed on its name, independent of the coffee phase
+        // machine). The resolved synthetic item TodayScreen inserts is what the
+        // CorrectionSheet then opens against.
+        if (rawTextOf(init) === E2E_SAVED_FOOD.name) {
+          savedFoodCreated = true;
+          return json(E2E_SAVED_FOOD_EVENT, 201);
+        }
         // FTY-181 entry-resolve flow: POST returns the stored pending event so
         // the skeleton is visible on-device; a subsequent GET returns the same
         // event completed with multiple by-date items summarized into one row.
@@ -290,6 +312,9 @@ export function createE2EMockFetch(): typeof fetch {
       // the reconciled failed / retry-pending row.
       if (failedStage === 1) return json([E2E_FAILED_EVENT]);
       if (failedStage === 2) return json([E2E_FAILED_RETRY_EVENT]);
+      // FTY-183 correction flow: keep serving the completed saved-food event so
+      // its resolved timeline row survives a poll while the sheet is open.
+      if (savedFoodCreated) return json([E2E_SAVED_FOOD_EVENT]);
       // The resolve flow's GET lists the completed entry so a Refresh/poll keeps
       // the reconciled row (its items ride the by-date feed above).
       if (resolveStage === 1) return json([E2E_RESOLVE_EVENT]);
@@ -359,11 +384,12 @@ export function createE2EMockFetch(): typeof fetch {
       return json(phase === 2 ? E2E_RESOLVED_SUMMARY : E2E_DAILY_SUMMARY);
     }
 
-    // /weight-entries — backs the Trends weight card (FTY-187). GET returns the
-    // synthetic series anchored to the window's end (`to` = the device's today)
-    // so the chart + headline delta render real data. A POST (a weight save) is
-    // acknowledged by echoing the submitted weight/date back as a stored entry,
-    // though the Trends flow only needs the sheet to open.
+    // /weight-entries — backs the Trends weight card (FTY-187/183). GET returns
+    // the synthetic series anchored to the window's end (`to` = the device's
+    // today). A POST (a weight save) echoes the submitted weight/date back AND
+    // records it, so a subsequent GET upserts today's point to the saved weight —
+    // the refetched Trends headline then reflects the save, which is the
+    // load-bearing proof trends.yaml asserts that the log/save round-trips.
     if (pathEnd.endsWith('/weight-entries')) {
       if (method === 'POST') {
         const body =
@@ -374,11 +400,13 @@ export function createE2EMockFetch(): typeof fetch {
               })
             : {};
         const date = body.effective_date ?? '2026-01-01';
+        const weight = body.weight ?? 75;
+        savedWeightKg = weight;
         return json(
           {
             id: 'e2e-weight-created',
             user_id: E2E_SESSION.userId,
-            weight_kg: body.weight ?? 75,
+            weight_kg: weight,
             effective_date: date,
             created_at: `${date}T08:00:00Z`,
             updated_at: `${date}T08:00:00Z`,
@@ -386,7 +414,51 @@ export function createE2EMockFetch(): typeof fetch {
           201,
         );
       }
-      return json(e2eWeightEntries(queryParam(url, 'to') ?? '2026-01-01'));
+      const to = queryParam(url, 'to') ?? '2026-01-01';
+      const series = e2eWeightEntries(to);
+      // One weight per calendar day: a save for today upserts the window's last
+      // point (the device's today) to the saved value, so the refetched series —
+      // and the EWMA headline recomputed from it — carries the just-saved weight.
+      if (savedWeightKg !== null && series.length > 0) {
+        const last = series[series.length - 1]!;
+        series[series.length - 1] = { ...last, weight_kg: savedWeightKg };
+      }
+      return json(series);
+    }
+
+    // /derived-items/food/{id}/source-candidates — the Change-match panel's
+    // alternative-source list (FTY-093). Returns one candidate the correction
+    // flow re-resolves to. Matched before the generic derived-items paths.
+    if (pathEnd.endsWith('/source-candidates')) {
+      return json({ candidates: [E2E_SOURCE_CANDIDATE] });
+    }
+
+    // /derived-items/food/{id}/re-resolve — commit the Change-match pick
+    // (FTY-093/183). Returns the same item with honest new provenance and
+    // server-recomputed values, which the sheet + timeline re-render in place.
+    if (pathEnd.endsWith('/re-resolve')) {
+      return json(E2E_RERESOLVED_ITEM);
+    }
+
+    // /saved-foods — the FTY-053 typeahead search backing the correction flow's
+    // saved-food pick. Returns the seeded saved food when the query prefix/
+    // substring matches its name (mirrors the server's contains semantics), so
+    // the suggestion chip appears as the user types; empty otherwise, so it never
+    // surfaces for the clarify/failed flows' inputs.
+    if (pathEnd.endsWith('/saved-foods') && method === 'GET') {
+      const q = (queryParam(url, 'q') ?? '').trim().toLowerCase();
+      const match = q.length > 0 && E2E_SAVED_FOOD.name.toLowerCase().includes(q);
+      return json({ items: match ? [E2E_SAVED_FOOD] : [], limit: 10 });
+    }
+
+    // /goal — POST creates/replaces the active goal and returns the goal +
+    // target reveal (FTY-106). Backs the FTY-182 profile flow: saving a goal
+    // edit under the native header resolves to the mini target-reveal, then
+    // SettingsScreen refetches GET /target (served below) for the full macros.
+    // Only POST is answered; GET /goal still 404s so getActiveGoalDirection
+    // keeps returning null (an absent goal) as the other flows expect.
+    if (pathEnd.endsWith('/goal') && method === 'POST') {
+      return json(E2E_GOAL_TARGET_RESPONSE, 201);
     }
 
     // Static fixtures (profile, target).

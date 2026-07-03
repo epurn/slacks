@@ -475,11 +475,11 @@ describe("TrendsScreen — log weight sheet", () => {
     );
     act(() => logBtn.props.onPress());
 
-    // Modal appears (visible prop becomes true on the WeightLogSheet)
-    const modal = tree.root.find(
-      (n) => n.props.visible !== undefined && n.props.animationType === "slide",
+    // The native sheet presents: its content (the weight field) is now mounted.
+    const inputs = tree.root.findAll((n) =>
+      String(n.props.accessibilityLabel).startsWith("Weight in"),
     );
-    expect(modal).toBeTruthy();
+    expect(inputs.length).toBeGreaterThan(0);
   });
 
   it("re-fetches entries after a successful save to show the new point", async () => {

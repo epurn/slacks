@@ -9,17 +9,26 @@
 #
 # The flow reaches Trends, proves the weight card is data-present (not an
 # empty/error state), asserts the cadence card is absent, taps the compact
-# Log weight control, and drives the weight sheet to its open, usable end state.
+# Log weight control, and then — for FTY-183 — drives the native weight sheet all
+# the way through a save: it logs a weight, the sheet dismisses on success, and
+# the refetched Trends headline reflects the just-saved value. This is the
+# weight log/save/Trends confirmation path the story requires.
 #
 # Load-bearing assertions:
-#   - `.*this month.*` (step 4): the headline delta renders only when weight
+#   - `.*this month.*` (step 3): the headline delta renders only when weight
 #     entries load (computeHeadlineDelta returns null with none) — a data-starved
 #     Trends would fail here rather than going green on the always-mounted card.
-#   - `WEIGH-IN REMINDER` absent (step 5): the exact section label the removed
+#   - `WEIGH-IN REMINDER` absent (step 4): the exact section label the removed
 #     cadence card rendered (git HEAD~1 TrendsScreen.tsx:486). Asserting it after
 #     the screen is confirmed present makes the absence meaningful, not trivial.
-#   - `weight-log-sheet` visible + `Weight in kg` (steps 7–8): the tap opens the
-#     real sheet with its usable weight input, the flow's successful end state.
+#   - `weight-log-sheet` visible + `Weight in kg` (steps 6–7): the tap opens the
+#     real native sheet with its usable weight input.
+#   - `weight-log-sheet` gone (step 10): the sheet dismisses only on a successful
+#     save (an API error keeps it open), so its dismissal proves the POST
+#     round-tripped.
+#   - `74.7 kg` headline (step 11): recomputed from the refetched series after
+#     the mock upserts today's point to the saved 70 kg. It cannot appear unless
+#     the save persisted AND Trends re-fetched — the end-to-end confirmation.
 #
 # The weight series and adherence range are served by the E2E mock fetch
 # (e2eWeightEntries / e2eDailySummaryRange in e2e/fixtures.ts), anchored to the
@@ -71,6 +80,49 @@ appId: com.fatty
     timeout: 10000
 
 # Step 7: …and it is usable, not data-starved: the weight input surface (its
-#         "Weight in kg" accessibility label) is present in the open sheet.
+#         "Weight in kg" accessibility label) is present in the open sheet, and
+#         the header carries the human-formatted date ("Today"), never an ISO
+#         string (FTY-183 acceptance: human date title, no raw YYYY-MM-DD).
 - assertVisible:
     text: "Weight in kg"
+- assertVisible:
+    text: "Today"
+
+# Step 8: Log a weight and save it (FTY-183). The field auto-focuses on present,
+#         so the keyboard is already up — we type straight into it WITHOUT first
+#         tapping the field, which is the keyboard-up-on-present proof. The field
+#         is pre-seeded with the last entry (74.8), so clear it and enter a
+#         distinctive value (70) whose smoothed headline is unmistakable.
+- eraseText: 8
+- inputText: "70"
+
+# Step 9: Tap the submit button by its stable testID. On the non-iOS fallback the
+#         sheet is a bottom-anchored Modal; the emulator resizes the window for the
+#         soft keyboard (adjustResize), so the whole sheet — including this button —
+#         sits above the keyboard and is directly tappable (steps 6–7 already
+#         asserted the sheet's content visible with the keyboard up). We do NOT
+#         `hideKeyboard` first: on Android that issues a back-press, which fires the
+#         Modal's `onRequestClose` and dismisses the sheet before we can tap. Using
+#         the id (not the "Log weight" text) disambiguates the submit control from
+#         the sheet's own "Log weight" header title and the card's "+ Log weight"
+#         trigger.
+- tapOn:
+    id: weight-log-submit
+
+# Step 10: The save round-trips: on success the sheet dismisses (an error would
+#          keep it open with an inline message). Its dismissal is the first proof
+#          the POST /weight-entries succeeded.
+- extendedWaitUntil:
+    notVisible:
+      id: weight-log-sheet
+    timeout: 10000
+
+# Step 11: Trends confirms the save end-to-end. handleWeightSaved re-fetches the
+#          series; the mock upserts today's point to the saved 70 kg, so the EWMA
+#          headline recomputes to "74.7 kg" (0.2·70 + 0.8·75.65 ≈ 74.69, rounded).
+#          That value only appears once the refetch returns the just-saved weight
+#          — a data-starved or non-refetched Trends would still read "75.7 kg".
+- extendedWaitUntil:
+    visible:
+      text: ".*74.7 kg.*"
+    timeout: 10000

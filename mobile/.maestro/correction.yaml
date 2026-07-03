@@ -1,33 +1,53 @@
-# FTY-181: Correction-saved beat (beat 2) — real data-path guard.
+# FTY-183: Correction sheet medium → large detent save path.
 #
-# The signature correction-saved beat (beat 2) fires a success haptic + a
-# confirmation pulse once per *successful* correction commit. Reaching it on the
-# real screen requires a resolved value row that is tappable, a correction sheet
-# that opens against that item, and an amount step that commits a new server
-# value — the visible confirmation the beat rides. This flow drives exactly that
-# on the real screen data path (the item-forward `/log-events/by-date` feed,
-# FTY-198), not injected props.
+# The story replaced the correction sheet's faked Modal/maxHeight with a real
+# native detent sheet: it opens at the medium detent (timeline visible behind)
+# for the quick fix and expands to the large detent when a lever (Change match /
+# override) needs the room. Per docs/standards/testing-standards.md a user-facing
+# behaviour needs a flow-completion E2E, and the reviewer specifically asked the
+# correction save path be driven to completion — not just prop-level Jest checks.
 #
-# If the correction commit were unreachable (row data-starved, sheet not wired,
-# or the PATCH not applied), the recomputed value below would never appear and
-# the assertion would go red — the gap this flow guards.
+# The only E2E-reachable way to put a tappable, resolved food item on Today is
+# the saved-food synthetic-item path (server-side item hydration for fetched
+# events is a later story): selecting a saved food inserts a resolved item on
+# submit. So the flow drives:
 #
-# Flow:
-#   Today (empty day) → submit "oatmeal" → it resolves to a completed entry →
-#   tap Refresh to load the by-date feed → the resolved value row
-#   "Oatmeal, 140 kcal" appears → tap it to open the correction sheet → step the
-#   portion up → the sheet shows the server-recomputed "175 kcal" (the commit the
-#   correction-saved beat accompanies).
+#   Today → type "Chicken" → tap the saved-food suggestion → Add → the resolved
+#   item lands on the timeline → tap it → correction sheet opens at the MEDIUM
+#   detent → open Change match (sheet expands to the LARGE detent, candidates
+#   load) → pick the USDA candidate → the re-resolve commits, the sheet returns
+#   to medium, and both the sheet and the timeline row re-render the new source
+#   and recomputed calories.
+#
+# Load-bearing assertions:
+#   - suggestion chip (step 3): the FTY-053 typeahead served the saved food, so
+#     the pick that seeds the whole flow is real, not assumed.
+#   - `Chicken burrito bowl, 640 kcal` row (step 6): the resolved synthetic item
+#     actually landed on the timeline as a tappable, counted row.
+#   - `Portion` (step 8): the correction sheet opened data-present at the medium
+#     detent with its amount stepper — not an empty/again-faked sheet.
+#   - candidate row (step 10): opening Change match expanded the sheet and the
+#     source-candidates read populated it — the medium→large transition is real.
+#   - search field gone (step 12): the Change-match panel closes only on a
+#     successful re-resolve (a failure keeps it open with an inline error), so its
+#     absence is the "correction commits" proof.
+#   - `Chicken, grilled, USDA, 415 kcal` timeline row (step 14): the committed
+#     correction reconciled back onto the SAME row (no duplicate) with the
+#     server-recomputed calories (≠ the original 640), so the change is visible on
+#     Today after the sheet closes — the end-to-end refetch/confirmation.
+#
+# The saved food, its completed log event, the source candidate, and the
+# re-resolved item are all served by the E2E mock (see e2e/fixtures.ts and
+# createE2EMockFetch in e2e/launchMode.ts), keyed on the saved food's name so
+# this flow drives state independently of the clarify/failed-parse flows.
 #
 # Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
 # directory-level Maestro runs launch the installed app under test reliably.
 appId: com.fatty
 ---
-# Step 1: Launch in E2E mode. The mock starts with an empty day.
+# Step 1: Launch in E2E mode. AuthGate routes straight to Today's empty day.
 - launchApp:
     clearState: false
-
-# Step 2: Assert the app reaches Today and the timeline is in the ready state.
 - extendedWaitUntil:
     visible:
       id: today-screen
@@ -37,61 +57,90 @@ appId: com.fatty
       id: today-timeline-ready
     timeout: 15000
 
-# Step 3: Submit "oatmeal" — the mock resolves it straight to a completed entry
-#         with a real derived item on the by-date feed.
+# Step 2: Type into the composer. The FTY-053 saved-food typeahead debounces the
+#         query and searches the mock, which returns the seeded saved food.
 - tapOn:
     text: "Log food or exercise"
-- inputText: "oatmeal"
+- inputText: "Chicken"
+
+# Step 3: The suggestion chip for the saved food appears (its accessibility
+#         label is "Use saved food: {name}"). A data-starved typeahead would fail
+#         here before the flow could pick anything.
+- extendedWaitUntil:
+    visible:
+      text: "Use saved food: Chicken burrito bowl"
+    timeout: 10000
+
+# Step 4: Pick the saved food — selects it and fills the composer with its name.
+- tapOn:
+    text: "Use saved food: Chicken burrito bowl"
+
+# Step 5: Submit. A selected saved food inserts a resolved synthetic item, so the
+#         entry lands already counted (no estimate round-trip).
 - tapOn:
     text: "Add entry"
 
-# Step 4: Wait for the reconciled completed entry on the timeline.
+# Step 6: The resolved item is on the timeline as a tappable, counted row (name +
+#         its 640 kcal). This is the item the correction sheet opens against.
 - extendedWaitUntil:
     visible:
-      id: today-timeline-with-entries
+      text: "Chicken burrito bowl, 640 kcal"
     timeout: 10000
 
-# Step 5: Tap Refresh to load the item-forward day feed, which carries the
-#         entry's resolved derived item (the row the correction sheet opens on).
+# Step 7: Tap the item row to open the correction sheet at the medium detent.
 - tapOn:
-    text: "Refresh"
+    text: "Chicken burrito bowl, 640 kcal"
 
-# Step 6: The resolved value row is visible, populated from the by-date feed.
-#         ItemTimelineRow exposes the collapsed a11y label "Oatmeal, 140 kcal".
-- extendedWaitUntil:
-    visible:
-      text: ".*Oatmeal, 140 kcal.*"
-    timeout: 10000
-
-# Step 7: Tap the resolved row to open the correction sheet against the item.
-- tapOn:
-    text: ".*Oatmeal, 140 kcal.*"
-
-# Step 8: The correction sheet opened data-present. Assert the "Portion" section
-#         label first (a plain, always-rendered Text — the most reliable open
-#         marker), so a sheet that never opened fails here with a clear signal,
-#         then wait for the portion stepper by its stable testID rather than the
-#         button's accessibility label — the robust selector the other flows use
-#         (add-a-detail-row, clarify-question), resilient to Modal-render timing.
+# Step 8: The sheet is open and data-present at the medium detent: its amount
+#         stepper (labelled "Portion") is visible.
 - extendedWaitUntil:
     visible:
       text: "Portion"
     timeout: 10000
-- extendedWaitUntil:
-    visible:
-      id: "today-correction-increase"
-    timeout: 10000
 
-# Step 9: Step the portion up — a successful PATCH commits the correction, which
-#         is what fires the correction-saved beat (haptic + confirmation pulse).
+# Step 9: Open Change match. The sheet narrows to large-only so it animates up to
+#         the large detent (the timeline behind dims), and the candidate read
+#         fires. Scroll to the lever first in case it sits below the medium fold.
+- scrollUntilVisible:
+    element:
+      text: "Change match"
+    direction: DOWN
+    timeout: 10000
 - tapOn:
-    id: "today-correction-increase"
+    text: "Change match"
 
-# Step 10: Load-bearing assertion — the sheet shows the server-recomputed value
-#          (175 kcal for the larger portion). It appears only once the correction
-#          commit lands, so this proves the beat's real data path end-to-end. A
-#          sheet that never applied the commit would still read "140 kcal" here.
+# Step 10: The large-detent panel populated: the USDA candidate row rendered from
+#          the source-candidates read (its label is "Select {name}, {kcal} kcal
+#          per 100g"). A chipless/empty panel would fail here.
 - extendedWaitUntil:
     visible:
-      text: ".*175 kcal.*"
+      text: ".*Select Chicken, grilled, USDA, 165 kcal per 100g.*"
     timeout: 10000
+
+# Step 11: Pick the candidate — one tap fires the re-resolve (no free-text).
+- tapOn:
+    text: ".*Select Chicken, grilled, USDA, 165 kcal per 100g.*"
+
+# Step 12: Re-resolve committed: on success the Change-match panel closes and the
+#          sheet returns to the medium detent, so its search field is gone (a
+#          failed re-resolve would keep the panel open with an inline error).
+- extendedWaitUntil:
+    notVisible:
+      text: "Search for a food"
+    timeout: 10000
+
+# Step 13: Close the sheet via the header's Done control (which sits outside the
+#          scroll area, so it's reachable regardless of scroll position).
+- tapOn:
+    text: "Done"
+
+# Step 14: Today confirms the correction end-to-end: the SAME row now reads the
+#          corrected source + the server-recomputed calories (415, ≠ the original
+#          640), and the old values are gone — the commit reconciled in place, no
+#          duplicate row.
+- extendedWaitUntil:
+    visible:
+      text: "Chicken, grilled, USDA, 415 kcal"
+    timeout: 10000
+- assertNotVisible:
+    text: "Chicken burrito bowl, 640 kcal"

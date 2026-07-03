@@ -697,10 +697,10 @@ describe("clarify mode", () => {
     expect(allText(tree)).toContain("We need a detail");
   });
 
-  it("renders the free-text input + Done at a usable height in both states", () => {
-    // A height floor on the clarify sheet keeps the body usable instead of the
-    // collapsed zero-height strip (the live RC regression this story fixes) —
-    // proven for question present and question absent/loading.
+  it("renders the free-text input + Done reachable in both states", () => {
+    // The native sheet sizes the body via its detent, so the clarify body no
+    // longer needs a manual min-height floor: the question, free-text input, and
+    // Done are reachable for question-present and question-absent/loading alike.
     for (const data of [
       clarificationData,
       { question: null, options: [] as const },
@@ -715,16 +715,6 @@ describe("clarify mode", () => {
       // Free-text input + Done are present and reachable.
       expect(hasA11yLabel(tree, "Your answer")).toBe(true);
       expect(hasA11yLabel(tree, "Submit answer")).toBe(true);
-      // The sheet pins a minimum height so the flex:1 body can't collapse.
-      const sheetStyles = tree.root
-        .findAll((n) => Array.isArray(n.props.style))
-        .map((n) => n.props.style as unknown[])
-        .find((styleArr) =>
-          styleArr.some(
-            (s) => s && typeof s === "object" && "minHeight" in s,
-          ),
-        );
-      expect(sheetStyles).toBeDefined();
     }
   });
 
@@ -921,9 +911,12 @@ describe("accessibility", () => {
     expect(hasA11yLabel(tree, "Select Turkey breast, roasted, 135 kcal per 100g")).toBe(true);
   });
 
-  it("backdrop has an accessible close label", () => {
+  it("presents as a native sheet announced to VoiceOver", () => {
+    // The hand-faked Modal + tappable backdrop is gone; the native sheet carries
+    // an accessibility label announcing it, and swipe/tap-outside dismissal is
+    // provided by the native presentation controller.
     const tree = mount(<CorrectionSheet {...defaultProps()} />);
-    expect(hasA11yLabel(tree, "Close sheet")).toBe(true);
+    expect(hasA11yLabel(tree, "Turkey breast details")).toBe(true);
   });
 
 });
@@ -938,10 +931,17 @@ describe("visibility and close", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("calls onClose when the backdrop is tapped", () => {
+  it("calls onClose when the native sheet is dismissed by gesture", () => {
     const onClose = jest.fn();
     const tree = mount(<CorrectionSheet {...defaultProps({ onClose })} />);
-    press(tree, "Close sheet");
+    // The native swipe/tap-outside dismissal surfaces as onDismissed on the
+    // sheet screen; NativeSheet forwards it to onClose.
+    const sheetScreen = tree.root.find(
+      (n) => typeof n.props.onDismissed === "function",
+    );
+    act(() => {
+      sheetScreen.props.onDismissed({ nativeEvent: { dismissCount: 1 } });
+    });
     expect(onClose).toHaveBeenCalled();
   });
 });
