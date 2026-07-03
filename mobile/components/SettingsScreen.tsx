@@ -65,8 +65,6 @@ import {
 import { fileCadenceStore, expoNotificationsAdapter } from '@/state/cadenceAdapter';
 import type { AppSettingsStore } from '@/state/appSettings';
 import { fileAppSettingsStore } from '@/state/appSettings';
-import type { GoalPaceStore } from '@/state/goalPace';
-import { fileGoalPaceStore } from '@/state/goalPace';
 import {
   METABOLIC_FORMULA_OPTIONS,
   cmToMeters,
@@ -159,12 +157,6 @@ export interface SettingsScreenProps {
   /** Injectable on-device settings stores. */
   settingsStore?: AppSettingsStore;
   cadenceStore?: CadenceStore;
-  /**
-   * On-device memory of the active goal's pace (FTY-190). Hydrates the collapsed
-   * Goal row as direction + pace on a cold load, since `GET /goal` recovers only
-   * the direction. Injectable for tests.
-   */
-  goalPaceStore?: GoalPaceStore;
   notificationsAdapter?: NotificationsAdapter;
   /** App version string for the About row. */
   appVersion?: string;
@@ -190,7 +182,6 @@ export function SettingsScreen({
   resetTargetOverrideFn = resetTargetOverride,
   settingsStore = fileAppSettingsStore,
   cadenceStore = fileCadenceStore,
-  goalPaceStore = fileGoalPaceStore,
   notificationsAdapter = expoNotificationsAdapter,
   appVersion = '1.0.0',
   onAppearanceChange,
@@ -269,15 +260,10 @@ export function SettingsScreen({
       // depending on an in-session edit. A load failure degrades to the
       // in-memory cross-screen direction rather than blocking settings.
       getActiveGoalDirectionFn(apiSession).catch(() => null),
-      // Pace is not carried on any fetchable read-model, so the row's second
-      // half (`· Steady`) comes from the pace this device last remembered for
-      // this user. Absent (another device / pre-memory) leaves the row at its
-      // real direction; a read failure never blocks settings.
-      goalPaceStore.getGoalPace(session.userId).catch(() => null),
       settingsStore.getAppearance(),
       cadenceStore.getCadence(),
     ])
-      .then(([prof, tgt, dir, pace, app, cad]) => {
+      .then(([prof, tgt, dir, app, cad]) => {
         if (!active) return;
         setProfile(prof);
         if (tgt === null) {
@@ -286,7 +272,6 @@ export function SettingsScreen({
           setTarget(tgt);
         }
         if (dir !== null) setGoalDirection(dir);
-        if (pace !== null) setGoalPace(pace);
         setAppearance(app);
         setCadence(cad ?? DEFAULT_CADENCE);
       })
@@ -306,7 +291,6 @@ export function SettingsScreen({
     getProfileFn,
     getTargetFn,
     getActiveGoalDirectionFn,
-    goalPaceStore,
     settingsStore,
     cadenceStore,
   ]);
@@ -336,10 +320,12 @@ export function SettingsScreen({
   // ── Goal edit handlers ────────────────────────────────────────────────────
 
   const currentGoalDirection = goalDirection ?? sessionGoalDirection;
-  // Pace comes either from this session's edit or from the pace this device
-  // remembered for the user (hydrated on load above); it is never inferred from
-  // target numbers. When still unknown, the collapsed row falls back to the
-  // direction summary rather than guessing.
+  // Pace is known only from this session's own goal edit — it is never carried
+  // on any read-model the client can fetch on a cold launch (`GET /goal`
+  // recovers only the direction) and is never inferred from target numbers or
+  // replayed from a local cache. Until the user edits the goal this session the
+  // collapsed row summarises the real goal by its authoritative direction alone
+  // rather than guessing or showing a possibly-stale pace.
   const currentGoalPace = goalPace;
 
   const openGoalEdit = useCallback(() => {
@@ -374,10 +360,12 @@ export function SettingsScreen({
       const savedPace = editDirection !== 'maintain' ? editPace : null;
       setGoalDirection(reveal.target.direction);
       setKnownGoalDirection(reveal.target.direction);
+      // The pace the user just chose upgrades the collapsed row to direction +
+      // pace for the rest of this session. It is intentionally not persisted:
+      // the goal itself round-tripped to the server (the authoritative store),
+      // and replaying a cached pace on a later launch risks showing a stale
+      // value if the goal is changed on another device.
       setGoalPace(savedPace);
-      // Remember the chosen pace on-device so the next cold load can summarise
-      // the goal as direction + pace (maintain has no pace → clears it).
-      void goalPaceStore.setGoalPace(session.userId, savedPace);
       setEditingGoal(false);
       // Fetch the full read-model (reveal only has calories, not macros)
       const updatedTarget = await getTargetFn(apiSession);
@@ -397,7 +385,6 @@ export function SettingsScreen({
     editPace,
     createGoalFn,
     getTargetFn,
-    goalPaceStore,
     showReveal,
     setKnownGoalDirection,
   ]);

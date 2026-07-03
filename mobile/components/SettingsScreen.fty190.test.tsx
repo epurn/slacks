@@ -4,10 +4,9 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
 import type { TargetReadModel } from "@/api/dailySummary";
-import type { GoalTargetResponse, PacePreset } from "@/api/goals";
+import type { GoalTargetResponse } from "@/api/goals";
 import type { ProfileDTO } from "@/api/profile";
 import type { AppSettingsStore } from "@/state/appSettings";
-import type { GoalPaceStore } from "@/state/goalPace";
 import type {
   CadenceStore,
   NotificationsAdapter,
@@ -136,14 +135,6 @@ function mockNotifications(): NotificationsAdapter {
   };
 }
 
-/** A pace store that remembers `initial` (default: nothing remembered). */
-function mockGoalPaceStore(initial: PacePreset | null = null): GoalPaceStore {
-  return {
-    getGoalPace: jest.fn(async () => initial),
-    setGoalPace: jest.fn(async () => {}),
-  };
-}
-
 function renderSettings(
   props: Partial<Parameters<typeof SettingsScreen>[0]> = {},
 ): ReactTestRenderer {
@@ -161,7 +152,6 @@ function renderSettings(
             getActiveGoalDirectionFn={jest.fn().mockResolvedValue("loss")}
             settingsStore={mockSettingsStore()}
             cadenceStore={mockCadenceStore()}
-            goalPaceStore={mockGoalPaceStore()}
             notificationsAdapter={mockNotifications()}
             {...props}
           />
@@ -203,36 +193,35 @@ function press(tree: ReactTestRenderer, label: string) {
 }
 
 describe("SettingsScreen FTY-190 copy and affordances", () => {
-  it("summarizes a returning user's loaded goal as direction + pace on a cold load", async () => {
+  it("summarizes a returning user's loaded goal by its real direction on a cold load", async () => {
     // The returning-user case: the in-memory seam is empty on a cold launch, so
-    // the direction comes from the authoritative `GET /goal` fetch and the pace
-    // from what this device last remembered for the user — together the real
-    // `Lose · Steady`, with no in-session edit required.
+    // the direction comes from the authoritative `GET /goal` fetch. Pace is not
+    // carried on any fetchable read-model and is never replayed from a local
+    // cache, so the row honestly summarises the real goal by its direction
+    // (`Lose`) rather than inventing or showing a possibly-stale pace — and
+    // never the dead `Active` / `Details unavailable` states the story removes.
     mockKnownGoalDirection = null;
     const tree = renderSettings({
       getActiveGoalDirectionFn: jest.fn().mockResolvedValue("loss"),
-      goalPaceStore: mockGoalPaceStore("steady"),
     });
     await act(async () => {});
 
-    expect(() => findPressable(tree, "Goal: Lose · Steady")).not.toThrow();
-    // Never the dead states the story removes, never `Active`.
+    expect(() => findPressable(tree, "Goal: Lose")).not.toThrow();
     expect(() => findPressable(tree, "Goal: Details unavailable")).toThrow();
     expect(() => findPressable(tree, "Goal: Loading…")).toThrow();
     expect(textContent(tree)).not.toContain("Active");
   });
 
-  it("summarizes by real direction when no pace is remembered, then remembers pace after an in-session edit", async () => {
-    // A goal set on another device (or before this device remembered a pace):
-    // direction is authoritative, pace is genuinely unknown, so the row reads as
-    // the real direction rather than a fabricated pace or a dead state.
+  it("upgrades the goal row to direction + pace after an in-session edit, without persisting the pace", async () => {
+    // Direction is authoritative on a cold load; pace becomes known only once the
+    // user edits the goal this session. The chosen pace upgrades the row to
+    // direction + pace for the session but is deliberately not written to any
+    // on-device store — the goal itself round-tripped to the server.
     mockKnownGoalDirection = null;
     const createGoalFn = jest.fn().mockResolvedValue(GOAL_TARGET_RESPONSE);
-    const goalPaceStore = mockGoalPaceStore(null);
     const tree = renderSettings({
       createGoalFn,
       getActiveGoalDirectionFn: jest.fn().mockResolvedValue("loss"),
-      goalPaceStore,
     });
     await act(async () => {});
 
@@ -249,17 +238,11 @@ describe("SettingsScreen FTY-190 copy and affordances", () => {
     });
     await act(async () => {});
 
-    // The chosen pace both upgrades the row to direction + pace and is
-    // remembered on-device for the next cold load.
     expect(createGoalFn).toHaveBeenCalledWith(
       expect.anything(),
       { direction: "loss", pace: "steady" },
     );
     expect(mockSetKnownGoalDirection).toHaveBeenCalledWith("loss");
-    expect(goalPaceStore.setGoalPace).toHaveBeenCalledWith(
-      SESSION.userId,
-      "steady",
-    );
     expect(() => findPressable(tree, "Goal: Lose · Steady")).not.toThrow();
     expect(() => findPressable(tree, "Goal: Loading…")).toThrow();
   });
@@ -268,8 +251,6 @@ describe("SettingsScreen FTY-190 copy and affordances", () => {
     mockKnownGoalDirection = null;
     const tree = renderSettings({
       getActiveGoalDirectionFn: jest.fn().mockResolvedValue("maintain"),
-      // A stale remembered pace must never turn a maintain goal into a paced one.
-      goalPaceStore: mockGoalPaceStore("steady"),
     });
     await act(async () => {});
 

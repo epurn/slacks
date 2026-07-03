@@ -17,13 +17,14 @@ const DIRECTION_LABELS: Record<GoalDirection, string> = {
  *
  * Direction is the authoritative, always-known part of a loaded goal
  * (`GET /goal`, FTY-189), so it is what the row summarises. Pace is only known
- * once a goal is created or edited this session — it is never persisted back to
- * the client and is never guessed or reverse-engineered from target numbers.
- * When pace is unknown the row still summarises the real goal by its direction
- * (`Lose`) rather than collapsing to a dead `Details unavailable`; when pace is
- * known it is appended (`Lose · Steady`). Maintain goals have no pace and read
- * as `Maintain`. Only a genuinely unknown direction (no active goal loaded)
- * stays neutral.
+ * once a goal is created or edited this session — it is never carried on a
+ * fetchable read-model, never persisted on-device, and never guessed or
+ * reverse-engineered from target numbers. When pace is unknown (a returning or
+ * cross-device goal) the row still summarises the real goal by its direction
+ * (`Lose`) rather than collapsing to a dead `Details unavailable` or inventing a
+ * pace; when pace is known this session it is appended (`Lose · Steady`).
+ * Maintain goals have no pace and read as `Maintain`. Only a genuinely unknown
+ * direction (no active goal loaded) stays neutral.
  */
 export function goalSummaryDetail(
   direction: GoalDirection | null,
