@@ -11,7 +11,7 @@ import { type PermissionResponse, PermissionStatus } from 'expo';
 import type { SessionRecord } from '@/state/session';
 import type { ProfileDTO } from '@/api/profile';
 import type { DailySummaryDTO, TargetReadModel } from '@/api/dailySummary';
-import type { GoalTargetResponse } from '@/api/goals';
+import type { ActiveGoal, GoalTargetResponse } from '@/api/goals';
 import type {
   LogEventDTO,
   LogEventEntryDTO,
@@ -103,6 +103,20 @@ export const E2E_GOAL_TARGET_RESPONSE: GoalTargetResponse = {
   },
   provenance: { source: 'derived', basis: 'goal_and_metrics' },
   clamp: { clamped: false, reason: null },
+};
+
+/**
+ * The returning user's active goal served by `GET /goal` (the FTY-189/FTY-190
+ * read model). Direction and pace are each recovered server-side from the
+ * persisted trajectory: `loss` matches the seeded goal above (start 75 kg →
+ * target 72 kg → a loss trajectory) and `steady` is the band that trajectory was
+ * derived from. So a cold-launched Settings screen summarises the real goal as
+ * `Goal: Lose · Steady` before any in-session edit, instead of the dead
+ * "Active" / neutral "Details unavailable" states FTY-190 removes.
+ */
+export const E2E_ACTIVE_GOAL: ActiveGoal = {
+  direction: 'loss',
+  pace: 'steady',
 };
 
 /** Zero daily summary for an empty E2E day. */

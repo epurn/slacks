@@ -26,9 +26,10 @@ backend-core / contracts lane (`backend/app/routers/goals.py`,
 
 ## Version
 
-2. v1 introduced the write (`POST /goal`) in FTY-106; v2 adds the read-only
-`GET /goal` active-goal-direction read model in FTY-189 (additive, no change to
-the write path).
+3. v1 introduced the write (`POST /goal`) in FTY-106; v2 added the read-only
+`GET /goal` active-goal-direction read model in FTY-189; v3 extends that read
+model to also return the recovered `pace` preset in FTY-190 (additive optional
+field, no change to the write path or the recovered direction).
 
 ## Inputs
 
@@ -50,15 +51,27 @@ so an unsafe rate is structurally impossible at the boundary.
 ### `GET /api/users/{user_id}/goal`
 
 Authenticated (bearer token); the `{user_id}` path is explicit and checked on
-every access. No request body. Returns the **direction** of the caller's current
-active goal so a returning user's Trends weight delta can be coloured by progress
-toward the goal after a cold launch — the only authoritative source of the
-direction, since neither the daily-summary nor the target read-model carries it.
+every access. No request body. Returns the **direction** and **pace preset** of
+the caller's current active goal so a returning user's Trends weight delta can be
+coloured by progress toward the goal (direction) and the Settings Goal row can be
+summarised as direction + pace after a cold launch — the only authoritative
+source, since neither the daily-summary nor the target read-model carries them.
 
-A goal has no stored `direction` column; the direction is **recovered** from the
-persisted trajectory: `target_weight_kg > start_weight_kg` → `gain`,
-`target_weight_kg < start_weight_kg` → `loss`, equal → `maintain` (the exact
-`maintain` path always yields `target == start`).
+A goal has no stored `direction` or `pace` column; both are **recovered** from the
+persisted trajectory. The direction: `target_weight_kg > start_weight_kg` →
+`gain`, `target_weight_kg < start_weight_kg` → `loss`, equal → `maintain` (the
+exact `maintain` path always yields `target == start`). The pace: the weekly
+fraction implied by the stored start/target weights over the fixed
+`PLANNING_HORIZON_WEEKS` is matched back to the band it was derived from (the
+exact inverse of the pace→trajectory derivation below). Because each band is a
+distinct constant and the trajectory is a pure function of it, the recovery is
+exact. The inverse is gated on the goal's own geometry: its `target_date` must be
+exactly `start_date + PLANNING_HORIZON_WEEKS`, the same horizon the derivation
+projects the pace over. A `maintain` goal has no pace; a legacy or hand-seeded
+goal that lands on no band, or that spans a different horizon than
+`PLANNING_HORIZON_WEEKS` (dividing its weight gap by the fixed horizon could
+otherwise fabricate a false band match), returns no pace — all yield `null` so
+the caller falls back to a direction-only summary rather than inventing a pace.
 
 ### Pace presets and the evidence-based bands
 
@@ -115,10 +128,14 @@ inputs → identical persisted goal and target.
 
 ### `GET /api/users/{user_id}/goal`
 
-`200 OK` with `ActiveGoalDirection`: `{ "direction": "loss" | "gain" | "maintain" }`
-— the single recovered direction, nothing else. No weight, RMR, TDEE, or target
-number is exposed. When the caller has no active goal, the response is `404`
-(fail closed; indistinguishable from a cross-user attempt — no existence oracle).
+`200 OK` with `ActiveGoal`:
+`{ "direction": "loss" | "gain" | "maintain", "pace": "gentle" | "steady" | "faster" | null }`
+— the recovered direction plus the recovered pace preset, nothing else. `pace` is
+`null` for a `maintain` goal or a legacy/off-grid/off-horizon goal that matches no
+band. No
+weight, RMR, TDEE, or target number is exposed. When the caller has no active
+goal, the response is `404` (fail closed; indistinguishable from a cross-user
+attempt — no existence oracle).
 
 ### Side effects
 
@@ -152,9 +169,13 @@ oracle), exactly as `profile` / `daily_summary` / `targets` do. The service-leve
 
 Weight, the derived RMR/TDEE, and the computed target are sensitive body data and
 are **never logged** — only non-sensitive labels (e.g. the environment) appear in
-diagnostics. The goal and its derived target follow the FTY-022 retention rule:
-they live until the goal is replaced/edited or the account is deleted
-(`ON DELETE CASCADE`).
+diagnostics. The `GET /goal` read model deliberately exposes only the recovered
+`direction` and `pace`: both are coarse categorical presets (a lose/maintain/gain
+direction and a gentle/steady/faster rate band), not body numbers, so they leak
+nothing sensitive that the direction did not already — no weight, start/target
+number, RMR, TDEE, or calorie target is derivable from them. The goal and its
+derived target follow the FTY-022 retention rule: they live until the goal is
+replaced/edited or the account is deleted (`ON DELETE CASCADE`).
 
 ## Errors
 

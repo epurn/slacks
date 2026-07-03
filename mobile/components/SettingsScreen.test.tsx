@@ -102,7 +102,6 @@ const DERIVED_TARGET: TargetReadModel = {
   carbs_g: { effective: 148, derived: 148, source: "derived" },
   fat_g: { effective: 64, derived: 64, source: "derived" },
 };
-
 /** Target read-model with calorie override in force. */
 const OVERRIDDEN_CALORIE_TARGET: TargetReadModel = {
   calories: { effective: 2000, derived: 1800, source: "user" },
@@ -217,6 +216,7 @@ function renderSettings(
             getTargetFn={jest.fn().mockResolvedValue(DERIVED_TARGET)}
             putProfileFn={jest.fn().mockResolvedValue(PROFILE)}
             createGoalFn={jest.fn().mockResolvedValue(GOAL_TARGET_RESPONSE)}
+            getActiveGoalFn={jest.fn().mockResolvedValue(null)}
             setTargetOverrideFn={
               jest.fn().mockResolvedValue(OVERRIDDEN_CALORIE_TARGET)
             }
@@ -467,7 +467,7 @@ describe("Mini target-reveal", () => {
 
     // Open goal edit and save
     await act(async () => {
-      press(tree, "Goal: Active");
+      press(tree, "Goal: Details unavailable");
     });
     await act(async () => {
       press(tree, "Save goal");
@@ -491,7 +491,7 @@ describe("Mini target-reveal", () => {
     await act(async () => {});
 
     await act(async () => {
-      press(tree, "Goal: Active");
+      press(tree, "Goal: Details unavailable");
     });
     await act(async () => {
       press(tree, "Save goal");
@@ -693,7 +693,6 @@ describe("PREFERENCES persistence", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Tests: Sign out
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -762,14 +761,6 @@ describe("Sign out", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("Data & About", () => {
-  it("renders export and deletion entry rows", async () => {
-    const tree = renderSettings();
-    await act(async () => {});
-    const text = textContent(tree);
-    expect(text).toContain("Export data");
-    expect(text).toContain("Delete account");
-  });
-
   it("renders the version row", async () => {
     const tree = renderSettings({ appVersion: "1.2.3" });
     await act(async () => {});
@@ -870,14 +861,14 @@ describe("No sensitive values in logs", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("Goal row honesty", () => {
-  it("shows 'Active' (not 'Not set') when a target proves a goal exists", async () => {
+  it("keeps an active goal neutral when only the target is loaded", async () => {
     const tree = renderSettings({
       getTargetFn: jest.fn().mockResolvedValue(DERIVED_TARGET),
     });
     await act(async () => {});
-    // The row must be reachable by an honest "Active" label, and "Not set" must
-    // not appear above the rendered calorie/macro targets.
-    expect(() => findPressable(tree, "Goal: Active")).not.toThrow();
+    expect(() => findPressable(tree, "Goal: Details unavailable")).not.toThrow();
+    expect(() => findPressable(tree, "Goal: Loading…")).toThrow();
+    expect(textContent(tree)).not.toContain("Active");
     expect(textContent(tree)).not.toContain("Not set");
   });
 
@@ -908,7 +899,7 @@ describe("Goal editor pace validity", () => {
 
     // Open the goal editor (defaults to the loss direction).
     await act(async () => {
-      press(tree, "Goal: Active");
+      press(tree, "Goal: Details unavailable");
     });
     // Pick the loss-only 'faster' pace, then switch the direction to gain.
     await act(async () => {
@@ -938,7 +929,7 @@ describe("Goal editor pace validity", () => {
     await act(async () => {});
 
     await act(async () => {
-      press(tree, "Goal: Active");
+      press(tree, "Goal: Details unavailable");
     });
     await act(async () => {
       press(tree, "Gain");
@@ -1033,7 +1024,7 @@ describe("Mini-reveal clamp note", () => {
     const tree = renderSettings({ createGoalFn, getTargetFn });
     await act(async () => {});
     await act(async () => {
-      press(tree, "Goal: Active");
+      press(tree, "Goal: Details unavailable");
     });
     await act(async () => {
       press(tree, "Save goal");
@@ -1059,7 +1050,7 @@ describe("Mini-reveal clamp note", () => {
     const tree = renderSettings({ createGoalFn, getTargetFn });
     await act(async () => {});
     await act(async () => {
-      press(tree, "Goal: Active");
+      press(tree, "Goal: Details unavailable");
     });
     await act(async () => {
       press(tree, "Save goal");
@@ -1141,14 +1132,22 @@ describe("Imperial height", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("Data & About stubs", () => {
-  it("marks export and deletion as Coming soon without claiming a flow opens", async () => {
+  it("marks export and deletion as non-tappable Coming soon disclosures", async () => {
     const tree = renderSettings();
     await act(async () => {});
     expect(textContent(tree)).toContain("Coming soon");
 
-    const exportRow = findPressable(tree, "Export data");
-    expect(exportRow.props.accessibilityHint).not.toMatch(/opens/i);
-    const deleteRow = findPressable(tree, "Delete account");
-    expect(deleteRow.props.accessibilityHint).not.toMatch(/opens/i);
+    expect(() => findPressable(tree, "Export data")).toThrow();
+    expect(() => findPressable(tree, "Delete account")).toThrow();
+
+    const exportRow = tree.root.find((n) => n.props.accessibilityLabel === "Export data");
+    expect(exportRow.props.accessibilityRole).toBeUndefined();
+    expect(exportRow.props.accessibilityHint).toBeUndefined();
+    expect(exportRow.props.onPress).toBeUndefined();
+
+    const deleteRow = tree.root.find((n) => n.props.accessibilityLabel === "Delete account");
+    expect(deleteRow.props.accessibilityRole).toBeUndefined();
+    expect(deleteRow.props.accessibilityHint).toBeUndefined();
+    expect(deleteRow.props.onPress).toBeUndefined();
   });
 });

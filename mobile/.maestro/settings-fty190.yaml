@@ -1,0 +1,113 @@
+# FTY-190 Settings polish flow: prove the copy + dead-control changes on the
+# running app, not just in render tests.
+#
+# The FTY-182 profile.yaml flow only proves the native header + goal-edit →
+# target-reveal wiring; it taps the Goal row by a bare `Goal:.*` regex and never
+# asserts the FTY-190 outcomes. Per docs/standards/testing-standards.md a
+# user-facing change needs a flow-completion E2E against the running app, and the
+# asserted end state must be real data — never an empty/placeholder state. This
+# flow drives the actual Settings screen (the /profile route) against the E2E
+# fetch mock and asserts every FTY-190 acceptance outcome:
+#
+#   1. Collapsed Goal row summarises the returning user's REAL goal as
+#      direction + pace on a cold load (`Goal: Lose · Steady`, both recovered
+#      server-side from GET /goal — the FTY-189/FTY-190 read model the mock now
+#      serves), never the dead `Active` state the story removes and never a
+#      neutral `Details unavailable`.
+#   2. Editing the goal this session still round-trips to the server and the
+#      collapsed row reflects the saved summary — a regression check that the
+#      goal-edit path keeps working on the running app.
+#   3. Calculation preference reads in plain language (`Higher calorie baseline`),
+#      not the raw formula token.
+#   4. Units and Appearance segmented rows carry visible associated labels.
+#   5. Export data and Delete account render as non-tappable `Coming soon`
+#      disclosures (the render tests assert the missing onPress/button role; this
+#      proves the visible coming-soon affordance on-device).
+#
+# Bundle ID: keep this literal so directory-level Maestro runs launch the app
+# under test (see smoke.yaml).
+appId: com.fatty
+---
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      id: today-screen
+    timeout: 15000
+
+# Open Profile from the Today header gear (accessibilityLabel "Open profile").
+- tapOn:
+    text: "Open profile"
+- extendedWaitUntil:
+    visible:
+      text: "Profile"
+    timeout: 10000
+- assertVisible:
+    text: "YOU"
+
+# 1. Cold-load Goal row summarises the real goal as direction + pace — the
+#    seeded loss/steady goal reads `Goal: Lose · Steady`, both recovered from
+#    GET /goal. Never the dead `Active` state (nor a neutral `Details
+#    unavailable`, which would mean the goal read failed).
+- extendedWaitUntil:
+    visible:
+      text: ".*Goal: Lose · Steady.*"
+    timeout: 10000
+- assertNotVisible:
+    text: "Goal: Active"
+- assertNotVisible:
+    text: "Goal: Details unavailable"
+
+# 2. Editing the goal this session still round-trips to the server. Open the
+#    inline editor, keep the loss direction and Steady pace, and save.
+- tapOn:
+    text: ".*Goal: Lose · Steady.*"
+- assertVisible:
+    id: goal-edit-card
+- tapOn:
+    text: "Steady"
+- tapOn:
+    text: "Save goal"
+# The goal round-trips (POST /goal → mini target-reveal), then the collapsed row
+# still reflects the saved summary: `Goal: Lose · Steady`.
+- extendedWaitUntil:
+    visible:
+      id: mini-target-reveal
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      text: ".*Goal: Lose · Steady.*"
+    timeout: 10000
+- assertNotVisible:
+    text: "Goal: Active"
+
+# 3. Calculation preference reads in plain language (the profile fixture uses the
+#    +5 formula → "Higher calorie baseline"), not the raw `mifflin_st_jeor` token.
+- scrollUntilVisible:
+    element:
+      text: "Higher calorie baseline"
+    direction: DOWN
+    timeout: 10000
+- assertNotVisible:
+    text: ".*mifflin_st_jeor.*"
+
+# 4. Units and Appearance segmented rows carry visible associated row labels.
+- scrollUntilVisible:
+    element:
+      text: "Units"
+    direction: DOWN
+    timeout: 10000
+- assertVisible:
+    text: "Appearance"
+
+# 5. Export data and Delete account render as non-tappable `Coming soon`
+#    disclosures (see the DATA & ABOUT section at the bottom).
+- scrollUntilVisible:
+    element:
+      text: "Export data"
+    direction: DOWN
+    timeout: 10000
+- assertVisible:
+    text: "Delete account"
+- assertVisible:
+    text: "Coming soon"

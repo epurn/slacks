@@ -12,9 +12,10 @@
 #      content clipped under the header/status bar instead of inset, fails here.
 #   3. The existing edit → target-reveal flow still behaves under the new
 #      header: tapping the Goal row opens its inline editor (goal-edit-card),
-#      changing the goal and saving reveals the updated targets
-#      (mini-target-reveal). This is the full editing path the story requires be
-#      preserved, driven end-to-end against the goal-create mock.
+#      saving the goal reveals the updated targets (mini-target-reveal) and the
+#      collapsed row updates to the direction + pace copy. This is the full
+#      editing path the story requires be preserved, driven end-to-end against
+#      the goal-create mock.
 #   4. Done (headerRight) dismisses back to where the gear was opened — Today.
 #      This is the dismissal the story requires and the isolated unit test can
 #      only assert against a mocked router.
@@ -44,16 +45,19 @@ appId: com.fatty
 - assertVisible:
     text: "YOU"
 
-# 3. Existing edit → target-reveal flow still works under the new header: the
-#    Goal row (accessibilityLabel "Goal: …") opens its inline editor, and
-#    changing the goal + saving reveals the updated targets.
+# 3. On a cold load the active goal summarises as its real direction + pace
+#    (GET /goal → loss + steady, both recovered server-side from the persisted
+#    trajectory) — the FTY-190 acceptance criterion, with no in-session edit and
+#    never the dead "Details unavailable"/"Active"/"Loading…" state. The Goal row
+#    (accessibilityLabel "Goal: …") then opens its inline editor, and saving
+#    through the real Settings path reveals updated targets and keeps the
+#    direction + pace summary for the session.
+- assertVisible:
+    text: "Goal: Lose · Steady"
 - tapOn:
     text: "Goal:.*"
 - assertVisible:
     id: goal-edit-card
-# Change the goal direction (an actual edit), then save it.
-- tapOn:
-    text: "Maintain"
 - tapOn:
     text: "Save goal"
 # The mini target-reveal appears — the goal-create round-trip completed and the
@@ -62,6 +66,8 @@ appId: com.fatty
     visible:
       id: mini-target-reveal
     timeout: 10000
+- assertVisible:
+    text: "Goal: Lose · Steady"
 
 # 4. Done dismisses back to where the gear was opened — Today.
 - tapOn:
@@ -70,3 +76,22 @@ appId: com.fatty
     visible:
       id: today-screen
     timeout: 10000
+
+# 5. Returning-user cold load: a fresh relaunch (JS state cleared) summarises the
+#    goal as direction + pace straight from GET /goal — both fields recovered
+#    server-side from the persisted trajectory, no in-session edit and no on-device
+#    cache — proving the returning-user summary FTY-190 requires.
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      id: today-screen
+    timeout: 15000
+- tapOn:
+    text: "Open profile"
+- extendedWaitUntil:
+    visible:
+      text: "Profile"
+    timeout: 10000
+- assertVisible:
+    text: "Goal: Lose · Steady"

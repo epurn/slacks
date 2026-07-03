@@ -1,6 +1,7 @@
 import {
   GoalsApiError,
   createGoal,
+  getActiveGoal,
   getActiveGoalDirection,
   getTarget,
   resetTargetOverride,
@@ -125,9 +126,53 @@ describe("getTarget", () => {
   });
 });
 
+describe("getActiveGoal", () => {
+  it("GETs the goal read model and returns its direction + recovered pace", async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(okResponse({ direction: "loss", pace: "steady" }));
+
+    const result = await getActiveGoal(SESSION, fetchMock);
+
+    expect(result).toEqual({ direction: "loss", pace: "steady" });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${ENCODED_BASE}/goal`);
+    expect(init.method).toBe("GET");
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      "Bearer test-token",
+    );
+  });
+
+  it("normalises a null/absent pace (maintain or off-grid goal) to null", async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(okResponse({ direction: "maintain", pace: null }));
+
+    await expect(getActiveGoal(SESSION, fetchMock)).resolves.toEqual({
+      direction: "maintain",
+      pace: null,
+    });
+  });
+
+  it("maps a 404 (no active goal / fail-closed) to null, not an error", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(errorResponse(404));
+    await expect(getActiveGoal(SESSION, fetchMock)).resolves.toBeNull();
+  });
+
+  it("still throws a GoalsApiError on a non-404 failure (e.g. 401)", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(errorResponse(401));
+    await expect(getActiveGoal(SESSION, fetchMock)).rejects.toMatchObject({
+      name: "GoalsApiError",
+      status: 401,
+    });
+  });
+});
+
 describe("getActiveGoalDirection", () => {
-  it("GETs the goal read model and returns its direction", async () => {
-    const fetchMock = jest.fn().mockResolvedValue(okResponse({ direction: "gain" }));
+  it("GETs the goal read model and returns just its direction", async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(okResponse({ direction: "gain", pace: "gentle" }));
 
     const result = await getActiveGoalDirection(SESSION, fetchMock);
 
@@ -135,9 +180,6 @@ describe("getActiveGoalDirection", () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(`${ENCODED_BASE}/goal`);
     expect(init.method).toBe("GET");
-    expect((init.headers as Record<string, string>).Authorization).toBe(
-      "Bearer test-token",
-    );
   });
 
   it("maps a 404 (no active goal / fail-closed) to null, not an error", async () => {

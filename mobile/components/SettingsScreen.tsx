@@ -41,6 +41,7 @@ import { Button } from '@/components/ui/Button';
 import {
   getTarget,
   createGoal,
+  getActiveGoal,
   setTargetOverride,
   resetTargetOverride,
   GoalsApiError,
@@ -85,28 +86,43 @@ import {
 } from '@/theme';
 import type { TargetReadModel } from '@/api/dailySummary';
 import type { ProfileDTO } from '@/api/profile';
+import { goalSummaryDetail } from './settingsGoalSummary';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
-
-const PACE_LABELS: Record<PacePreset, string> = {
-  gentle: 'Gentle',
-  steady: 'Steady',
-  faster: 'Faster',
-};
-
-const DIRECTION_LABELS: Record<GoalDirection, string> = {
-  loss: 'Lose weight',
-  maintain: 'Maintain weight',
-  gain: 'Gain weight',
-};
 
 const APPEARANCE_OPTIONS: readonly { value: ColorSchemeOverride; label: string }[] = [
   { value: 'light', label: 'Light' },
   { value: 'dark', label: 'Dark' },
   { value: 'system', label: 'System' },
 ];
+
+const SETTINGS_METABOLIC_FORMULA_COPY: Record<
+  MetabolicFormula,
+  { readonly label: string; readonly description: string }
+> = {
+  mifflin_st_jeor_plus5: {
+    label: 'Higher calorie baseline',
+    description:
+      'Uses the Mifflin-St Jeor +5 baseline, giving a slightly higher resting burn estimate.',
+  },
+  mifflin_st_jeor_minus161: {
+    label: 'Lower calorie baseline',
+    description:
+      'Uses the Mifflin-St Jeor -161 baseline, giving a lower resting burn estimate.',
+  },
+};
+
+function settingsFormulaCopy(value?: MetabolicFormula | string | null) {
+  if (
+    value === 'mifflin_st_jeor_plus5' ||
+    value === 'mifflin_st_jeor_minus161'
+  ) {
+    return SETTINGS_METABOLIC_FORMULA_COPY[value];
+  }
+  return null;
+}
 
 /** A client-side validation failure on body-metric input (carries display copy). */
 class InvalidBodyMetric extends Error {}
@@ -135,6 +151,7 @@ export interface SettingsScreenProps {
   getProfileFn?: typeof getProfile;
   putProfileFn?: typeof putProfile;
   createGoalFn?: typeof createGoal;
+  getActiveGoalFn?: typeof getActiveGoal;
   setTargetOverrideFn?: typeof setTargetOverride;
   resetTargetOverrideFn?: typeof resetTargetOverride;
   /** Injectable on-device settings stores. */
@@ -160,6 +177,7 @@ export function SettingsScreen({
   getProfileFn = getProfile,
   putProfileFn = putProfile,
   createGoalFn = createGoal,
+  getActiveGoalFn = getActiveGoal,
   setTargetOverrideFn = setTargetOverride,
   resetTargetOverrideFn = resetTargetOverride,
   settingsStore = fileAppSettingsStore,
@@ -171,7 +189,10 @@ export function SettingsScreen({
   const liveSession = useSession();
   const sessionController = useSessionController();
   const session = sessionOverride !== undefined ? sessionOverride : liveSession;
-  const goalDirectionController = useGoalDirectionController();
+  const {
+    goalDirection: sessionGoalDirection,
+    setGoalDirection: setKnownGoalDirection,
+  } = useGoalDirectionController();
 
   const router = useRouter();
   const { colors } = useTheme();
@@ -234,16 +255,26 @@ export function SettingsScreen({
         if (e && e.status === 404) return null;
         throw e;
       }),
+      // The returning user's active goal (direction + pace, both recovered
+      // server-side from the persisted trajectory) so the collapsed Goal row
+      // summarises the real goal — direction + pace — on a cold load instead of
+      // depending on an in-session edit. A load failure degrades to the in-memory
+      // cross-screen direction rather than blocking settings.
+      getActiveGoalFn(apiSession).catch(() => null),
       settingsStore.getAppearance(),
       cadenceStore.getCadence(),
     ])
-      .then(([prof, tgt, app, cad]) => {
+      .then(([prof, tgt, goal, app, cad]) => {
         if (!active) return;
         setProfile(prof);
         if (tgt === null) {
           setNoTarget(true);
         } else {
           setTarget(tgt);
+        }
+        if (goal !== null) {
+          setGoalDirection(goal.direction);
+          setGoalPace(goal.pace);
         }
         setAppearance(app);
         setCadence(cad ?? DEFAULT_CADENCE);
@@ -259,7 +290,14 @@ export function SettingsScreen({
     return () => {
       active = false;
     };
-  }, [session, getProfileFn, getTargetFn, settingsStore, cadenceStore]);
+  }, [
+    session,
+    getProfileFn,
+    getTargetFn,
+    getActiveGoalFn,
+    settingsStore,
+    cadenceStore,
+  ]);
 
   // ── Mini reveal animation ─────────────────────────────────────────────────
 
@@ -285,12 +323,21 @@ export function SettingsScreen({
 
   // ── Goal edit handlers ────────────────────────────────────────────────────
 
+  const currentGoalDirection = goalDirection ?? sessionGoalDirection;
+  // Pace is recovered from the real goal on a cold load (`GET /goal` returns the
+  // direction + the pace preset, both recovered server-side from the persisted
+  // trajectory) and refreshed from the user's own edit this session — never
+  // inferred client-side from target numbers or replayed from a local cache. It
+  // is `null` only for a maintain goal (no pace) or a legacy goal off the band
+  // grid, in which case the row summarises the real goal by its direction alone.
+  const currentGoalPace = goalPace;
+
   const openGoalEdit = useCallback(() => {
     setActionError(null);
-    setEditDirection(goalDirection ?? 'loss');
-    setEditPace(goalPace ?? 'steady');
+    setEditDirection(currentGoalDirection ?? 'loss');
+    setEditPace(currentGoalPace ?? 'steady');
     setEditingGoal(true);
-  }, [goalDirection, goalPace]);
+  }, [currentGoalDirection, currentGoalPace]);
 
   // `faster` is a loss-only pace preset; `gain` rejects it (422). Clamp it back
   // to `steady` when leaving `loss` so the editor can never submit the
@@ -314,9 +361,14 @@ export function SettingsScreen({
     };
     try {
       const reveal: GoalTargetResponse = await createGoalFn(apiSession, payload);
+      const savedPace = editDirection !== 'maintain' ? editPace : null;
       setGoalDirection(reveal.target.direction);
-      goalDirectionController.setGoalDirection(reveal.target.direction);
-      setGoalPace(editDirection !== 'maintain' ? editPace : null);
+      setKnownGoalDirection(reveal.target.direction);
+      // Reflect the pace the user just chose in the collapsed row immediately.
+      // It is not cached on-device: the goal round-tripped to the server (the
+      // authoritative store), so a later cold launch recovers the pace from
+      // `GET /goal` rather than from a stale local copy.
+      setGoalPace(savedPace);
       setEditingGoal(false);
       // Fetch the full read-model (reveal only has calories, not macros)
       const updatedTarget = await getTargetFn(apiSession);
@@ -337,7 +389,7 @@ export function SettingsScreen({
     createGoalFn,
     getTargetFn,
     showReveal,
-    goalDirectionController,
+    setKnownGoalDirection,
   ]);
 
   // ── Body metric edit handlers ─────────────────────────────────────────────
@@ -561,27 +613,11 @@ export function SettingsScreen({
 
   const isMetric = profile?.units_preference === 'metric';
 
-  // The Goal row must never contradict the targets rendered right below it. A
-  // stored daily target only exists for an *active* goal, so a loaded target
-  // means a goal is in force even though this screen has no goal-read endpoint
-  // to recover its direction/pace on a fresh mount (see the inline edit, which
-  // captures them, and the follow-up read slice noted in the PR). We therefore
-  // show the known direction/pace when the goal was set this session, an honest
-  // "Active" when a target proves a goal exists but its details aren't loaded,
-  // and "Not set" only when there is genuinely no active goal.
   const goalIsActive = !noTarget && target !== null;
-  const goalDetail =
-    goalDirection !== null
-      ? `${DIRECTION_LABELS[goalDirection]}${goalPace && goalDirection !== 'maintain' ? ` · ${PACE_LABELS[goalPace]}` : ''}`
-      : goalIsActive
-        ? 'Active'
-        : 'Not set';
-  const goalDetailA11y =
-    goalDirection !== null
-      ? `${DIRECTION_LABELS[goalDirection]}${goalPace && goalDirection !== 'maintain' ? `, ${PACE_LABELS[goalPace]}` : ''}`
-      : goalIsActive
-        ? 'Active'
-        : 'Not set';
+  const goalDetail = goalIsActive
+    ? goalSummaryDetail(currentGoalDirection, currentGoalPace)
+    : 'Not set';
+  const formulaCopy = settingsFormulaCopy(profile?.metabolic_formula);
 
   if (!session) {
     return (
@@ -666,7 +702,7 @@ export function SettingsScreen({
           label="Goal"
           value={goalDetail}
           onPress={openGoalEdit}
-          accessibilityLabel={`Goal: ${goalDetailA11y}`}
+          accessibilityLabel={`Goal: ${goalDetail}`}
           accessibilityHint="Double-tap to edit your goal"
           colors={colors}
         />
@@ -974,14 +1010,10 @@ export function SettingsScreen({
         <Separator colors={colors} />
         <BodyMetricRow
           label="Calculation preference"
-          value={
-            METABOLIC_FORMULA_OPTIONS.find(
-              (o) => o.value === profile?.metabolic_formula,
-            )?.label ?? '—'
-          }
+          value={formulaCopy?.label ?? '—'}
           onPress={() => openBodyEdit('formula')}
           colors={colors}
-          accessibilityLabel={`Calculation preference: ${METABOLIC_FORMULA_OPTIONS.find((o) => o.value === profile?.metabolic_formula)?.label ?? 'not set'}`}
+          accessibilityLabel={`Calculation preference: ${formulaCopy?.label ?? 'not set'}${formulaCopy ? `. ${formulaCopy.description}` : ''}`}
           accessibilityHint="Double-tap to change your metabolic formula"
         />
       </GroupedCard>
@@ -1080,12 +1112,13 @@ export function SettingsScreen({
         <EditCard colors={colors} testID="formula-edit-card">
           {METABOLIC_FORMULA_OPTIONS.map((opt) => {
             const selected = bodyEditFormula === opt.value;
+            const copy = settingsFormulaCopy(opt.value);
             return (
               <Pressable
                 key={opt.value}
                 accessibilityRole="radio"
                 accessibilityState={{ selected }}
-                accessibilityLabel={`${opt.label}. ${opt.description}`}
+                accessibilityLabel={`${copy?.label ?? opt.label}. ${copy?.description ?? opt.description}`}
                 onPress={() => setBodyEditFormula(opt.value)}
                 style={[
                   styles.formulaChoice,
@@ -1101,10 +1134,10 @@ export function SettingsScreen({
                     { color: selected ? colors.accent : colors.text },
                   ]}
                 >
-                  {opt.label}
+                  {copy?.label ?? opt.label}
                 </Text>
                 <Text style={[styles.formulaChoiceDesc, { color: colors.textMuted }]}>
-                  {opt.description}
+                  {copy?.description ?? opt.description}
                 </Text>
               </Pressable>
             );
@@ -1235,25 +1268,18 @@ export function SettingsScreen({
       {/* ── DATA & ABOUT ─────────────────────────────────────────────── */}
       <SectionHeader title="DATA & ABOUT" colors={colors} />
       <GroupedCard colors={colors}>
-        <DisclosureRow
+        <ComingSoonDisclosureRow
           label="Export data"
-          onPress={() => {}}
           accessibilityLabel="Export data"
-          accessibilityHint="Data export is not yet available"
           note="Coming soon"
-          disabled
           colors={colors}
         />
         <Separator colors={colors} />
-        <DisclosureRow
+        <ComingSoonDisclosureRow
           label="Delete account"
-          onPress={() => {}}
           accessibilityLabel="Delete account"
-          accessibilityHint="Account deletion is not yet available"
           note="Coming soon"
-          disabled
           colors={colors}
-          destructive
         />
         <Separator colors={colors} />
         <View style={styles.aboutRow}>
@@ -1425,50 +1451,29 @@ function BodyMetricRow({
   );
 }
 
-function DisclosureRow({
+function ComingSoonDisclosureRow({
   label,
-  onPress,
   accessibilityLabel,
-  accessibilityHint,
   colors,
-  destructive = false,
   note,
-  disabled = false,
 }: {
   label: string;
-  onPress: () => void;
   accessibilityLabel: string;
-  accessibilityHint?: string;
   colors: ReturnType<typeof useTheme>['colors'];
-  destructive?: boolean;
   /** Trailing status text (e.g. "Coming soon") for a not-yet-wired row. */
-  note?: string;
-  disabled?: boolean;
+  note: string;
 }) {
   return (
-    <Pressable
-      accessibilityRole="button"
+    <View
       accessibilityLabel={accessibilityLabel}
-      accessibilityHint={accessibilityHint}
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      style={styles.settingsRow}
+      accessibilityState={{ disabled: true }}
+      style={[styles.settingsRow, styles.comingSoonRow]}
     >
-      <Text
-        style={[
-          styles.rowLabel,
-          { color: destructive ? colors.coral : colors.text },
-        ]}
-      >
+      <Text style={[styles.rowLabel, { color: colors.textMuted }]}>
         {label}
       </Text>
-      {note ? (
-        <Text style={[styles.rowValue, { color: colors.textMuted }]}>{note}</Text>
-      ) : (
-        <Text style={[styles.rowChevron, { color: colors.textMuted }]}>›</Text>
-      )}
-    </Pressable>
+      <Text style={[styles.rowValue, { color: colors.textMuted }]}>{note}</Text>
+    </View>
   );
 }
 
@@ -1750,6 +1755,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.base,
     paddingVertical: spacing.md,
     minHeight: 44,
+  },
+  comingSoonRow: {
+    opacity: 0.72,
   },
   rowLabel: {
     fontSize: typeScale.body,

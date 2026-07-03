@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from app.db import get_session
 from app.deps import CurrentUser
 from app.schemas.goals import (
-    ActiveGoalDirection,
+    ActiveGoal,
     GoalTargetRequest,
     GoalTargetResponse,
 )
@@ -77,20 +77,23 @@ def create_goal(
     return goals_service.build_goal_target_response(goal, target, payload.direction)
 
 
-@router.get("/{user_id}/goal", response_model=ActiveGoalDirection)
-def read_active_goal_direction(
+@router.get("/{user_id}/goal", response_model=ActiveGoal)
+def read_active_goal(
     user_id: uuid.UUID,
     current_user: CurrentUser,
     session: Annotated[Session, Depends(get_session)],
-) -> ActiveGoalDirection:
-    """Read the direction of the caller's active goal (FTY-189).
+) -> ActiveGoal:
+    """Read the caller's active goal as direction + pace (FTY-189/FTY-190).
 
-    Trends colours the weight delta by progress toward the goal, so it needs the
-    active goal's direction for a returning user after a cold launch — the only
-    authoritative source, since no read-model otherwise carries it. Fails closed
-    ``404`` on cross-user access *and* when the caller simply has no active goal:
-    the two are indistinguishable (no existence oracle). The recovered direction
-    is the only field returned; no weight/target number is exposed or logged.
+    Trends colours the weight delta by progress toward the goal (direction), and
+    Settings summarises the returning user's Goal row as direction + pace on a cold
+    launch — both need the active goal for a returning user, the only authoritative
+    source since no other read-model carries it. Direction and pace are each
+    *recovered* from the persisted trajectory (no stored column); pace is ``null``
+    for a maintain goal or a legacy goal off the band grid. Fails closed ``404`` on
+    cross-user access *and* when the caller simply has no active goal: the two are
+    indistinguishable (no existence oracle). Only these recovered fields are
+    returned — no weight/target number is exposed or logged.
     """
 
     try:
@@ -99,4 +102,7 @@ def read_active_goal_direction(
         raise _NOT_FOUND from exc
     if goal is None:
         raise _NOT_FOUND
-    return ActiveGoalDirection(direction=goals_service.direction_of(goal))
+    return ActiveGoal(
+        direction=goals_service.direction_of(goal),
+        pace=goals_service.pace_of(goal),
+    )
