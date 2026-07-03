@@ -124,6 +124,24 @@ function messageFor(error: unknown, kind: "load" | "save"): string {
  * capture flow. `load`/`create`/`session`/`useActive`/`pollIntervalMs` are
  * injectable for tests.
  */
+/**
+ * Id prefix for the synthetic saved-food row built locally on a saved-food add
+ * (FTY-053). It marks a client-built resolved row so the items-forward timeline
+ * can tell a true optimistic/saved-food row from a server-fed by-date item —
+ * server ids are UUIDs and never carry this prefix.
+ */
+const SAVED_FOOD_ITEM_ID_PREFIX = "saved-";
+
+/**
+ * Whether an item is a locally-built synthetic saved-food row (FTY-053) rather
+ * than a server-fed derived item. Used to gate the items-forward fallback to
+ * true optimistic/saved-food rows so a server row can only surface through the
+ * completed branch — the pending→completed transition that arms beat 1 (FTY-181).
+ */
+function isSyntheticSavedFoodItem(item: DerivedItem): boolean {
+  return item.id.startsWith(SAVED_FOOD_ITEM_ID_PREFIX);
+}
+
 /** Build a synthetic resolved food item from a saved food selection (FTY-053). */
 function syntheticSavedFoodItem(
   savedFood: SavedFoodDTO,
@@ -132,7 +150,7 @@ function syntheticSavedFoodItem(
 ): DerivedFoodItemDTO {
   return {
     item_type: "food",
-    id: `saved-${savedFood.id}`,
+    id: `${SAVED_FOOD_ITEM_ID_PREFIX}${savedFood.id}`,
     user_id: userId,
     log_event_id: logEventId,
     name: savedFood.name,
@@ -1481,9 +1499,17 @@ function ClusterView({
             );
           }
 
-          // Optimistic / saved-food synthetic items (before server confirms)
-          if (items.length > 0) {
-            return items.map((item) => (
+          // Optimistic / saved-food synthetic items (before the server feed
+          // reports the entry). Only true local saved-food rows render here
+          // (FTY-053). A server-fed by-date item is never surfaced through this
+          // fallback: it can only render via the completed branch above, so a
+          // resolved value row always appears on the pending→completed
+          // transition that arms beat 1 (resolve animation + haptic) — never
+          // un-animated because the by-date feed won the poll race against the
+          // event-list poll, or the event-list poll failed (FTY-181 review).
+          const syntheticItems = items.filter(isSyntheticSavedFoodItem);
+          if (syntheticItems.length > 0) {
+            return syntheticItems.map((item) => (
               <ItemTimelineRow
                 key={item.id}
                 item={item}

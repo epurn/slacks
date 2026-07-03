@@ -432,3 +432,176 @@ export const E2E_RESOLVE_SUMMARY: DailySummaryDTO = {
   target: E2E_TARGET,
   exercise: { active_calories: 0 },
 };
+
+// ─── FTY-181 correction-saved (beat 2) fixtures ───────────────────────────────
+//
+// The correction-saved beat fires once per successful correction commit. To
+// reach it on the real screen a resolved value row must be tappable, the
+// correction sheet must open against it, and an amount step must commit a new
+// server value — the visible confirmation the beat rides. correction.yaml drives
+// exactly that: log "oatmeal" → it resolves with a real 140-kcal item on the
+// by-date feed → tap the row → step the portion up → the sheet shows the
+// server-recomputed 175 kcal (the commit the beat's haptic accompanies). Keyed on
+// its own raw_text so it stays independent of the resolve/clarify/failed flows.
+
+/** The input correction.yaml submits. Distinct from every other flow's text. */
+export const E2E_CORRECTION_RAW_TEXT = 'oatmeal';
+
+/** Stable id for the correction flow's completed event. */
+export const E2E_CORRECTION_EVENT_ID =
+  'e2e-correction-event-00000000-0000-0000-0000-000000000000';
+
+/** Stable id for the correction flow's derived item (the PATCH target). */
+export const E2E_CORRECTION_ITEM_ID =
+  'e2e-correction-item-00000000-0000-0000-0000-000000000000';
+
+/** The completed event the correction flow's POST returns (pending→completed). */
+export const E2E_CORRECTION_EVENT: LogEventDTO = {
+  id: E2E_CORRECTION_EVENT_ID,
+  user_id: E2E_SESSION.userId,
+  raw_text: E2E_CORRECTION_RAW_TEXT,
+  status: 'completed',
+  created_at: '2026-01-01T07:15:00Z',
+  updated_at: '2026-01-01T07:15:00Z',
+};
+
+/**
+ * The resolved derived item the by-date feed carries for the correction event.
+ * ItemTimelineRow renders its accessibility label as "Oatmeal, 140 kcal" — the
+ * row correction.yaml taps to open the correction sheet.
+ */
+export const E2E_CORRECTION_ITEM: DerivedFoodItemDTO = {
+  item_type: 'food',
+  id: E2E_CORRECTION_ITEM_ID,
+  user_id: E2E_SESSION.userId,
+  log_event_id: E2E_CORRECTION_EVENT_ID,
+  name: 'Oatmeal',
+  quantity_text: '1 cup',
+  unit: 'cup',
+  amount: 1,
+  status: 'resolved',
+  grams: 234,
+  calories: 140,
+  protein_g: 5,
+  carbs_g: 27,
+  fat_g: 3,
+  calories_estimated: 140,
+  protein_g_estimated: 5,
+  carbs_g_estimated: 27,
+  fat_g_estimated: 3,
+  created_at: '2026-01-01T07:15:00Z',
+  updated_at: '2026-01-01T07:15:00Z',
+  source: {
+    source_type: 'trusted_nutrition_database',
+    label: 'USDA',
+    ref: 'usda_fdc:169705',
+  },
+  is_edited: false,
+};
+
+/** The item-forward day row the by-date feed returns for the correction entry. */
+export const E2E_CORRECTION_ENTRY: LogEventEntryDTO = {
+  event: E2E_CORRECTION_EVENT,
+  items: [E2E_CORRECTION_ITEM],
+};
+
+/**
+ * The item the PATCH /derived-items/food/{id} returns after an amount step — the
+ * server-recomputed portion (1.25 cups → 175 kcal, `is_edited: true`). The
+ * correction sheet swaps this in and the 175-kcal value is what correction.yaml
+ * asserts: the correction committed on the real data path, so the beat fired.
+ */
+export const E2E_CORRECTION_EDITED_ITEM: DerivedFoodItemDTO = {
+  ...E2E_CORRECTION_ITEM,
+  quantity_text: '1.25 cup',
+  amount: 1.25,
+  calories: 175,
+  protein_g: 6,
+  carbs_g: 34,
+  fat_g: 4,
+  calories_estimated: 175,
+  protein_g_estimated: 6,
+  carbs_g_estimated: 34,
+  fat_g_estimated: 4,
+  is_edited: true,
+  updated_at: '2026-01-01T07:16:00Z',
+};
+
+// ─── FTY-181 target-reached (beat 3) fixtures ─────────────────────────────────
+//
+// The target-reached beat fires once when the day's intake crosses the calorie
+// target — a live crossing, never on an app opened already-over. target.yaml
+// proves the crossing is reachable on the real screen: the hero mounts on the
+// empty day (0 of 2,000 kcal → seeds "not yet reached"), a single large log
+// resolves, and the summary poll lands over target so the hero flips to its
+// over-budget end state (the visible companion of the beat). Keyed on its own
+// raw_text, independent of the other flows.
+
+/** The input target.yaml submits — a large entry that crosses the 2,000 target. */
+export const E2E_TARGET_RAW_TEXT = 'holiday roast dinner';
+
+/** Stable id for the target flow's completed event. */
+export const E2E_TARGET_EVENT_ID =
+  'e2e-target-event-00000000-0000-0000-0000-000000000000';
+
+/** The completed event the target flow's POST returns (pending→completed). */
+export const E2E_TARGET_EVENT: LogEventDTO = {
+  id: E2E_TARGET_EVENT_ID,
+  user_id: E2E_SESSION.userId,
+  raw_text: E2E_TARGET_RAW_TEXT,
+  status: 'completed',
+  created_at: '2026-01-01T18:00:00Z',
+  updated_at: '2026-01-01T18:00:00Z',
+};
+
+/**
+ * The resolved derived item the by-date feed carries for the target event — a
+ * 2,100-kcal entry that pushes the day from 0 to over the 2,000-kcal target.
+ */
+export const E2E_TARGET_ITEM: DerivedFoodItemDTO = {
+  item_type: 'food',
+  id: 'e2e-target-item-00000000-0000-0000-0000-000000000000',
+  user_id: E2E_SESSION.userId,
+  log_event_id: E2E_TARGET_EVENT_ID,
+  name: 'Holiday roast dinner',
+  quantity_text: '1 plate',
+  unit: 'plate',
+  amount: 1,
+  status: 'resolved',
+  grams: 900,
+  calories: 2100,
+  protein_g: 120,
+  carbs_g: 150,
+  fat_g: 90,
+  calories_estimated: 2100,
+  protein_g_estimated: 120,
+  carbs_g_estimated: 150,
+  fat_g_estimated: 90,
+  created_at: '2026-01-01T18:00:00Z',
+  updated_at: '2026-01-01T18:00:00Z',
+  source: {
+    source_type: 'model_prior',
+    label: 'Estimated',
+    ref: 'model_prior',
+  },
+  is_edited: false,
+};
+
+/** The item-forward day row the by-date feed returns for the target entry. */
+export const E2E_TARGET_ENTRY: LogEventEntryDTO = {
+  event: E2E_TARGET_EVENT,
+  items: [E2E_TARGET_ITEM],
+};
+
+/**
+ * Daily summary after the large entry resolves: 2,100 kcal against the 2,000
+ * target, so the hero crosses into its over-budget state ("2,100 of 2,000 kcal,
+ * 100 over budget") — the crossing that arms beat 3.
+ */
+export const E2E_TARGET_SUMMARY: DailySummaryDTO = {
+  date: '2026-01-01',
+  intake: { calories: 2100, protein_g: 120, carbs_g: 150, fat_g: 90 },
+  has_intake: true,
+  target: E2E_TARGET,
+  exercise: { active_calories: 0 },
+};

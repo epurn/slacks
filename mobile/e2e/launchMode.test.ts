@@ -19,6 +19,8 @@ jest.mock('@/state/onboardingComplete', () => ({
 // eslint-disable-next-line import/first
 import {
   isE2EMode,
+  isE2EReduceMotionMode,
+  applyE2EReduceMotion,
   e2eSessionStore,
   e2eConnectionStore,
   installE2EMockFetch,
@@ -43,6 +45,14 @@ import {
   E2E_RESOLVE_RAW_TEXT,
   E2E_RESOLVE_EVENT_ID,
   E2E_RESOLVE_ITEM,
+  E2E_CORRECTION_RAW_TEXT,
+  E2E_CORRECTION_EVENT_ID,
+  E2E_CORRECTION_ITEM_ID,
+  E2E_CORRECTION_ITEM,
+  E2E_CORRECTION_EDITED_ITEM,
+  E2E_TARGET_RAW_TEXT,
+  E2E_TARGET_EVENT_ID,
+  E2E_TARGET_ITEM,
 } from './fixtures';
 // eslint-disable-next-line import/first
 import { formatWallClockTime } from '@/state/today';
@@ -67,7 +77,11 @@ import {
 // eslint-disable-next-line import/first
 import { getDailySummary, getDailySummaryRange } from '@/api/dailySummary';
 // eslint-disable-next-line import/first
+import { editDerivedItem } from '@/api/derivedItems';
+// eslint-disable-next-line import/first
 import { listWeightEntries, createWeightEntry } from '@/api/weightEntries';
+// eslint-disable-next-line import/first
+import { AccessibilityInfo } from 'react-native';
 
 // jest-expo sets __DEV__ = true globally. Use globalThis so TypeScript is happy
 // without needing @types/node (which the project excludes from "types").
@@ -76,7 +90,11 @@ const gThis = globalThis as Record<string, unknown>;
 // Capture originals so each test can restore them in afterEach.
 const ORIGINAL_DEV = gThis['__DEV__'] as boolean;
 const ORIGINAL_E2E_ENV = process.env.EXPO_PUBLIC_FATTY_E2E;
+const ORIGINAL_E2E_REDUCE_MOTION_ENV =
+  process.env.EXPO_PUBLIC_FATTY_E2E_REDUCE_MOTION;
 const ORIGINAL_FETCH = gThis['fetch'] as typeof fetch;
+const ORIGINAL_IS_REDUCE_MOTION_ENABLED =
+  AccessibilityInfo.isReduceMotionEnabled;
 
 afterEach(() => {
   gThis['__DEV__'] = ORIGINAL_DEV;
@@ -87,6 +105,16 @@ afterEach(() => {
   } else {
     process.env['EXPO_PUBLIC_FATTY_E2E'] = ORIGINAL_E2E_ENV;
   }
+  if (ORIGINAL_E2E_REDUCE_MOTION_ENV === undefined) {
+    delete process.env['EXPO_PUBLIC_FATTY_E2E_REDUCE_MOTION'];
+  } else {
+    process.env['EXPO_PUBLIC_FATTY_E2E_REDUCE_MOTION'] =
+      ORIGINAL_E2E_REDUCE_MOTION_ENV;
+  }
+  // Restore the accessibility read a reduce-motion test may have overridden.
+  (AccessibilityInfo as unknown as Record<string, unknown>)[
+    'isReduceMotionEnabled'
+  ] = ORIGINAL_IS_REDUCE_MOTION_ENABLED;
   jest.clearAllMocks();
 });
 
@@ -97,6 +125,15 @@ function setE2EEnv(value: string | undefined): void {
     delete process.env['EXPO_PUBLIC_FATTY_E2E'];
   } else {
     process.env['EXPO_PUBLIC_FATTY_E2E'] = value;
+  }
+}
+
+// Set the reduce-motion E2E env var (FTY-181), centralised for the same reason.
+function setE2EReduceMotionEnv(value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env['EXPO_PUBLIC_FATTY_E2E_REDUCE_MOTION'];
+  } else {
+    process.env['EXPO_PUBLIC_FATTY_E2E_REDUCE_MOTION'] = value;
   }
 }
 
@@ -139,6 +176,58 @@ describe('isE2EMode', () => {
 
     setE2EEnv('yes');
     expect(isE2EMode()).toBe(false);
+  });
+});
+
+// ─── isE2EReduceMotionMode gate (FTY-181) ────────────────────────────────────
+
+describe('isE2EReduceMotionMode', () => {
+  it('is off by default, even in E2E mode (motion on)', () => {
+    gThis['__DEV__'] = true;
+    setE2EEnv('true');
+    setE2EReduceMotionEnv(undefined);
+    expect(isE2EReduceMotionMode()).toBe(false);
+  });
+
+  it('requires E2E mode: the reduce-motion var alone does nothing', () => {
+    gThis['__DEV__'] = true;
+    setE2EEnv(undefined);
+    setE2EReduceMotionEnv('true');
+    // Fail-closed: without the E2E gate the reduce-motion override never applies.
+    expect(isE2EReduceMotionMode()).toBe(false);
+  });
+
+  it('is on when E2E mode is on AND the reduce-motion var is exactly "true"', () => {
+    gThis['__DEV__'] = true;
+    setE2EEnv('true');
+    setE2EReduceMotionEnv('true');
+    expect(isE2EReduceMotionMode()).toBe(true);
+  });
+
+  it('is off for the default "false" the runner exports when the pass is unset', () => {
+    gThis['__DEV__'] = true;
+    setE2EEnv('true');
+    setE2EReduceMotionEnv('false');
+    expect(isE2EReduceMotionMode()).toBe(false);
+  });
+
+  it('applyE2EReduceMotion forces the accessibility read on only when active', async () => {
+    gThis['__DEV__'] = true;
+    setE2EEnv('true');
+
+    // Motion on (no reduce-motion var): the read is left untouched.
+    setE2EReduceMotionEnv(undefined);
+    (AccessibilityInfo as unknown as Record<string, unknown>)[
+      'isReduceMotionEnabled'
+    ] = () => Promise.resolve(false);
+    applyE2EReduceMotion();
+    await expect(AccessibilityInfo.isReduceMotionEnabled()).resolves.toBe(false);
+
+    // Reduce-motion pass: the read is overridden to resolve true, the exact
+    // signal the signature beats branch on for their no-motion path.
+    setE2EReduceMotionEnv('true');
+    applyE2EReduceMotion();
+    await expect(AccessibilityInfo.isReduceMotionEnabled()).resolves.toBe(true);
   });
 });
 
@@ -552,6 +641,119 @@ describe('FTY-181 entry-resolve flow: stateful mock transitions', () => {
   });
 
   it('the resolve branch does not disturb the clarify phase machine', async () => {
+    const mockFetch = createE2EMockFetch();
+    const created = await createLogEvent(apiSession, 'coffee', undefined, mockFetch);
+    expect(created.status).toBe('needs_clarification');
+  });
+});
+
+// ─── FTY-181 correction-saved (beat 2) flow stateful mock ────────────────────
+//
+// Proves correction.yaml's data path: the log resolves to a tappable resolved
+// row on the by-date feed, and a PATCH to that item returns the server-recomputed
+// value the correction-saved beat rides. Keyed on its own raw_text, independent
+// of the resolve / clarify / failed machines.
+
+describe('FTY-181 correction-saved flow: stateful mock transitions', () => {
+  const apiSession = toApiSession(E2E_SESSION);
+
+  it('POST the correction text returns a completed entry with a tappable row', async () => {
+    const mockFetch = createE2EMockFetch();
+    const created = await createLogEvent(
+      apiSession,
+      E2E_CORRECTION_RAW_TEXT,
+      undefined,
+      mockFetch,
+    );
+    expect(created.id).toBe(E2E_CORRECTION_EVENT_ID);
+    expect(created.status).toBe('completed');
+    // The by-date feed carries the resolved item the correction sheet opens on.
+    const entries = await listTodayLogEventEntries(apiSession, '2026-01-01', mockFetch);
+    expect(entries).toHaveLength(1);
+    const item = entries[0]?.items[0];
+    expect(item?.id).toBe(E2E_CORRECTION_ITEM_ID);
+    expect(item?.item_type).toBe('food');
+    if (item?.item_type === 'food') {
+      expect(item.calories).toBe(E2E_CORRECTION_ITEM.calories);
+    }
+  });
+
+  it('a PATCH to the item returns the server-recomputed value the beat rides', async () => {
+    const mockFetch = createE2EMockFetch();
+    await createLogEvent(apiSession, E2E_CORRECTION_RAW_TEXT, undefined, mockFetch);
+    // The amount step commits a single-field quantity PATCH; the mock echoes the
+    // recomputed item (1.25 cups → 175 kcal, is_edited) — the visible
+    // confirmation correction.yaml asserts, proving the beat's commit path.
+    const edited = await editDerivedItem(
+      apiSession,
+      'food',
+      E2E_CORRECTION_ITEM_ID,
+      'quantity',
+      1.25,
+      mockFetch,
+    );
+    expect(edited.id).toBe(E2E_CORRECTION_ITEM_ID);
+    expect(edited.item_type).toBe('food');
+    expect(edited).toEqual(E2E_CORRECTION_EDITED_ITEM);
+    if (edited.item_type === 'food') {
+      expect(edited.calories).toBe(175);
+      expect(edited.is_edited).toBe(true);
+    }
+  });
+
+  it('the correction branch does not disturb the clarify phase machine', async () => {
+    const mockFetch = createE2EMockFetch();
+    const created = await createLogEvent(apiSession, 'coffee', undefined, mockFetch);
+    expect(created.status).toBe('needs_clarification');
+  });
+});
+
+// ─── FTY-181 target-reached (beat 3) flow stateful mock ──────────────────────
+//
+// Proves target.yaml's data path: the day starts at zero intake (hero under
+// target → seeds not-reached), and a single large log flips the summary over the
+// calorie target so the hero crosses into its over-budget state. Keyed on its own
+// raw_text, independent of the other machines.
+
+describe('FTY-181 target-reached flow: stateful mock transitions', () => {
+  const apiSession = toApiSession(E2E_SESSION);
+
+  it('starts under target: the empty-day summary is zero intake', async () => {
+    const mockFetch = createE2EMockFetch();
+    const summary = await getDailySummary(apiSession, '2026-01-01', mockFetch);
+    expect(summary.has_intake).toBe(false);
+    expect(summary.intake.calories).toBe(0);
+    expect(summary.target?.calories.effective).toBe(2000);
+  });
+
+  it('POST the large text crosses the target: the summary lands over budget', async () => {
+    const mockFetch = createE2EMockFetch();
+    const created = await createLogEvent(
+      apiSession,
+      E2E_TARGET_RAW_TEXT,
+      undefined,
+      mockFetch,
+    );
+    expect(created.id).toBe(E2E_TARGET_EVENT_ID);
+    expect(created.status).toBe('completed');
+    // The day summary now exceeds the 2,000-kcal target — the crossing that arms
+    // beat 3 and drives the hero's over-budget end state target.yaml asserts.
+    const summary = await getDailySummary(apiSession, '2026-01-01', mockFetch);
+    expect(summary.has_intake).toBe(true);
+    expect(summary.intake.calories).toBe(2100);
+    expect(summary.intake.calories).toBeGreaterThan(
+      summary.target?.calories.effective ?? Infinity,
+    );
+    // The by-date feed carries the large item so the entry renders resolved.
+    const entries = await listTodayLogEventEntries(apiSession, '2026-01-01', mockFetch);
+    const item = entries[0]?.items[0];
+    expect(item?.item_type).toBe('food');
+    if (item?.item_type === 'food') {
+      expect(item.calories).toBe(E2E_TARGET_ITEM.calories);
+    }
+  });
+
+  it('the target branch does not disturb the clarify phase machine', async () => {
     const mockFetch = createE2EMockFetch();
     const created = await createLogEvent(apiSession, 'coffee', undefined, mockFetch);
     expect(created.status).toBe('needs_clarification');

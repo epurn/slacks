@@ -2301,6 +2301,58 @@ describe("TodayScreen — beat 1: entry resolve (FTY-181)", () => {
       jest.useRealTimers();
     }
   });
+
+  it("does not render a server-fed value row while the event list still has the entry pending (no un-animated resolve)", async () => {
+    jest.useFakeTimers();
+    try {
+      // The race the reviewer flagged: the by-date feed reports the entry
+      // completed-with-items while the event-list poll lags (or failed) and
+      // still holds it pending. The resolved value row must NOT render through
+      // the saved-food fallback — it can only surface once the event-list poll
+      // reconciles the entry to completed, so beat 1 fires on that transition
+      // instead of a row appearing un-animated (FTY-181 review).
+      const pending = event({ id: "a", raw_text: "Yogurt", status: "pending" });
+      const completed = event({ id: "a", raw_text: "Yogurt", status: "completed" });
+      // Event list lags on the first two loads, only catching up on the third.
+      const load = jest
+        .fn()
+        .mockResolvedValueOnce([pending])
+        .mockResolvedValueOnce([pending])
+        .mockResolvedValue([completed]);
+      // The by-date feed already reports the entry completed-with-items from the
+      // very first read — it won the race.
+      const loadEntries = jest
+        .fn()
+        .mockResolvedValue([{ event: completed, items: [foodItem()] }]);
+      const tree = mount(
+        <TodayScreen
+          session={SESSION}
+          load={load}
+          loadEntries={loadEntries}
+          useActive={() => true}
+          pollIntervalMs={1000}
+        />,
+      );
+      await act(async () => {});
+      // Feed already has the item, but the event is pending → no value row, no beat.
+      expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(false);
+      expect(mockEntryResolvedHaptic).not.toHaveBeenCalled();
+
+      // A poll where the event list still lags must not leak the row or a beat.
+      act(() => jest.advanceTimersByTime(1000));
+      await act(async () => {});
+      expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(false);
+      expect(mockEntryResolvedHaptic).not.toHaveBeenCalled();
+
+      // The event list catches up → the row renders and the resolve beat fires once.
+      act(() => jest.advanceTimersByTime(1000));
+      await act(async () => {});
+      expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(true);
+      expect(mockEntryResolvedHaptic).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });
 
 describe("TodayScreen — beat 3: target reached through the real screen (FTY-181)", () => {
