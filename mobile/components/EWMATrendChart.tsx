@@ -7,13 +7,15 @@
  * overlay the smoothed trend as the primary line." The EWMA line, not any
  * single reading, is the story the chart tells.
  *
- * Uses pure React Native Views (no external charting library). Handles
- * loading, error, empty, and sparse (single-point) states so the chart never
- * looks broken. Accessibility: chart View carries a text summary as an
- * alternative for screen readers.
+ * The plot is drawn with `react-native-svg`: the smoothed trend is a single
+ * `Polyline`, and the raw and trend points are `Circle`s. Handles loading,
+ * error, empty, and sparse (single-point) states so the chart never looks
+ * broken. Accessibility: chart View carries a text summary as an alternative
+ * for screen readers.
  */
 
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { Circle, Polyline, Svg } from "react-native-svg";
 
 import type { WeightEntryDTO } from "@/api/weightEntries";
 import type { UnitsPreference } from "@/state/profile";
@@ -205,11 +207,48 @@ function ChartCanvas({
   const ewmaPoints = ewmaDisplay.map((v, i) => ({
     x: PAD.left + xOf(i),
     y: PAD.top + yOf(v),
-    v,
   }));
+
+  const linePoints = ewmaPoints.map((p) => `${p.x},${p.y}`).join(" ");
 
   return (
     <View style={{ height: CHART_H, width }}>
+      {/* Plot canvas: raw dots, the trend line, and the trend dots. */}
+      <Svg width={width} height={CHART_H} style={StyleSheet.absoluteFill}>
+        {/* Raw weigh-in dots — de-emphasised */}
+        {rawPoints.map((p, i) => (
+          <Circle
+            key={`raw-dot-${i}`}
+            cx={p.x}
+            cy={p.y}
+            r={RAW_DOT_R}
+            fill={colors.textSecondary}
+            opacity={RAW_DOT_OPACITY}
+          />
+        ))}
+
+        {/* EWMA smoothed trend — the primary line */}
+        <Polyline
+          points={linePoints}
+          fill="none"
+          stroke={colors.accent}
+          strokeWidth={3}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+
+        {/* EWMA point dots */}
+        {ewmaPoints.map((p, i) => (
+          <Circle
+            key={`ewma-dot-${i}`}
+            cx={p.x}
+            cy={p.y}
+            r={TREND_DOT_R}
+            fill={colors.accent}
+          />
+        ))}
+      </Svg>
+
       {/* Y-axis labels */}
       <Text
         style={[
@@ -241,65 +280,6 @@ function ChartCanvas({
           {`${minV} ${unit}`}
         </Text>
       ) : null}
-
-      {/* Raw data dots — de-emphasised */}
-      {rawPoints.map((p, i) => (
-        <View
-          key={`raw-dot-${i}`}
-          testID={`ewma-raw-dot-${i}`}
-          style={{
-            position: "absolute",
-            left: p.x - RAW_DOT_R,
-            top: p.y - RAW_DOT_R,
-            width: RAW_DOT_R * 2,
-            height: RAW_DOT_R * 2,
-            borderRadius: RAW_DOT_R,
-            backgroundColor: colors.textSecondary,
-            opacity: RAW_DOT_OPACITY,
-          }}
-        />
-      ))}
-
-      {/* EWMA trend line segments — the primary line */}
-      {ewmaPoints.slice(1).map((p, i) => {
-        const p0 = ewmaPoints[i]!;
-        const dx = p.x - p0.x;
-        const dy = p.y - p0.y;
-        const len = Math.sqrt(dx * dx + dy * dy);
-        const angle = Math.atan2(dy, dx) * (180 / Math.PI);
-        return (
-          <View
-            key={`ewma-seg-${i}`}
-            testID={`ewma-segment-${i}`}
-            style={{
-              position: "absolute",
-              left: (p0.x + p.x) / 2 - len / 2,
-              top: (p0.y + p.y) / 2 - 1.5,
-              width: len,
-              height: 3,
-              backgroundColor: colors.accent,
-              transform: [{ rotate: `${angle}deg` }],
-            }}
-          />
-        );
-      })}
-
-      {/* EWMA point dots */}
-      {ewmaPoints.map((p, i) => (
-        <View
-          key={`ewma-dot-${i}`}
-          testID={`ewma-dot-${i}`}
-          style={{
-            position: "absolute",
-            left: p.x - TREND_DOT_R,
-            top: p.y - TREND_DOT_R,
-            width: TREND_DOT_R * 2,
-            height: TREND_DOT_R * 2,
-            borderRadius: TREND_DOT_R,
-            backgroundColor: colors.accent,
-          }}
-        />
-      ))}
 
       {/* X-axis: first and last date */}
       <Text
