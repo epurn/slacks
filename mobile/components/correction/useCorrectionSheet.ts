@@ -1,0 +1,388 @@
+/**
+ * FTY-204: Correction-sheet state hook.
+ *
+ * Owns every mode transition, the four levers' async handlers, and the
+ * save/override/change-match status transitions for the correction sheet,
+ * extracted from the former monolithic `CorrectionSheet.tsx`. The sheet shell
+ * becomes a thin renderer over what this returns. Behaviour — including the
+ * search debounce + out-of-order guard, the optimistic-revert on failure, and
+ * the Beat-2 correction-saved pulse/haptic firing only on a successful commit —
+ * is unchanged.
+ */
+
+import { useCallback, useRef, useState } from "react";
+
+import {
+  listSourceCandidates as listSourceCandidatesApi,
+  reResolveItem as reResolveItemApi,
+  type SourceCandidate,
+} from "@/api/corrections";
+import {
+  editDerivedItem as editDerivedItemApi,
+  type DerivedFoodItemDTO,
+  type DerivedItem,
+} from "@/api/derivedItems";
+import {
+  saveFood as saveFoodApi,
+  type NutritionSnapshot,
+} from "@/api/savedFoods";
+import { formatValue } from "@/state/derivedItems";
+import type { ApiSession } from "@/state/session";
+import { correctionSavedHaptic } from "@/theme/haptics";
+import { usePulse } from "@/theme/motion";
+
+import { SEARCH_DEBOUNCE_MS, messageForError } from "./helpers";
+import type { SaveFoodStatus } from "./SaveFoodRow";
+
+export type SheetMode = "normal" | "change-match" | "override" | "clarify";
+
+export interface UseCorrectionSheetArgs {
+  initialItem: DerivedItem;
+  visible: boolean;
+  session: ApiSession;
+  onItemChange?: (item: DerivedItem) => void;
+  logPhrase?: string;
+  needsClarification: boolean;
+  onClarificationResolved?: (answer: string) => void;
+  editItem: typeof editDerivedItemApi;
+  listCandidates: typeof listSourceCandidatesApi;
+  reResolve: typeof reResolveItemApi;
+  saveFood: typeof saveFoodApi;
+}
+
+export function useCorrectionSheet({
+  initialItem,
+  visible,
+  session,
+  onItemChange,
+  logPhrase,
+  needsClarification,
+  onClarificationResolved,
+  editItem,
+  listCandidates,
+  reResolve,
+  saveFood,
+}: UseCorrectionSheetArgs) {
+  // Beat 2 — correction saved. A brief confirmation pulse + success haptic fires
+  // once per *successful* commit (amount step, re-resolve, value override), never
+  // on a validation error or an API failure.
+  const { scale, opacity, pulse } = usePulse();
+  const fireCorrectionSaved = useCallback(() => {
+    correctionSavedHaptic();
+    pulse();
+  }, [pulse]);
+
+  const [item, setItem] = useState<DerivedItem>(initialItem);
+
+  // Resync local item when prop changes (parent may push a confirmed edit).
+  const [syncedItem, setSyncedItem] = useState<DerivedItem>(initialItem);
+  if (initialItem !== syncedItem) {
+    setSyncedItem(initialItem);
+    setItem(initialItem);
+  }
+
+  // Sheet opens in clarify-mode when needs_clarification, otherwise normal.
+  const [mode, setMode] = useState<SheetMode>(needsClarification ? "clarify" : "normal");
+
+  // Sync mode when needsClarification prop changes or sheet re-opens.
+  const [syncedNeedsClarification, setSyncedNeedsClarification] = useState(needsClarification);
+  if (needsClarification !== syncedNeedsClarification) {
+    setSyncedNeedsClarification(needsClarification);
+    setMode(needsClarification ? "clarify" : "normal");
+  }
+
+  // The Change-match or advanced-override panel wants the large detent. Narrowing
+  // the allowed detents to large-only makes UIKit animate the sheet up to it; the
+  // quick-fix path (amount / save / clarify) stays at the medium detent with the
+  // timeline visible behind.
+  const expanded = mode === "change-match" || mode === "override";
+
+  // ─── Amount stepper state ───────────────────────────────────────────────────
+  const [amountPending, setAmountPending] = useState(false);
+  const [amountError, setAmountError] = useState<string | null>(null);
+
+  // ─── Change-match state ─────────────────────────────────────────────────────
+  const [candidates, setCandidates] = useState<readonly SourceCandidate[]>([]);
+  const [candidatesLoading, setCandidatesLoading] = useState(false);
+  const [candidatesError, setCandidatesError] = useState<string | null>(null);
+  const [matchQuery, setMatchQuery] = useState("");
+  const [reResolving, setReResolving] = useState(false);
+  const [reResolveError, setReResolveError] = useState<string | null>(null);
+  // Debounce timer + monotonic request id for the change-match search. The id
+  // guards against out-of-order responses: a slower earlier query that resolves
+  // after a newer one must not overwrite the newer query's candidates.
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchSeq = useRef(0);
+
+  // ─── Override (advanced) state ──────────────────────────────────────────────
+  const [overrideField, setOverrideField] = useState<string>("calories");
+  const [overrideDraft, setOverrideDraft] = useState("");
+  const [overrideSaving, setOverrideSaving] = useState(false);
+  const [overrideError, setOverrideError] = useState<string | null>(null);
+
+  // ─── Clarify state ──────────────────────────────────────────────────────────
+  const [clarifyText, setClarifyText] = useState("");
+  const [clarifySubmitting, setClarifySubmitting] = useState(false);
+
+  // ─── Save as food state ─────────────────────────────────────────────────────
+  const [saveFoodStatus, setSaveFoodStatus] = useState<SaveFoodStatus>("idle");
+  const [saveFoodError, setSaveFoodError] = useState<string | null>(null);
+
+  // Reset transient state when the sheet re-opens (visible transitions false→true).
+  // Uses the "adjust state on prop change during render" pattern (no useEffect)
+  // to avoid the setState-in-effect lint rule and prevent cascading renders.
+  const [prevVisible, setPrevVisible] = useState(visible);
+  if (visible !== prevVisible) {
+    setPrevVisible(visible);
+    if (visible) {
+      setMode(needsClarification ? "clarify" : "normal");
+      setAmountError(null);
+      setCandidates([]);
+      setCandidatesError(null);
+      setMatchQuery("");
+      setReResolveError(null);
+      setOverrideDraft("");
+      setOverrideError(null);
+      setClarifyText("");
+      setSaveFoodStatus("idle");
+      setSaveFoodError(null);
+    }
+  }
+
+  // ─── Amount stepper ─────────────────────────────────────────────────────────
+
+  const handleAmountStep = useCallback(
+    async (delta: number) => {
+      if (item.item_type !== "food") return;
+      const food = item as DerivedFoodItemDTO;
+      const current = food.amount ?? 1;
+      const next = Math.max(0.25, Math.round((current + delta) * 4) / 4);
+      if (next === current) return;
+
+      const prior = item;
+      setAmountPending(true);
+      setAmountError(null);
+      try {
+        const updated = await editItem(session, "food", food.id, "quantity", next);
+        setItem(updated);
+        onItemChange?.(updated);
+        fireCorrectionSaved();
+      } catch (err) {
+        setItem(prior);
+        setAmountError(messageForError(err, "adjust the amount"));
+      } finally {
+        setAmountPending(false);
+      }
+    },
+    [item, editItem, session, onItemChange, fireCorrectionSaved],
+  );
+
+  // ─── Change match ────────────────────────────────────────────────────────────
+
+  // Cancel any pending debounced search and invalidate in-flight responses so a
+  // late result can't land after we've moved on (leaving the panel, picking).
+  const cancelPendingSearch = useCallback(() => {
+    if (searchTimer.current) {
+      clearTimeout(searchTimer.current);
+      searchTimer.current = null;
+    }
+    searchSeq.current += 1;
+  }, []);
+
+  const loadCandidates = useCallback(
+    async (query?: string) => {
+      if (item.item_type !== "food") return;
+      const food = item as DerivedFoodItemDTO;
+      const seq = (searchSeq.current += 1);
+      setCandidatesLoading(true);
+      setCandidatesError(null);
+      try {
+        const results = await listCandidates(session, food.id, query || undefined);
+        if (seq !== searchSeq.current) return; // superseded by a newer query
+        setCandidates(results);
+      } catch (err) {
+        if (seq !== searchSeq.current) return; // superseded by a newer query
+        setCandidatesError(messageForError(err, "load alternatives"));
+        setCandidates([]);
+      } finally {
+        if (seq === searchSeq.current) setCandidatesLoading(false);
+      }
+    },
+    [item, listCandidates, session],
+  );
+
+  const openChangeMatch = useCallback(() => {
+    setMode("change-match");
+    setReResolveError(null);
+    void loadCandidates();
+  }, [loadCandidates]);
+
+  const handleCandidateSearch = useCallback(
+    (query: string) => {
+      setMatchQuery(query);
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+      searchTimer.current = setTimeout(() => {
+        searchTimer.current = null;
+        void loadCandidates(query);
+      }, SEARCH_DEBOUNCE_MS);
+    },
+    [loadCandidates],
+  );
+
+  const handlePickCandidate = useCallback(
+    async (candidate: SourceCandidate) => {
+      if (item.item_type !== "food") return;
+      const food = item as DerivedFoodItemDTO;
+      cancelPendingSearch();
+      setReResolving(true);
+      setReResolveError(null);
+      try {
+        const updated = await reResolve(session, food.id, candidate.source_ref);
+        setItem(updated);
+        onItemChange?.(updated);
+        setMode("normal");
+        setMatchQuery("");
+        setCandidates([]);
+        fireCorrectionSaved();
+      } catch (err) {
+        setReResolveError(messageForError(err, "apply that match"));
+      } finally {
+        setReResolving(false);
+      }
+    },
+    [item, reResolve, session, onItemChange, cancelPendingSearch, fireCorrectionSaved],
+  );
+
+  const cancelChangeMatch = useCallback(() => {
+    cancelPendingSearch();
+    setMode("normal");
+    setMatchQuery("");
+    setCandidates([]);
+    setCandidatesError(null);
+  }, [cancelPendingSearch]);
+
+  // ─── Advanced override ───────────────────────────────────────────────────────
+
+  const openOverride = useCallback((field: string, currentValue: number | null) => {
+    setOverrideField(field);
+    setOverrideDraft(currentValue !== null ? formatValue(currentValue) : "");
+    setOverrideError(null);
+    setMode("override");
+  }, []);
+
+  const submitOverride = useCallback(async () => {
+    if (item.item_type !== "food") return;
+    const food = item as DerivedFoodItemDTO;
+    const parsed = Number(overrideDraft.trim());
+    if (overrideDraft.trim() === "" || !Number.isFinite(parsed) || parsed < 0) {
+      setOverrideError("Enter a number that's zero or more.");
+      return;
+    }
+    const prior = item;
+    setOverrideSaving(true);
+    setOverrideError(null);
+    try {
+      const updated = await editItem(session, "food", food.id, overrideField, parsed);
+      setItem(updated);
+      onItemChange?.(updated);
+      setMode("normal");
+      setOverrideDraft("");
+      fireCorrectionSaved();
+    } catch (err) {
+      setItem(prior);
+      setOverrideError(messageForError(err, "save that override"));
+    } finally {
+      setOverrideSaving(false);
+    }
+  }, [item, editItem, session, onItemChange, overrideField, overrideDraft, fireCorrectionSaved]);
+
+  const cancelOverride = useCallback(() => {
+    setMode("normal");
+    setOverrideDraft("");
+    setOverrideError(null);
+  }, []);
+
+  // ─── Clarify ─────────────────────────────────────────────────────────────────
+
+  const handleClarifyAnswer = useCallback(
+    (answer: string) => {
+      if (!answer.trim()) return;
+      setClarifySubmitting(true);
+      try {
+        onClarificationResolved?.(answer.trim());
+      } finally {
+        setClarifySubmitting(false);
+      }
+    },
+    [onClarificationResolved],
+  );
+
+  // ─── Save as food ─────────────────────────────────────────────────────────────
+
+  const handleSaveFood = useCallback(async () => {
+    if (item.item_type !== "food" || !logPhrase) return;
+    const food = item as DerivedFoodItemDTO;
+    if (food.calories === null) return;
+
+    const nutrition: NutritionSnapshot = {
+      calories: food.calories,
+      protein_g: food.protein_g,
+      carbs_g: food.carbs_g,
+      fat_g: food.fat_g,
+      serving_size: food.amount ?? 1,
+      serving_unit: food.unit ?? "serving",
+    };
+    setSaveFoodStatus("saving");
+    setSaveFoodError(null);
+    try {
+      await saveFood(session, { name: food.name, phrase: logPhrase, nutrition });
+      setSaveFoodStatus("saved");
+    } catch {
+      setSaveFoodStatus("error");
+      setSaveFoodError("We couldn't save that food. Check your connection and try again.");
+    }
+  }, [item, logPhrase, saveFood, session]);
+
+  return {
+    // Presentation motion (Beat 2)
+    scale,
+    opacity,
+    // Item + mode
+    item,
+    mode,
+    expanded,
+    // Amount stepper
+    amountPending,
+    amountError,
+    handleAmountStep,
+    // Change match
+    candidates,
+    candidatesLoading,
+    candidatesError,
+    matchQuery,
+    reResolving,
+    reResolveError,
+    openChangeMatch,
+    handleCandidateSearch,
+    handlePickCandidate,
+    cancelChangeMatch,
+    // Advanced override
+    overrideField,
+    overrideDraft,
+    overrideSaving,
+    overrideError,
+    setOverrideDraft,
+    openOverride,
+    submitOverride,
+    cancelOverride,
+    // Clarify
+    clarifyText,
+    setClarifyText,
+    clarifySubmitting,
+    handleClarifyAnswer,
+    // Save as food
+    saveFoodStatus,
+    saveFoodError,
+    handleSaveFood,
+  };
+}
