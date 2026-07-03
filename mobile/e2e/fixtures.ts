@@ -9,7 +9,7 @@
 import type { SessionRecord } from '@/state/session';
 import type { ProfileDTO } from '@/api/profile';
 import type { DailySummaryDTO, TargetReadModel } from '@/api/dailySummary';
-import type { GoalTargetResponse } from '@/api/goals';
+import type { ActiveGoalDirection, GoalTargetResponse } from '@/api/goals';
 import type {
   LogEventDTO,
   LogEventEntryDTO,
@@ -82,6 +82,20 @@ export const E2E_GOAL_TARGET_RESPONSE: GoalTargetResponse = {
   },
   provenance: { source: 'derived', basis: 'goal_and_metrics' },
   clamp: { clamped: false, reason: null },
+};
+
+/**
+ * The returning user's active-goal direction served by `GET /goal` (the FTY-189
+ * direction read model). `loss` matches the seeded goal above (start 75 kg →
+ * target 72 kg → a loss trajectory), so a cold-launched Settings screen
+ * summarises the real goal by its direction (`Goal: Lose`) instead of the dead
+ * "Active" / neutral "Details unavailable" states FTY-190 removes. The read
+ * model carries direction only — no pace — exactly like the real contract, so
+ * the settings-fty190.yaml flow proves the pace half of the summary
+ * (`Lose · Steady`) only after the user's own in-session goal edit.
+ */
+export const E2E_ACTIVE_GOAL_DIRECTION: ActiveGoalDirection = {
+  direction: 'loss',
 };
 
 /** Zero daily summary for an empty E2E day. */
