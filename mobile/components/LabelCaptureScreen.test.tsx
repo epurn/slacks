@@ -405,6 +405,42 @@ describe("LabelCaptureScreen – capture chrome", () => {
     expect(hasA11yLabel(tree, "Fit the nutrition label inside the frame")).toBe(false);
     expect(hasA11yLabel(tree, "Flash")).toBe(false);
   });
+
+  it("turns the torch off when leaving the camera phase even if flash was on", async () => {
+    const tree = mount(
+      <LabelCaptureScreen
+        session={SESSION}
+        onUploaded={jest.fn()}
+        onClose={jest.fn()}
+        permissionsHook={makeGrantedHook()}
+        takePhoto={jest.fn().mockResolvedValue({ uri: "file:///captured-label.jpg" })}
+        upload={jest.fn().mockResolvedValue(makeEvent())}
+      />,
+    );
+
+    const camera = () => tree.root.find((n) => n.props.testID === "camera-view");
+    const flashButton = () =>
+      tree.root.find(
+        (n) => n.props.accessibilityLabel === "Flash" && typeof n.props.onPress === "function",
+      );
+
+    // Turn the flash on while framing.
+    act(() => {
+      flashButton().props.onPress();
+    });
+    expect(camera().props.enableTorch).toBe(true);
+
+    // Take the photo → preview. The flash control is hidden, so the torch must
+    // not stay lit while the CameraView is still mounted.
+    await act(async () => {
+      press(tree, "Take photo");
+    });
+    expect(camera().props.enableTorch).toBe(false);
+
+    // Returning to framing re-lights the torch (the toggle state is retained).
+    press(tree, "Retake photo");
+    expect(camera().props.enableTorch).toBe(true);
+  });
 });
 
 // ─── Upload flow ─────────────────────────────────────────────────────────────

@@ -127,6 +127,11 @@ export function LabelCaptureScreen({
   const doTakePhoto = takePhoto ?? defaultTakePhoto;
   const doUpload = upload ?? defaultUpload;
 
+  // The flash control only exists in the camera/error phases, so gate the torch
+  // to those phases: once the user leaves (preview/uploading), the torch turns
+  // off even though `torchOn` is retained for when they return to framing.
+  const torchActive = torchOn && (phase === "camera" || phase === "error");
+
   const handleShutter = useCallback(async () => {
     try {
       const captured = await doTakePhoto();
@@ -172,7 +177,7 @@ export function LabelCaptureScreen({
             ref={cameraRef}
             style={StyleSheet.absoluteFill}
             facing="back"
-            enableTorch={torchOn}
+            enableTorch={torchActive}
             accessibilityLabel="Camera viewfinder"
           />
 
