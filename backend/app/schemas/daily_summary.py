@@ -69,5 +69,18 @@ class DailySummaryDTO(BaseModel):
     #: ``has_intake=False`` days from its logged-intake average and on/off-target
     #: denominator instead of counting every unlogged day as a real 0-kcal day.
     has_intake: bool
+    #: Count of the day's entries that are **logged but not yet counted** toward
+    #: ``intake`` because they await a user action. Precisely the sum of the user's
+    #: ``needs_clarification`` log events and ``proposed`` (costed-but-unconfirmed,
+    #: FTY-196) derived food items attributed to the day — the two states an entry
+    #: sits in until the user resolves it. In-flight events (``pending`` /
+    #: ``processing``), ``failed`` events, and already-finalized entries (already in
+    #: ``intake``) are **excluded**: those are the estimator's or a retry's business,
+    #: not the user's. A day with no such entries reports ``0``. This is what lets a
+    #: range consumer (FTY-188 Trends adherence) honestly say "N entries awaiting
+    #: details" rather than collapse an uncounted-only day into "nothing logged" — a
+    #: day whose only entries are uncounted has ``has_intake=False`` and zeroed
+    #: ``intake`` yet a non-zero count here.
+    uncounted_entries: int
     target: TargetReadModel | None
     exercise: DailySummaryExerciseDTO

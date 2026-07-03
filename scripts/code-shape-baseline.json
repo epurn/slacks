@@ -14,8 +14,8 @@
     "backend/tests/test_daily_summary_api.py": {
       "kind": "test",
       "lane": "backend",
-      "lines": 1160,
-      "reason": "Existing over-threshold first-party test file at FTY-200 baseline."
+      "lines": 1358,
+      "reason": "Existing over-threshold first-party test file at FTY-200 baseline; +198 in FTY-223 for the uncounted-entries (needs_clarification events + proposed food items) coverage — uncounted-only day across single-day and range, finalized/empty zero cases, pending/processing/failed exclusion, per-day range density, and owner-scoping."
     },
     "backend/tests/test_parse_step.py": {
       "kind": "test",

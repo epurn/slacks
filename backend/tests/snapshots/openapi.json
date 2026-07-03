@@ -182,12 +182,17 @@
                 "type": "null"
               }
             ]
+          },
+          "uncounted_entries": {
+            "title": "Uncounted Entries",
+            "type": "integer"
           }
         },
         "required": [
           "date",
           "intake",
           "has_intake",
+          "uncounted_entries",
           "target",
           "exercise"
         ],

@@ -1104,6 +1104,204 @@ def test_range_missing_required_params_return_422(client: TestClient) -> None:
     assert resp.status_code == 422
 
 
+# ---------------------------------------------------------------------------
+# Uncounted entries: logged-but-not-yet-counted count (FTY-223)
+# ---------------------------------------------------------------------------
+
+
+def test_uncounted_only_day_single_and_range(client: TestClient, db_engine: Engine) -> None:
+    """A day whose only entries await a user action reports the count, not "empty".
+
+    A ``needs_clarification`` event and a ``proposed`` (costed-but-unconfirmed) food
+    item on the same day → ``uncounted_entries == 2`` with ``has_intake == false``
+    and zeroed ``intake`` — the entries exist but count toward nothing. The
+    single-day and range reads report the same value.
+    """
+
+    user_id, auth = _register(client, "uncounted-only@example.com")
+    _set_timezone(client, user_id, auth, "UTC")
+    at = datetime(2026, 3, 10, 12, 0, 0, tzinfo=UTC)
+
+    # A needs_clarification event (counted as an event; it has no committed items).
+    _seed_completed_event(
+        db_engine, user_id, created_at=at, status=LogEventStatus.NEEDS_CLARIFICATION
+    )
+    # A proposed food item on a completed event (excluded from intake by construction).
+    completed_event = _seed_completed_event(db_engine, user_id, created_at=at)
+    _seed_food_item(
+        db_engine,
+        user_id,
+        completed_event,
+        calories=250.0,
+        item_status=DerivedItemStatus.PROPOSED,
+    )
+
+    single = client.get(
+        f"/api/users/{user_id}/daily-summary",
+        headers={"Authorization": auth},
+        params={"day": "2026-03-10"},
+    )
+    assert single.status_code == 200
+    body = single.json()
+    assert body["uncounted_entries"] == 2
+    assert body["has_intake"] is False
+    assert body["intake"] == {"calories": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0}
+
+    ranged = client.get(
+        f"/api/users/{user_id}/daily-summary/range",
+        headers={"Authorization": auth},
+        params={"from": "2026-03-09", "to": "2026-03-11"},
+    )
+    assert ranged.status_code == 200
+    by_date = {row["date"]: row for row in ranged.json()}
+    assert by_date["2026-03-10"]["uncounted_entries"] == 2
+    assert by_date["2026-03-10"]["has_intake"] is False
+    # Surrounding days with nothing logged report 0.
+    assert by_date["2026-03-09"]["uncounted_entries"] == 0
+    assert by_date["2026-03-11"]["uncounted_entries"] == 0
+
+
+def test_finalized_only_day_reports_zero_uncounted(client: TestClient, db_engine: Engine) -> None:
+    """A day with only finalized entries reports ``uncounted_entries == 0``."""
+
+    user_id, auth = _register(client, "finalized-uncounted@example.com")
+    today = datetime.now(UTC).date()
+    event_id = _seed_completed_event(db_engine, user_id)
+    _seed_food_item(db_engine, user_id, event_id, calories=300.0)
+
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary",
+        headers={"Authorization": auth},
+        params={"day": str(today)},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["uncounted_entries"] == 0
+    assert body["has_intake"] is True
+
+
+def test_empty_day_reports_zero_uncounted(client: TestClient, db_engine: Engine) -> None:
+    """A genuinely empty day reports ``uncounted_entries == 0`` and ``has_intake == false``.
+
+    Still distinguishable from an uncounted-only day: both zero ``intake`` and read
+    ``has_intake == false``, but the empty day's count is ``0`` where the
+    uncounted-only day's is non-zero.
+    """
+
+    user_id, auth = _register(client, "empty-uncounted@example.com")
+    empty_day = date(2025, 8, 1)
+
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary",
+        headers={"Authorization": auth},
+        params={"day": str(empty_day)},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["uncounted_entries"] == 0
+    assert body["has_intake"] is False
+
+
+def test_pending_processing_failed_events_do_not_increment_uncounted(
+    client: TestClient, db_engine: Engine
+) -> None:
+    """In-flight (``pending`` / ``processing``) and ``failed`` events never count.
+
+    Only entries the user must act on to make them count (``needs_clarification`` /
+    ``proposed``) increment the total; the estimator's in-flight and retry states do
+    not.
+    """
+
+    user_id, auth = _register(client, "excluded-uncounted@example.com")
+    today = datetime.now(UTC).date()
+
+    for excluded_status in (
+        LogEventStatus.PENDING,
+        LogEventStatus.PROCESSING,
+        LogEventStatus.FAILED,
+    ):
+        evt_id = _seed_completed_event(db_engine, user_id, status=excluded_status)
+        # Even an item on the excluded event must not leak into the count.
+        _seed_food_item(db_engine, user_id, evt_id, calories=500.0)
+
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary",
+        headers={"Authorization": auth},
+        params={"day": str(today)},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["uncounted_entries"] == 0
+
+
+def test_range_uncounted_per_day_density(client: TestClient, db_engine: Engine) -> None:
+    """A multi-day range returns ``uncounted_entries`` on every day with per-day values."""
+
+    user_id, auth = _register(client, "range-uncounted@example.com")
+    _set_timezone(client, user_id, auth, "UTC")
+
+    # 2026-09-01: one needs_clarification event. 2026-09-02: nothing. 2026-09-03: two
+    # proposed food items on one completed event + one needs_clarification event = 3.
+    _seed_completed_event(
+        db_engine,
+        user_id,
+        created_at=datetime(2026, 9, 1, 12, 0, 0, tzinfo=UTC),
+        status=LogEventStatus.NEEDS_CLARIFICATION,
+    )
+    d3_completed = _seed_completed_event(
+        db_engine, user_id, created_at=datetime(2026, 9, 3, 8, 0, 0, tzinfo=UTC)
+    )
+    _seed_food_item(db_engine, user_id, d3_completed, item_status=DerivedItemStatus.PROPOSED)
+    _seed_food_item(db_engine, user_id, d3_completed, item_status=DerivedItemStatus.PROPOSED)
+    _seed_completed_event(
+        db_engine,
+        user_id,
+        created_at=datetime(2026, 9, 3, 9, 0, 0, tzinfo=UTC),
+        status=LogEventStatus.NEEDS_CLARIFICATION,
+    )
+
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary/range",
+        headers={"Authorization": auth},
+        params={"from": "2026-09-01", "to": "2026-09-03"},
+    )
+
+    assert resp.status_code == 200
+    by_date = {row["date"]: row for row in resp.json()}
+    # The field is present (dense) on every calendar day.
+    assert all("uncounted_entries" in row for row in resp.json())
+    assert by_date["2026-09-01"]["uncounted_entries"] == 1
+    assert by_date["2026-09-02"]["uncounted_entries"] == 0
+    assert by_date["2026-09-03"]["uncounted_entries"] == 3
+
+
+def test_uncounted_entries_are_owner_scoped(client: TestClient, db_engine: Engine) -> None:
+    """Another user's uncounted entries never leak into the count."""
+
+    alice_id, alice_auth = _register(client, "alice-uncounted@example.com")
+    bob_id, _bob_auth = _register(client, "bob-uncounted@example.com")
+    at = datetime(2026, 10, 5, 12, 0, 0, tzinfo=UTC)
+
+    # Bob has uncounted entries on the day; Alice has none.
+    _seed_completed_event(
+        db_engine, bob_id, created_at=at, status=LogEventStatus.NEEDS_CLARIFICATION
+    )
+    bob_completed = _seed_completed_event(db_engine, bob_id, created_at=at)
+    _seed_food_item(db_engine, bob_id, bob_completed, item_status=DerivedItemStatus.PROPOSED)
+
+    resp = client.get(
+        f"/api/users/{alice_id}/daily-summary",
+        headers={"Authorization": alice_auth},
+        params={"day": "2026-10-05"},
+    )
+
+    assert resp.status_code == 200
+    # Alice sees zero — Bob's uncounted entries do not cross the owner boundary.
+    assert resp.json()["uncounted_entries"] == 0
+
+
 def test_range_timezone_boundary_attribution(client: TestClient, db_engine: Engine) -> None:
     """Items near local midnight land in the correct calendar day within the range.
 

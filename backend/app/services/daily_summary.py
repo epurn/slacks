@@ -41,7 +41,7 @@ from collections import defaultdict
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import ColumnElement, select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 
 from app.enums import DerivedItemStatus, LogEventStatus
@@ -101,6 +101,7 @@ def get_daily_summary(
     start_utc, end_utc = day_bounds_utc(day, tz)
 
     intake, has_intake = _aggregate_intake(session, owner_id, start_utc, end_utc)
+    uncounted_entries = _aggregate_uncounted_entries(session, owner_id, start_utc, end_utc)
     exercise = _aggregate_exercise(session, owner_id, start_utc, end_utc)
     target = _resolve_target(session, owner_id, day)
 
@@ -108,6 +109,7 @@ def get_daily_summary(
         date=day,
         intake=intake,
         has_intake=has_intake,
+        uncounted_entries=uncounted_entries,
         target=target,
         exercise=exercise,
     )
@@ -149,6 +151,9 @@ def get_daily_summaries(
     intake_by_day = _aggregate_intake_by_day(
         session, owner_id, window_start_utc, window_end_utc, tz
     )
+    uncounted_by_day = _aggregate_uncounted_entries_by_day(
+        session, owner_id, window_start_utc, window_end_utc, tz
+    )
     exercise_by_day = _aggregate_exercise_by_day(
         session, owner_id, window_start_utc, window_end_utc, tz
     )
@@ -164,6 +169,7 @@ def get_daily_summaries(
                 date=day,
                 intake=intake_by_day.get(day, _intake_dto([])),
                 has_intake=day in intake_by_day,
+                uncounted_entries=uncounted_by_day.get(day, 0),
                 target=targets_by_day.get(day),
                 exercise=exercise_by_day.get(day, _exercise_dto([])),
             )
@@ -215,6 +221,54 @@ def _exercise_window_conditions(
         LogEvent.status == LogEventStatus.COMPLETED,
         DerivedExerciseItem.status == DerivedItemStatus.RESOLVED,
         DerivedExerciseItem.active_calories.isnot(None),
+        LogEvent.created_at >= start_utc,
+        LogEvent.created_at < end_utc,
+    )
+
+
+# ── Uncounted-entries predicate (logged-but-not-yet-counted) ───────────────────
+#
+# An entry is *uncounted* when it exists but has not yet been counted toward
+# ``intake`` because it awaits a user action. Two disjoint kinds, summed:
+#   1. ``needs_clarification`` LOG EVENTS — the estimator asked a question and is
+#      waiting on the user (counted as events; a clarification event has no
+#      committed items). Attributed by the event's own ``created_at``.
+#   2. ``proposed`` DERIVED FOOD ITEMS (FTY-196) — a costed-but-unconfirmed label
+#      parse, excluded from every finalized read by construction. Attributed by the
+#      owning event's ``created_at`` (the same day rule ``intake`` uses).
+# Deliberately excluded: ``pending`` / ``processing`` events (the estimator is
+# still working — the client's loading path, not "awaiting details"), ``failed``
+# events (a distinct retry state), and finalized entries (already in ``intake``).
+
+
+def _needs_clarification_window_conditions(
+    owner_id: uuid.UUID, start_utc: datetime, end_utc: datetime
+) -> tuple[ColumnElement[bool], ...]:
+    """WHERE conditions selecting one user's ``needs_clarification`` events in a window."""
+
+    return (
+        LogEvent.user_id == owner_id,
+        LogEvent.status == LogEventStatus.NEEDS_CLARIFICATION,
+        LogEvent.created_at >= start_utc,
+        LogEvent.created_at < end_utc,
+    )
+
+
+def _proposed_food_window_conditions(
+    owner_id: uuid.UUID, start_utc: datetime, end_utc: datetime
+) -> tuple[ColumnElement[bool], ...]:
+    """WHERE conditions selecting one user's ``proposed`` food items in a window.
+
+    Attribution is the owning ``LogEvent.created_at`` (joined by the caller),
+    matching how ``intake`` attributes a day. No event-status filter: a
+    ``proposed`` item lands only on a ``completed`` event by construction (FTY-196),
+    so the item status alone is the precise predicate.
+    """
+
+    return (
+        DerivedFoodItem.user_id == owner_id,
+        LogEvent.user_id == owner_id,
+        DerivedFoodItem.status == DerivedItemStatus.PROPOSED,
         LogEvent.created_at >= start_utc,
         LogEvent.created_at < end_utc,
     )
@@ -339,6 +393,78 @@ def _aggregate_exercise_by_day(
     for item, created_at in rows:
         buckets[_to_local_date(created_at, tz)].append(item)
     return {day: _exercise_dto(items) for day, items in buckets.items()}
+
+
+def _aggregate_uncounted_entries(
+    session: Session,
+    owner_id: uuid.UUID,
+    start_utc: datetime,
+    end_utc: datetime,
+) -> int:
+    """Count the day's logged-but-not-yet-counted entries (single-day path).
+
+    The sum of the user's ``needs_clarification`` log events and ``proposed`` food
+    items attributed to the window — the entries awaiting a user action. Returns
+    ``0`` for a day with no such entries. Two bounded ``COUNT`` queries; every item
+    in ``[start_utc, end_utc)`` belongs to the single requested day so no per-day
+    bucketing is needed here.
+    """
+
+    needs_clarification_count = (
+        session.scalar(
+            select(func.count())
+            .select_from(LogEvent)
+            .where(*_needs_clarification_window_conditions(owner_id, start_utc, end_utc))
+        )
+        or 0
+    )
+    proposed_count = (
+        session.scalar(
+            select(func.count())
+            .select_from(DerivedFoodItem)
+            .join(LogEvent, DerivedFoodItem.log_event_id == LogEvent.id)
+            .where(*_proposed_food_window_conditions(owner_id, start_utc, end_utc))
+        )
+        or 0
+    )
+    return needs_clarification_count + proposed_count
+
+
+def _aggregate_uncounted_entries_by_day(
+    session: Session,
+    owner_id: uuid.UUID,
+    start_utc: datetime,
+    end_utc: datetime,
+    tz: ZoneInfo,
+) -> dict[date, int]:
+    """Bucket logged-but-not-yet-counted entries across a window into per-day counts.
+
+    Two windowed queries (``needs_clarification`` events and ``proposed`` items),
+    bucketed in Python by the owning event's local day — the same attribution rule
+    as the single-day path, computed once for the range. Days with no uncounted
+    entries are simply absent (the caller renders them ``0``).
+    """
+
+    counts: dict[date, int] = defaultdict(int)
+
+    needs_clarification_rows = session.execute(
+        select(LogEvent.created_at).where(
+            *_needs_clarification_window_conditions(owner_id, start_utc, end_utc)
+        )
+    ).all()
+    for (created_at,) in needs_clarification_rows:
+        counts[_to_local_date(created_at, tz)] += 1
+
+    proposed_rows = session.execute(
+        select(LogEvent.created_at)
+        .select_from(DerivedFoodItem)
+        .join(LogEvent, DerivedFoodItem.log_event_id == LogEvent.id)
+        .where(*_proposed_food_window_conditions(owner_id, start_utc, end_utc))
+    ).all()
+    for (created_at,) in proposed_rows:
+        counts[_to_local_date(created_at, tz)] += 1
+
+    return dict(counts)
 
 
 def _resolve_target(

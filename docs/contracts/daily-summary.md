@@ -40,7 +40,7 @@ serializer that derives them).
 
 ## Version
 
-3 (FTY-071; target read-model added jointly by FTY-094/FTY-095). FTY-092 adds the
+4 (FTY-071; target read-model added jointly by FTY-094/FTY-095). FTY-092 adds the
 **per-item provenance read shape** (`source` descriptor + `is_edited`) to the
 Today/daily item read-model below; it does not change the aggregate totals math.
 FTY-094/FTY-095 replace the single-integer `target` component with the **target
@@ -52,6 +52,11 @@ change any existing component.
 FTY-123 adds the **range/list read** (`GET .../daily-summary/range?from&to`) — the
 server-side read-model for multi-day series that replaces per-day fan-out; see the
 range-read section under Inputs.
+FTY-223 adds the integer **`uncounted_entries`** field (per-day count of entries
+logged but not yet counted toward `intake` because they await a user action) so a
+range consumer can tell a genuinely empty day from a day whose only entries are
+uncounted; additive, no migration, populated identically in the single-day and
+range reads.
 
 ## Inputs
 
@@ -86,8 +91,10 @@ read path.)
   timezone. `from` must be on or before `to`, and the span may not exceed
   **366 days**; either violation (or a malformed date) is rejected as `422`.
 - Every day in the inclusive range is present in the response, oldest-first.
-  Days with no finalized data carry zeroed `intake`/`exercise` and `has_intake:
-  false`; their `target` follows the same **No-target representation** as the
+  Days with no finalized data carry zeroed `intake`/`exercise`, `has_intake:
+  false`, and `uncounted_entries: 0` (unless the day has uncounted entries — the
+  count is populated per-day identically to the single-day read); their `target`
+  follows the same **No-target representation** as the
   single-day read (carried forward within the goal's horizon, `null` outside it) —
   exactly the DTO the single-day endpoint returns for that day. The response is the
   JSON array `[DailySummaryDTO, …]`.
@@ -109,6 +116,7 @@ read path.)
     "fat_g": 40.0
   },
   "has_intake": true,
+  "uncounted_entries": 0,
   "target": {
     "calories": { "effective": 1800, "derived": 1678, "source": "user" },
     "protein_g": { "effective": 128, "derived": 128, "source": "derived" },
@@ -130,6 +138,25 @@ read path.)
   two; this flag does. A range/series consumer (FTY-101 Trends adherence) excludes
   `has_intake: false` days from its logged-intake average and on/off-target
   denominator rather than counting every unlogged day as a real 0-kcal day.
+- `uncounted_entries` — integer, the count of the day's entries that are **logged
+  but not yet counted** toward `intake` because they await a user action. Precisely
+  the sum of two disjoint kinds attributed to the day:
+  - the user's **`needs_clarification`** log events (the estimator asked a question
+    and is waiting on the user — counted as events; such an event carries no
+    committed items), and
+  - the user's **`proposed`** derived food items (FTY-196 — a costed-but-unconfirmed
+    label parse, excluded from every finalized read by construction).
+
+  **Excluded** (never counted): finalized entries (already in `intake`); `pending`
+  and `processing` events (the estimator is still working — the client's loading
+  path, not "awaiting details"); and `failed` events (a distinct retry state). Day
+  attribution is the owning `LogEvent.created_at` in the profile timezone over
+  `[start, end)`, exactly matching how `intake` / `has_intake` attribute a day. A
+  day with no such entries reports `0`. This is what lets a range consumer (FTY-188
+  Trends adherence) honestly say "N entries awaiting details" rather than collapse
+  an uncounted-only day (`has_intake: false`, zeroed `intake`, non-zero
+  `uncounted_entries`) into "nothing logged" (`uncounted_entries: 0`). Present on
+  every day of the single-day and range reads.
 - `target` — the **target read-model** for the user's active goal on this day,
   **carried forward** within the goal's horizon (a `daily_targets` row is stored on
   goal-creation day but the daily target is effectively constant across the horizon
@@ -345,3 +372,10 @@ curl -s ':8000/api/users/<uid>/daily-summary/range?from=2025-01-01&to=2026-06-01
   `corrections` history) — no new table, no migration, no change to the aggregate
   totals. Consumers (FTY-098/100 timeline + sheet) depend on the `source` / `is_edited`
   shape defined here for the source icon + ✎ marker.
+- **FTY-223** adds the additive `uncounted_entries` integer (single-day and range).
+  It is a pure computed read over existing rows (`log_events.status ==
+  'needs_clarification'` events + `derived_food_items.status == 'proposed'` items),
+  no new table and **no migration** — both statuses already exist and `proposed` is
+  persisted as a plain `VARCHAR` (application-only per `DerivedItemStatus`).
+  Additive and backward-compatible: existing consumers ignore the new field; the
+  intended consumer is FTY-188 Trends adherence.
