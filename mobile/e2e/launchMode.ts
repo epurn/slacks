@@ -24,12 +24,15 @@
  */
 
 import { AccessibilityInfo } from 'react-native';
+import type { PermissionResponse } from 'expo';
+import type { useCameraPermissions } from 'expo-camera';
 import { markOnboardingComplete } from '@/state/onboardingComplete';
 import type { SessionStore } from '@/state/sessionStore';
 import type { ServerConnectionStore } from '@/state/serverConnectionStore';
 import {
   E2E_SESSION,
   E2E_SERVER_URL,
+  E2E_CAMERA_PERMISSION_GRANTED,
   E2E_FIXTURE_MAP,
   E2E_DAILY_SUMMARY,
   E2E_GOAL_TARGET_RESPONSE,
@@ -44,12 +47,14 @@ import {
   E2E_FAILED_EVENT,
   E2E_FAILED_RETRY_EVENT,
   E2E_RESOLVE_RAW_TEXT,
+  E2E_RESOLVE_PENDING_EVENT,
   E2E_RESOLVE_EVENT,
   E2E_RESOLVE_ENTRY,
   E2E_RESOLVE_SUMMARY,
   E2E_CORRECTION_RAW_TEXT,
   E2E_CORRECTION_EVENT,
   E2E_CORRECTION_ENTRY,
+  E2E_CORRECTION_SUMMARY,
   E2E_CORRECTION_ITEM_ID,
   E2E_CORRECTION_EDITED_ITEM,
   E2E_TARGET_RAW_TEXT,
@@ -117,6 +122,22 @@ export const e2eConnectionStore: ServerConnectionStore = {
 };
 
 /**
+ * E2E camera-permission hook (FTY-194). Drop-in for expo-camera's
+ * `useCameraPermissions`, returning an already-granted permission so the
+ * barcode scanner renders its granted chrome — reticle, torch, and the
+ * "Type it instead" fallback — without a device camera. `CameraCapture`
+ * defaults to this hook when `isE2EMode()` is true, so the
+ * `barcode-manual-entry.yaml` flow can drive the real scanner path on the
+ * simulator. `request`/`get` resolve to the same granted response; nothing is
+ * ever asked of the OS. Dead code in release builds (never reached off E2E).
+ */
+export const e2eCameraPermissionsHook: typeof useCameraPermissions = () => {
+  const grant = async (): Promise<PermissionResponse> =>
+    E2E_CAMERA_PERMISSION_GRANTED;
+  return [E2E_CAMERA_PERMISSION_GRANTED, grant, grant];
+};
+
+/**
  * Build the E2E mock fetch function. Returns hermetic fixture JSON for every
  * API call the app makes — no network I/O. The mock is stateful: it tracks the
  * clarify-flow phase so the smoke flow (FTY-160) and the clarify flow (FTY-162)
@@ -151,8 +172,9 @@ export const e2eConnectionStore: ServerConnectionStore = {
  *
  * The FTY-181 signature-beat flows each run off their own stage keyed on a
  * distinct `raw_text`, independent of every machine above:
- *   - `resolveStage` (beat 1): a log resolves to a completed entry whose item
- *     rides the by-date feed so the resolve value row is reachable.
+ *   - `resolveStage` (beat 1): a log first appears pending, then resolves to a
+ *     completed entry whose item-forward feed carries multiple items summarized
+ *     into one event row so the no-layout-shift resolve path is reachable.
  *   - `correctionStage` (beat 2): the log resolves to a tappable resolved row;
  *     a PATCH to its item returns the recomputed value the correction beat rides.
  *   - `targetStage` (beat 3): a single large entry resolves and the day summary
@@ -161,9 +183,9 @@ export const e2eConnectionStore: ServerConnectionStore = {
 export function createE2EMockFetch(): typeof fetch {
   let phase: 0 | 1 | 2 = 0;
   let failedStage: 0 | 1 | 2 = 0;
-  // FTY-181 entry-resolve flow: 0 before the log, 1 once the resolve entry is
-  // created. Keyed on its own raw_text so it stays independent of the clarify
-  // "coffee" phase machine and the gibberish failed flow.
+  // FTY-181 entry-resolve flow: 0 before the log, 1 once the pending resolve
+  // entry is created. Keyed on its own raw_text so it stays independent of the
+  // clarify "coffee" phase machine and the gibberish failed flow.
   let resolveStage: 0 | 1 = 0;
   // FTY-181 correction-saved (beat 2) flow: 0 before the log, 1 once the
   // correction entry (a tappable resolved row) is created. A PATCH to its item
@@ -231,7 +253,7 @@ export function createE2EMockFetch(): typeof fetch {
     // since the value row only renders when the feed carries the entry's items.
     // The clarify/smoke/failed flows serve `items: []` so their rows keep
     // rendering the raw phrase (no value row); only the resolve flow carries a
-    // real item, so resolve.yaml can assert the resolved value row on-device.
+    // real items, so resolve.yaml can assert both resolved rows on-device.
     // Matched before `/log-events` because the URL suffix is more specific.
     if (pathEnd.endsWith('/log-events/by-date')) {
       if (failedStage === 1) return json([{ event: E2E_FAILED_EVENT, items: [] }]);
@@ -276,13 +298,14 @@ export function createE2EMockFetch(): typeof fetch {
           savedFoodCreated = true;
           return json(E2E_SAVED_FOOD_EVENT, 201);
         }
-        // FTY-181 entry-resolve flow: a plain text log resolves straight to a
-        // completed entry (the client's optimistic `pending`→`completed`
-        // reconcile is the transition that arms the beat). Keyed on its own
-        // raw_text so it never disturbs the clarify phase machine.
+        // FTY-181 entry-resolve flow: POST returns the stored pending event so
+        // the skeleton is visible on-device; a subsequent GET returns the same
+        // event completed with multiple by-date items summarized into one row.
+        // Keyed on its own raw_text so it never disturbs the clarify phase
+        // machine.
         if (rawTextOf(init) === E2E_RESOLVE_RAW_TEXT) {
           resolveStage = 1;
-          return json(E2E_RESOLVE_EVENT, 201);
+          return json(E2E_RESOLVE_PENDING_EVENT, 201);
         }
         // FTY-181 correction-saved (beat 2): the log resolves to a completed
         // entry whose resolved row is tappable; the PATCH below then commits the
@@ -369,14 +392,15 @@ export function createE2EMockFetch(): typeof fetch {
     }
 
     // /daily-summary — returns non-zero intake once the entry is resolved
-    // (the resolve flow's 140-kcal item, or the clarify/smoke 120-kcal coffee).
+    // (the resolve flow's two-item 245-kcal entry, or the clarify/smoke 120-kcal
+    // coffee).
     // The target flow returns the over-budget 2,100-kcal summary so the hero
     // crosses its calorie target and beat 3 arms; the correction flow keeps the
     // pre-edit 140 kcal (its beat rides the PATCH, not the day total).
     if (pathEnd.endsWith('/daily-summary')) {
       if (resolveStage === 1) return json(E2E_RESOLVE_SUMMARY);
       if (targetStage === 1) return json(E2E_TARGET_SUMMARY);
-      if (correctionStage === 1) return json(E2E_RESOLVE_SUMMARY);
+      if (correctionStage === 1) return json(E2E_CORRECTION_SUMMARY);
       return json(phase === 2 ? E2E_RESOLVED_SUMMARY : E2E_DAILY_SUMMARY);
     }
 

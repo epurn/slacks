@@ -6,6 +6,8 @@
  * machine paths, or private data.
  */
 
+import { type PermissionResponse, PermissionStatus } from 'expo';
+
 import type { SessionRecord } from '@/state/session';
 import type { ProfileDTO } from '@/api/profile';
 import type { DailySummaryDTO, TargetReadModel } from '@/api/dailySummary';
@@ -21,6 +23,25 @@ import type { SavedFoodDTO } from '@/api/savedFoods';
 import type { SourceCandidate } from '@/api/corrections';
 
 export const E2E_SERVER_URL = 'http://localhost:8000';
+
+/**
+ * Granted camera-permission response for the barcode-scanner E2E flow (FTY-194).
+ *
+ * The iOS simulator has no camera, so `useCameraPermissions` never leaves the
+ * `undetermined` state and the scanner's granted chrome — the reticle, torch,
+ * and the "Type it instead" fallback — never renders. This synthetic granted
+ * response is the hermetic equivalent of the OS permission grant (mirroring the
+ * Reduce Motion override in launchMode.ts): it lets `barcode-manual-entry.yaml`
+ * drive the real Today → scanner → "Type it instead" → pre-filled composer path
+ * without a device camera or a flaky system permission dialog. Fabricated for
+ * testing only; it carries no real permission state.
+ */
+export const E2E_CAMERA_PERMISSION_GRANTED: PermissionResponse = {
+  status: PermissionStatus.GRANTED,
+  granted: true,
+  canAskAgain: true,
+  expires: 'never',
+};
 
 /**
  * Synthetic session — NOT a real credential. The token is an obviously fake
@@ -515,22 +536,37 @@ export const E2E_RERESOLVED_ITEM: DerivedFoodItemDTO = {
 // it transitions pending→completed. That value row only renders when the Today
 // feed carries the entry's derived items — the item-forward `/log-events/by-date`
 // read (FTY-198). These fixtures drive resolve.yaml: a plain text log resolves to
-// a completed entry whose real derived food item (name · kcal · provenance) is
-// served by the by-date feed, so the beat's value row is reachable on the real
-// screen data path — not injected item props. Keyed on its own `raw_text` so it
-// never collides with the clarify flow's "coffee" or the failed flow's gibberish.
+// a pending entry that refreshes to a completed event whose real derived food
+// items (name · kcal · provenance) are served by the by-date feed, so the beat's
+// value row is reachable on the real screen data path — not injected item props.
+// It is intentionally multi-item: the pending skeleton is one row, the first
+// resolved item keeps the event-keyed row for the resolve beat, and the second
+// resolved item must become its own editable row. Keyed on its own `raw_text` so
+// it never collides with the clarify flow's "coffee" or the failed flow's
+// gibberish.
 
 /** The input resolve.yaml submits. Distinct from "coffee" and the gibberish text. */
-export const E2E_RESOLVE_RAW_TEXT = 'greek yogurt';
+export const E2E_RESOLVE_RAW_TEXT = 'greek yogurt and banana';
 
 /** Stable id for the resolve flow's completed event. */
 export const E2E_RESOLVE_EVENT_ID =
   'e2e-resolve-event-00000000-0000-0000-0000-000000000000';
 
+/** The pending event the resolve flow's POST returns, keeping the skeleton visible. */
+export const E2E_RESOLVE_PENDING_EVENT: LogEventDTO = {
+  id: E2E_RESOLVE_EVENT_ID,
+  user_id: E2E_SESSION.userId,
+  raw_text: E2E_RESOLVE_RAW_TEXT,
+  status: 'pending',
+  created_at: '2026-01-01T09:30:00Z',
+  updated_at: '2026-01-01T09:30:00Z',
+};
+
 /**
- * The completed event the resolve flow's POST returns. The client inserts the
- * submitted text optimistically as `pending`, then reconciles to this completed
- * event — a genuine pending→completed transition that arms the entry-resolve beat.
+ * The completed event the resolve flow's GET returns after refresh/poll. The
+ * client first shows the POST's pending skeleton, then reconciles to this
+ * completed event — a genuine pending→completed transition that arms the
+ * entry-resolve beat.
  */
 export const E2E_RESOLVE_EVENT: LogEventDTO = {
   id: E2E_RESOLVE_EVENT_ID,
@@ -542,10 +578,9 @@ export const E2E_RESOLVE_EVENT: LogEventDTO = {
 };
 
 /**
- * The resolved derived food item the by-date feed carries for the resolve event.
- * ItemTimelineRow renders its accessibility label as "Greek yogurt, 140 kcal" —
- * the exact string resolve.yaml asserts, proving the value row is populated from
- * real server data.
+ * The first resolved derived food item the by-date feed carries for the resolve
+ * event. Its row keeps the event-keyed test id through the pending→completed
+ * resolve while `E2E_RESOLVE_EXTRA_ITEM` mounts as a normal secondary row.
  */
 export const E2E_RESOLVE_ITEM: DerivedFoodItemDTO = {
   item_type: 'food',
@@ -576,16 +611,46 @@ export const E2E_RESOLVE_ITEM: DerivedFoodItemDTO = {
   is_edited: false,
 };
 
+/** The second resolved item, rendered as its own row after the resolve beat. */
+export const E2E_RESOLVE_EXTRA_ITEM: DerivedFoodItemDTO = {
+  item_type: 'food',
+  id: 'e2e-resolve-item-extra-00000000-0000-0000-0000-000000000000',
+  user_id: E2E_SESSION.userId,
+  log_event_id: E2E_RESOLVE_EVENT_ID,
+  name: 'Banana',
+  quantity_text: '1 medium',
+  unit: 'medium',
+  amount: 1,
+  status: 'resolved',
+  grams: 118,
+  calories: 105,
+  protein_g: 1,
+  carbs_g: 27,
+  fat_g: 0,
+  calories_estimated: 105,
+  protein_g_estimated: 1,
+  carbs_g_estimated: 27,
+  fat_g_estimated: 0,
+  created_at: '2026-01-01T09:30:00Z',
+  updated_at: '2026-01-01T09:30:00Z',
+  source: {
+    source_type: 'trusted_nutrition_database',
+    label: 'USDA',
+    ref: 'usda_fdc:173944',
+  },
+  is_edited: false,
+};
+
 /** The item-forward day row the by-date feed returns once the entry resolves. */
 export const E2E_RESOLVE_ENTRY: LogEventEntryDTO = {
   event: E2E_RESOLVE_EVENT,
-  items: [E2E_RESOLVE_ITEM],
+  items: [E2E_RESOLVE_ITEM, E2E_RESOLVE_EXTRA_ITEM],
 };
 
-/** Daily summary reflecting the resolved "greek yogurt" entry (140 kcal). */
+/** Daily summary reflecting the resolved "greek yogurt and banana" entry. */
 export const E2E_RESOLVE_SUMMARY: DailySummaryDTO = {
   date: '2026-01-01',
-  intake: { calories: 140, protein_g: 20, carbs_g: 9, fat_g: 4 },
+  intake: { calories: 245, protein_g: 21, carbs_g: 36, fat_g: 4 },
   has_intake: true,
   target: E2E_TARGET,
   exercise: { active_calories: 0 },
@@ -661,6 +726,15 @@ export const E2E_CORRECTION_ITEM: DerivedFoodItemDTO = {
 export const E2E_CORRECTION_ENTRY: LogEventEntryDTO = {
   event: E2E_CORRECTION_EVENT,
   items: [E2E_CORRECTION_ITEM],
+};
+
+/** Daily summary reflecting the correction flow's pre-edit oatmeal entry. */
+export const E2E_CORRECTION_SUMMARY: DailySummaryDTO = {
+  date: '2026-01-01',
+  intake: { calories: 140, protein_g: 5, carbs_g: 27, fat_g: 3 },
+  has_intake: true,
+  target: E2E_TARGET,
+  exercise: { active_calories: 0 },
 };
 
 /**

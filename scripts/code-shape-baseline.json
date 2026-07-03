@@ -52,20 +52,6 @@
       "lane": "mobile",
       "lines": 1023,
       "reason": "FTY-181 adds beat-2 (correction-saved haptic) coverage — fires once per successful commit (amount step, re-resolve, override), not on a server failure or a validation error — crossing the 1000-line test threshold."
-    },
-    "mobile/components/TodayScreen.test.tsx": {
-      "kind": "test",
-      "lane": "mobile",
-      "lines": 2436,
-      "reason": "Existing over-threshold first-party test file at FTY-200 baseline; +82 in FTY-175 for clarify answer-round-trip coverage (chip resolve, free-text resolve, error path, in-place poll, chip render from payload); +123 in the FTY-175 review fix covering the submit-time question-id re-read (fallback answer resolves after a failed read, re-read failure surfaced, empty-payload honesty); +175 in FTY-197 for the confirm-parsed-values sheet flow (shows the parse + Label scan provenance + not-yet-counted after a legible upload, confirm commits and refreshes totals in place, adjust sends the corrected value, never-silent dismiss leaves an uncounted re-openable proposal, and the unreadable null-proposal path stays unchanged); +112 in FTY-181 for the signature-beat flow tests: beat-1 (entry-resolve haptic — no beat on initial load, exactly one on a pending→completed poll with no re-fire) and beat-3 (target-reached haptic fires once when a summary poll crosses the calorie target through the real mounted hero); +36 in the FTY-181 review fix proving beat-1 fires on the real by-date item feed (server derived items populate the value row, no injected item prop); +52 in the FTY-181 PR-171 review fix for the beat-1 race-guard regression test (a server-fed by-date item on an event the event-list poll still holds pending must not render an un-animated resolved row, and beat 1 fires only once the event list catches up to completed); +41 in the FTY-181 PR-171 review fix for the once-per-event regression test (two pending entries resolving in the SAME reconciliation fire two entry-resolve beats, not one coalesced tap, with no re-fire on a later identical poll)."
-
-    },
-    "mobile/components/TodayScreen.tsx": {
-      "kind": "source",
-      "lane": "mobile",
-      "lines": 1709,
-      "reason": "Existing over-threshold first-party source file at FTY-200 baseline; +13 in FTY-178 to mount the hero above the composer and the macro tier separately beneath it (macro rework is FTY-179); +6 in FTY-175 wiring the FTY-170 clarify payload (question id + chips) and the answer round-trip that resolves the same entry in place; +16 in the FTY-175 review fix re-reading the question id at submit time so the free-text fallback stays non-blocking; +1 in FTY-179 passing the daily-summary target read-model into MacroTier so the macro chips measure against their effective targets; +120 in FTY-197 wiring the confirm-parsed-values sheet: reading the FTY-196 label proposal after upload, presenting the sheet, committing the confirmed item into the timeline + refetching the summary in place, and surfacing an undismissed proposal as a re-openable not-yet-counted row; +65 in FTY-181 detecting pending→completed transitions to fire the entry-resolve beat once (soft tap + row fade) and never on initial load; +30 in the FTY-181 review fix loading the FTY-198 by-date item feed so completed entries render their real derived value rows (the entry-resolve beat's real data path); +26 in the FTY-181 PR-171 review fix gating the items-forward fallback to true synthetic saved-food rows (isSyntheticSavedFoodItem) so a server-fed by-date item can only render through the completed branch — closing the race where a resolved row appeared un-animated before the event reached completed; +11 in the FTY-181 PR-171 review fix making the entry-resolve beat once-per-event: a resolveBeatCount advanced by the number of fresh completions each reconciliation, with an effect firing the delta since it last ran, so a poll batch where several entries complete at once beats once per event rather than one tap total."
-
     }
   },
   "boundary_imports": [

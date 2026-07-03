@@ -146,6 +146,27 @@ describe("ItemTimelineRow — food item", () => {
     expect(label).toContain("205 kcal");
   });
 
+  it("summarizes additional items into the same row for multi-item resolves", () => {
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(
+        <ItemTimelineRow
+          item={foodItem({ name: "Greek yogurt", calories: 140 })}
+          additionalItems={[
+            foodItem({ id: "item-2", name: "Banana", calories: 105 }),
+          ]}
+        />,
+      );
+    });
+
+    const text = allText(tree!);
+    expect(text).toContain("Greek yogurt + 1");
+    expect(text).toContain("245 kcal");
+    expect(firstA11yLabel(tree!)).toBe(
+      "Greek yogurt and 1 more item, 245 kcal total",
+    );
+  });
+
   it("is_edited item shows ✎ source icon with 'Edited by you' label", () => {
     let tree: ReactTestRenderer;
     act(() => {
@@ -252,7 +273,156 @@ describe("ItemTimelineRow — needs_clarification", () => {
   });
 });
 
-describe("ItemTimelineRow — beat 1: resolve fade", () => {
+/** Resolve the style object for a node, collapsing a Pressable style function. */
+function rowGeometry(node: { props: { style?: unknown } }): Record<string, unknown> {
+  const raw =
+    typeof node.props.style === "function"
+      ? (node.props.style as (s: { pressed: boolean }) => unknown)({ pressed: false })
+      : node.props.style;
+  return Object.assign(
+    {},
+    ...([] as unknown[]).concat(raw).filter(Boolean) as Record<string, unknown>[],
+  );
+}
+
+describe("ItemTimelineRow — loading (FTY-180)", () => {
+  beforeEach(() => {
+    mockReduceMotion(false);
+    // `mockReduceMotion` resolves the Reduce Motion check synchronously, so
+    // both the Skeleton's shimmer-loop effect and the row's own resolve-fade
+    // effect run inside the same `act()` call as render. Stub `Animated.loop`
+    // and `Animated.timing` so no real requestAnimationFrame-driven animation
+    // is left running past the test (it would otherwise keep the Jest process
+    // alive) — their own behaviour is Skeleton's / the resolve-fade tests'
+    // concern, covered elsewhere.
+    jest
+      .spyOn(Animated, "loop")
+      .mockReturnValue({ start: jest.fn(), stop: jest.fn() } as never);
+    jest
+      .spyOn(Animated, "timing")
+      .mockReturnValue({ start: jest.fn(), stop: jest.fn() } as never);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it("renders a Skeleton shimmer, never literal 'Waiting'/'Estimating' text", () => {
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(<ItemTimelineRow loading accessibilityLabel="Waiting to estimate" />);
+    });
+
+    const text = allText(tree!);
+    expect(text).not.toContain("Waiting");
+    expect(text).not.toContain("Estimating");
+  });
+
+  it("conveys the in-progress status to VoiceOver via accessibilityRole + accessibilityLabel", () => {
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(<ItemTimelineRow loading accessibilityLabel="Estimating" />);
+    });
+
+    const node = tree!.root.find(
+      (n) => n.props.accessibilityRole === "progressbar",
+    );
+    expect(node.props.accessibilityLabel).toBe("Estimating");
+  });
+
+  it("hides each shimmer placeholder from the accessibility tree so VoiceOver reads one loading state, not three", () => {
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(<ItemTimelineRow loading accessibilityLabel="Estimating" />);
+    });
+
+    // Every Skeleton placeholder is marked hidden-with-descendants so only the
+    // row's own "Estimating" label reaches VoiceOver, not each block's default
+    // "Loading" label three times over.
+    const hiddenSkeletons = tree!.root.findAll(
+      (n) =>
+        n.props.accessibilityElementsHidden === true &&
+        n.props.importantForAccessibility === "no-hide-descendants",
+    );
+    expect(hiddenSkeletons.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("uses the same row geometry (height, insets) as the resolved row — zero layout shift on resolve", () => {
+    let loadingTree: ReactTestRenderer;
+    let resolvedTree: ReactTestRenderer;
+    act(() => {
+      loadingTree = render(
+        <ItemTimelineRow loading accessibilityLabel="Estimating" />,
+      );
+    });
+    act(() => {
+      resolvedTree = render(<ItemTimelineRow item={foodItem()} />);
+    });
+
+    const loadingRow = loadingTree!.root.find(
+      (n) => n.props.accessibilityRole === "progressbar",
+    );
+    const resolvedRow = resolvedTree!.root.find(
+      (n) => n.props.accessibilityRole === "button",
+    );
+
+    const loadingGeometry = rowGeometry(loadingRow);
+    const resolvedGeometry = rowGeometry(resolvedRow);
+
+    expect(loadingGeometry.minHeight).toBe(resolvedGeometry.minHeight);
+    expect(loadingGeometry.paddingVertical).toBe(resolvedGeometry.paddingVertical);
+    expect(loadingGeometry.paddingHorizontal).toBe(resolvedGeometry.paddingHorizontal);
+    expect(loadingGeometry.gap).toBe(resolvedGeometry.gap);
+  });
+
+  it("does not animate the shimmer under Reduce Motion (degrades to a static placeholder)", async () => {
+    mockReduceMotion(true);
+    const loopSpy = jest
+      .spyOn(Animated, "loop")
+      .mockReturnValue({ start: jest.fn(), stop: jest.fn() } as never);
+
+    act(() => {
+      render(<ItemTimelineRow loading accessibilityLabel="Estimating" />);
+    });
+    await act(async () => {});
+
+    expect(loopSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("ItemTimelineRow — beat 1: resolve fade (FTY-180/181)", () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it("resolves in place: one instance goes loading→resolved and eases the value in on the transition, not during loading (animateResolve)", () => {
+    mockReduceMotion(false);
+    // The Skeleton shimmer drives Animated.loop/timing; the resolve fade is a
+    // spring (Reduce Motion off), so assert on spring to isolate the beat.
+    jest
+      .spyOn(Animated, "loop")
+      .mockReturnValue({ start: jest.fn(), stop: jest.fn() } as never);
+
+    // Mount as the loading skeleton, then update the SAME tree to resolved with
+    // animateResolve. The timeline keys the pending row and the first resolved
+    // row by the same event id, so React reuses this one instance — exactly what
+    // drives the in-place fade.
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(<ItemTimelineRow loading accessibilityLabel="Estimating" />);
+    });
+
+    // While loading, the resolve fade has not run — the shimmer owns the visuals.
+    expect(Animated.spring).not.toHaveBeenCalled();
+
+    act(() => {
+      tree!.update(<ItemTimelineRow item={foodItem()} animateResolve />);
+    });
+
+    // The value row is now present (no longer a progressbar) and the fade played
+    // on the transition — the resolved value eased in over the skeleton footprint.
+    expect(
+      tree!.root.findAll((n) => n.props.accessibilityRole === "progressbar"),
+    ).toHaveLength(0);
+    expect(allA11yLabels(tree!)).toContain("Greek yogurt, 150 kcal");
+    expect(Animated.spring).toHaveBeenCalled();
+  });
+
   it("eases the value in with a spring when the row resolves (animateResolve)", () => {
     act(() => {
       render(<ItemTimelineRow item={foodItem()} animateResolve />);

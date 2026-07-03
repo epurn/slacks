@@ -129,8 +129,9 @@ export async function listTodayLogEvents(
  * derived food/exercise item rows. This is the item-forward read the timeline
  * uses to render a completed entry's resolved value rows (name · kcal · source)
  * — the plain `listTodayLogEvents` above carries only event envelopes, so it
- * cannot populate the item rows. Owner-scoped like every other day read; the
- * `day` query mirrors the event list.
+ * cannot populate the item rows that a pending row resolves into (FTY-180).
+ * Owner-scoped like every other day read; the `day` query mirrors the event
+ * list.
  */
 export async function listTodayLogEventEntries(
   session: LogEventSession,

@@ -14,6 +14,20 @@
 import { useCameraPermissions as useExpoCameraPermissions } from "expo-camera";
 import type { PermissionResponse } from "expo";
 
+import { isE2EMode, e2eCameraPermissionsHook } from "@/e2e/launchMode";
+
+/**
+ * Camera-permission source used when a consumer does not inject one. In an E2E
+ * build this is the granted-permission stub (FTY-194) so the scanner's granted
+ * chrome renders on the simulator, which has no camera; otherwise it is
+ * expo-camera's real hook. Chosen once at module load — `isE2EMode()` is a
+ * compile-time-constant gate, so release builds always get the real hook and
+ * Metro dead-code-eliminates the E2E branch.
+ */
+const defaultPermissionsHook: typeof useExpoCameraPermissions = isE2EMode()
+  ? e2eCameraPermissionsHook
+  : useExpoCameraPermissions;
+
 export type CameraPermissionStatus =
   | "loading" // OS permission state not yet resolved
   | "undetermined" // user has not been asked yet
@@ -46,11 +60,12 @@ export function resolvePermissionStatus(
  * Camera permission hook. Wraps `useCameraPermissions` from expo-camera into
  * the compact domain type used by `CameraCapture` and its consumers.
  *
- * @param permissionsHook - Injectable for tests; defaults to expo-camera's
- *   `useCameraPermissions`.
+ * @param permissionsHook - Injectable for tests; defaults to
+ *   `defaultPermissionsHook` (expo-camera's real hook, or the E2E granted stub
+ *   in an E2E build).
  */
 export function useCameraPermission(
-  permissionsHook: typeof useExpoCameraPermissions = useExpoCameraPermissions,
+  permissionsHook: typeof useExpoCameraPermissions = defaultPermissionsHook,
 ): CameraPermission {
   const [permission, requestPermission] = permissionsHook();
 
