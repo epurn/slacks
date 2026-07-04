@@ -185,7 +185,7 @@ const styles = StyleSheet.create({
     fontVariant: ["tabular-nums"],
   },
   candidateChevron: {
-    fontSize: 20,
+    fontSize: typeScale.title3,
   },
   emptyLabel: {
     fontSize: typeScale.subhead,

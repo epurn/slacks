@@ -379,7 +379,7 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   leverChevron: {
-    fontSize: 20,
+    fontSize: typeScale.title3,
     fontWeight: "300",
   },
 });

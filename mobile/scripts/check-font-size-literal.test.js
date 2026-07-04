@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("fs");
+const path = require("path");
 
 const {
   scanSource,
@@ -124,6 +125,14 @@ describe("font-size-baseline.json", () => {
     expect(baselinedFiles.has("components/ui/DisplayText.tsx")).toBe(false);
   });
 
+  it("does not baseline the mobile-correction sites drained by FTY-214", () => {
+    const baselinedFiles = new Set(baseline.files.map((entry) => entry.file));
+    expect(baselinedFiles.has("components/CorrectionSheet.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/correction/AdvancedLeverRow.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/correction/AmountStepper.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/correction/ChangeMatchPanel.tsx")).toBe(false);
+  });
+
   it("enumerates the currently-known per-screen numeric fontSize sites", () => {
     const byFile = Object.fromEntries(
       baseline.files.map((entry) => [entry.file, entry.sites.length]),
@@ -134,10 +143,6 @@ describe("font-size-baseline.json", () => {
       "components/StatusIcon.tsx": 1,
       "components/TypeaheadSuggestionBar.tsx": 1,
       "components/today/SignInRequired.tsx": 1,
-      "components/CorrectionSheet.tsx": 1,
-      "components/correction/AdvancedLeverRow.tsx": 1,
-      "components/correction/AmountStepper.tsx": 1,
-      "components/correction/ChangeMatchPanel.tsx": 1,
       "components/WeightEntryInput.tsx": 4,
       "components/WeightScreen.tsx": 4,
       "components/WeightTrendChart.tsx": 5,
@@ -177,5 +182,28 @@ describe("font-size-baseline.json", () => {
     const entryRow = byFile.get("components/EntryRow.tsx");
     expect(entryRow).toBeDefined();
     expect([...entryRow.values()].reduce((a, b) => a + b, 0)).toBe(7);
+  });
+});
+
+describe("FTY-214 — correction-owned fontSize sites are fully drained", () => {
+  // The correction sheet host, its ClarifyMode branch, and every panel under
+  // components/correction/.
+  const CORRECTION_OWNED_FILES = [
+    "components/CorrectionSheet.tsx",
+    "components/ClarifyMode.tsx",
+    "components/correction/AdvancedLeverRow.tsx",
+    "components/correction/AmountStepper.tsx",
+    "components/correction/ChangeMatchPanel.tsx",
+    "components/correction/OverridePanel.tsx",
+    "components/correction/ProvenanceBlock.tsx",
+    "components/correction/SaveFoodRow.tsx",
+  ];
+
+  it("has no remaining numeric fontSize literal in any correction-owned file", () => {
+    for (const rel of CORRECTION_OWNED_FILES) {
+      const abs = path.join(MOBILE_ROOT, rel);
+      const sites = scanSource(fs.readFileSync(abs, "utf8"), rel);
+      expect({ file: rel, sites }).toEqual({ file: rel, sites: [] });
+    }
   });
 });

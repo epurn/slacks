@@ -140,7 +140,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   stepperButtonLabel: {
-    fontSize: 22,
+    fontSize: typeScale.title2,
     fontWeight: "300",
   },
   stepperValue: {

@@ -99,54 +99,6 @@
       ]
     },
     {
-      "file": "components/CorrectionSheet.tsx",
-      "reason": "mobile-correction lane — FTY-214.",
-      "sites": [
-        {
-          "context": "styles.leverChevron",
-          "sizes": [
-            20
-          ]
-        }
-      ]
-    },
-    {
-      "file": "components/correction/AdvancedLeverRow.tsx",
-      "reason": "mobile-correction lane — FTY-214.",
-      "sites": [
-        {
-          "context": "styles.leverChevron",
-          "sizes": [
-            20
-          ]
-        }
-      ]
-    },
-    {
-      "file": "components/correction/AmountStepper.tsx",
-      "reason": "mobile-correction lane — FTY-214.",
-      "sites": [
-        {
-          "context": "styles.stepperButtonLabel",
-          "sizes": [
-            22
-          ]
-        }
-      ]
-    },
-    {
-      "file": "components/correction/ChangeMatchPanel.tsx",
-      "reason": "mobile-correction lane — FTY-214.",
-      "sites": [
-        {
-          "context": "styles.candidateChevron",
-          "sizes": [
-            20
-          ]
-        }
-      ]
-    },
-    {
       "file": "components/WeightEntryInput.tsx",
       "reason": "mobile-weight lane — FTY-215.",
       "sites": [
