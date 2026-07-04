@@ -1,8 +1,13 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
-import { AccessibilityInfo, Animated, useColorScheme } from 'react-native';
+import { Animated, useColorScheme } from 'react-native';
 import { ThemeProvider } from '@/theme';
 import { Skeleton } from '@/components/ui';
+import {
+  cleanupReactTestRenderers,
+  trackReactTestRenderer,
+} from '@/testUtils/reactTestRenderer';
+import { mockReduceMotion } from '@/testUtils/reduceMotion';
 
 // jest-expo's preset already mocks useColorScheme as a jest.fn() returning 'light'.
 const mockUseColorScheme = useColorScheme as jest.MockedFunction<typeof useColorScheme>;
@@ -14,24 +19,18 @@ function mount(element: React.ReactElement) {
       React.createElement(ThemeProvider, { override: 'light' }, element),
     );
   });
-  return tree!;
+  return trackReactTestRenderer(tree!);
 }
 
 describe('Skeleton', () => {
   beforeEach(() => {
     mockUseColorScheme.mockReturnValue('light');
     // Default: Reduce Motion is off
-    jest
-      .spyOn(AccessibilityInfo, 'isReduceMotionEnabled')
-      .mockResolvedValue(false);
-    // The component subscribes to live Reduce Motion changes; return a no-op
-    // removable subscription so the effect cleanup has something to call.
-    jest
-      .spyOn(AccessibilityInfo, 'addEventListener')
-      .mockReturnValue({ remove: jest.fn() } as never);
+    mockReduceMotion(false);
   });
 
   afterEach(() => {
+    cleanupReactTestRenderers();
     jest.restoreAllMocks();
   });
 
@@ -80,15 +79,7 @@ describe('Skeleton', () => {
       .spyOn(Animated, 'loop')
       .mockReturnValue({ start: jest.fn(), stop: jest.fn() } as never);
 
-    act(() => {
-      create(
-        React.createElement(
-          ThemeProvider,
-          { override: 'light' },
-          React.createElement(Skeleton, { width: 80, height: 20 }),
-        ),
-      );
-    });
+    mount(React.createElement(Skeleton, { width: 80, height: 20 }));
     // Let the isReduceMotionEnabled promise resolve inside useEffect.
     await act(async () => {});
 
@@ -96,29 +87,18 @@ describe('Skeleton', () => {
   });
 
   it('does not animate (no shimmer loop) when Reduce Motion is enabled', async () => {
-    jest
-      .spyOn(AccessibilityInfo, 'isReduceMotionEnabled')
-      .mockResolvedValue(true);
+    mockReduceMotion(true);
     const loopSpy = jest
       .spyOn(Animated, 'loop')
       .mockReturnValue({ start: jest.fn(), stop: jest.fn() } as never);
 
-    let tree: ReturnType<typeof create> | null = null;
-    act(() => {
-      tree = create(
-        React.createElement(
-          ThemeProvider,
-          { override: 'light' },
-          React.createElement(Skeleton, { width: 80, height: 20 }),
-        ),
-      );
-    });
+    const tree = mount(React.createElement(Skeleton, { width: 80, height: 20 }));
     // Let the isReduceMotionEnabled promise resolve inside useEffect.
     await act(async () => {});
 
     // The placeholder still renders, but the shimmer loop must never start.
     expect(
-      tree!.root.find((n) => n.props.accessibilityRole === 'progressbar'),
+      tree.root.find((n) => n.props.accessibilityRole === 'progressbar'),
     ).toBeTruthy();
     expect(loopSpy).not.toHaveBeenCalled();
   });

@@ -7,6 +7,10 @@ import {
 } from "./CorrectionSheet";
 import type { DerivedFoodItemDTO, ItemSourceDTO } from "@/api/derivedItems";
 import type { ApiSession } from "@/state/session";
+import {
+  cleanupReactTestRenderers,
+  trackReactTestRenderer,
+} from "@/testUtils/reactTestRenderer";
 import { ThemeProvider } from "@/theme";
 import { mockReduceMotion } from "@/testUtils/reduceMotion";
 
@@ -87,7 +91,7 @@ function mount(element: React.ReactElement): ReactTestRenderer {
   act(() => {
     tree = render(<ThemeProvider override="light">{element}</ThemeProvider>);
   });
-  return tree;
+  return trackReactTestRenderer(tree);
 }
 
 function allText(tree: ReactTestRenderer): string {
@@ -98,7 +102,10 @@ function allText(tree: ReactTestRenderer): string {
 }
 
 beforeEach(() => mockReduceMotion(false));
-afterEach(() => jest.restoreAllMocks());
+afterEach(() => {
+  cleanupReactTestRenderers();
+  jest.restoreAllMocks();
+});
 
 describe("CorrectionSheet accessibility details", () => {
   it("renders the full logged phrase in clarify mode without truncating it", () => {
