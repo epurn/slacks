@@ -111,12 +111,17 @@ describe("accent-text-baseline.json", () => {
     expect(baselinedFiles).not.toContain("components/correction/SaveFoodRow.tsx");
   });
 
+  it("does not baseline components/settings/BodySection.tsx — drained by FTY-212", () => {
+    expect(
+      baseline.sites.some((site) => site.file === "components/settings/BodySection.tsx"),
+    ).toBe(false);
+  });
+
   it("enumerates the currently-known per-screen accent-as-text sites", () => {
     const byFile = Object.fromEntries(baseline.sites.map((site) => [site.file, site.count]));
     expect(byFile).toEqual({
       "components/TrendsScreen.tsx": 1,
       "components/onboarding/MeasurementsStep.tsx": 1,
-      "components/settings/BodySection.tsx": 1,
     });
   });
 
@@ -203,5 +208,40 @@ describe("FTY-208 — correction-owned accent-as-text sites are fully drained", 
     const code = fs.readFileSync(path.join(MOBILE_ROOT, "components/ClarifyMode.tsx"), "utf8");
     const fillSites = code.match(/backgroundColor:[^}]*colors\.accent\b/g) ?? [];
     expect(fillSites.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("FTY-212 — settings-owned accent-as-text sites are fully drained", () => {
+  // The settings-owned files: the screen host at components/, and its
+  // section/row/primitive components under components/settings/.
+  const SETTINGS_OWNED_FILES = [
+    "components/SettingsScreen.tsx",
+    "components/settings/AccountSection.tsx",
+    "components/settings/BodySection.tsx",
+    "components/settings/DataAboutSection.tsx",
+    "components/settings/MiniTargetReveal.tsx",
+    "components/settings/OverrideEditCard.tsx",
+    "components/settings/PreferencesSection.tsx",
+    "components/settings/StateScreens.tsx",
+    "components/settings/TargetRow.tsx",
+    "components/settings/YouSection.tsx",
+    "components/settings/primitives.tsx",
+  ];
+
+  it("has no remaining color: colors.accent text site in any settings-owned file", () => {
+    for (const rel of SETTINGS_OWNED_FILES) {
+      const abs = path.join(MOBILE_ROOT, rel);
+      const lines = scanSource(fs.readFileSync(abs, "utf8"), rel);
+      expect({ file: rel, lines }).toEqual({ file: rel, lines: [] });
+    }
+  });
+
+  it("leaves BodySection.tsx's borderColor: colors.accent selection-ring site untouched", () => {
+    const code = fs.readFileSync(
+      path.join(MOBILE_ROOT, "components/settings/BodySection.tsx"),
+      "utf8",
+    );
+    const borderSites = code.match(/borderColor: selected \? colors\.accent\b/g) ?? [];
+    expect(borderSites.length).toBeGreaterThanOrEqual(1);
   });
 });
