@@ -6,6 +6,7 @@ import {
   computeEWMAFromEntries,
   computeHeadlineDelta,
   computeAdherence,
+  adherenceContentState,
   dayAdherenceState,
   ON_TARGET_TOLERANCE,
   DATE_RANGE_OPTIONS,
@@ -46,11 +47,13 @@ function summary(
   intake: number,
   targetCalories: number | null,
   hasIntake = true,
+  uncountedEntries = 0,
 ): DailySummaryDTO {
   return {
     date,
     intake: { calories: intake, protein_g: 80, carbs_g: 150, fat_g: 40 },
     has_intake: hasIntake,
+    uncounted_entries: uncountedEntries,
     target: targetCalories !== null ? makeTarget(targetCalories) : null,
     exercise: { active_calories: 0 },
   };
@@ -386,6 +389,77 @@ describe("computeAdherence", () => {
   it("days array length equals allDates length", () => {
     const result = computeAdherence([], allDates);
     expect(result.days).toHaveLength(allDates.length);
+  });
+
+  // ── Uncounted signal (FTY-188 / FTY-223) ────────────────────────────────
+  it("sums uncounted_entries across the range's own days", () => {
+    const summaries = [
+      summary("2026-06-01", 0, null, false, 2),
+      summary("2026-06-02", 0, null, false, 0),
+      summary("2026-06-03", 0, null, false, 3),
+    ];
+    const result = computeAdherence(summaries, allDates);
+    expect(result.uncountedEntries).toBe(5);
+  });
+
+  it("uncountedEntries is 0 when no day carries any", () => {
+    const summaries = [summary("2026-06-01", 1800, 1800)];
+    expect(computeAdherence(summaries, allDates).uncountedEntries).toBe(0);
+  });
+
+  it("a fetch gap (null day) contributes 0 uncounted, never NaN", () => {
+    const result = computeAdherence([null, null, null], allDates);
+    expect(result.uncountedEntries).toBe(0);
+  });
+
+  it("ignores uncounted_entries for days outside allDates", () => {
+    const summaries = [summary("2025-12-31", 0, null, false, 9)];
+    expect(computeAdherence(summaries, allDates).uncountedEntries).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Adherence content state (FTY-188) — honest empty / uncounted / data
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("adherenceContentState", () => {
+  const allDates = buildDayRange("2026-01-01", "2026-01-03");
+
+  it("'data' when at least one day carries counted intake", () => {
+    const s = computeAdherence([summary("2026-01-01", 1800, 1800)], allDates);
+    expect(adherenceContentState(s)).toBe("data");
+  });
+
+  it("'uncounted' when nothing is counted but entries await details", () => {
+    const s = computeAdherence(
+      [summary("2026-01-01", 0, null, false, 2)],
+      allDates,
+    );
+    expect(adherenceContentState(s)).toBe("uncounted");
+  });
+
+  it("'empty' when nothing is logged at all", () => {
+    const s = computeAdherence(
+      [summary("2026-01-01", 0, null, false, 0)],
+      allDates,
+    );
+    expect(adherenceContentState(s)).toBe("empty");
+  });
+
+  it("'empty' for a wholly-absent range (all fetch gaps)", () => {
+    const s = computeAdherence([null, null, null], allDates);
+    expect(adherenceContentState(s)).toBe("empty");
+  });
+
+  it("counted data wins over co-present uncounted entries (never 'uncounted')", () => {
+    const s = computeAdherence(
+      [
+        summary("2026-01-01", 1800, 1800),
+        summary("2026-01-02", 0, null, false, 3),
+      ],
+      allDates,
+    );
+    expect(adherenceContentState(s)).toBe("data");
   });
 });
 

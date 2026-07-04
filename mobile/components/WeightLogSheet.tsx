@@ -25,6 +25,7 @@ import {
   createWeightEntry as createWeightEntryApi,
   type WeightEntryDTO,
 } from "@/api/weightEntries";
+import { DisplayText } from "@/components/ui/DisplayText";
 import { NativeSheet } from "@/components/ui/NativeSheet";
 import { WeightEntryInput } from "@/components/WeightEntryInput";
 import type { UnitsPreference } from "@/state/profile";
@@ -105,7 +106,7 @@ export function WeightLogSheet({
             the sheet. The title carries a human-formatted date. */}
         <View style={styles.header}>
           <View style={styles.headerTitles}>
-            <Text style={[styles.title, { color: colors.text }]}>Log weight</Text>
+            <DisplayText scale="title2">Log weight</DisplayText>
             <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>
               {formatHumanDate(today, today)}
             </Text>
@@ -156,10 +157,6 @@ const styles = StyleSheet.create({
   headerTitles: {
     flex: 1,
     gap: 2,
-  },
-  title: {
-    fontSize: typeScale.title2,
-    fontWeight: "700",
   },
   dateLabel: {
     fontSize: typeScale.subhead,

@@ -192,8 +192,8 @@ function AuthGate() {
 /**
  * Root layout. Provides the design-system theme, the connected-server state, and
  * the authenticated-session context to every screen. The Stack hosts the tab
- * group plus the modal/standalone screens (connect, signin, onboarding, profile,
- * weight). StatusBar style is resolved from the active theme. `ConnectionProvider`
+ * group plus the modal/standalone screens (connect, signin, onboarding,
+ * profile). StatusBar style is resolved from the active theme. `ConnectionProvider`
  * hydrates the persisted server connection on launch; `SessionProvider` hydrates
  * the persisted session; `AppearanceProvider` hydrates the Light / Dark / System
  * preference; `GoalDirectionProvider` holds the session-scoped goal direction

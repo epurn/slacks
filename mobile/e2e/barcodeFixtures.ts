@@ -99,6 +99,7 @@ export const E2E_BARCODE_SUMMARY: DailySummaryDTO = {
   date: '2026-01-01',
   intake: { calories: 130, protein_g: 12, carbs_g: 9, fat_g: 5 },
   has_intake: true,
+  uncounted_entries: 0,
   target: E2E_TARGET,
   exercise: { active_calories: 0 },
 };

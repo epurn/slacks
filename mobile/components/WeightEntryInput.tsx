@@ -12,6 +12,7 @@ import type { UnitsPreference } from "@/state/profile";
 import { parseWeightInput, weightUnitLabel } from "@/state/weightEntries";
 import { useTheme } from "@/theme/ThemeContext";
 import type { ColorPalette } from "@/theme/colors";
+import { typeScale } from "@/theme";
 
 interface WeightEntryInputProps {
   unitsPreference: UnitsPreference;
@@ -116,17 +117,17 @@ function makeStyles(colors: ColorPalette) {
       backgroundColor: colors.surfaceRaised,
       borderRadius: 10,
       paddingHorizontal: 14,
-      fontSize: 17,
+      fontSize: typeScale.body,
       color: colors.text,
     },
     unit: {
-      fontSize: 17,
+      fontSize: typeScale.body,
       fontWeight: "500",
       color: colors.textMuted,
       minWidth: 24,
     },
     error: {
-      fontSize: 14,
+      fontSize: typeScale.detail,
       color: colors.coral,
       marginLeft: 4,
     },
@@ -142,7 +143,7 @@ function makeStyles(colors: ColorPalette) {
       backgroundColor: colors.controlBackground,
     },
     buttonLabel: {
-      fontSize: 16,
+      fontSize: typeScale.callout,
       fontWeight: "600",
       color: colors.accentForeground,
     },
