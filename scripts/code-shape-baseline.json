@@ -46,6 +46,12 @@
       "lane": "mobile",
       "lines": 1023,
       "reason": "FTY-181 adds beat-2 (correction-saved haptic) coverage — fires once per successful commit (amount step, re-resolve, override), not on a server failure or a validation error — crossing the 1000-line test threshold."
+    },
+    "mobile/e2e/launchMode.test.ts": {
+      "kind": "test",
+      "lane": "mobile",
+      "lines": 1031,
+      "reason": "FTY-245 adds the saved-food Portion PATCH regression guard (the E2E mock's derived-item PATCH branch must handle E2E_SAVED_FOOD_ITEM_ID, not just E2E_CORRECTION_ITEM_ID) plus an isolation guard proving the new branch doesn't disturb the estimated-correction PATCH branch, crossing the 1000-line test threshold."
     }
   },
   "boundary_imports": [

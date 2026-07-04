@@ -48,6 +48,7 @@ import {
   E2E_SAVED_FOOD,
   E2E_SAVED_FOOD_EVENT_ID,
   E2E_SAVED_FOOD_ITEM_ID,
+  E2E_SAVED_FOOD_EDITED_ITEM,
   E2E_SOURCE_CANDIDATE,
   E2E_RESOLVE_RAW_TEXT,
   E2E_RESOLVE_EVENT_ID,
@@ -729,6 +730,45 @@ describe('FTY-183 correction flow: stateful mock endpoints', () => {
     expect(updated.source?.label).toBe('USDA');
     expect(updated.calories).toBe(415);
     expect(updated.calories).not.toBe(E2E_SAVED_FOOD.calories);
+  });
+
+  // FTY-245 regression guard: the saved-food correction sheet's Portion
+  // (amount) stepper PATCHes this same endpoint against the saved-food item's
+  // derived-item id. Before this fix that PATCH fell through to the mock's
+  // default 404 ("E2E fixture not found for this URL"), which the client
+  // rendered as "We couldn't find that item." — this test fails again if that
+  // regresses.
+  it('a Portion PATCH on the saved-food item returns the recomputed item, not a 404', async () => {
+    const mockFetch = createE2EMockFetch();
+    const edited = await editDerivedItem(
+      apiSession,
+      'food',
+      E2E_SAVED_FOOD_ITEM_ID,
+      'quantity',
+      1.25,
+      mockFetch,
+    );
+    expect(edited.id).toBe(E2E_SAVED_FOOD_ITEM_ID);
+    expect(edited.item_type).toBe('food');
+    expect(edited).toEqual(E2E_SAVED_FOOD_EDITED_ITEM);
+    if (edited.item_type === 'food') {
+      expect(edited.calories).toBe(800);
+      expect(edited.is_edited).toBe(true);
+    }
+  });
+
+  it('the saved-food Portion PATCH branch does not disturb the estimated-correction PATCH branch', async () => {
+    const mockFetch = createE2EMockFetch();
+    await createLogEvent(apiSession, E2E_CORRECTION_RAW_TEXT, undefined, mockFetch);
+    const edited = await editDerivedItem(
+      apiSession,
+      'food',
+      E2E_CORRECTION_ITEM_ID,
+      'quantity',
+      1.25,
+      mockFetch,
+    );
+    expect(edited).toEqual(E2E_CORRECTION_EDITED_ITEM);
   });
 });
 

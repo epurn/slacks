@@ -70,6 +70,8 @@ import {
   e2eDailySummaryRange,
   E2E_SAVED_FOOD,
   E2E_SAVED_FOOD_EVENT,
+  E2E_SAVED_FOOD_ITEM_ID,
+  E2E_SAVED_FOOD_EDITED_ITEM,
   E2E_SOURCE_CANDIDATE,
   E2E_RERESOLVED_ITEM,
 } from './fixtures';
@@ -399,9 +401,19 @@ export function createE2EMockFetch(): typeof fetch {
     // commit, so the mock echoes the recomputed item for the correction flow's
     // amount step; correction.yaml asserts its 175-kcal value on-device. Matched
     // on the item id so it never intercepts an unrelated PATCH.
+    //
+    // FTY-245: the saved-food correction sheet's Portion (amount) stepper PATCHes
+    // the same endpoint against the saved-food synthetic item's derived-item id
+    // (E2E_SAVED_FOOD_ITEM_ID). Without this branch that PATCH fell through to the
+    // 404 default below and the sheet surfaced "We couldn't find that item."
+    // Matched on the item id exactly, like the correction branch above, so it
+    // never intercepts an unrelated PATCH (e.g. the correction item's).
     if (method === 'PATCH' && pathEnd.includes('/derived-items/')) {
       if (pathEnd.endsWith(`/${E2E_CORRECTION_ITEM_ID}`)) {
         return json(E2E_CORRECTION_EDITED_ITEM);
+      }
+      if (pathEnd.endsWith(`/${E2E_SAVED_FOOD_ITEM_ID}`)) {
+        return json(E2E_SAVED_FOOD_EDITED_ITEM);
       }
     }
 
