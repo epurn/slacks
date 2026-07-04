@@ -13,7 +13,7 @@ import {
 } from "@/api/savedFoods";
 import { useTheme } from "@/theme/ThemeContext";
 import type { ColorPalette } from "@/theme/colors";
-import { spacing } from "@/theme";
+import { spacing, typeScale } from "@/theme";
 
 /** Debounce window in ms: avoids a network call per keystroke. */
 const DEBOUNCE_MS = 300;
@@ -122,7 +122,7 @@ function makeStyles(colors: ColorPalette) {
       alignItems: "center",
     },
     chipText: {
-      fontSize: 14,
+      fontSize: typeScale.detail,
       color: colors.text,
       fontWeight: "500",
     },

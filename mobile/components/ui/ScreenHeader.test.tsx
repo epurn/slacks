@@ -3,7 +3,7 @@ import { Pressable, Text, View } from "react-native";
 import { act, create } from "react-test-renderer";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
-import { ThemeProvider } from "@/theme";
+import { DISPLAY_FONT_FAMILY, ThemeProvider, displayTracking, typeScale } from "@/theme";
 import { ScreenHeader } from "./ScreenHeader";
 
 // Stub expo-symbols so tests run without native modules.
@@ -50,13 +50,32 @@ describe("ScreenHeader", () => {
   it("renders the title at largeTitle font size (34)", () => {
     const tree = mount(<ScreenHeader title="Trends" />);
     const header = tree.root.find(
-      (n) => n.props.accessibilityRole === "header",
+      (n) =>
+        (n.type as unknown as string) === "Text" &&
+        n.props.accessibilityRole === "header",
     );
     expect(header.props.style).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ fontSize: 34 }),
       ]),
     );
+  });
+
+  it("routes the title through DisplayText (display face + tracking at typeScale.largeTitle)", () => {
+    const tree = mount(<ScreenHeader title="Today" />);
+    const header = tree.root.find(
+      (n) =>
+        (n.type as unknown as string) === "Text" &&
+        n.props.accessibilityRole === "header",
+    );
+    const flattened = (header.props.style as Record<string, unknown>[]).reduce(
+      (acc, s) => (s && typeof s === "object" ? { ...acc, ...s } : acc),
+      {} as Record<string, unknown>,
+    );
+    expect(flattened.fontFamily).toBe(DISPLAY_FONT_FAMILY);
+    expect(flattened.letterSpacing).toBe(displayTracking);
+    expect(flattened.fontSize).toBe(typeScale.largeTitle);
+    expect(flattened.fontWeight).toBe("700");
   });
 
   it("renders provided right-actions", () => {

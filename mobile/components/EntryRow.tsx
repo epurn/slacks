@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { LogEventDTO } from "@/api/logEvents";
 import { StatusIcon } from "@/components/StatusIcon";
 import { statusPresentation } from "@/state/today";
-import { useTheme } from "@/theme/ThemeContext";
+import { typeScale, useTheme } from "@/theme";
 import type { ColorPalette } from "@/theme/colors";
 
 /**
@@ -241,7 +241,7 @@ function makeStyles(colors: ColorPalette) {
       borderBottomColor: colors.separator,
     },
     failedHint: {
-      fontSize: 13,
+      fontSize: typeScale.footnote,
       marginTop: 2,
     },
     failedActions: {
@@ -256,21 +256,21 @@ function makeStyles(colors: ColorPalette) {
       justifyContent: "center",
     },
     failedActionText: {
-      fontSize: 14,
+      fontSize: typeScale.detail,
       fontWeight: "600",
     },
     body: {
       flex: 1,
     },
     text: {
-      fontSize: 16,
+      fontSize: typeScale.callout,
       color: colors.text,
     },
     clarifyText: {
       color: colors.textMuted,
     },
     truncationHint: {
-      fontSize: 12,
+      fontSize: typeScale.caption1,
       marginTop: 2,
     },
     addDetailChip: {
@@ -281,16 +281,16 @@ function makeStyles(colors: ColorPalette) {
       marginTop: 4,
     },
     addDetailChipText: {
-      fontSize: 13,
+      fontSize: typeScale.footnote,
       fontWeight: "600",
     },
     uncounted: {
-      fontSize: 16,
+      fontSize: typeScale.callout,
       minWidth: 24,
       textAlign: "right",
     },
     meta: {
-      fontSize: 13,
+      fontSize: typeScale.footnote,
       color: colors.textMuted,
       marginTop: 2,
     },

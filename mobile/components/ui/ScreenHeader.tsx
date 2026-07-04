@@ -1,7 +1,8 @@
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useTheme, spacing, typeScale } from "@/theme";
+import { spacing } from "@/theme";
+import { DisplayText } from "./DisplayText";
 
 interface ScreenHeaderProps {
   title: string;
@@ -22,19 +23,15 @@ interface ScreenHeaderProps {
  * would be double-indented relative to the content.
  */
 export function ScreenHeader({ title, actions }: ScreenHeaderProps) {
-  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
   return (
     <View
       style={[styles.container, { paddingTop: insets.top + spacing.sm }]}
     >
-      <Text
-        style={[styles.title, { color: colors.text }]}
-        accessibilityRole="header"
-      >
+      <DisplayText scale="largeTitle" accessibilityRole="header">
         {title}
-      </Text>
+      </DisplayText>
       {actions ? <View style={styles.actions}>{actions}</View> : null}
     </View>
   );
@@ -48,10 +45,6 @@ const styles = StyleSheet.create({
     // No paddingHorizontal: inherited from the host content container so the
     // title/actions align with the body (see component doc).
     paddingBottom: spacing.xs,
-  },
-  title: {
-    fontSize: typeScale.largeTitle,
-    fontWeight: "700",
   },
   actions: {
     flexDirection: "row",
