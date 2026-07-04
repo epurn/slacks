@@ -55,6 +55,7 @@ from app.estimator.fdc import (
     FdcResponseError,
     FdcTransientError,
     ProductFacts,
+    build_fdc_client,
 )
 from app.estimator.food_serving import NutritionFacts, resolve_grams, scale_facts
 from app.estimator.off import OFF_SOURCE, OFF_SOURCE_TYPE
@@ -504,8 +505,6 @@ def build_re_match_capability(session: Session) -> ReMatchCapability:
     The thin backend operation calls this per request; tests construct
     :class:`ReMatchCapability` directly with network-free providers.
     """
-
-    from app.estimator.fdc import build_fdc_client
 
     provider = UsdaCandidateProvider(build_fdc_client())
     return ReMatchCapability(session=session, providers=(provider,))

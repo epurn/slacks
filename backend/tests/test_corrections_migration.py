@@ -34,7 +34,7 @@ def test_corrections_migration_applies_and_rolls_back(tmp_path: Path) -> None:
         assert "corrections" in applied
 
         food_columns = {c["name"] for c in inspect(engine).get_columns("derived_food_items")}
-        assert _FOOD_SNAPSHOT_COLUMNS <= food_columns
+        assert food_columns >= _FOOD_SNAPSHOT_COLUMNS
         exercise_columns = {
             c["name"] for c in inspect(engine).get_columns("derived_exercise_items")
         }
@@ -44,7 +44,7 @@ def test_corrections_migration_applies_and_rolls_back(tmp_path: Path) -> None:
         downgrade(engine, "0007")
         remaining = set(inspect(engine).get_table_names())
         assert "corrections" not in remaining
-        assert _PRIOR_TABLES <= remaining
+        assert remaining >= _PRIOR_TABLES
         rolled_food = {c["name"] for c in inspect(engine).get_columns("derived_food_items")}
         assert not (_FOOD_SNAPSHOT_COLUMNS & rolled_food)
         rolled_exercise = {c["name"] for c in inspect(engine).get_columns("derived_exercise_items")}

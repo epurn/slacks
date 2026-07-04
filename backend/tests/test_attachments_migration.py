@@ -52,13 +52,13 @@ def test_log_attachments_migration_applies_and_rolls_back(tmp_path: Path) -> Non
     try:
         upgrade(engine, "head")
         applied = set(inspect(engine).get_table_names())
-        assert _NEW_TABLES <= applied
+        assert applied >= _NEW_TABLES
 
         # Roll back only 0011; the prior schema must remain intact (additive).
         downgrade(engine, "0010")
         remaining = set(inspect(engine).get_table_names())
         assert not (_NEW_TABLES & remaining)
-        assert _PRIOR_TABLES <= remaining
+        assert remaining >= _PRIOR_TABLES
     finally:
         engine.dispose()
 

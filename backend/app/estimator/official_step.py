@@ -270,7 +270,7 @@ class OfficialSourceResolveStep:
             context,
             candidate,
             query=_identity_query(candidate),
-            fetch=lambda url: self._fetch_official(url),
+            fetch=self._fetch_official,
             page_kind=_OFFICIAL_PAGE_KIND,
             source_type=OFFICIAL_SOURCE_TYPE,
         )
@@ -306,7 +306,7 @@ class OfficialSourceResolveStep:
             context,
             candidate,
             query=f"{_identity_query(candidate)} {REFERENCE_SEARCH_INTENT}",
-            fetch=lambda url: self._fetch_reference(url),
+            fetch=self._fetch_reference,
             page_kind=_REFERENCE_PAGE_KIND,
             source_type=REFERENCE_SOURCE_TYPE,
         )

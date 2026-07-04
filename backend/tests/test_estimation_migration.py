@@ -30,13 +30,13 @@ def test_estimation_migration_applies_and_rolls_back(tmp_path: Path) -> None:
     try:
         upgrade(engine, "head")
         applied = set(inspect(engine).get_table_names())
-        assert _NEW_TABLES <= applied
+        assert applied >= _NEW_TABLES
 
         # Roll back only the 0004 migration; the prior schema must remain intact.
         downgrade(engine, "0003")
         remaining = set(inspect(engine).get_table_names())
         assert not (_NEW_TABLES & remaining)
-        assert _PRIOR_TABLES <= remaining
+        assert remaining >= _PRIOR_TABLES
     finally:
         engine.dispose()
 

@@ -46,12 +46,29 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-# pycodestyle, pyflakes, isort, bugbear, pyupgrade, and bandit security rules.
-select = ["E", "F", "I", "B", "UP", "S"]
+# pycodestyle, pyflakes, isort, bugbear, pyupgrade, bandit security rules, plus
+# flake8-simplify (SIM), flake8-unused-arguments (ARG), mccabe complexity (C90),
+# Pylint (PL), Ruff-specific rules (RUF), and Perflint (PERF) so the verify gate
+# catches code smells and dead code mechanically instead of on the reviewer's
+# plate (FTY-231).
+select = ["E", "F", "I", "B", "UP", "S", "SIM", "ARG", "C90", "PL", "RUF", "PERF"]
+# Mathematical/typographic symbols used deliberately in scientific docstrings and
+# formulas (density ρ, multiplication ×, minus −, en-dash – in ranges). Replacing
+# them with ASCII look-alikes (ρ→p, ×→x) would corrupt the notation, so they are
+# allowed rather than "fixed". RUF001/002/003 still flag any other confusable.
+allowed-confusables = ["–", "−", "×", "ρ"]
+
+[tool.ruff.lint.pylint]
+# Smallest cap that fits the current cohesive signatures (the widest are 9-arg:
+# e.g. confirm_label_proposal's keyword-only nutrition adjustments), capped at 10
+# per FTY-231. Signature refactors are a Non-Goal; nothing exceeds this today.
+max-args = 9
 
 [tool.ruff.lint.per-file-ignores]
 # Assertions are the expected idiom in tests; S101 would flag every one.
-"tests/**" = ["S101"]
+# PLR2004 (literal assertions) and ARG (unused fixture/mock arguments) are
+# likewise idiomatic in test code, so they are ignored under tests/ only.
+"tests/**" = ["S101", "PLR2004", "ARG"]
 
 [tool.mypy]
 python_version = "3.12"

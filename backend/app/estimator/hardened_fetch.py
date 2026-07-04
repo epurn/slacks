@@ -231,7 +231,7 @@ def _is_local_service_address(address: str) -> bool:
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     """A redirect handler that refuses every redirect instead of following it."""
 
-    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+    def redirect_request(self, *_args: Any, **_kwargs: Any) -> None:
         raise FetchPolicyError("redirect_blocked")
 
 
@@ -449,7 +449,7 @@ def _open_json(
         status = exc.code
         exc.read()  # drain without surfacing the body
         message = f"provider returned HTTP {status}"
-        if status >= 500:
+        if status >= http.HTTPStatus.INTERNAL_SERVER_ERROR:
             raise FetchTransientError(message, status_code=status) from None
         raise FetchResponseError(message, status_code=status) from None
     except (urllib.error.URLError, TimeoutError):
@@ -548,7 +548,7 @@ def _open_text(
         status = exc.code
         exc.read()  # drain without surfacing the body
         message = f"provider returned HTTP {status}"
-        if status >= 500:
+        if status >= http.HTTPStatus.INTERNAL_SERVER_ERROR:
             raise FetchTransientError(message, status_code=status) from None
         raise FetchResponseError(message, status_code=status) from None
     except (urllib.error.URLError, TimeoutError):
@@ -659,13 +659,13 @@ class _InertTextExtractor(html.parser.HTMLParser):
         #: whenever this is non-zero.
         self._skip_depth = 0
 
-    def handle_starttag(self, tag: str, attrs: Any) -> None:
+    def handle_starttag(self, tag: str, _attrs: Any) -> None:
         if tag in _ACTIVE_CONTENT_ELEMENTS:
             self._skip_depth += 1
         elif tag in _BLOCK_ELEMENTS:
             self._chunks.append("\n")
 
-    def handle_startendtag(self, tag: str, attrs: Any) -> None:
+    def handle_startendtag(self, tag: str, _attrs: Any) -> None:
         # Self-closing tag (e.g. ``<br/>``): no subtree, just a possible break.
         if tag in _BLOCK_ELEMENTS:
             self._chunks.append("\n")

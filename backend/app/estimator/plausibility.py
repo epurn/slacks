@@ -295,7 +295,7 @@ class PlausibilityResult:
     clarification_question: str | None = None
 
 
-def check_candidate(candidate: ParsedCandidate) -> PlausibilityResult:
+def check_candidate(candidate: ParsedCandidate) -> PlausibilityResult:  # noqa: PLR0911 — many guards
     """Return whether ``candidate``'s quantity is physically plausible.
 
     Rules (generous, documented tunables — see module-level constants):
@@ -477,10 +477,15 @@ def _last_word_stem(text: str) -> str:
     return _count_word_stem(words[-1])
 
 
+#: Shortest word longer than the ``ies`` suffix itself, so ``word[:-3]`` keeps at
+#: least one stem character (e.g. "pies" -> "py", but "ies" is left untouched).
+_MIN_IES_STEM_LEN = 3
+
+
 def _count_word_stem(word: str) -> str:
     """Return a small plural-normalised form for food count terms."""
 
-    if len(word) > 3 and word.endswith("ies"):
+    if len(word) > _MIN_IES_STEM_LEN and word.endswith("ies"):
         return f"{word[:-3]}y"
     if len(word) > 1 and word.endswith("s"):
         return word[:-1]

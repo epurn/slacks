@@ -37,6 +37,7 @@ from sqlalchemy.orm import Mapped, Mapper, mapped_column
 
 from app.db import Base, UtcDateTime
 from app.enums import CandidateType, CorrectionSource
+from app.models.derived import DerivedExerciseItem, DerivedFoodItem
 
 
 def _utcnow() -> datetime:
@@ -114,8 +115,6 @@ event.listen(Correction, "before_delete", _reject_mutation)
 
 def correction_item_type(item: object) -> CandidateType:
     """Return the :class:`~app.enums.CandidateType` for a derived item instance."""
-
-    from app.models.derived import DerivedExerciseItem, DerivedFoodItem
 
     if isinstance(item, DerivedFoodItem):
         return CandidateType.FOOD

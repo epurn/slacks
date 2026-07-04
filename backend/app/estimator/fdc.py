@@ -196,7 +196,7 @@ class FdcNutrient(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    nutrientId: int | None = None  # noqa: N815 — FDC wire field name
+    nutrientId: int | None = None
     value: float | None = None
 
 
@@ -205,11 +205,11 @@ class FdcFood(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    fdcId: int  # noqa: N815 — FDC wire field name
+    fdcId: int
     description: str = Field(default="")
-    foodNutrients: list[FdcNutrient] = Field(default_factory=list)  # noqa: N815
-    servingSize: float | None = None  # noqa: N815 — FDC wire field name
-    servingSizeUnit: str | None = Field(default=None, max_length=32)  # noqa: N815
+    foodNutrients: list[FdcNutrient] = Field(default_factory=list)
+    servingSize: float | None = None
+    servingSizeUnit: str | None = Field(default=None, max_length=32)
 
     @field_validator("description", mode="before")
     @classmethod

@@ -30,7 +30,7 @@ def celery_enqueuer(*, log_event_id: uuid.UUID, user_id: uuid.UUID) -> None:
     that never enqueue.
     """
 
-    from app.estimator.tasks import process_log_event_task
+    from app.estimator.tasks import process_log_event_task  # noqa: PLC0415 — lazy (see docstring)
 
     process_log_event_task.delay(str(log_event_id), str(user_id))
 

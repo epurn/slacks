@@ -43,6 +43,7 @@ import {
 } from "@/api/labelProposal";
 import { AppIcon } from "@/components/ui/AppIcon";
 import { provenancePresentation } from "@/components/ui/ProvenanceIcon";
+import { ThemedNumber } from "@/components/ui/ThemedNumber";
 import type { ApiSession } from "@/state/session";
 import { formatValue } from "@/state/derivedItems";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
@@ -433,12 +434,11 @@ function ReviewValues({
       >
         {servingDisplay(item)}
       </Text>
-      <Text
-        style={[styles.calories, { color: colors.text }]}
+      <ThemedNumber
+        value={item.calories !== null ? `${Math.round(item.calories)} kcal` : "— kcal"}
+        scale="title2"
         accessibilityElementsHidden
-      >
-        {item.calories !== null ? `${Math.round(item.calories)} kcal` : "— kcal"}
-      </Text>
+      />
       <View style={styles.macroRow} accessibilityElementsHidden>
         <MacroChip label="P" value={item.protein_g} colors={colors} />
         <MacroChip label="C" value={item.carbs_g} colors={colors} />
@@ -641,11 +641,6 @@ const styles = StyleSheet.create({
   servingLabel: {
     fontSize: typeScale.subhead,
   },
-  calories: {
-    fontSize: typeScale.title2,
-    fontWeight: "700",
-    fontVariant: ["tabular-nums"],
-  },
   macroRow: {
     flexDirection: "row",
     gap: spacing.md,
@@ -678,7 +673,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   stepperButtonLabel: {
-    fontSize: 22,
+    fontSize: typeScale.title2,
     fontWeight: "300",
   },
   stepperValue: {

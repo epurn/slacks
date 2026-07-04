@@ -77,6 +77,10 @@ SELF_CONSISTENCY_FIRST_WINDOW = 2
 #: FTY-159 bake-off, ``calibration_summary.json``).
 HYBRID_AGREEMENT_WEIGHT = 0.6
 
+#: Minimum number of samples required before unanimity can be attested — a single
+#: sample trivially "agrees" with itself and says nothing about consistency.
+_MIN_SAMPLES_FOR_UNANIMITY = 2
+
 
 @dataclass(frozen=True)
 class SelfConsistencySignal:
@@ -287,7 +291,7 @@ def hybrid_score(agreement: float, verbalized: float) -> float:
 def _is_unanimous(samples: Sequence[ParseResult]) -> bool:
     """Whether ``samples`` can attest full agreement (needs >= 2 samples)."""
 
-    return len(samples) >= 2 and agreement_score(samples) == 1.0
+    return len(samples) >= _MIN_SAMPLES_FOR_UNANIMITY and agreement_score(samples) == 1.0
 
 
 def _sample_parallel(provider: Provider, prompt: str, count: int) -> tuple[ParseResult, ...]:

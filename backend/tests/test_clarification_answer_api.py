@@ -524,7 +524,7 @@ def test_cross_user_and_unknown_access_fails_closed(client: TestClient, session:
     """Cross-user event, nonexistent event, and a foreign question id are all an
     indistinguishable 404, with nothing persisted (no existence oracle)."""
 
-    bob_id, bob_auth, bob_event_id, bob_question_ids = _drive_to_needs_clarification(
+    bob_id, _bob_auth, bob_event_id, bob_question_ids = _drive_to_needs_clarification(
         client, session, "answer-bob@example.com"
     )
     alice_id, alice_auth, alice_event_id, alice_question_ids = _drive_to_needs_clarification(

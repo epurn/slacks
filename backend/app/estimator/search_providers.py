@@ -178,7 +178,7 @@ class BraveSearchProvider:
             available=self._settings.is_available,
         )
 
-    def search(self, query: str) -> SearchResult:
+    def search(self, query: str) -> SearchResult:  # noqa: PLR0911 — status guards
         """Search the provider for ``query`` and return candidate URLs + a status."""
 
         if not self._settings.is_enabled:
@@ -261,7 +261,7 @@ class SearXNGSearchProvider:
             available=self._settings.is_available,
         )
 
-    def search(self, query: str) -> SearchResult:
+    def search(self, query: str) -> SearchResult:  # noqa: PLR0911 — status guards
         """Search the instance for ``query`` and return candidate URLs + a status."""
 
         if not self._settings.is_enabled:
@@ -323,7 +323,7 @@ class NullSearchProvider:
             available=False,
         )
 
-    def search(self, query: str) -> SearchResult:
+    def search(self, query: str) -> SearchResult:  # noqa: ARG002 — protocol stub; query unused
         return SearchResult(status=SearchStatus.DISABLED)
 
 

@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess  # noqa: S404 — invocation is fixed argv, tools disabled, no shell
+import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -347,7 +347,7 @@ _FENCE_START_RE = re.compile(r"^```(?:json)?\s*\n?", re.IGNORECASE)
 _FENCE_END_RE = re.compile(r"\n?```\s*$")
 
 
-def _extract_first_json_object(text: str) -> tuple[str, str] | None:
+def _extract_first_json_object(text: str) -> tuple[str, str] | None:  # noqa: C901 — brace/string scanner
     """Find the first balanced top-level ``{...}`` object in ``text``.
 
     Returns ``(object_text, remainder)`` where ``remainder`` is everything after

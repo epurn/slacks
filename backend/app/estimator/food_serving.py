@@ -309,6 +309,4 @@ def nutrition_facts_plausible(facts: NutritionFacts) -> bool:
         return False
     if facts.calories < 0 or facts.calories > _MAX_ENERGY_KCAL_PER_100G:
         return False
-    if facts.protein_g < 0 or facts.carbs_g < 0 or facts.fat_g < 0:
-        return False
-    return True
+    return not (facts.protein_g < 0 or facts.carbs_g < 0 or facts.fat_g < 0)
