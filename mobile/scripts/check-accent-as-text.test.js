@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("fs");
+const path = require("path");
 
 const {
   scanSource,
@@ -90,12 +91,16 @@ describe("accent-text-baseline.json", () => {
     expect(baseline.sites.some((site) => site.file === "app/day.tsx")).toBe(false);
   });
 
+  it("does not baseline the Today-owned files drained by FTY-207 — they are fixed, not deferred", () => {
+    const baselinedFiles = baseline.sites.map((site) => site.file);
+    expect(baselinedFiles).not.toContain("components/EntryRow.tsx");
+    expect(baselinedFiles).not.toContain("components/ConfirmParsedValuesSheet.tsx");
+  });
+
   it("enumerates the currently-known per-screen accent-as-text sites", () => {
     const byFile = Object.fromEntries(baseline.sites.map((site) => [site.file, site.count]));
     expect(byFile).toEqual({
-      "components/ConfirmParsedValuesSheet.tsx": 1,
       "components/CorrectionSheet.tsx": 2,
-      "components/EntryRow.tsx": 3,
       "components/TrendsScreen.tsx": 1,
       "components/WeightLogSheet.tsx": 1,
       "components/correction/ChangeMatchPanel.tsx": 1,
@@ -115,5 +120,45 @@ describe("accent-text-baseline.json", () => {
       [...loadBaselineCounts(DEFAULT_BASELINE_PATH).entries()].map(([f, c]) => [f, c]),
     );
     expect(live).toEqual(baselineCounts);
+  });
+});
+
+describe("FTY-207 — Today-owned accent-as-text sites are fully drained", () => {
+  // The Today-owned files: the row/status/banner/suggestion components at
+  // components/, the today screen host + its sheets under components/today/,
+  // and ConfirmParsedValuesSheet.tsx — a Today sheet mounted from
+  // components/today/TodaySheetHost.tsx that lives at components/ (not
+  // components/today/), so a components/today/ glob alone would miss it.
+  const TODAY_OWNED_FILES = [
+    "components/EntryRow.tsx",
+    "components/OfflineEntryRow.tsx",
+    "components/ItemTimelineRow.tsx",
+    "components/TypeaheadSuggestionBar.tsx",
+    "components/StatusIcon.tsx",
+    "components/ConnectionBanner.tsx",
+    "components/TodayScreen.tsx",
+    "components/ConfirmParsedValuesSheet.tsx",
+    "components/today/ClusterView.tsx",
+    "components/today/SignInRequired.tsx",
+    "components/today/Timeline.tsx",
+    "components/today/TodayComposer.tsx",
+    "components/today/TodaySheetHost.tsx",
+  ];
+
+  it("has no remaining color: colors.accent text site in any Today-owned file", () => {
+    for (const rel of TODAY_OWNED_FILES) {
+      const abs = path.join(MOBILE_ROOT, rel);
+      const lines = scanSource(fs.readFileSync(abs, "utf8"), rel);
+      expect({ file: rel, lines }).toEqual({ file: rel, lines: [] });
+    }
+  });
+
+  it("leaves ConfirmParsedValuesSheet.tsx's backgroundColor: colors.accent fill sites untouched", () => {
+    const code = fs.readFileSync(
+      path.join(MOBILE_ROOT, "components/ConfirmParsedValuesSheet.tsx"),
+      "utf8",
+    );
+    const fillSites = code.match(/backgroundColor: colors\.accent\b/g) ?? [];
+    expect(fillSites.length).toBeGreaterThanOrEqual(2);
   });
 });
