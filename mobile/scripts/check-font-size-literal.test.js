@@ -125,6 +125,9 @@ describe("font-size-baseline.json", () => {
     expect(baselinedFiles.has("components/WeightEntryInput.tsx")).toBe(false);
     expect(baselinedFiles.has("components/WeightScreen.tsx")).toBe(false);
     expect(baselinedFiles.has("components/WeightTrendChart.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/EWMATrendChart.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/TrendsScreen.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/AdherenceStrip.tsx")).toBe(false);
   });
 
   it("does not baseline the mobile-today sites drained by FTY-213", () => {
@@ -148,7 +151,6 @@ describe("font-size-baseline.json", () => {
       "components/BarcodeScannerScreen.tsx": 2,
       "components/CameraCapture.tsx": 3,
       "components/LabelCaptureScreen.tsx": 6,
-      "components/EWMATrendChart.tsx": 5,
     });
   });
 

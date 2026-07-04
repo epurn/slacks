@@ -34,7 +34,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AppIcon, ScreenHeader, SegmentedControl, Skeleton } from "@/components/ui";
+import { AppIcon, ScreenHeader, SegmentedControl, Skeleton, ThemedNumber } from "@/components/ui";
 
 import {
   WeightApiError,
@@ -367,9 +367,10 @@ export function TrendsScreen({
                   : ""
             }`}
           >
-            <Text style={[styles.headlineValue, { color: colors.text }]}>
-              {`${headline.current} ${headline.unit}`}
-            </Text>
+            <ThemedNumber
+              value={`${headline.current} ${headline.unit}`}
+              scale="title1"
+            />
             <Text
               style={[
                 styles.headlineDelta,
@@ -663,10 +664,6 @@ const styles = StyleSheet.create({
     alignItems: "baseline",
     flexWrap: "wrap",
     marginBottom: spacing.xs,
-  },
-  headlineValue: {
-    fontSize: typeScale.title1,
-    fontWeight: "700",
   },
   headlineDelta: {
     fontSize: typeScale.callout,

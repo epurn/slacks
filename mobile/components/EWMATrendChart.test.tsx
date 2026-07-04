@@ -4,7 +4,7 @@ import { Circle, Polyline } from "react-native-svg";
 import { EWMATrendChart } from "./EWMATrendChart";
 import type { WeightEntryDTO } from "@/api/weightEntries";
 import { computeEWMAFromEntries } from "@/state/trends";
-import { lightPalette } from "@/theme";
+import { lightPalette, typeScale } from "@/theme";
 
 // Tests render with the default (light) theme, so the chart draws with the
 // light palette's accent / secondary colours.
@@ -214,6 +214,32 @@ describe("EWMATrendChart — single point", () => {
     expect(img.props.accessibilityLabel).toBeTruthy();
     expect(img.props.accessibilityLabel).toContain("June 27");
     expect(img.props.accessibilityLabel).not.toContain("2026-06-27");
+  });
+
+  it("renders the smoothed value through the display face (tabular-nums, per typeScale.title2)", () => {
+    const tree = render(
+      <EWMATrendChart
+        entries={singleEntry}
+        ewmaKg={singleEwma}
+        unitsPreference="metric"
+        loading={false}
+        error={null}
+        today={TEST_TODAY}
+        width={TEST_WIDTH}
+      />,
+    );
+    const valueNode = tree.root.find(
+      (n) =>
+        (n.type as unknown as string) === "Text" &&
+        typeof n.props.children === "string" &&
+        (n.props.children as string).includes("kg"),
+    );
+    const styles: Array<Record<string, unknown>> = Array.isArray(valueNode.props.style)
+      ? valueNode.props.style
+      : [valueNode.props.style];
+    const combined = Object.assign({}, ...styles);
+    expect(combined.fontVariant).toEqual(["tabular-nums"]);
+    expect(combined.fontSize).toBe(typeScale.title2);
   });
 
   it("renders without crash for sparse single-point range (no startup artifact)", () => {
