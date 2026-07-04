@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from app.llm import transport
-from app.llm.errors import LLMResponseError
+from app.llm.errors import LLMResponseError, StructuredOutputValidationError
 from app.llm.providers.anthropic import AnthropicProvider
 from tests.llm.conftest import (
     SENSITIVE_IMAGE_BYTES,
@@ -102,7 +102,5 @@ def test_schema_invalid_tool_input_is_rejected(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(transport, "post_json", fake_post_json)
 
     # Validation happens in the base class; the wrong-typed field is rejected.
-    from app.llm.errors import StructuredOutputValidationError
-
     with pytest.raises(StructuredOutputValidationError):
         _provider().structured_completion("an apple", Candidate)

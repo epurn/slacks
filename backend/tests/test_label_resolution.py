@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 from app.db import create_session_factory
 from app.enums import DerivedItemStatus, EstimationJobStatus, LogEventStatus
 from app.estimator.label_step import USER_LABEL_SOURCE_TYPE, LabelInput, LabelResolveStep
-from app.estimator.pipeline import Pipeline
+from app.estimator.pipeline import EstimationContext, Pipeline
 from app.estimator.processing import process_estimation
 from app.llm.errors import LLMError, LLMTransientError
 from app.llm.providers.fake import FakeProvider
@@ -394,11 +394,6 @@ def test_transient_provider_error_is_retryable(client: TestClient, session: Sess
 
 def test_label_source_refs_idempotent_no_duplicates_on_repeat() -> None:
     """Running the label step twice does not duplicate source refs (de-duplication works)."""
-
-    import uuid
-
-    from app.estimator.pipeline import EstimationContext
-    from app.llm.providers.fake import FakeProvider
 
     ctx = EstimationContext(
         log_event_id=uuid.uuid4(),

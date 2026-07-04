@@ -37,10 +37,11 @@ prose, the no-real-PII rule, and how to extend the band.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
-import subprocess  # noqa: S404 — fixed argv, no shell, prompt on stdin, keys withheld
+import subprocess
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -547,7 +548,7 @@ _FENCE_START_RE = re.compile(r"^```(?:json)?\s*\n?", re.IGNORECASE)
 _FENCE_END_RE = re.compile(r"\n?```\s*$")
 
 
-def _extract_first_json_object(text: str) -> tuple[str, str] | None:
+def _extract_first_json_object(text: str) -> tuple[str, str] | None:  # noqa: C901 — brace/string scanner
     """Find the first balanced top-level ``{...}`` object (string-escape aware)."""
 
     start = -1
@@ -674,8 +675,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     Fails closed (exit 2) with a clear message when a login is absent — never
     fabricates a label, never runs on the default verify path.
     """
-
-    import argparse
 
     parser = argparse.ArgumentParser(
         description=(

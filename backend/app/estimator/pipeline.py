@@ -428,9 +428,9 @@ def default_pipeline(
 
     # Imported here rather than at module top to avoid a cycle: the steps import the
     # context/exception types defined above in this module.
-    from app.estimator.exercise_step import ExerciseCalculateStep
-    from app.estimator.food_step import FoodResolveStep
-    from app.estimator.parse import ParseStep
+    from app.estimator.exercise_step import ExerciseCalculateStep  # noqa: PLC0415 — import cycle
+    from app.estimator.food_step import FoodResolveStep  # noqa: PLC0415 — import cycle
+    from app.estimator.parse import ParseStep  # noqa: PLC0415 — import cycle
 
     steps: list[EstimationStep] = [ParseStep(provider), ExerciseCalculateStep()]
     if food_resolver is not None:
@@ -455,6 +455,6 @@ def label_pipeline(provider: Provider) -> Pipeline:
 
     # Imported here rather than at module top to avoid a cycle: the step imports the
     # context/exception types defined above in this module.
-    from app.estimator.label_step import LabelResolveStep
+    from app.estimator.label_step import LabelResolveStep  # noqa: PLC0415 — import cycle
 
     return Pipeline([LabelResolveStep(provider)])

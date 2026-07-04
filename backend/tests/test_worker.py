@@ -26,8 +26,8 @@ def test_celery_app_includes_estimation_task_module() -> None:
 def test_estimation_task_is_registered() -> None:
     # Importing the task module registers the single estimation task on the
     # module-level app (the worker entrypoint ``app.worker:celery_app``).
-    import app.estimator.tasks  # noqa: F401  (import registers the task)
-    from app.worker import celery_app
+    import app.estimator.tasks  # noqa: F401, PLC0415 — import registers the task
+    from app.worker import celery_app  # noqa: PLC0415 — local with registration import
 
     user_tasks = [name for name in celery_app.tasks if not name.startswith("celery.")]
 

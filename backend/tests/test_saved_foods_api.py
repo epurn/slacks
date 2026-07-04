@@ -242,7 +242,7 @@ def test_search_only_returns_callers_own_foods(client: TestClient, db_engine: En
 
 
 def test_cross_user_search_fails_closed(client: TestClient, db_engine: Engine) -> None:
-    alice_id, alice_auth = register(client, "alice-xsearch@example.com")
+    _alice_id, alice_auth = register(client, "alice-xsearch@example.com")
     bob_id, bob_auth = register(client, "bob-xsearch@example.com")
     _save(client, bob_id, bob_auth, name="Bob Secret Food", phrase="secret")
 

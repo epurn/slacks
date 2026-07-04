@@ -19,6 +19,7 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+from http import HTTPStatus
 from typing import Any
 
 from app.llm.errors import LLMConfigurationError, LLMResponseError, LLMTransientError
@@ -78,7 +79,7 @@ def post_json(
         # hiccup than to a deterministic client error. Everything else in 4xx
         # (auth, not-found, bad-request) is a client error where retrying is
         # pointless; those stay LLMResponseError.
-        if status >= 500 or status in (408, 425, 429):
+        if status >= HTTPStatus.INTERNAL_SERVER_ERROR or status in (408, 425, 429):
             raise LLMTransientError(f"provider returned HTTP {status}") from None
         raise LLMResponseError(f"provider returned HTTP {status}") from None
     except (urllib.error.URLError, TimeoutError):

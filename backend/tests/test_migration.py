@@ -21,7 +21,7 @@ def test_baseline_migration_applies_and_rolls_back(tmp_path: Path) -> None:
     try:
         upgrade(engine, "head")
         applied = set(inspect(engine).get_table_names())
-        assert _TABLES <= applied
+        assert applied >= _TABLES
 
         downgrade(engine, "base")
         remaining = set(inspect(engine).get_table_names())

@@ -41,13 +41,13 @@ def test_saved_foods_migration_applies_and_rolls_back(tmp_path: Path) -> None:
     try:
         upgrade(engine, "head")
         applied = set(inspect(engine).get_table_names())
-        assert _NEW_TABLES <= applied
+        assert applied >= _NEW_TABLES
 
         # Roll back only 0009; the prior schema must remain intact.
         downgrade(engine, "0008")
         remaining = set(inspect(engine).get_table_names())
         assert not (_NEW_TABLES & remaining)
-        assert _PRIOR_TABLES <= remaining
+        assert remaining >= _PRIOR_TABLES
     finally:
         engine.dispose()
 

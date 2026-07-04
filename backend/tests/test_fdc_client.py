@@ -67,7 +67,7 @@ def _client(reply: dict[str, Any] | Exception) -> tuple[FdcClient, _RecordingTra
 
 
 def test_lookup_maps_fdc_food_to_canonical_facts() -> None:
-    client, transport = _client(_RICE_RESPONSE)
+    client, _transport = _client(_RICE_RESPONSE)
 
     facts = client.lookup("White Rice")
 

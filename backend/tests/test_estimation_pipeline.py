@@ -8,9 +8,12 @@ retryable, and the runner never copies raw user text into the trace.
 from __future__ import annotations
 
 import uuid
+from typing import cast
 
 import pytest
+from sqlalchemy.orm import Session
 
+from app.estimator.food_step import FoodResolver
 from app.estimator.pipeline import (
     EstimationContext,
     NeedsClarification,
@@ -85,12 +88,6 @@ def test_default_pipeline_uses_real_parse_then_exercise_calculate() -> None:
 def test_default_pipeline_appends_food_resolution_when_resolver_supplied() -> None:
     # The worker supplies a session-bound food resolver (FTY-044); the food step is
     # then appended after parse + exercise. Composition only — nothing is run.
-    from typing import cast
-
-    from sqlalchemy.orm import Session
-
-    from app.estimator.food_step import FoodResolver
-
     class _DisabledSource:
         enabled = False
 

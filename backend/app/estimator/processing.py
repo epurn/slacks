@@ -351,7 +351,7 @@ def _run_pipeline(pipeline: Pipeline, context: EstimationContext) -> PipelineRes
 
     try:
         return pipeline.run(context)
-    except Exception as exc:  # noqa: BLE001 (defensive worker boundary)
+    except Exception as exc:
         return PipelineResult(
             PipelineOutcome.FAILED,
             f"unexpected step error: {type(exc).__name__}",

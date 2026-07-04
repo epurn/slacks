@@ -199,9 +199,8 @@ def test_transient_error_logging_is_sanitized(
         max_retries=1,
     )
 
-    with caplog.at_level(logging.INFO, logger="app.llm"):
-        with pytest.raises(LLMTransientError):
-            provider.structured_completion("user ate SENSITIVE_FOOD", Candidate)
+    with caplog.at_level(logging.INFO, logger="app.llm"), pytest.raises(LLMTransientError):
+        provider.structured_completion("user ate SENSITIVE_FOOD", Candidate)
 
     assert "sk-secret-key" not in caplog.text
     assert "SENSITIVE_FOOD" not in caplog.text

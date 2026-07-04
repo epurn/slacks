@@ -26,15 +26,15 @@ def test_food_migration_applies_and_rolls_back(tmp_path: Path) -> None:
     try:
         upgrade(engine, "head")
         applied = set(inspect(engine).get_table_names())
-        assert _NEW_TABLES <= applied
+        assert applied >= _NEW_TABLES
         food_columns = {c["name"] for c in inspect(engine).get_columns("derived_food_items")}
-        assert _FOOD_RESOLUTION_COLUMNS <= food_columns
+        assert food_columns >= _FOOD_RESOLUTION_COLUMNS
 
         # Roll back only 0007; the prior schema must remain intact.
         downgrade(engine, "0006")
         remaining = set(inspect(engine).get_table_names())
         assert not (_NEW_TABLES & remaining)
-        assert _PRIOR_TABLES <= remaining
+        assert remaining >= _PRIOR_TABLES
         rolled_back = {c["name"] for c in inspect(engine).get_columns("derived_food_items")}
         assert not (_FOOD_RESOLUTION_COLUMNS & rolled_back)
     finally:

@@ -352,8 +352,9 @@ def test_redirects_are_refused_so_redirect_to_private_cannot_bounce() -> None:
 
 def test_default_text_content_types_are_inert_only() -> None:
     # The default allowlist is text/HTML only — no active or binary content types.
-    assert DEFAULT_TEXT_CONTENT_TYPES == frozenset(
-        {"text/html", "application/xhtml+xml", "text/plain"}
+    assert (
+        frozenset({"text/html", "application/xhtml+xml", "text/plain"})
+        == DEFAULT_TEXT_CONTENT_TYPES
     )
 
 

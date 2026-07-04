@@ -23,13 +23,13 @@ def test_targets_migration_applies_and_rolls_back(tmp_path: Path) -> None:
     try:
         upgrade(engine, "head")
         applied = set(inspect(engine).get_table_names())
-        assert _NEW_TABLES <= applied
+        assert applied >= _NEW_TABLES
 
         # Roll back only the 0002 migration; the baseline must remain intact.
         downgrade(engine, "0001")
         remaining = set(inspect(engine).get_table_names())
         assert not (_NEW_TABLES & remaining)
-        assert _BASELINE_TABLES <= remaining
+        assert remaining >= _BASELINE_TABLES
     finally:
         engine.dispose()
 
@@ -57,8 +57,8 @@ def test_override_columns_apply_and_rollback(tmp_path: Path) -> None:
     try:
         upgrade(engine, "head")
         cols = {c["name"] for c in inspect(engine).get_columns("daily_targets")}
-        assert _DERIVED_MACRO_COLUMNS <= cols
-        assert _OVERRIDE_COLUMNS <= cols
+        assert cols >= _DERIVED_MACRO_COLUMNS
+        assert cols >= _OVERRIDE_COLUMNS
 
         # The derived macro columns are NOT NULL; the override columns are nullable.
         col_meta = {c["name"]: c for c in inspect(engine).get_columns("daily_targets")}

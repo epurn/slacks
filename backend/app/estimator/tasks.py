@@ -42,7 +42,7 @@ def _get_session_factory() -> sessionmaker[Session]:
     web app is running in the same process.
     """
 
-    global _session_factory
+    global _session_factory  # noqa: PLW0603 — module-level lazy singleton for the worker process
     if _session_factory is None:
         settings = load_settings()
         _session_factory = create_session_factory(create_db_engine(settings.database_url))

@@ -70,9 +70,11 @@ def test_rejected_payload_absent_from_logs(caplog: pytest.LogCaptureFixture) -> 
     # A schema-invalid reply is untrusted and may echo personal context; the
     # rejection logs only an error count, never the offending payload.
     provider = FakeProvider(responses=[{"name": _MARKER}])  # missing required "calories"
-    with caplog.at_level(logging.DEBUG, logger="app.llm"):
-        with pytest.raises(StructuredOutputValidationError):
-            provider.structured_completion(f"user ate {_MARKER}", _Candidate)
+    with (
+        caplog.at_level(logging.DEBUG, logger="app.llm"),
+        pytest.raises(StructuredOutputValidationError),
+    ):
+        provider.structured_completion(f"user ate {_MARKER}", _Candidate)
 
     assert any("rejected" in r.getMessage() for r in caplog.records)
     for record in caplog.records:

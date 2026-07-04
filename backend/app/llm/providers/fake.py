@@ -64,10 +64,10 @@ class FakeProvider(Provider):
     def _complete(
         self,
         prompt: str,
-        schema: type[BaseModel],
+        schema: type[BaseModel],  # noqa: ARG002 — abstract _complete signature; fake ignores schema
         *,
         images: Sequence[ImageInput] | None,
-        timeout_seconds: float,
+        timeout_seconds: float,  # noqa: ARG002 — abstract _complete signature; fake ignores timeout
     ) -> dict[str, Any]:
         self.prompts.append(prompt)
         self.image_counts.append(len(images) if images else 0)
