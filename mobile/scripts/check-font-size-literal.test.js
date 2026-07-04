@@ -126,6 +126,16 @@ describe("font-size-baseline.json", () => {
     expect(baselinedFiles.has("components/WeightEntryInput.tsx")).toBe(false);
     expect(baselinedFiles.has("components/WeightScreen.tsx")).toBe(false);
     expect(baselinedFiles.has("components/WeightTrendChart.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/EWMATrendChart.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/TrendsScreen.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/AdherenceStrip.tsx")).toBe(false);
+  });
+
+  it("does not baseline the capture sites drained by FTY-216", () => {
+    const baselinedFiles = new Set(baseline.files.map((entry) => entry.file));
+    expect(baselinedFiles.has("components/BarcodeScannerScreen.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/CameraCapture.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/LabelCaptureScreen.tsx")).toBe(false);
   });
 
   it("does not baseline the mobile-correction sites drained by FTY-214", () => {
@@ -149,12 +159,7 @@ describe("font-size-baseline.json", () => {
     const byFile = Object.fromEntries(
       baseline.files.map((entry) => [entry.file, entry.sites.length]),
     );
-    expect(byFile).toEqual({
-      "components/BarcodeScannerScreen.tsx": 2,
-      "components/CameraCapture.tsx": 3,
-      "components/LabelCaptureScreen.tsx": 6,
-      "components/EWMATrendChart.tsx": 5,
-    });
+    expect(byFile).toEqual({});
   });
 
   it("pins every baselined site by context and value, not by count", () => {

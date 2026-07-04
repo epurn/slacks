@@ -20,7 +20,8 @@ import { Circle, Polyline, Svg } from "react-native-svg";
 import type { WeightEntryDTO } from "@/api/weightEntries";
 import type { UnitsPreference } from "@/state/profile";
 import { formatHumanDate, kgToDisplay, weightUnitLabel } from "@/state/weightEntries";
-import { useTheme } from "@/theme";
+import { useTheme, typeScale } from "@/theme";
+import { ThemedNumber } from "@/components/ui";
 
 const CHART_H = 180;
 const PAD = { top: 20, bottom: 32, left: 48, right: 12 };
@@ -112,9 +113,10 @@ export function EWMATrendChart({
         accessibilityRole="image"
         style={styles.state}
       >
-        <Text style={[styles.singlePoint, { color: colors.text }]}>
-          {`${ewmaDisplay[0]} ${unit}`}
-        </Text>
+        <ThemedNumber
+          value={`${ewmaDisplay[0]} ${unit}`}
+          scale="title2"
+        />
         <Text style={[styles.singleDate, { color: colors.textSecondary }]}>
           {formatHumanDate(entries[0]!.effective_date, today)}
         </Text>
@@ -321,16 +323,12 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   stateText: {
-    fontSize: 15,
+    fontSize: typeScale.subhead,
     textAlign: "center",
     paddingHorizontal: 16,
   },
-  singlePoint: {
-    fontSize: 22,
-    fontWeight: "700",
-  },
   singleDate: {
-    fontSize: 14,
+    fontSize: typeScale.detail,
   },
   retry: {
     paddingVertical: 10,
@@ -338,11 +336,11 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   retryLabel: {
-    fontSize: 15,
+    fontSize: typeScale.subhead,
     fontWeight: "600",
   },
   axisLabel: {
-    fontSize: 11,
+    fontSize: typeScale.caption2,
     textAlign: "right",
   },
 });

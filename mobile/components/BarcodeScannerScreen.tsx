@@ -29,6 +29,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CameraView, type BarcodeScanningResult } from "expo-camera";
 
+import { typeScale } from "@/theme";
 import { AppIcon } from "@/components/ui";
 import { CameraCapture, type CameraCaptureProps } from "@/components/CameraCapture";
 
@@ -189,7 +190,7 @@ const styles = StyleSheet.create({
   },
   guidance: {
     color: "#FFFFFF",
-    fontSize: 16,
+    fontSize: typeScale.callout,
     fontWeight: "500",
     textAlign: "center",
     backgroundColor: "rgba(0,0,0,0.5)",
@@ -227,7 +228,7 @@ const styles = StyleSheet.create({
   },
   manualLabel: {
     color: "#FFFFFF",
-    fontSize: 16,
+    fontSize: typeScale.callout,
     fontWeight: "600",
   },
 });
