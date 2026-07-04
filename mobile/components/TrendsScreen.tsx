@@ -210,15 +210,26 @@ export function TrendsScreen({
   );
 
   // ── Adherence summaries ──────────────────────────────────────────────────
-  const [adherencePhase, setAdherencePhase] = useState<LoadPhase>("loading");
   const [adherenceError, setAdherenceError] = useState<string | null>(null);
   const [rawSummaries, setRawSummaries] = useState<
     readonly (DailySummaryDTO | null)[]
   >([]);
   const [adherenceReload, setAdherenceReload] = useState(0);
+  // The settled phase is keyed to the read that produced it. Any new read —
+  // initial mount, a range change, or a retry — has a fresh key, so the card
+  // derives back to `loading` instead of leaving the previous ready/error
+  // content on screen while the new read is in flight (FTY-188).
+  const adherenceRequestKey = `${from}|${to}|${adherenceReload}`;
+  const [adherenceSettled, setAdherenceSettled] = useState<{
+    key: string;
+    phase: "ready" | "error";
+  } | null>(null);
+  const adherencePhase: LoadPhase =
+    adherenceSettled?.key === adherenceRequestKey
+      ? adherenceSettled.phase
+      : "loading";
 
   const reloadAdherence = useCallback(() => {
-    setAdherencePhase("loading");
     setAdherenceError(null);
     setAdherenceReload((k) => k + 1);
   }, []);
@@ -239,7 +250,7 @@ export function TrendsScreen({
         if (!active) return;
         setRawSummaries(results);
         setAdherenceError(null);
-        setAdherencePhase("ready");
+        setAdherenceSettled({ key: adherenceRequestKey, phase: "ready" });
       })
       .catch((err: unknown) => {
         if (!active) return;
@@ -249,13 +260,20 @@ export function TrendsScreen({
             ? err.message
             : "Could not load your intake history. Please try again.",
         );
-        setAdherencePhase("error");
+        setAdherenceSettled({ key: adherenceRequestKey, phase: "error" });
       });
 
     return () => {
       active = false;
     };
-  }, [apiSession, getDailySummaryRange, from, to, adherenceReload]);
+  }, [
+    apiSession,
+    getDailySummaryRange,
+    from,
+    to,
+    adherenceReload,
+    adherenceRequestKey,
+  ]);
 
   const adherence: AdherenceSummary = useMemo(
     () => computeAdherence(rawSummaries, allDates),
@@ -441,7 +459,11 @@ export function TrendsScreen({
               <Skeleton width={132} height={18} borderRadius={6} />
             </View>
           ) : adherencePhase === "error" ? (
-            <View accessibilityRole="alert" style={styles.errorBox}>
+            <View
+              accessibilityRole="alert"
+              accessibilityLabel="Intake adherence failed to load"
+              style={styles.errorBox}
+            >
               <Text style={[styles.errorText, { color: colors.textSecondary }]}>
                 {adherenceError ?? "Could not load your intake history. Please try again."}
               </Text>

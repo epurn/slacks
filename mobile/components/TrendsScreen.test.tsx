@@ -721,6 +721,11 @@ describe("TrendsScreen — adherence error and empty states", () => {
 
     const alert = tree.root.find((n) => n.props.accessibilityRole === "alert");
     expect(alert).toBeTruthy();
+    // The error state carries its own screen-reader label, distinct from the
+    // loading/empty/uncounted labels (FTY-188).
+    expect(alert.props.accessibilityLabel).toBe(
+      "Intake adherence failed to load",
+    );
 
     const retry = tree.root.findAll(
       (n) => n.props.accessibilityLabel === "Try again",
@@ -986,6 +991,86 @@ describe("TrendsScreen — adherence honesty (FTY-188)", () => {
     expect(textContent(tree)).toContain("2 entries awaiting details");
   });
 
+  it("changing the range re-shows the loading placeholder, then resolves to the new range's state", async () => {
+    let resolveSecond!: (v: DailySummaryDTO[]) => void;
+    const getSum = jest
+      .fn()
+      .mockResolvedValueOnce([makeSummary(TODAY, 2000, 2000, true, 0)])
+      .mockReturnValueOnce(
+        new Promise<DailySummaryDTO[]>((r) => {
+          resolveSecond = r;
+        }),
+      );
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={getSum}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+
+    // First read settled: real data on screen, no skeleton.
+    expect(textContent(tree)).toContain("Avg 2000 kcal/day");
+    expect(
+      tree.root.findAll((n) => n.props.testID === "adherence-loading").length,
+    ).toBe(0);
+
+    // Switch range: the new read is in flight, so the stale ready content must
+    // be replaced by the loading placeholder — not left on screen.
+    selectRange(tree, "3M");
+    await act(async () => {});
+    expect(
+      tree.root.findAll((n) => n.props.testID === "adherence-loading").length,
+    ).toBeGreaterThan(0);
+    expect(textContent(tree)).not.toContain("Avg 2000 kcal/day");
+
+    // The new read settles: the placeholder resolves to the new range's state.
+    await act(async () => {
+      resolveSecond([]);
+    });
+    expect(
+      tree.root.findAll((n) => n.props.testID === "adherence-loading").length,
+    ).toBe(0);
+    expect(textContent(tree)).toContain("No meals logged in this range yet");
+  });
+
+  it("changing the range after an adherence error re-shows the loading placeholder, not the stale error", async () => {
+    const getSum = jest
+      .fn()
+      .mockRejectedValueOnce(new DailySummaryApiError(500, "boom"))
+      .mockReturnValueOnce(new Promise<DailySummaryDTO[]>(() => {}));
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={getSum}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+    expect(
+      tree.root.findAll((n) => n.props.accessibilityRole === "alert").length,
+    ).toBeGreaterThan(0);
+
+    selectRange(tree, "3M");
+    await act(async () => {});
+
+    expect(
+      tree.root.findAll((n) => n.props.testID === "adherence-loading").length,
+    ).toBeGreaterThan(0);
+    expect(
+      tree.root.findAll((n) => n.props.accessibilityRole === "alert").length,
+    ).toBe(0);
+
+    // The read is intentionally left pending; unmount so the skeleton's
+    // animation loop doesn't outlive the test.
+    await act(async () => {
+      tree.unmount();
+    });
+  });
+
   it("the four settled/load states are mutually exclusive (only one visible label at a time)", async () => {
     // Uncounted range: the loading, error, and empty labels must all be absent.
     const tree = mount(
@@ -1005,6 +1090,7 @@ describe("TrendsScreen — adherence honesty (FTY-188)", () => {
     expect(labels("4 entries awaiting details")).toBeGreaterThan(0);
     expect(labels("Loading intake adherence")).toBe(0);
     expect(labels("No intake logged for this range")).toBe(0);
+    expect(labels("Intake adherence failed to load")).toBe(0);
     expect(
       tree.root.findAll((n) => n.props.accessibilityRole === "alert").length,
     ).toBe(0);
