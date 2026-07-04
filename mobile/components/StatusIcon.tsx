@@ -2,7 +2,7 @@ import { StyleSheet, Text } from "react-native";
 
 import type { LogEventStatus } from "@/api/logEvents";
 import { statusPresentation } from "@/state/today";
-import { useTheme } from "@/theme/ThemeContext";
+import { typeScale, useTheme } from "@/theme";
 
 /**
  * Compact status indicator for a timeline entry. Pairs a glyph with an
@@ -30,7 +30,7 @@ export function StatusIcon({ status }: { status: LogEventStatus }) {
 
 const styles = StyleSheet.create({
   icon: {
-    fontSize: 18,
+    fontSize: typeScale.iconGlyph,
     width: 24,
     textAlign: "center",
   },

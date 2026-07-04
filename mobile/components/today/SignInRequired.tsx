@@ -1,5 +1,6 @@
 import { StyleSheet, Text, View } from "react-native";
 
+import { DisplayText } from "@/components/ui";
 import { useTheme, spacing, typeScale } from "@/theme";
 
 /**
@@ -11,9 +12,9 @@ export function SignInRequired({ insetTop }: { insetTop: number }) {
   const { colors } = useTheme();
   return (
     <View style={[styles.center, { paddingTop: insetTop, backgroundColor: colors.surface }]}>
-      <Text style={[styles.centerTitle, { color: colors.text }]} accessibilityRole="header">
+      <DisplayText scale="title2Large" accessibilityRole="header" style={styles.centerTitle}>
         Sign in to see your day
-      </Text>
+      </DisplayText>
       <Text style={[styles.centerBody, { color: colors.textMuted }]}>
         Your log is stored privately against your account. Sign in to add and
         review today&apos;s food and exercise.
@@ -29,8 +30,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   centerTitle: {
-    fontSize: 24,
-    fontWeight: "700",
     textAlign: "center",
   },
   centerBody: {

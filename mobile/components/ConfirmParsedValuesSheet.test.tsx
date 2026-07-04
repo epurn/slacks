@@ -14,7 +14,7 @@
  */
 
 import { act, create as render, type ReactTestRenderer } from "react-test-renderer";
-import { ThemeProvider } from "@/theme";
+import { DISPLAY_FONT_FAMILY, ThemeProvider, typeScale } from "@/theme";
 
 import { ConfirmParsedValuesSheet } from "./ConfirmParsedValuesSheet";
 import {
@@ -171,6 +171,21 @@ describe("ConfirmParsedValuesSheet — shows the parse", () => {
     expect(text).toContain("Label scan");
     // macros are shown
     expect(text).toContain("29g");
+  });
+
+  it("renders the calorie hero numeral through DisplayText", () => {
+    const tree = mount(<ConfirmParsedValuesSheet {...defaultProps()} />);
+    const heroNumber = tree.root.find(
+      (n) =>
+        (n.type as unknown as string) === "Text" && n.props.children === "190 kcal",
+    );
+    const style: Record<string, unknown> = Object.assign(
+      {},
+      ...(Array.isArray(heroNumber.props.style) ? heroNumber.props.style : [heroNumber.props.style]),
+    );
+    expect(style.fontFamily).toBe(DISPLAY_FONT_FAMILY);
+    expect(style.fontSize).toBe(typeScale.title2);
+    expect(style.fontVariant).toEqual(["tabular-nums"]);
   });
 
   it("marks the entry not yet counted", () => {
