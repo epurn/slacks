@@ -16,17 +16,29 @@ export const DISPLAY_FONT_FAMILY: string | undefined = Platform.select({
 /** Standard body face — always the system font (SF Pro on iOS) for Dynamic Type. */
 export const BODY_FONT_FAMILY: string | undefined = undefined;
 
-/** Typography scale. Sizes follow the iOS Dynamic Type size chart. */
+/**
+ * Typography scale. Sizes follow the iOS Dynamic Type size chart, plus three
+ * Fatty-specific sizes (`title2Large`, `iconGlyph`, `detail`) that fill gaps
+ * the Dynamic Type chart doesn't name but the app's own audited fontSize
+ * literals need a home for. This is the single place a size is added — screen
+ * stories reference these tokens, they never add new sizes to theme.
+ */
 export const typeScale = {
   heroDisplay: 56,
   largeTitle: 34,
   title1: 28,
+  /** Between title2 and largeTitle — compact empty/gated-state headlines. */
+  title2Large: 24,
   title2: 22,
   title3: 20,
   headline: 17,
   body: 17,
+  /** Inline glyph-as-text sizing (e.g. a status/close glyph rendered as Text). */
+  iconGlyph: 18,
   callout: 16,
   subhead: 15,
+  /** Secondary/meta text between subhead and footnote (chips, row detail, chart axis labels). */
+  detail: 14,
   footnote: 13,
   caption1: 12,
   caption2: 11,

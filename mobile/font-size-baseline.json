@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "description": "Baseline allowlist for scripts/check-font-size-literal.js — pre-existing numeric fontSize sites, seeded at FTY-192 by snapshotting the guard's own output on the live tree. Each entry is a per-file count of numeric fontSize sites still present in that file, in source order; the guard exempts a file's first `count` sites and fails on anything beyond that. Per-screen application stories (FTY-213-217) drain their file's count to 0 and delete the entry as they route the literal through typeScale, and adopt DisplayText for their headers; the guard is fully strict once this list is empty.",
+  "sites": [
+    {
+      "file": "components/ConfirmParsedValuesSheet.tsx",
+      "count": 1,
+      "reason": "mobile-today lane — FTY-213."
+    },
+    {
+      "file": "components/EntryRow.tsx",
+      "count": 7,
+      "reason": "mobile-today lane — FTY-213."
+    },
+    {
+      "file": "components/StatusIcon.tsx",
+      "count": 1,
+      "reason": "mobile-today lane — FTY-213."
+    },
+    {
+      "file": "components/TypeaheadSuggestionBar.tsx",
+      "count": 1,
+      "reason": "mobile-today lane — FTY-213."
+    },
+    {
+      "file": "components/today/SignInRequired.tsx",
+      "count": 1,
+      "reason": "mobile-today lane — FTY-213."
+    },
+    {
+      "file": "components/CorrectionSheet.tsx",
+      "count": 1,
+      "reason": "mobile-correction lane — FTY-214."
+    },
+    {
+      "file": "components/correction/AdvancedLeverRow.tsx",
+      "count": 1,
+      "reason": "mobile-correction lane — FTY-214."
+    },
+    {
+      "file": "components/correction/AmountStepper.tsx",
+      "count": 1,
+      "reason": "mobile-correction lane — FTY-214."
+    },
+    {
+      "file": "components/correction/ChangeMatchPanel.tsx",
+      "count": 1,
+      "reason": "mobile-correction lane — FTY-214."
+    },
+    {
+      "file": "components/WeightEntryInput.tsx",
+      "count": 4,
+      "reason": "mobile-weight lane — FTY-215."
+    },
+    {
+      "file": "components/WeightScreen.tsx",
+      "count": 4,
+      "reason": "mobile-weight lane — FTY-215."
+    },
+    {
+      "file": "components/WeightTrendChart.tsx",
+      "count": 5,
+      "reason": "mobile-weight lane — FTY-215."
+    },
+    {
+      "file": "components/BarcodeScannerScreen.tsx",
+      "count": 2,
+      "reason": "mobile-capture lane — FTY-216."
+    },
+    {
+      "file": "components/CameraCapture.tsx",
+      "count": 3,
+      "reason": "mobile-capture lane — FTY-216."
+    },
+    {
+      "file": "components/LabelCaptureScreen.tsx",
+      "count": 6,
+      "reason": "mobile-capture lane — FTY-216."
+    },
+    {
+      "file": "components/EWMATrendChart.tsx",
+      "count": 5,
+      "reason": "mobile-trends lane — FTY-217."
+    }
+  ]
+}
