@@ -125,6 +125,9 @@ describe("font-size-baseline.json", () => {
     expect(baselinedFiles.has("components/WeightEntryInput.tsx")).toBe(false);
     expect(baselinedFiles.has("components/WeightScreen.tsx")).toBe(false);
     expect(baselinedFiles.has("components/WeightTrendChart.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/EWMATrendChart.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/TrendsScreen.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/AdherenceStrip.tsx")).toBe(false);
   });
 
   it("does not baseline the capture sites drained by FTY-216", () => {
@@ -152,7 +155,6 @@ describe("font-size-baseline.json", () => {
       "components/correction/AdvancedLeverRow.tsx": 1,
       "components/correction/AmountStepper.tsx": 1,
       "components/correction/ChangeMatchPanel.tsx": 1,
-      "components/EWMATrendChart.tsx": 5,
     });
   });
 
