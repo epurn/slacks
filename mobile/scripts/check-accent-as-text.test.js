@@ -123,11 +123,15 @@ describe("accent-text-baseline.json", () => {
     ).toBe(false);
   });
 
+  it("does not baseline components/onboarding/MeasurementsStep.tsx — drained by FTY-211", () => {
+    expect(
+      baseline.sites.some((site) => site.file === "components/onboarding/MeasurementsStep.tsx"),
+    ).toBe(false);
+  });
+
   it("enumerates the currently-known per-screen accent-as-text sites", () => {
     const byFile = Object.fromEntries(baseline.sites.map((site) => [site.file, site.count]));
-    expect(byFile).toEqual({
-      "components/onboarding/MeasurementsStep.tsx": 1,
-    });
+    expect(byFile).toEqual({});
   });
 
   it("covers the live tree exactly — make verify passes with the baseline present", () => {
@@ -248,5 +252,43 @@ describe("FTY-212 — settings-owned accent-as-text sites are fully drained", ()
     );
     const borderSites = code.match(/borderColor: selected \? colors\.accent\b/g) ?? [];
     expect(borderSites.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("FTY-211 — onboarding-owned accent-as-text sites are fully drained", () => {
+  // The onboarding-owned files: the wizard host at components/OnboardingScreen.tsx,
+  // and its step/primitive components under components/onboarding/.
+  const ONBOARDING_OWNED_FILES = [
+    "components/OnboardingScreen.tsx",
+    "components/onboarding/GoalStep.tsx",
+    "components/onboarding/MeasurementsStep.tsx",
+    "components/onboarding/TargetRevealStep.tsx",
+    "components/onboarding/primitives.tsx",
+  ];
+
+  it("has no remaining color: colors.accent text site in any onboarding-owned file", () => {
+    for (const rel of ONBOARDING_OWNED_FILES) {
+      const abs = path.join(MOBILE_ROOT, rel);
+      const lines = scanSource(fs.readFileSync(abs, "utf8"), rel);
+      expect({ file: rel, lines }).toEqual({ file: rel, lines: [] });
+    }
+  });
+
+  it("leaves MeasurementsStep.tsx's borderColor: colors.accent selection site untouched", () => {
+    const code = fs.readFileSync(
+      path.join(MOBILE_ROOT, "components/onboarding/MeasurementsStep.tsx"),
+      "utf8",
+    );
+    const borderSites = code.match(/borderColor: selected\s*\?\s*colors\.accent\b/g) ?? [];
+    expect(borderSites.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("leaves primitives.tsx's backgroundColor: colors.accent step-progress dot untouched", () => {
+    const code = fs.readFileSync(
+      path.join(MOBILE_ROOT, "components/onboarding/primitives.tsx"),
+      "utf8",
+    );
+    const fillSites = code.match(/backgroundColor:\s*\n?\s*active \|\| done \? colors\.accent\b/g) ?? [];
+    expect(fillSites.length).toBeGreaterThanOrEqual(1);
   });
 });

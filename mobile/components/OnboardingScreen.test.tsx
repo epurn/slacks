@@ -43,7 +43,7 @@ jest.mock("expo-router", () => ({
 // eslint-disable-next-line import/first
 import { OnboardingScreen, type OnboardingScreenProps } from "./OnboardingScreen";
 // eslint-disable-next-line import/first
-import { ThemeProvider } from "@/theme";
+import { ThemeProvider, lightPalette } from "@/theme";
 // eslint-disable-next-line import/first
 import type { SessionRecord } from "@/state/session";
 // eslint-disable-next-line import/first
@@ -765,6 +765,28 @@ describe("privacy", () => {
     } finally {
       spies.forEach((spy) => spy.mockRestore());
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Accent-as-text (FTY-211): the selected formula label uses colors.accentText
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("accent-as-text", () => {
+  it("renders the selected formula label in accentText, not accent (WCAG AA on the light surface)", async () => {
+    const tree = await mount();
+    await act(async () => {
+      byLabel(tree, "Continue to measurements").props.onPress();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    const formulaLabel =
+      "Higher baseline (+5). Mifflin-St Jeor with the +5 constant — a higher resting estimate.";
+    act(() => { byLabel(tree, formulaLabel).props.onPress(); });
+
+    const selectedText = tree.root.find(
+      (n) => n.props.children === "Higher baseline (+5)",
+    );
+    expect(flattenStyle(selectedText.props.style).color).toBe(lightPalette.accentText);
   });
 });
 
