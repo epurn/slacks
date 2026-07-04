@@ -194,7 +194,7 @@ export function MeasurementsStep({
             <Text
               style={[
                 styles.formulaChoiceLabel,
-                { color: selected ? colors.accent : colors.text },
+                { color: selected ? colors.accentText : colors.text },
               ]}
             >
               {opt.label}
