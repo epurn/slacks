@@ -85,7 +85,7 @@ const styles = StyleSheet.create({
     fontVariant: ["tabular-nums"],
   },
   leverChevron: {
-    fontSize: 20,
+    fontSize: typeScale.title3,
     fontWeight: "300",
   },
 });

@@ -6,6 +6,7 @@
 
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
+import { DisplayText } from "@/components/ui/DisplayText";
 import { radius, spacing, typeScale, type ColorPalette } from "@/theme";
 
 const FIELD_LABELS: Record<string, { label: string; unit: string }> = {
@@ -39,9 +40,9 @@ export function OverridePanel({
   return (
     <View style={styles.overridePanel}>
       <View style={styles.overridePanelHeader}>
-        <Text style={[styles.overridePanelTitle, { color: colors.text }]}>
+        <DisplayText scale="headline">
           Override {meta.label}
-        </Text>
+        </DisplayText>
         <Text style={[styles.overridePanelNote, { color: colors.textMuted }]}>
           Marks this entry {'"'}✎ edited{'"'}
         </Text>
@@ -116,10 +117,6 @@ const styles = StyleSheet.create({
   },
   overridePanelHeader: {
     gap: spacing.xs,
-  },
-  overridePanelTitle: {
-    fontSize: typeScale.headline,
-    fontWeight: "600",
   },
   overridePanelNote: {
     fontSize: typeScale.footnote,

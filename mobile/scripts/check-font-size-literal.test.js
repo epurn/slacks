@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("fs");
+const path = require("path");
 
 const {
   scanSource,
@@ -137,6 +138,14 @@ describe("font-size-baseline.json", () => {
     expect(baselinedFiles.has("components/LabelCaptureScreen.tsx")).toBe(false);
   });
 
+  it("does not baseline the mobile-correction sites drained by FTY-214", () => {
+    const baselinedFiles = new Set(baseline.files.map((entry) => entry.file));
+    expect(baselinedFiles.has("components/CorrectionSheet.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/correction/AdvancedLeverRow.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/correction/AmountStepper.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/correction/ChangeMatchPanel.tsx")).toBe(false);
+  });
+
   it("does not baseline the mobile-today sites drained by FTY-213", () => {
     const baselinedFiles = new Set(baseline.files.map((entry) => entry.file));
     expect(baselinedFiles.has("components/ConfirmParsedValuesSheet.tsx")).toBe(false);
@@ -150,12 +159,7 @@ describe("font-size-baseline.json", () => {
     const byFile = Object.fromEntries(
       baseline.files.map((entry) => [entry.file, entry.sites.length]),
     );
-    expect(byFile).toEqual({
-      "components/CorrectionSheet.tsx": 1,
-      "components/correction/AdvancedLeverRow.tsx": 1,
-      "components/correction/AmountStepper.tsx": 1,
-      "components/correction/ChangeMatchPanel.tsx": 1,
-    });
+    expect(byFile).toEqual({});
   });
 
   it("pins every baselined site by context and value, not by count", () => {
@@ -192,6 +196,29 @@ describe("font-size-baseline.json", () => {
       const multiset = byFile.get(entry.file);
       expect(multiset).toBeDefined();
       expect([...multiset.values()].reduce((a, b) => a + b, 0)).toBe(entry.sites.length);
+    }
+  });
+});
+
+describe("FTY-214 — correction-owned fontSize sites are fully drained", () => {
+  // The correction sheet host, its ClarifyMode branch, and every panel under
+  // components/correction/.
+  const CORRECTION_OWNED_FILES = [
+    "components/CorrectionSheet.tsx",
+    "components/ClarifyMode.tsx",
+    "components/correction/AdvancedLeverRow.tsx",
+    "components/correction/AmountStepper.tsx",
+    "components/correction/ChangeMatchPanel.tsx",
+    "components/correction/OverridePanel.tsx",
+    "components/correction/ProvenanceBlock.tsx",
+    "components/correction/SaveFoodRow.tsx",
+  ];
+
+  it("has no remaining numeric fontSize literal in any correction-owned file", () => {
+    for (const rel of CORRECTION_OWNED_FILES) {
+      const abs = path.join(MOBILE_ROOT, rel);
+      const sites = scanSource(fs.readFileSync(abs, "utf8"), rel);
+      expect({ file: rel, sites }).toEqual({ file: rel, sites: [] });
     }
   });
 });

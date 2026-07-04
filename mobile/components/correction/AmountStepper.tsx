@@ -8,6 +8,7 @@
 
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { DisplayText } from "@/components/ui/DisplayText";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { radius, spacing, typeScale, type ColorPalette } from "@/theme";
 
@@ -60,9 +61,14 @@ export function AmountStepper({
         >
           <Text style={[styles.stepperButtonLabel, { color: colors.text }]}>−</Text>
         </Pressable>
-        <Text style={[styles.stepperValue, { color: colors.text }]} accessibilityLabel={`Amount: ${amountDisplay}`}>
+        <DisplayText
+          scale="title3"
+          tabularNums
+          style={styles.stepperValue}
+          accessibilityLabel={`Amount: ${amountDisplay}`}
+        >
           {amountDisplay}
-        </Text>
+        </DisplayText>
         <Pressable
           onPress={onStepUp}
           testID="today-correction-increase"
@@ -140,15 +146,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   stepperButtonLabel: {
-    fontSize: 22,
+    fontSize: typeScale.title2,
     fontWeight: "300",
   },
   stepperValue: {
     flex: 1,
     textAlign: "center",
-    fontSize: typeScale.title3,
-    fontWeight: "600",
-    fontVariant: ["tabular-nums"],
   },
   nutritionRow: {
     flexDirection: "row",

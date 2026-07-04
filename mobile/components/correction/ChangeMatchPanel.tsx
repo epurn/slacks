@@ -10,6 +10,7 @@
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import type { SourceCandidate } from "@/api/corrections";
+import { DisplayText } from "@/components/ui/DisplayText";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { radius, spacing, typeScale, type ColorPalette } from "@/theme";
 
@@ -39,9 +40,9 @@ export function ChangeMatchPanel({
   return (
     <View style={styles.changeMatchPanel}>
       <View style={styles.changeMatchHeader}>
-        <Text style={[styles.changeMatchTitle, { color: colors.text }]}>
+        <DisplayText scale="headline" style={styles.changeMatchTitle}>
           Change match
-        </Text>
+        </DisplayText>
         <Pressable
           onPress={onCancel}
           accessibilityLabel="Cancel change match"
@@ -138,8 +139,6 @@ const styles = StyleSheet.create({
   },
   changeMatchTitle: {
     flex: 1,
-    fontSize: typeScale.headline,
-    fontWeight: "600",
   },
   cancelButton: {
     minHeight: 44,
@@ -185,7 +184,7 @@ const styles = StyleSheet.create({
     fontVariant: ["tabular-nums"],
   },
   candidateChevron: {
-    fontSize: 20,
+    fontSize: typeScale.title3,
   },
   emptyLabel: {
     fontSize: typeScale.subhead,

@@ -49,6 +49,7 @@ import { OverridePanel } from "@/components/correction/OverridePanel";
 import { ProvenanceBlock } from "@/components/correction/ProvenanceBlock";
 import { SaveFoodRow } from "@/components/correction/SaveFoodRow";
 import { useCorrectionSheet } from "@/components/correction/useCorrectionSheet";
+import { DisplayText } from "@/components/ui/DisplayText";
 import { NativeSheet } from "@/components/ui/NativeSheet";
 import { provenancePresentation } from "@/components/ui/ProvenanceIcon";
 import type { ApiSession } from "@/state/session";
@@ -180,9 +181,9 @@ export function CorrectionSheet({
       >
         {/* Header */}
         <View style={styles.header}>
-          <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
+          <DisplayText scale="headline" style={styles.title} numberOfLines={1}>
             {item.name}
-          </Text>
+          </DisplayText>
           <Pressable
             onPress={onClose}
             accessibilityLabel="Close"
@@ -342,8 +343,6 @@ const styles = StyleSheet.create({
   },
   title: {
     flex: 1,
-    fontSize: typeScale.headline,
-    fontWeight: "600",
   },
   closeButton: {
     minWidth: 44,
@@ -379,7 +378,7 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   leverChevron: {
-    fontSize: 20,
+    fontSize: typeScale.title3,
     fontWeight: "300",
   },
 });
