@@ -19,6 +19,7 @@ import {
   rangeProse,
   type DateRangeKey,
 } from "@/state/trends";
+import { formatDate } from "@/state/weightEntries";
 import { ThemeProvider, lightPalette, darkPalette } from "@/theme";
 
 // TrendsScreen now uses ScreenHeader → AppIcon (expo-symbols); stub the native
@@ -75,11 +76,13 @@ function makeSummary(
   intake: number,
   targetCal: number | null,
   hasIntake = true,
+  uncountedEntries = 0,
 ): DailySummaryDTO {
   return {
     date,
     intake: { calories: intake, protein_g: 80, carbs_g: 150, fat_g: 40 },
     has_intake: hasIntake,
+    uncounted_entries: uncountedEntries,
     target: targetCal !== null ? makeTarget(targetCal) : null,
     exercise: { active_calories: 0 },
   };
@@ -809,7 +812,7 @@ describe("TrendsScreen — adherence error and empty states", () => {
     expect(getSum).toHaveBeenCalledTimes(2);
   });
 
-  it("empty range (no summaries returned) shows the empty invite", async () => {
+  it("empty range (no summaries returned) shows the honest empty invite", async () => {
     const tree = mount(
       <TrendsScreen
         session={SESSION}
@@ -819,7 +822,16 @@ describe("TrendsScreen — adherence error and empty states", () => {
       />,
     );
     await act(async () => {});
-    expect(textContent(tree)).toContain("No intake data for this range");
+    const content = textContent(tree);
+    expect(content).toContain("No meals logged in this range yet");
+    // The old lie must be gone.
+    expect(content).not.toContain("No intake data");
+    // Distinct screen-reader label for the empty state.
+    expect(
+      tree.root.findAll(
+        (n) => n.props.accessibilityLabel === "No intake logged for this range",
+      ).length,
+    ).toBeGreaterThan(0);
   });
 
   it("422 from range maps to the DailySummaryApiError message (no personal data leaked)", async () => {
@@ -840,6 +852,162 @@ describe("TrendsScreen — adherence error and empty states", () => {
     expect(content).toContain("Invalid date format.");
     // No numeric nutrition data in the error
     expect(content).not.toMatch(/\d{4}\s*kcal/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Adherence honesty — empty / uncounted / loading→resolves (FTY-188)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("TrendsScreen — adherence honesty (FTY-188)", () => {
+  /** The `to` bound of the default 1M range is today (NOW), so a summary on this
+   * date lands inside the fetched window. */
+  const TODAY = formatDate(NOW);
+
+  it("uncounted range shows 'N entries awaiting details', never 'No intake data'", async () => {
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={jest
+          .fn()
+          .mockResolvedValue([makeSummary(TODAY, 0, null, false, 3)])}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+
+    const content = textContent(tree);
+    expect(content).toContain("3 entries awaiting details");
+    // The two lies the card used to tell must both be absent.
+    expect(content).not.toContain("No intake data");
+    expect(content).not.toContain("No meals logged");
+    // Distinct screen-reader label for the uncounted state.
+    expect(
+      tree.root.findAll(
+        (n) => n.props.accessibilityLabel === "3 entries awaiting details",
+      ).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("a single uncounted entry uses the singular noun", async () => {
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={jest
+          .fn()
+          .mockResolvedValue([makeSummary(TODAY, 0, null, false, 1)])}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+    expect(textContent(tree)).toContain("1 entry awaiting details");
+  });
+
+  it("counted data present alongside uncounted entries shows the data summary, not the awaiting copy", async () => {
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={jest
+          .fn()
+          .mockResolvedValue([
+            makeSummary(TODAY, 2000, 2000, true, 2),
+          ])}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+    const content = textContent(tree);
+    expect(content).toContain("Avg 2000 kcal/day");
+    expect(content).not.toContain("awaiting details");
+  });
+
+  it("loading placeholder shows, then always resolves — empty range leaves no permanent skeleton", async () => {
+    let resolveRange!: (v: DailySummaryDTO[]) => void;
+    const pending = new Promise<DailySummaryDTO[]>((r) => {
+      resolveRange = r;
+    });
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={jest.fn().mockReturnValue(pending)}
+        now={NOW}
+      />,
+    );
+    // Flush the weight list + Skeleton's async Reduce-Motion check; the range
+    // read is still pending, so adherence stays in the loading phase.
+    await act(async () => {});
+
+    // While the read is in flight, the loading placeholder is on screen.
+    const loading = tree.root.find(
+      (n) => n.props.testID === "adherence-loading",
+    );
+    expect(loading.props.accessibilityLabel).toBe("Loading intake adherence");
+
+    // Resolve the read → the placeholder must be replaced by a real state.
+    await act(async () => {
+      resolveRange([]);
+    });
+
+    expect(
+      tree.root.findAll((n) => n.props.testID === "adherence-loading").length,
+    ).toBe(0);
+    expect(textContent(tree)).toContain("No meals logged in this range yet");
+  });
+
+  it("loading placeholder resolves to the uncounted state too (no never-filling skeleton)", async () => {
+    let resolveRange!: (v: DailySummaryDTO[]) => void;
+    const pending = new Promise<DailySummaryDTO[]>((r) => {
+      resolveRange = r;
+    });
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={jest.fn().mockReturnValue(pending)}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+    expect(
+      tree.root.findAll((n) => n.props.testID === "adherence-loading").length,
+    ).toBeGreaterThan(0);
+
+    await act(async () => {
+      resolveRange([makeSummary(TODAY, 0, null, false, 2)]);
+    });
+
+    expect(
+      tree.root.findAll((n) => n.props.testID === "adherence-loading").length,
+    ).toBe(0);
+    expect(textContent(tree)).toContain("2 entries awaiting details");
+  });
+
+  it("the four settled/load states are mutually exclusive (only one visible label at a time)", async () => {
+    // Uncounted range: the loading, error, and empty labels must all be absent.
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={jest
+          .fn()
+          .mockResolvedValue([makeSummary(TODAY, 0, null, false, 4)])}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+
+    const labels = (label: string) =>
+      tree.root.findAll((n) => n.props.accessibilityLabel === label).length;
+    expect(labels("4 entries awaiting details")).toBeGreaterThan(0);
+    expect(labels("Loading intake adherence")).toBe(0);
+    expect(labels("No intake logged for this range")).toBe(0);
+    expect(
+      tree.root.findAll((n) => n.props.accessibilityRole === "alert").length,
+    ).toBe(0);
   });
 });
 

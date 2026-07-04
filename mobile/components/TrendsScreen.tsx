@@ -34,7 +34,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AppIcon, ScreenHeader, SegmentedControl } from "@/components/ui";
+import { AppIcon, ScreenHeader, SegmentedControl, Skeleton } from "@/components/ui";
 
 import {
   WeightApiError,
@@ -62,6 +62,7 @@ import {
   computeEWMAFromEntries,
   computeHeadlineDelta,
   computeAdherence,
+  adherenceContentState,
   rangeBounds,
   rangeProse,
   resolveDeltaGoalState,
@@ -260,6 +261,13 @@ export function TrendsScreen({
     () => computeAdherence(rawSummaries, allDates),
     [rawSummaries, allDates],
   );
+  // Once the read settles, which honest content state to show: real data, an
+  // uncounted-only range ("N entries awaiting details"), or a genuine empty
+  // (ux-design §Acknowledge-every-action; FTY-188).
+  const contentState = useMemo(
+    () => adherenceContentState(adherence),
+    [adherence],
+  );
 
   // ── Log weight sheet ───────────────────────────────────────────────────────
   const [sheetVisible, setSheetVisible] = useState(false);
@@ -419,9 +427,19 @@ export function TrendsScreen({
           </Text>
 
           {adherencePhase === "loading" ? (
-            <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-              Loading...
-            </Text>
+            // In-place skeleton placeholder. It always resolves: the range
+            // effect drives `adherencePhase` to `ready`/`error`, so this is
+            // never a permanent placeholder (FTY-188). Skeleton honors Reduce
+            // Motion, degrading to a static block.
+            <View
+              testID="adherence-loading"
+              accessibilityRole="progressbar"
+              accessibilityLabel="Loading intake adherence"
+              style={styles.adherenceLoading}
+            >
+              <Skeleton width={168} height={18} borderRadius={6} />
+              <Skeleton width={132} height={18} borderRadius={6} />
+            </View>
           ) : adherencePhase === "error" ? (
             <View accessibilityRole="alert" style={styles.errorBox}>
               <Text style={[styles.errorText, { color: colors.textSecondary }]}>
@@ -438,6 +456,13 @@ export function TrendsScreen({
                 </Text>
               </Pressable>
             </View>
+          ) : contentState === "uncounted" ? (
+            <AdherenceUncountedRow
+              count={adherence.uncountedEntries}
+              colors={colors}
+            />
+          ) : contentState === "empty" ? (
+            <AdherenceEmptyInvite colors={colors} />
           ) : (
             <>
               <AdherenceSummaryRow
@@ -498,6 +523,63 @@ function RangeSelector({
   );
 }
 
+/**
+ * The honest empty invite: genuinely nothing logged in the range. Distinct from
+ * the uncounted state — here there are no entries at all, so we invite logging
+ * rather than claim a false "no intake data" (FTY-188).
+ */
+function AdherenceEmptyInvite({
+  colors,
+}: {
+  colors: { text: string; textSecondary: string; textMuted: string };
+}) {
+  return (
+    <View
+      style={styles.adherenceRow}
+      accessible
+      accessibilityLabel="No intake logged for this range"
+    >
+      <Text style={[styles.emptyTitle, { color: colors.text }]}>
+        No meals logged in this range yet.
+      </Text>
+      <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+        Your logged meals will show up here.
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * The logged-but-uncounted state: entries exist in the range but none are
+ * counted yet (they await a detail on Today). Never the false "No intake data"
+ * — this acknowledges the real action and points at what to do next without
+ * duplicating the Today clarify flow (ux-design §Acknowledge-every-action;
+ * FTY-188).
+ */
+function AdherenceUncountedRow({
+  count,
+  colors,
+}: {
+  count: number;
+  colors: { text: string; textSecondary: string; textMuted: string };
+}) {
+  const noun = count === 1 ? "entry" : "entries";
+  return (
+    <View
+      style={styles.adherenceRow}
+      accessible
+      accessibilityLabel={`${count} ${noun} awaiting details`}
+    >
+      <Text style={[styles.emptyTitle, { color: colors.text }]}>
+        {`${count} ${noun} awaiting details`}
+      </Text>
+      <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+        Add their details on Today to count them toward your intake.
+      </Text>
+    </View>
+  );
+}
+
 function AdherenceSummaryRow({
   adherence,
   colors,
@@ -505,14 +587,6 @@ function AdherenceSummaryRow({
   adherence: AdherenceSummary;
   colors: { text: string; textSecondary: string; textMuted: string };
 }) {
-  if (adherence.avgCalories === null && adherence.daysWithTarget === 0) {
-    return (
-      <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-        No intake data for this range.
-      </Text>
-    );
-  }
-
   return (
     <View style={styles.adherenceRow}>
       {adherence.avgCalories !== null ? (
@@ -603,7 +677,8 @@ const styles = StyleSheet.create({
   },
   logWeightLabel: { fontSize: typeScale.subhead, fontWeight: "600" },
 
-  loadingText: { fontSize: typeScale.body },
+  adherenceLoading: { gap: spacing.xs },
+  emptyTitle: { fontSize: typeScale.body, fontWeight: "600" },
   emptyText: { fontSize: typeScale.body },
 
   adherenceRow: { gap: spacing.xs },

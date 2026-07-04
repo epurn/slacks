@@ -124,6 +124,7 @@ export const E2E_DAILY_SUMMARY: DailySummaryDTO = {
   date: '2026-01-01',
   intake: { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
   has_intake: false,
+  uncounted_entries: 0,
   target: E2E_TARGET,
   exercise: { active_calories: 0 },
 };
@@ -269,6 +270,7 @@ export const E2E_RESOLVED_SUMMARY: DailySummaryDTO = {
   date: '2026-01-01',
   intake: { calories: 120, protein_g: 1, carbs_g: 20, fat_g: 3 },
   has_intake: true,
+  uncounted_entries: 0,
   target: E2E_TARGET,
   exercise: { active_calories: 0 },
 };
@@ -394,6 +396,7 @@ export function e2eDailySummaryRange(
         date,
         intake: { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
         has_intake: false,
+        uncounted_entries: 0,
         target: null,
         exercise: { active_calories: 0 },
       };
@@ -411,6 +414,7 @@ export function e2eDailySummaryRange(
         fat_g: Math.round(calories * 0.0325),
       },
       has_intake: true,
+      uncounted_entries: 0,
       target: E2E_TARGET,
       exercise: { active_calories: 0 },
     };
@@ -652,6 +656,7 @@ export const E2E_RESOLVE_SUMMARY: DailySummaryDTO = {
   date: '2026-01-01',
   intake: { calories: 245, protein_g: 21, carbs_g: 36, fat_g: 4 },
   has_intake: true,
+  uncounted_entries: 0,
   target: E2E_TARGET,
   exercise: { active_calories: 0 },
 };
@@ -770,6 +775,7 @@ export const E2E_OCCLUSION_SUMMARY: DailySummaryDTO = {
     fat_g: 48,
   },
   has_intake: true,
+  uncounted_entries: 0,
   target: E2E_TARGET,
   exercise: { active_calories: 0 },
 };
@@ -851,6 +857,7 @@ export const E2E_CORRECTION_SUMMARY: DailySummaryDTO = {
   date: '2026-01-01',
   intake: { calories: 140, protein_g: 5, carbs_g: 27, fat_g: 3 },
   has_intake: true,
+  uncounted_entries: 0,
   target: E2E_TARGET,
   exercise: { active_calories: 0 },
 };
@@ -952,6 +959,7 @@ export const E2E_TARGET_SUMMARY: DailySummaryDTO = {
   date: '2026-01-01',
   intake: { calories: 2100, protein_g: 120, carbs_g: 150, fat_g: 90 },
   has_intake: true,
+  uncounted_entries: 0,
   target: E2E_TARGET,
   exercise: { active_calories: 0 },
 };
