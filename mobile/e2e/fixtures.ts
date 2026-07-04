@@ -534,6 +534,41 @@ export const E2E_RERESOLVED_ITEM: DerivedFoodItemDTO = {
   updated_at: '2026-01-01T12:05:00Z',
 };
 
+/**
+ * The saved-food item after a Portion (amount) step: the **same** id and
+ * log_event_id (reconciles onto the same row), amount stepped from 1 to 1.25
+ * bowls, and server-recomputed values scaled from the saved food's per-serving
+ * macros (640 kcal → 800 kcal). Its distinctive `calories` (800, distinct from
+ * the saved food's 640, the re-resolve's 415, and the estimated-correction
+ * item's 175) is what FTY-245's regression guard asserts to prove the
+ * saved-food Portion PATCH branch — not the 404 fall-through — handled the
+ * commit.
+ */
+export const E2E_SAVED_FOOD_EDITED_ITEM: DerivedFoodItemDTO = {
+  item_type: 'food',
+  id: E2E_SAVED_FOOD_ITEM_ID,
+  user_id: E2E_SESSION.userId,
+  log_event_id: E2E_SAVED_FOOD_EVENT_ID,
+  name: E2E_SAVED_FOOD.name,
+  quantity_text: '1.25 bowl',
+  unit: E2E_SAVED_FOOD.serving_unit,
+  amount: 1.25,
+  status: 'resolved',
+  grams: null,
+  calories: 800,
+  protein_g: 52.5,
+  carbs_g: 70,
+  fat_g: 27.5,
+  calories_estimated: E2E_SAVED_FOOD.calories,
+  protein_g_estimated: E2E_SAVED_FOOD.protein_g,
+  carbs_g_estimated: E2E_SAVED_FOOD.carbs_g,
+  fat_g_estimated: E2E_SAVED_FOOD.fat_g,
+  // Portion (amount) change = provenance-preserving `amount_adjust`, item stays un-edited (docs/contracts/corrections.md).
+  is_edited: false,
+  created_at: '2026-01-01T08:00:00Z',
+  updated_at: '2026-01-01T12:06:00Z',
+};
+
 // ─── FTY-181 entry-resolve (beat 1) item-forward fixtures ─────────────────────
 //
 // The signature entry-resolve beat eases a resolved entry's *value row* in when
