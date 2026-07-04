@@ -124,6 +124,13 @@ describe("font-size-baseline.json", () => {
     expect(baselinedFiles.has("components/ui/DisplayText.tsx")).toBe(false);
   });
 
+  it("does not baseline the capture sites drained by FTY-216", () => {
+    const baselinedFiles = new Set(baseline.files.map((entry) => entry.file));
+    expect(baselinedFiles.has("components/BarcodeScannerScreen.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/CameraCapture.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/LabelCaptureScreen.tsx")).toBe(false);
+  });
+
   it("enumerates the currently-known per-screen numeric fontSize sites", () => {
     const byFile = Object.fromEntries(
       baseline.files.map((entry) => [entry.file, entry.sites.length]),
@@ -141,9 +148,6 @@ describe("font-size-baseline.json", () => {
       "components/WeightEntryInput.tsx": 4,
       "components/WeightScreen.tsx": 4,
       "components/WeightTrendChart.tsx": 5,
-      "components/BarcodeScannerScreen.tsx": 2,
-      "components/CameraCapture.tsx": 3,
-      "components/LabelCaptureScreen.tsx": 6,
       "components/EWMATrendChart.tsx": 5,
     });
   });
