@@ -23,6 +23,29 @@
  * Reduce Motion, the dimming material, and VoiceOver announcement all come from
  * the native presentation controller on iOS, so we do not reimplement them.
  *
+ * ## Why the content is given an explicit height on iOS (FTY-227)
+ *
+ * `react-native-screens` positions a `formSheet`'s content wrapper as
+ * `position: absolute; top/left/right` with **no `bottom`** on its default
+ * (non-`synchronousScreenUpdatesEnabled`) code path for React Native ≥ 0.82 —
+ * see `ScreenStackItem`'s `getPositioningStyle` → `absoluteWithNoBottom`. That
+ * leaves the wrapper sized to its content's *intrinsic* height, so a `flex: 1`
+ * sheet body (and any `flex: 1` `ScrollView` inside it, as `CorrectionSheet`
+ * uses) has no bounded height to grow into and collapses to zero: the sheet
+ * presents its native chrome (grabber + fixed-height header) while the scrolling
+ * body — title/provenance/Portion stepper — renders blank. Jest never catches
+ * this because it does no native layout (children always mount into the tree),
+ * and the Android `Modal` fallback (below) already gives its body an explicit
+ * height, which is why CI stayed green while iOS was broken.
+ *
+ * The fix: on iOS, wrap the children in a content host with an explicit height
+ * derived from the largest allowed detent, so the flex chain resolves. Sizing to
+ * the *largest* detent (not the initial one) means the body never undershoots
+ * into an empty gap at the large detent; at a smaller detent the native sheet
+ * simply clips the taller content and the inner `ScrollView` scrolls it — the
+ * same behaviour a native sheet has. `fitToContents` sheets keep sizing to their
+ * own content and get no forced height (`WeightLogSheet`).
+ *
  * ## Non-iOS fallback
  *
  * The UIKit detent controller is iOS-only. Off iOS (Android, and the Jest
@@ -225,6 +248,17 @@ export function NativeSheet({
   }
 
   // ── iOS: genuine UIKit detent sheet ────────────────────────────────────────
+  // The content wrapper `react-native-screens` gives a `formSheet` is sized to
+  // its content (absolute, no `bottom`) — see the header doc. Give the body an
+  // explicit height from the largest detent so a `flex: 1` sheet body fills it
+  // instead of collapsing to a blank strip; `fitToContents` keeps sizing to its
+  // own content.
+  const iosContentHeight =
+    detents === "fitToContents"
+      ? undefined
+      : Math.round(
+          windowHeight * (detents.length > 0 ? Math.max(...detents) : 1),
+        );
   return (
     // Full-window overlay; `box-none` so the transparent presenter never eats
     // touches meant for the screen behind an undimmed detent.
@@ -258,7 +292,21 @@ export function NativeSheet({
           style={[styles.sheet, { backgroundColor }]}
           contentStyle={[styles.sheet, { backgroundColor }, contentStyle]}
         >
-          {children}
+          {/*
+            Content host with an explicit height (see the header doc). This is
+            what keeps the sheet body from collapsing to blank on iOS; the
+            `testID` lets the regression guard assert the height is bounded and
+            non-zero for a numeric-detent sheet.
+          */}
+          <View
+            testID="native-sheet-ios-content-host"
+            style={[
+              styles.iosContentHost,
+              iosContentHeight != null ? { height: iosContentHeight } : null,
+            ]}
+          >
+            {children}
+          </View>
         </ScreenStackItem>
       </ScreenStack>
     </View>
@@ -279,6 +327,11 @@ const styles = StyleSheet.create({
   },
   sheet: {
     flex: 1,
+  },
+  iosContentHost: {
+    // Fill the sheet's width; the explicit height is applied inline from the
+    // largest detent so a `flex: 1` body has bounded space to grow into.
+    width: "100%",
   },
   // ── Non-iOS fallback ──
   fallbackOverlay: {
