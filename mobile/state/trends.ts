@@ -234,6 +234,37 @@ export interface AdherenceSummary {
    * Null-target days are excluded from this denominator per the contract.
    */
   readonly daysWithTarget: number;
+  /**
+   * Total entries in the range that are **logged but not yet counted** — the
+   * sum of every day's `uncounted_entries` (FTY-223). A day whose only entries
+   * are uncounted contributes here but not to `avgCalories`/`daysWithTarget`
+   * (its `has_intake` is false). This is what lets the adherence card honestly
+   * say "N entries awaiting details" instead of collapsing such a range into the
+   * false "no intake data" empty state (FTY-188).
+   */
+  readonly uncountedEntries: number;
+}
+
+/**
+ * Which honest content state the adherence card should render once the range
+ * read has settled (FTY-188). Distinct from the load phase (loading / error):
+ * this classifies a *resolved* range.
+ * - `data` — at least one day carries counted intake or a target; show the
+ *   avg/on-target summary.
+ * - `uncounted` — no counted intake at all, but entries exist that await a user
+ *   action; show the "N entries awaiting details" copy, never "no intake data".
+ * - `empty` — genuinely nothing logged in the range; show the honest empty invite.
+ */
+export type AdherenceContentState = "data" | "uncounted" | "empty";
+
+export function adherenceContentState(
+  summary: AdherenceSummary,
+): AdherenceContentState {
+  const hasCountedData =
+    summary.avgCalories !== null || summary.daysWithTarget > 0;
+  if (hasCountedData) return "data";
+  if (summary.uncountedEntries > 0) return "uncounted";
+  return "empty";
 }
 
 /**
@@ -305,5 +336,14 @@ export function computeAdherence(
     (d) => d.state === "on-target" || d.state === "off-target",
   ).length;
 
-  return { days, avgCalories, daysOnTarget, daysWithTarget };
+  // Sum the logged-but-uncounted entries across the range's own days (a fetch
+  // gap contributes 0). This survives even when every day is `has_intake:
+  // false`, so an uncounted-only range is no longer indistinguishable from an
+  // empty one.
+  const uncountedEntries = allDates.reduce((sum, date) => {
+    const s = byDate.get(date);
+    return sum + (s?.uncounted_entries ?? 0);
+  }, 0);
+
+  return { days, avgCalories, daysOnTarget, daysWithTarget, uncountedEntries };
 }
