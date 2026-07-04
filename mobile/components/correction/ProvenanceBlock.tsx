@@ -60,7 +60,7 @@ export function ProvenanceBlock({
           accessibilityRole="button"
           accessibilityLabel="Make it exact — find the real source"
         >
-          <Text style={[styles.makeExactLabel, { color: colors.accent }]}>
+          <Text style={[styles.makeExactLabel, { color: colors.accentText }]}>
             › Make it exact
           </Text>
         </Pressable>

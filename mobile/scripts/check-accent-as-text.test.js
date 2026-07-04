@@ -109,13 +109,17 @@ describe("accent-text-baseline.json", () => {
     ).toBe(false);
   });
 
+  it("does not baseline the correction-owned files drained by FTY-208 — they are fixed, not deferred", () => {
+    const baselinedFiles = baseline.sites.map((site) => site.file);
+    expect(baselinedFiles).not.toContain("components/CorrectionSheet.tsx");
+    expect(baselinedFiles).not.toContain("components/correction/ChangeMatchPanel.tsx");
+    expect(baselinedFiles).not.toContain("components/correction/ProvenanceBlock.tsx");
+    expect(baselinedFiles).not.toContain("components/correction/SaveFoodRow.tsx");
+  });
+
   it("enumerates the currently-known per-screen accent-as-text sites", () => {
     const byFile = Object.fromEntries(baseline.sites.map((site) => [site.file, site.count]));
     expect(byFile).toEqual({
-      "components/CorrectionSheet.tsx": 2,
-      "components/correction/ChangeMatchPanel.tsx": 1,
-      "components/correction/ProvenanceBlock.tsx": 1,
-      "components/correction/SaveFoodRow.tsx": 1,
       "components/onboarding/MeasurementsStep.tsx": 1,
       "components/settings/BodySection.tsx": 1,
     });
@@ -170,5 +174,39 @@ describe("FTY-207 — Today-owned accent-as-text sites are fully drained", () =>
     );
     const fillSites = code.match(/backgroundColor: colors\.accent\b/g) ?? [];
     expect(fillSites.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("FTY-208 — correction-owned accent-as-text sites are fully drained", () => {
+  // The correction-owned files: the sheet host at components/, and its
+  // change-match / provenance / save-food panels under components/correction/.
+  const CORRECTION_OWNED_FILES = [
+    "components/CorrectionSheet.tsx",
+    "components/correction/ChangeMatchPanel.tsx",
+    "components/correction/ProvenanceBlock.tsx",
+    "components/correction/SaveFoodRow.tsx",
+  ];
+
+  it("has no remaining color: colors.accent text site in any correction-owned file", () => {
+    for (const rel of CORRECTION_OWNED_FILES) {
+      const abs = path.join(MOBILE_ROOT, rel);
+      const lines = scanSource(fs.readFileSync(abs, "utf8"), rel);
+      expect({ file: rel, lines }).toEqual({ file: rel, lines: [] });
+    }
+  });
+
+  it("leaves OverridePanel.tsx's backgroundColor: colors.accent fill site untouched", () => {
+    const code = fs.readFileSync(
+      path.join(MOBILE_ROOT, "components/correction/OverridePanel.tsx"),
+      "utf8",
+    );
+    const fillSites = code.match(/backgroundColor: colors\.accent\b/g) ?? [];
+    expect(fillSites.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("leaves ClarifyMode.tsx's backgroundColor: colors.accent fill site untouched", () => {
+    const code = fs.readFileSync(path.join(MOBILE_ROOT, "components/ClarifyMode.tsx"), "utf8");
+    const fillSites = code.match(/backgroundColor:[^}]*colors\.accent\b/g) ?? [];
+    expect(fillSites.length).toBeGreaterThanOrEqual(1);
   });
 });

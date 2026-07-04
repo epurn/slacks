@@ -32,7 +32,7 @@ export function SaveFoodRow({
         disabled={disabled}
         accessibilityState={{ disabled }}
       >
-        <Text style={[styles.saveFoodLabel, { color: status === "saved" ? colors.accent : colors.textSecondary }]}>
+        <Text style={[styles.saveFoodLabel, { color: status === "saved" ? colors.accentText : colors.textSecondary }]}>
           {status === "saving" ? "Saving…" : status === "saved" ? "Saved ✓" : "Save as food"}
         </Text>
       </Pressable>
