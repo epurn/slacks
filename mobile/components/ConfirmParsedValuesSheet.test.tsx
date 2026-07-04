@@ -23,6 +23,10 @@ import {
 } from "@/api/derivedItems";
 import { LabelProposalApiError } from "@/api/labelProposal";
 import type { ApiSession } from "@/state/session";
+import {
+  cleanupReactTestRenderers,
+  trackReactTestRenderer,
+} from "@/testUtils/reactTestRenderer";
 import { mockReduceMotion } from "@/testUtils/reduceMotion";
 
 // expo-symbols is a native module — stub SymbolView so the provenance icon
@@ -95,7 +99,7 @@ function mount(element: React.ReactElement): ReactTestRenderer {
   act(() => {
     tree = render(<ThemeProvider override="light">{element}</ThemeProvider>);
   });
-  return tree;
+  return trackReactTestRenderer(tree);
 }
 
 function allText(tree: ReactTestRenderer): string {
@@ -158,6 +162,11 @@ function defaultProps(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   mockReduceMotion(false);
+});
+
+afterEach(() => {
+  cleanupReactTestRenderers();
+  jest.restoreAllMocks();
 });
 
 // ─── Shows the parse ────────────────────────────────────────────────────────────

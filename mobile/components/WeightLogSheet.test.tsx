@@ -13,6 +13,11 @@ import {
 import { WeightLogSheet } from "./WeightLogSheet";
 import { WeightApiError, type WeightEntryDTO } from "@/api/weightEntries";
 import type { ApiSession } from "@/state/session";
+import {
+  cleanupReactTestRenderers,
+  trackReactTestRenderer,
+} from "@/testUtils/reactTestRenderer";
+import { mockReduceMotion } from "@/testUtils/reduceMotion";
 import { ThemeProvider, lightPalette } from "@/theme";
 
 const SESSION: ApiSession = {
@@ -40,7 +45,7 @@ function mount(element: React.ReactElement): ReactTestRenderer {
   act(() => {
     tree = render(<ThemeProvider override="light">{element}</ThemeProvider>);
   });
-  return tree;
+  return trackReactTestRenderer(tree);
 }
 
 function allText(tree: ReactTestRenderer): string {
@@ -86,6 +91,15 @@ function defaultProps(
 }
 
 describe("WeightLogSheet", () => {
+  beforeEach(() => {
+    mockReduceMotion(false);
+  });
+
+  afterEach(() => {
+    cleanupReactTestRenderers();
+    jest.restoreAllMocks();
+  });
+
   it("renders nothing until presented (visible=false → no field mounted)", () => {
     const tree = mount(
       <WeightLogSheet {...defaultProps({ visible: false })} />,
