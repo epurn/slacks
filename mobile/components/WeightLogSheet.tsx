@@ -116,7 +116,7 @@ export function WeightLogSheet({
             accessibilityRole="button"
             style={styles.closeButton}
           >
-            <Text style={[styles.closeLabel, { color: colors.accent }]}>Cancel</Text>
+            <Text style={[styles.closeLabel, { color: colors.accentText }]}>Cancel</Text>
           </Pressable>
         </View>
 

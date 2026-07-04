@@ -91,6 +91,12 @@ describe("accent-text-baseline.json", () => {
     expect(baseline.sites.some((site) => site.file === "app/day.tsx")).toBe(false);
   });
 
+  it("does not baseline components/WeightLogSheet.tsx — drained by FTY-210", () => {
+    expect(
+      baseline.sites.some((site) => site.file === "components/WeightLogSheet.tsx"),
+    ).toBe(false);
+  });
+
   it("does not baseline the Today-owned files drained by FTY-207 — they are fixed, not deferred", () => {
     const baselinedFiles = baseline.sites.map((site) => site.file);
     expect(baselinedFiles).not.toContain("components/EntryRow.tsx");
@@ -109,7 +115,6 @@ describe("accent-text-baseline.json", () => {
     const byFile = Object.fromEntries(baseline.sites.map((site) => [site.file, site.count]));
     expect(byFile).toEqual({
       "components/TrendsScreen.tsx": 1,
-      "components/WeightLogSheet.tsx": 1,
       "components/onboarding/MeasurementsStep.tsx": 1,
       "components/settings/BodySection.tsx": 1,
     });

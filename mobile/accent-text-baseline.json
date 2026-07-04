@@ -8,11 +8,6 @@
       "reason": "mobile-trends lane — FTY-209."
     },
     {
-      "file": "components/WeightLogSheet.tsx",
-      "count": 1,
-      "reason": "mobile-weight lane — FTY-210."
-    },
-    {
       "file": "components/onboarding/MeasurementsStep.tsx",
       "count": 1,
       "reason": "mobile-onboarding lane — FTY-211 (selected-option label, formerly OnboardingScreen.tsx)."

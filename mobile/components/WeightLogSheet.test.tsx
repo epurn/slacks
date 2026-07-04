@@ -13,7 +13,7 @@ import {
 import { WeightLogSheet } from "./WeightLogSheet";
 import { WeightApiError, type WeightEntryDTO } from "@/api/weightEntries";
 import type { ApiSession } from "@/state/session";
-import { ThemeProvider } from "@/theme";
+import { ThemeProvider, lightPalette } from "@/theme";
 
 const SESSION: ApiSession = {
   baseUrl: "https://api.example.test",
@@ -48,6 +48,17 @@ function allText(tree: ReactTestRenderer): string {
     .findAll((n) => typeof n.props.children === "string")
     .map((n) => n.props.children as string)
     .join(" ");
+}
+
+/** The resolved `color` style of a rendered node (style is `[base, {color}]`). */
+function styleColor(node: { props: { style?: unknown } }): string | undefined {
+  const style = node.props.style;
+  const arr = Array.isArray(style) ? style : [style];
+  const withColor = arr.find(
+    (s): s is { color: string } =>
+      typeof s === "object" && s !== null && "color" in s,
+  );
+  return withColor?.color;
 }
 
 function weightInput(tree: ReactTestRenderer) {
@@ -175,6 +186,14 @@ describe("WeightLogSheet", () => {
     expect(cancel.props.style.minHeight).toBeGreaterThanOrEqual(44);
     act(() => cancel.props.onPress());
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("renders the Cancel label in accentText, not accent (WCAG AA on the light surface)", () => {
+    const tree = mount(<WeightLogSheet {...defaultProps()} />);
+    const cancelLabel = tree.root.find(
+      (n) => n.props.children === "Cancel" && typeof n.props.style !== "undefined",
+    );
+    expect(styleColor(cancelLabel)).toBe(lightPalette.accentText);
   });
 
   it("calls onClose when the native sheet is dismissed by gesture", () => {
