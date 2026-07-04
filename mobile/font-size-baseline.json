@@ -229,42 +229,6 @@
           ]
         }
       ]
-    },
-    {
-      "file": "components/EWMATrendChart.tsx",
-      "reason": "mobile-trends lane — FTY-217.",
-      "sites": [
-        {
-          "context": "styles.stateText",
-          "sizes": [
-            15
-          ]
-        },
-        {
-          "context": "styles.singlePoint",
-          "sizes": [
-            22
-          ]
-        },
-        {
-          "context": "styles.singleDate",
-          "sizes": [
-            14
-          ]
-        },
-        {
-          "context": "styles.retryLabel",
-          "sizes": [
-            15
-          ]
-        },
-        {
-          "context": "styles.axisLabel",
-          "sizes": [
-            11
-          ]
-        }
-      ]
     }
   ]
 }

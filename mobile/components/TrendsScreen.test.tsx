@@ -20,7 +20,7 @@ import {
   type DateRangeKey,
 } from "@/state/trends";
 import { formatDate } from "@/state/weightEntries";
-import { ThemeProvider, lightPalette, darkPalette } from "@/theme";
+import { ThemeProvider, lightPalette, darkPalette, typeScale } from "@/theme";
 
 // TrendsScreen now uses ScreenHeader → AppIcon (expo-symbols); stub the native
 // module so tests run without a native runtime.
@@ -396,6 +396,40 @@ describe("TrendsScreen — headline delta", () => {
     const content = textContent(tree);
     // Should show a delta direction
     expect(content).toMatch(/[↑↓→]/);
+  });
+
+  it("renders the current-value headline through the display face (tabular-nums, per typeScale.title1)", async () => {
+    const entries = [
+      makeEntry("1", 72, "2026-06-01"),
+      makeEntry("2", 70, "2026-06-20"),
+    ];
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue(entries)}
+        getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
+        now={NOW}
+        unitsPreference="metric"
+      />,
+    );
+    await act(async () => {});
+    // Scope to the headline row (its accessibilityLabel starts with "Current
+    // weight trend:") so this doesn't collide with the chart's own axis-label
+    // Text nodes, which also end in the unit string.
+    const headlineRow = tree.root.find(
+      (n) =>
+        typeof n.props.accessibilityLabel === "string" &&
+        (n.props.accessibilityLabel as string).startsWith("Current weight trend:"),
+    );
+    const valueNode = headlineRow.findAll(
+      (n) => (n.type as unknown as string) === "Text",
+    )[0]!;
+    const styles: Array<Record<string, unknown>> = Array.isArray(valueNode.props.style)
+      ? valueNode.props.style
+      : [valueNode.props.style];
+    const combined = Object.assign({}, ...styles);
+    expect(combined.fontVariant).toEqual(["tabular-nums"]);
+    expect(combined.fontSize).toBe(typeScale.title1);
   });
 });
 
