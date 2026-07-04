@@ -31,6 +31,7 @@ import {
   type CameraPermission,
 } from "@/state/cameraPermission";
 import { useTheme } from "@/theme/ThemeContext";
+import { typeScale } from "@/theme/typography";
 import type { ColorPalette } from "@/theme/colors";
 import type { PermissionResponse } from "expo";
 
@@ -190,7 +191,7 @@ const styles = StyleSheet.create({
   },
   rationaleText: {
     color: "#FFFFFF",
-    fontSize: 17,
+    fontSize: typeScale.body,
     textAlign: "center",
     marginBottom: 24,
     lineHeight: 24,
@@ -204,7 +205,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   primaryButtonLabel: {
-    fontSize: 16,
+    fontSize: typeScale.callout,
     fontWeight: "600",
   },
   closeButton: {
@@ -222,7 +223,7 @@ const styles = StyleSheet.create({
   },
   closeButtonLabel: {
     color: "#FFFFFF",
-    fontSize: 18,
+    fontSize: typeScale.iconGlyph,
     fontWeight: "600",
   },
 });

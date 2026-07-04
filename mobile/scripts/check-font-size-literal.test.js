@@ -130,6 +130,13 @@ describe("font-size-baseline.json", () => {
     expect(baselinedFiles.has("components/AdherenceStrip.tsx")).toBe(false);
   });
 
+  it("does not baseline the capture sites drained by FTY-216", () => {
+    const baselinedFiles = new Set(baseline.files.map((entry) => entry.file));
+    expect(baselinedFiles.has("components/BarcodeScannerScreen.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/CameraCapture.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/LabelCaptureScreen.tsx")).toBe(false);
+  });
+
   it("does not baseline the mobile-today sites drained by FTY-213", () => {
     const baselinedFiles = new Set(baseline.files.map((entry) => entry.file));
     expect(baselinedFiles.has("components/ConfirmParsedValuesSheet.tsx")).toBe(false);
@@ -148,9 +155,6 @@ describe("font-size-baseline.json", () => {
       "components/correction/AdvancedLeverRow.tsx": 1,
       "components/correction/AmountStepper.tsx": 1,
       "components/correction/ChangeMatchPanel.tsx": 1,
-      "components/BarcodeScannerScreen.tsx": 2,
-      "components/CameraCapture.tsx": 3,
-      "components/LabelCaptureScreen.tsx": 6,
     });
   });
 

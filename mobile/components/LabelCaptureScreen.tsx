@@ -39,6 +39,7 @@ import {
   uploadLabelImage as uploadLabelImageApi,
 } from "@/api/labelCapture";
 import { useTheme } from "@/theme/ThemeContext";
+import { typeScale } from "@/theme/typography";
 import type { ColorPalette } from "@/theme/colors";
 import { AppIcon } from "@/components/ui";
 import {
@@ -404,7 +405,7 @@ function makeStyles(colors: ColorPalette) {
       // Sits over the live camera feed — fixed white for contrast, matching
       // the other camera-overlay text in this file.
       color: "#FFFFFF",
-      fontSize: 15,
+      fontSize: typeScale.subhead,
       fontWeight: "500",
       textAlign: "center",
       paddingHorizontal: 24,
@@ -425,7 +426,7 @@ function makeStyles(colors: ColorPalette) {
     },
     errorText: {
       color: colors.coral,
-      fontSize: 15,
+      fontSize: typeScale.subhead,
       textAlign: "center",
       paddingHorizontal: 24,
       backgroundColor: "rgba(0,0,0,0.7)",
@@ -484,7 +485,7 @@ function makeStyles(colors: ColorPalette) {
       // surface — fixed white for contrast in both light and dark (matches
       // CameraCapture's overlay text).
       color: "#FFFFFF",
-      fontSize: 16,
+      fontSize: typeScale.callout,
       fontWeight: "500",
     },
     previewActions: {
@@ -504,7 +505,7 @@ function makeStyles(colors: ColorPalette) {
       // Translucent-white button over the camera feed — fixed white, not a
       // themed token (the camera feed is not a themed surface).
       color: "#FFFFFF",
-      fontSize: 16,
+      fontSize: typeScale.callout,
       fontWeight: "600",
     },
     primaryButton: {
@@ -519,7 +520,7 @@ function makeStyles(colors: ColorPalette) {
       // The only overlay label on the amber accent fill (`primaryButton`), so
       // accentForeground is the correct on-accent token here.
       color: colors.accentForeground,
-      fontSize: 16,
+      fontSize: typeScale.callout,
       fontWeight: "600",
     },
     uploadingContainer: {
@@ -529,7 +530,7 @@ function makeStyles(colors: ColorPalette) {
     uploadingText: {
       // Rendered directly on the live camera feed — fixed white for contrast.
       color: "#FFFFFF",
-      fontSize: 16,
+      fontSize: typeScale.callout,
       fontWeight: "500",
     },
   });
