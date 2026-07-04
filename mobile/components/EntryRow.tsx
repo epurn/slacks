@@ -103,7 +103,7 @@ export function EntryRow({
               accessibilityLabel="Retry"
               accessibilityHint="Re-runs the estimate as a fresh attempt"
             >
-              <Text style={[styles.failedActionText, { color: colors.accent }]}>
+              <Text style={[styles.failedActionText, { color: colors.accentText }]}>
                 Retry
               </Text>
             </Pressable>
@@ -119,7 +119,7 @@ export function EntryRow({
               accessibilityLabel="Edit as text"
               accessibilityHint="Puts this entry's wording in the composer to fix and resubmit"
             >
-              <Text style={[styles.failedActionText, { color: colors.accent }]}>
+              <Text style={[styles.failedActionText, { color: colors.accentText }]}>
                 Edit as text
               </Text>
             </Pressable>
@@ -177,7 +177,7 @@ export function EntryRow({
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
           >
-            <Text style={[styles.addDetailChipText, { color: colors.accent }]}>
+            <Text style={[styles.addDetailChipText, { color: colors.accentText }]}>
               Add a detail ›
             </Text>
           </View>

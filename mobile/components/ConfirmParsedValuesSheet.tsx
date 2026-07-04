@@ -262,7 +262,7 @@ export function ConfirmParsedValuesSheet({
               accessibilityRole="button"
               style={styles.closeButton}
             >
-              <Text style={[styles.closeLabel, { color: colors.accent }]}>Not now</Text>
+              <Text style={[styles.closeLabel, { color: colors.accentText }]}>Not now</Text>
             </Pressable>
           </View>
 
