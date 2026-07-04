@@ -127,16 +127,20 @@ describe("font-size-baseline.json", () => {
     expect(baselinedFiles.has("components/WeightTrendChart.tsx")).toBe(false);
   });
 
+  it("does not baseline the mobile-today sites drained by FTY-213", () => {
+    const baselinedFiles = new Set(baseline.files.map((entry) => entry.file));
+    expect(baselinedFiles.has("components/ConfirmParsedValuesSheet.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/EntryRow.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/StatusIcon.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/TypeaheadSuggestionBar.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/today/SignInRequired.tsx")).toBe(false);
+  });
+
   it("enumerates the currently-known per-screen numeric fontSize sites", () => {
     const byFile = Object.fromEntries(
       baseline.files.map((entry) => [entry.file, entry.sites.length]),
     );
     expect(byFile).toEqual({
-      "components/ConfirmParsedValuesSheet.tsx": 1,
-      "components/EntryRow.tsx": 7,
-      "components/StatusIcon.tsx": 1,
-      "components/TypeaheadSuggestionBar.tsx": 1,
-      "components/today/SignInRequired.tsx": 1,
       "components/CorrectionSheet.tsx": 1,
       "components/correction/AdvancedLeverRow.tsx": 1,
       "components/correction/AmountStepper.tsx": 1,
@@ -173,9 +177,15 @@ describe("font-size-baseline.json", () => {
   });
 
   it("loads into a per-file multiset keyed by context@sizes", () => {
+    // Checked against whatever the baseline currently holds rather than a
+    // named file: other lanes drain entries independently, and pinning one
+    // breaks on their merges.
     const byFile = loadBaselineSites(DEFAULT_BASELINE_PATH);
-    const entryRow = byFile.get("components/EntryRow.tsx");
-    expect(entryRow).toBeDefined();
-    expect([...entryRow.values()].reduce((a, b) => a + b, 0)).toBe(7);
+    expect(byFile.size).toBe(baseline.files.length);
+    for (const entry of baseline.files) {
+      const multiset = byFile.get(entry.file);
+      expect(multiset).toBeDefined();
+      expect([...multiset.values()].reduce((a, b) => a + b, 0)).toBe(entry.sites.length);
+    }
   });
 });
