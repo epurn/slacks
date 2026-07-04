@@ -177,9 +177,15 @@ describe("font-size-baseline.json", () => {
   });
 
   it("loads into a per-file multiset keyed by context@sizes", () => {
+    // Checked against whatever the baseline currently holds rather than a
+    // named file: other lanes drain entries independently, and pinning one
+    // breaks on their merges.
     const byFile = loadBaselineSites(DEFAULT_BASELINE_PATH);
-    const weightEntryInput = byFile.get("components/WeightEntryInput.tsx");
-    expect(weightEntryInput).toBeDefined();
-    expect([...weightEntryInput.values()].reduce((a, b) => a + b, 0)).toBe(4);
+    expect(byFile.size).toBe(baseline.files.length);
+    for (const entry of baseline.files) {
+      const multiset = byFile.get(entry.file);
+      expect(multiset).toBeDefined();
+      expect([...multiset.values()].reduce((a, b) => a + b, 0)).toBe(entry.sites.length);
+    }
   });
 });
