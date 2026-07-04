@@ -189,7 +189,7 @@ export function CorrectionSheet({
             accessibilityRole="button"
             style={styles.closeButton}
           >
-            <Text style={[styles.closeLabel, { color: colors.accent }]}>Done</Text>
+            <Text style={[styles.closeLabel, { color: colors.accentText }]}>Done</Text>
           </Pressable>
         </View>
 
@@ -254,7 +254,7 @@ export function CorrectionSheet({
                     accessibilityLabel="Change match"
                     accessibilityHint="Find a different food source for this entry"
                   >
-                    <Text style={[styles.leverLabel, { color: colors.accent }]}>
+                    <Text style={[styles.leverLabel, { color: colors.accentText }]}>
                       Change match
                     </Text>
                     <Text style={[styles.leverChevron, { color: colors.textMuted }]}>›</Text>

@@ -48,7 +48,7 @@ export function ChangeMatchPanel({
           accessibilityRole="button"
           style={styles.cancelButton}
         >
-          <Text style={[styles.cancelLabel, { color: colors.accent }]}>Cancel</Text>
+          <Text style={[styles.cancelLabel, { color: colors.accentText }]}>Cancel</Text>
         </Pressable>
       </View>
 
