@@ -899,7 +899,10 @@ export const E2E_CORRECTION_SUMMARY: DailySummaryDTO = {
 
 /**
  * The item the PATCH /derived-items/food/{id} returns after an amount step — the
- * server-recomputed portion (1.25 cups → 175 kcal, `is_edited: true`). The
+ * server-recomputed portion (1.25 cups → 175 kcal). Per `amount_adjust`
+ * semantics (docs/contracts/corrections.md), a `quantity` edit is a
+ * provenance-preserving portion change: it never marks the item edited
+ * (`is_edited` stays `false`) and leaves the original estimate untouched. The
  * correction sheet swaps this in and the 175-kcal value is what correction-beat.yaml
  * asserts: the correction committed on the real data path, so the beat fired.
  */
@@ -911,11 +914,7 @@ export const E2E_CORRECTION_EDITED_ITEM: DerivedFoodItemDTO = {
   protein_g: 6,
   carbs_g: 34,
   fat_g: 4,
-  calories_estimated: 175,
-  protein_g_estimated: 6,
-  carbs_g_estimated: 34,
-  fat_g_estimated: 4,
-  is_edited: true,
+  is_edited: false,
   updated_at: '2026-01-01T07:16:00Z',
 };
 

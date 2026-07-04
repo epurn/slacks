@@ -893,8 +893,8 @@ describe('FTY-181 correction-saved flow: stateful mock transitions', () => {
     const mockFetch = createE2EMockFetch();
     await createLogEvent(apiSession, E2E_CORRECTION_RAW_TEXT, undefined, mockFetch);
     // The amount step commits a single-field quantity PATCH; the mock echoes the
-    // recomputed item (1.25 cups → 175 kcal, is_edited) — the visible
-    // confirmation correction-beat.yaml asserts, proving the beat's commit path.
+    // recomputed item (1.25 cups → 175 kcal, amount_adjust → is_edited false) —
+    // the visible confirmation correction-beat.yaml asserts, proving the beat's commit path.
     const edited = await editDerivedItem(
       apiSession,
       'food',
@@ -908,7 +908,7 @@ describe('FTY-181 correction-saved flow: stateful mock transitions', () => {
     expect(edited).toEqual(E2E_CORRECTION_EDITED_ITEM);
     if (edited.item_type === 'food') {
       expect(edited.calories).toBe(175);
-      expect(edited.is_edited).toBe(true);
+      expect(edited.is_edited).toBe(false);
     }
   });
 
