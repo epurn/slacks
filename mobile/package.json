@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "check:accent-text": "node scripts/check-accent-as-text.js",
+    "check:font-size": "node scripts/check-font-size-literal.js",
     "test": "jest"
   },
   "dependencies": {

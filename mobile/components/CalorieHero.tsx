@@ -1,15 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, StyleSheet, Text, View } from "react-native";
 
-import {
-  useTheme,
-  DISPLAY_FONT_FAMILY,
-  spacing,
-  radius,
-  typeScale,
-} from "@/theme";
+import { useTheme, spacing, radius, typeScale } from "@/theme";
 import { defaultSpring, useReduceMotion, usePulse } from "@/theme/motion";
 import { targetReachedHaptic } from "@/theme/haptics";
+import { ThemedNumber } from "@/components/ui";
 
 function formatCalories(n: number): string {
   return Math.round(n).toLocaleString("en-US");
@@ -97,15 +92,12 @@ export function CalorieHero({
         accessible={true}
         accessibilityLabel={copy.accessibilityLabel}
       >
-        <Text
-          style={[
-            styles.heroNumber,
-            { color: colors.text, fontFamily: DISPLAY_FONT_FAMILY },
-          ]}
+        <ThemedNumber
+          value="—"
+          scale="heroDisplay"
+          style={styles.heroNumber}
           accessibilityElementsHidden
-        >
-          —
-        </Text>
+        />
         <Text
           style={[styles.contextLine, { color: colors.textSecondary }]}
           accessibilityElementsHidden
@@ -129,15 +121,12 @@ export function CalorieHero({
         accessible={true}
         accessibilityLabel={`${formatCalories(consumed)} kcal today, no target set`}
       >
-        <Text
-          style={[
-            styles.heroNumber,
-            { color: colors.text, fontFamily: DISPLAY_FONT_FAMILY },
-          ]}
+        <ThemedNumber
+          value={formatCalories(consumed)}
+          scale="heroDisplay"
+          style={styles.heroNumber}
           accessibilityElementsHidden
-        >
-          {formatCalories(consumed)}
-        </Text>
+        />
         <Text
           style={[styles.contextLine, { color: colors.textSecondary }]}
           accessibilityElementsHidden
@@ -179,15 +168,12 @@ export function CalorieHero({
       accessible={true}
       accessibilityLabel={a11yLabel}
     >
-      <Text
-        style={[
-          styles.heroNumber,
-          { color: colors.text, fontFamily: DISPLAY_FONT_FAMILY },
-        ]}
+      <ThemedNumber
+        value={formatCalories(consumed)}
+        scale="heroDisplay"
+        style={styles.heroNumber}
         accessibilityElementsHidden
-      >
-        {formatCalories(consumed)}
-      </Text>
+      />
 
       <Text
         style={[styles.contextLine, { color: colors.textSecondary }]}
@@ -330,10 +316,6 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   heroNumber: {
-    fontSize: typeScale.heroDisplay,
-    fontWeight: "700",
-    fontVariant: ["tabular-nums"],
-    letterSpacing: 0,
     lineHeight: typeScale.heroDisplay * 1.05,
   },
   contextLine: {

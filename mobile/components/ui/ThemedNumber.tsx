@@ -1,11 +1,6 @@
-import { Text, type TextProps } from 'react-native';
-import {
-  useTheme,
-  typeScale,
-  type TypeScaleKey,
-  DISPLAY_FONT_FAMILY,
-  displayTracking,
-} from '@/theme';
+import { type TextProps } from 'react-native';
+import { type TypeScaleKey } from '@/theme';
+import { DisplayText } from './DisplayText';
 
 interface ThemedNumberProps extends TextProps {
   /** The numeric value to display (string or number). */
@@ -20,10 +15,9 @@ interface ThemedNumberProps extends TextProps {
 /**
  * Display-face number primitive with tabular figures.
  *
- * Uses the DISPLAY_FONT_FAMILY token (currently the system font) with
- * fontVariant: ['tabular-nums'] so that live-updating numbers keep a constant
- * width and never jitter. Swap DISPLAY_FONT_FAMILY in theme/typography.ts when
- * the licensed geometric grotesque is bundled.
+ * Wraps DisplayText with fontVariant: ['tabular-nums'] so that live-updating
+ * numbers keep a constant width and never jitter. Swap DISPLAY_FONT_FAMILY in
+ * theme/typography.ts when the licensed geometric grotesque is bundled.
  */
 export function ThemedNumber({
   value,
@@ -33,23 +27,9 @@ export function ThemedNumber({
   style,
   ...rest
 }: ThemedNumberProps) {
-  const { colors } = useTheme();
   return (
-    <Text
-      style={[
-        {
-          fontFamily: DISPLAY_FONT_FAMILY,
-          fontSize: typeScale[scale],
-          fontWeight: bold ? '700' : '400',
-          color: colors[variant],
-          fontVariant: ['tabular-nums'],
-          letterSpacing: displayTracking,
-        },
-        style,
-      ]}
-      {...rest}
-    >
+    <DisplayText scale={scale} variant={variant} bold={bold} tabularNums style={style} {...rest}>
       {String(value)}
-    </Text>
+    </DisplayText>
   );
 }

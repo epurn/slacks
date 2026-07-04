@@ -4,6 +4,7 @@ import { act, create as render, type ReactTestRenderer } from "react-test-render
 import { CalorieHero } from "./CalorieHero";
 import { mockReduceMotion } from "@/testUtils/reduceMotion";
 import { targetReachedHaptic } from "@/theme/haptics";
+import { displayTracking } from "@/theme";
 
 // The signature-beat haptics are mocked so the target-reached beat can be
 // asserted without a native Taptic Engine.
@@ -302,6 +303,22 @@ describe("CalorieHero — hero bar easing", () => {
       tree!.update(<CalorieHero consumed={1600} target={2000} />);
     });
     expect(springSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("CalorieHero — display face", () => {
+  it("renders the hero numeral through the DisplayText tracking (ThemedNumber)", () => {
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(<CalorieHero consumed={1240} target={2000} />);
+    });
+
+    const heroNumeral = tree!.root.find(
+      (n) => (n.type as unknown as string) === "Text" && n.props.children === "1,240",
+    );
+    const style = flattenedStyle(heroNumeral.props.style);
+    expect(style.letterSpacing).toBe(displayTracking);
+    expect(style.fontVariant).toEqual(["tabular-nums"]);
   });
 });
 
