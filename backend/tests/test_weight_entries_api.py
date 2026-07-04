@@ -11,7 +11,7 @@ Weight values are sensitive personal data and are never logged.
 from __future__ import annotations
 
 import uuid
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -460,6 +460,12 @@ def test_create_rejects_date_before_floor(client: TestClient) -> None:
 
 
 def test_create_accepts_today_utc(client: TestClient) -> None:
+    """The local machine date is offset-robust here: for a timezone-less user the
+    endpoint accepts up to UTC-today + 1 day slack, and the local calendar date
+    can never differ from the UTC calendar date by more than one day in either
+    direction, so it always falls inside the accepted window.
+    """
+
     user_id, auth = _register(client, "weight-today@example.com")
     today = date.today().isoformat()
 
@@ -516,9 +522,11 @@ def test_create_timezone_boundary_ahead_of_utc(client: TestClient) -> None:
     # Set the user's timezone well ahead of UTC so their "local today" may be UTC "tomorrow".
     _set_timezone(client, user_id, auth, "Pacific/Auckland")
 
-    # tomorrow in UTC == within the +1 day slack, so this must be accepted regardless
-    # of whether Auckland is +12 or +13 right now.
-    tomorrow_utc = (date.today() + timedelta(days=1)).isoformat()
+    # Computed from actual UTC today, not the test-runner's local date: the
+    # runner's local calendar date can itself be a day ahead of UTC, which
+    # would silently push this past the +1 day slack and flake independently
+    # of the Auckland boundary this test means to exercise.
+    tomorrow_utc = (datetime.now(UTC).date() + timedelta(days=1)).isoformat()
 
     resp = client.post(
         f"/api/users/{user_id}/weight-entries",
@@ -530,10 +538,16 @@ def test_create_timezone_boundary_ahead_of_utc(client: TestClient) -> None:
 
 
 def test_create_rejects_day_beyond_slack(client: TestClient) -> None:
-    """A date two days beyond today (UTC) must be rejected even with the slack."""
+    """A date two days beyond today (UTC) must be rejected even with the slack.
+
+    Computed from UTC today, not the test-runner's local date: this user has no
+    profile timezone, so the endpoint resolves "today" in UTC. Using the local
+    date would make this test's pass/fail depend on the runner's clock and
+    timezone offset relative to UTC.
+    """
 
     user_id, auth = _register(client, "weight-beyond-slack@example.com")
-    two_days_ahead = (date.today() + timedelta(days=2)).isoformat()
+    two_days_ahead = (datetime.now(UTC).date() + timedelta(days=2)).isoformat()
 
     resp = client.post(
         f"/api/users/{user_id}/weight-entries",
