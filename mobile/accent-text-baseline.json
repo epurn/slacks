@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "description": "Baseline allowlist for scripts/check-accent-as-text.js — pre-existing colors.accent-as-text sites, seeded at FTY-191 by snapshotting the guard's own output on the live tree. Each entry is a per-file count of accent-as-text sites still present in that file, in source order; the guard exempts a file's first `count` sites and fails on anything beyond that. Per-screen application stories (FTY-207-212) drain their file's count to 0 and delete the entry as they swap to colors.accentText; the guard is fully strict once this list is empty.",
+  "sites": [
+    {
+      "file": "components/ConfirmParsedValuesSheet.tsx",
+      "count": 1,
+      "reason": "Confirm-parse sheet mounted from today/TodaySheetHost.tsx — mobile-today lane."
+    },
+    {
+      "file": "components/CorrectionSheet.tsx",
+      "count": 2,
+      "reason": "mobile-correction lane — FTY-208."
+    },
+    {
+      "file": "components/EntryRow.tsx",
+      "count": 3,
+      "reason": "mobile-today lane — FTY-207."
+    },
+    {
+      "file": "components/TrendsScreen.tsx",
+      "count": 1,
+      "reason": "mobile-trends lane — FTY-209."
+    },
+    {
+      "file": "components/WeightLogSheet.tsx",
+      "count": 1,
+      "reason": "mobile-weight lane — FTY-210."
+    },
+    {
+      "file": "components/correction/ChangeMatchPanel.tsx",
+      "count": 1,
+      "reason": "mobile-correction lane — FTY-208."
+    },
+    {
+      "file": "components/correction/ProvenanceBlock.tsx",
+      "count": 1,
+      "reason": "mobile-correction lane — FTY-208."
+    },
+    {
+      "file": "components/correction/SaveFoodRow.tsx",
+      "count": 1,
+      "reason": "mobile-correction lane — FTY-208."
+    },
+    {
+      "file": "components/onboarding/MeasurementsStep.tsx",
+      "count": 1,
+      "reason": "mobile-onboarding lane — FTY-211 (selected-option label, formerly OnboardingScreen.tsx)."
+    },
+    {
+      "file": "components/settings/BodySection.tsx",
+      "count": 1,
+      "reason": "mobile-settings lane — FTY-212 (selected-segment label, formerly SettingsScreen.tsx)."
+    }
+  ]
+}

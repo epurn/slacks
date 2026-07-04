@@ -54,7 +54,7 @@ describe('verify-e2e runner contract', () => {
       'npx expo run:ios $BUILD_CACHE_FLAG --configuration Debug --no-bundler',
     );
     expect(script).not.toContain('run:ios $BUILD_CACHE_FLAG --configuration Debug --simulator');
-    expect(script).toContain('E2E_MAESTRO_TIMEOUT_SECONDS:-420');
+    expect(script).toContain('E2E_MAESTRO_TIMEOUT_SECONDS:-720');
     expect(script).toContain('MAESTRO_CLI_NO_ANALYTICS=1 maestro test .maestro/');
   });
 
