@@ -63,6 +63,17 @@ export interface DailySummaryDTO {
    * on/off-target denominator instead of counting them as real 0-kcal days.
    */
   readonly has_intake: boolean;
+  /**
+   * Count of the day's entries that are **logged but not yet counted** toward
+   * `intake` because they await a user action — the sum of the user's
+   * `needs_clarification` log events and `proposed` (unconfirmed) items on the
+   * day (FTY-223). `pending`/`processing` (still estimating) and `failed`
+   * entries are excluded. Zero for a genuinely empty day, so it — not
+   * `has_intake` alone — is what lets the Trends adherence card tell a day with
+   * nothing logged apart from a day whose only entries are uncounted ("N entries
+   * awaiting details"). See `docs/contracts/daily-summary.md`.
+   */
+  readonly uncounted_entries: number;
   readonly target: TargetReadModel | null;
   readonly exercise: {
     readonly active_calories: number;

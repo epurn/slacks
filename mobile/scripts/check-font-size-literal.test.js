@@ -123,6 +123,9 @@ describe("font-size-baseline.json", () => {
     expect(baselinedFiles.has("app/day.tsx")).toBe(false);
     expect(baselinedFiles.has("components/ui/ThemedNumber.tsx")).toBe(false);
     expect(baselinedFiles.has("components/ui/DisplayText.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/WeightEntryInput.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/WeightScreen.tsx")).toBe(false);
+    expect(baselinedFiles.has("components/WeightTrendChart.tsx")).toBe(false);
   });
 
   it("does not baseline the mobile-correction sites drained by FTY-214", () => {
@@ -143,9 +146,6 @@ describe("font-size-baseline.json", () => {
       "components/StatusIcon.tsx": 1,
       "components/TypeaheadSuggestionBar.tsx": 1,
       "components/today/SignInRequired.tsx": 1,
-      "components/WeightEntryInput.tsx": 4,
-      "components/WeightScreen.tsx": 4,
-      "components/WeightTrendChart.tsx": 5,
       "components/BarcodeScannerScreen.tsx": 2,
       "components/CameraCapture.tsx": 3,
       "components/LabelCaptureScreen.tsx": 6,
