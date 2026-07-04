@@ -7,6 +7,8 @@ import type { UnitsPreference } from "@/state/profile";
 import { kgToDisplay, weightUnitLabel } from "@/state/weightEntries";
 import { useTheme } from "@/theme/ThemeContext";
 import type { ColorPalette } from "@/theme/colors";
+import { typeScale } from "@/theme";
+import { ThemedNumber } from "@/components/ui";
 
 const CHART_H = 160;
 const PAD = { top: 16, bottom: 28, left: 48, right: 12 };
@@ -100,7 +102,7 @@ export function WeightTrendChart({
         accessibilityRole="image"
         style={styles.state}
       >
-        <Text style={styles.singlePoint}>{`${displayValues[0]} ${unit}`}</Text>
+        <ThemedNumber value={`${displayValues[0]} ${unit}`} scale="title2" />
         <Text style={styles.singleDate}>{entries[0].effective_date}</Text>
       </View>
     );
@@ -230,18 +232,13 @@ function makeStyles(colors: ColorPalette) {
       gap: 12,
     },
     stateText: {
-      fontSize: 15,
+      fontSize: typeScale.subhead,
       color: colors.textMuted,
       textAlign: "center",
       paddingHorizontal: 16,
     },
-    singlePoint: {
-      fontSize: 22,
-      fontWeight: "700",
-      color: colors.text,
-    },
     singleDate: {
-      fontSize: 14,
+      fontSize: typeScale.detail,
       color: colors.textMuted,
     },
     retry: {
@@ -251,12 +248,12 @@ function makeStyles(colors: ColorPalette) {
       backgroundColor: colors.controlBackground,
     },
     retryLabel: {
-      fontSize: 15,
+      fontSize: typeScale.subhead,
       fontWeight: "600",
       color: colors.text,
     },
     axisLabel: {
-      fontSize: 11,
+      fontSize: typeScale.caption2,
       color: colors.textMuted,
       textAlign: "right",
     },

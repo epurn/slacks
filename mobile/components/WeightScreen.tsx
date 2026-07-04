@@ -10,6 +10,8 @@ import {
 } from "@/api/weightEntries";
 import { useTheme } from "@/theme/ThemeContext";
 import type { ColorPalette } from "@/theme/colors";
+import { typeScale } from "@/theme";
+import { DisplayText } from "@/components/ui";
 import { WeightEntryInput } from "@/components/WeightEntryInput";
 import { WeightTrendChart } from "@/components/WeightTrendChart";
 import type { UnitsPreference } from "@/state/profile";
@@ -131,9 +133,9 @@ export function WeightScreen({
         { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 24 },
       ]}
     >
-      <Text style={styles.title} accessibilityRole="header">
+      <DisplayText scale="largeTitle" accessibilityRole="header">
         Weight
-      </Text>
+      </DisplayText>
 
       <View style={styles.card}>
         <Text style={styles.sectionLabel}>Log weight</Text>
@@ -169,9 +171,13 @@ function SignInRequired({ insetTop, colors }: { insetTop: number; colors: ColorP
   const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={[styles.center, { paddingTop: insetTop }]}>
-      <Text style={styles.centerTitle} accessibilityRole="header">
+      <DisplayText
+        scale="title2Large"
+        style={styles.centerTitle}
+        accessibilityRole="header"
+      >
         Sign in to log your weight
-      </Text>
+      </DisplayText>
       <Text style={styles.centerBody}>
         Your weight log is stored privately against your account. Sign in to
         log and view your weight trend.
@@ -190,11 +196,6 @@ function makeStyles(colors: ColorPalette) {
       paddingHorizontal: 16,
       gap: 16,
     },
-    title: {
-      fontSize: 34,
-      fontWeight: "700",
-      color: colors.text,
-    },
     card: {
       backgroundColor: colors.surfaceRaised,
       borderRadius: 12,
@@ -202,7 +203,7 @@ function makeStyles(colors: ColorPalette) {
       gap: 12,
     },
     sectionLabel: {
-      fontSize: 13,
+      fontSize: typeScale.footnote,
       fontWeight: "600",
       color: colors.textMuted,
       textTransform: "uppercase",
@@ -215,13 +216,10 @@ function makeStyles(colors: ColorPalette) {
       alignItems: "center",
     },
     centerTitle: {
-      fontSize: 24,
-      fontWeight: "700",
-      color: colors.text,
       textAlign: "center",
     },
     centerBody: {
-      fontSize: 15,
+      fontSize: typeScale.subhead,
       color: colors.textMuted,
       textAlign: "center",
       marginTop: 12,
