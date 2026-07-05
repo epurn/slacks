@@ -23,98 +23,17 @@ jobs:
       - name: Verify mobile
         run: make mobile
 
-  # ── End-to-end smoke flow (FTY-161) ─────────────────────────────────────────
-  # Runs the FTY-160 Maestro harness in the pipeline so a flow that opens but
-  # cannot complete fails the build like a unit failure. This is the enforcement
-  # half of the harness: the local runner alone would not have caught FTY-149.
-  #
-  # Platform decision: Android emulator on a Linux runner. iOS-simulator E2E
-  # needs macOS runners (~10x the minutes), so it is deliberately deferred to
-  # keep this on cheap ubuntu-latest minutes (consistent with the unit `mobile`
-  # job and the cost stance in docs/agent-model-policy). The Maestro flows are
-  # platform-agnostic YAML, so a developer can still run them against an iOS
-  # simulator locally via mobile/verify-e2e.sh (PLATFORM=ios, the default).
-  #
-  # The job builds the debug binary, boots an emulator, installs, and runs the
-  # whole mobile/.maestro/ directory via that same runner — so any flow added
-  # later (e.g. FTY-162's clarify regression) is picked up with no edit here.
+  # Temporary transition job for repositories that still require the historical
+  # `mobile-e2e` context. It deliberately does not build native code, boot an
+  # emulator, install Maestro, or run mobile/verify-e2e.sh. The full suite moved
+  # to .github/workflows/mobile-e2e.yml as non-required manual/scheduled evidence.
   mobile-e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-      - name: Set up Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: mobile/package-lock.json
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - name: Install mobile dependencies
-        working-directory: mobile
-        run: npm ci
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('mobile/package-lock.json') }}
-          restore-keys: |
-            gradle-${{ runner.os }}-
-      - name: Install Maestro
+      - name: Explain E2E demotion
         run: |
-          curl -Ls "https://get.maestro.mobile.dev" | bash
-          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
-      - name: Enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-      - name: Cache AVD
-        uses: actions/cache@v4
-        id: avd-cache
-        with:
-          path: |
-            ~/.android/avd/*
-            ~/.android/adb*
-          key: avd-34-${{ runner.os }}
-      - name: Create AVD snapshot for caching
-        if: steps.avd-cache.outputs.cache-hit != 'true'
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 34
-          arch: x86_64
-          force-avd-creation: false
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
-          disable-animations: false
-          script: echo "Generated AVD snapshot for caching."
-      - name: Build, install, and run Maestro flows
-        uses: reactivecircus/android-emulator-runner@v2
-        env:
-          # Reuse the restored Gradle cache so the emulator build stays bounded.
-          E2E_BUILD_CACHE: "1"
-        with:
-          api-level: 34
-          arch: x86_64
-          force-avd-creation: false
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save
-          disable-animations: true
-          working-directory: mobile
-          # Fails the job if the build, install, or any flow fails — the gate.
-          script: PLATFORM=android ./verify-e2e.sh
-      - name: Upload Maestro artifacts on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: maestro-e2e-artifacts
-          path: |
-            ~/.maestro/tests/
-          if-no-files-found: ignore
-          retention-days: 7
+          echo "FTY-248 demoted the full native Maestro suite from the required PR gate."
+          echo "This compatibility job is intentionally lightweight and does not run E2E."
+          echo "Repository admins must remove required status check 'mobile-e2e' and require 'mobile'."
+          echo "Run the full suite from the non-required mobile-e2e workflow_dispatch/schedule path."

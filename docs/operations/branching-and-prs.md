@@ -47,17 +47,28 @@ Configure GitHub `main` with:
 - require status checks:
   - `governance`,
   - `reviewer-approved`,
-  - `mobile-e2e` (mobile end-to-end Maestro smoke gate, FTY-161),
+  - `mobile` (fast mobile typecheck/lint/test gate),
   - future backend/mobile/security checks,
 - block force pushes,
 - block deletions,
 - apply rules to administrators where practical.
+
+Repository administrators must remove the historical required status check
+`mobile-e2e` and add or keep `mobile` as the required mobile check. During the
+transition a lightweight `mobile-e2e` compatibility job may appear on PRs only
+to satisfy old branch protection; it does not run native E2E and must not be
+treated as full Maestro evidence.
 
 The `reviewer-approved` commit status is the automated non-author review gate.
 The reviewer agent sets it for the current PR head SHA. This custom status is
 the required reviewer gate because GitHub's native required-review rule may not
 count approvals submitted by the `fatty-reviewer` app as eligible native
 approvals.
+
+The full native Maestro suite remains available as non-required evidence through
+the manual/scheduled `mobile-e2e` workflow, which builds the Android debug
+binary, boots an emulator, runs `mobile/.maestro/`, and uploads failure
+artifacts for debugging.
 
 ## Merge Style
 

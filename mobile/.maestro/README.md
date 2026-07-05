@@ -18,7 +18,7 @@ new architecture, config plugins expo-router / expo-camera / expo-secure-store).
 `expo prebuild` + the native toolchain. Expo Go cannot faithfully host this
 app's config plugins and new-architecture build, and is not a deterministic
 target (shared client, OTA fetch, version skew). The debug binary is also the
-CI target (FTY-161).
+target for the non-required manual/scheduled `mobile-e2e` workflow.
 
 ## Prerequisites
 
@@ -43,6 +43,14 @@ This script:
    by default; set `PLATFORM=android` to build an APK).
 2. Installs the binary on the active simulator/emulator.
 3. Runs `maestro test .maestro/` — every flow in this directory.
+
+## CI coverage
+
+The required PR mobile gate is the fast `mobile` job. It does not build native
+code, boot an emulator, or run this directory. The full Maestro suite remains
+available as non-required evidence through the manual/scheduled `mobile-e2e`
+workflow, which runs the same directory-level harness and uploads Maestro
+failure artifacts for debugging.
 
 **Running the flow directly** (if you already have the binary installed):
 
