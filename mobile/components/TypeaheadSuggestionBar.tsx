@@ -1,19 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-} from "react-native";
+import { useEffect, useState } from "react";
+import { ScrollView, StyleSheet } from "react-native";
 
 import {
   searchSavedFoods as searchSavedFoodsApi,
   type SavedFoodDTO,
   type SavedFoodSession,
 } from "@/api/savedFoods";
-import { useTheme } from "@/theme/ThemeContext";
-import type { ColorPalette } from "@/theme/colors";
-import { spacing, typeScale } from "@/theme";
+import { Chip } from "@/components/ui";
+import { spacing } from "@/theme";
 
 /** Debounce window in ms: avoids a network call per keystroke. */
 const DEBOUNCE_MS = 300;
@@ -47,8 +41,6 @@ export function TypeaheadSuggestionBar({
   /** Injectable search function for tests. */
   search?: typeof searchSavedFoodsApi;
 }) {
-  const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [suggestions, setSuggestions] = useState<readonly SavedFoodDTO[]>([]);
   const trimmed = query.trim();
 
@@ -85,46 +77,29 @@ export function TypeaheadSuggestionBar({
       contentContainerStyle={styles.barContent}
     >
       {visibleSuggestions.map((food) => (
-        <Pressable
+        <Chip
           key={food.id}
-          style={styles.chip}
-          accessibilityRole="button"
+          label={food.name}
           accessibilityLabel={`Use saved food: ${food.name}`}
           onPress={() => onSelect(food)}
-        >
-          <Text style={styles.chipText} numberOfLines={1}>
-            {food.name}
-          </Text>
-        </Pressable>
+          style={styles.chip}
+        />
       ))}
     </ScrollView>
   );
 }
 
-function makeStyles(colors: ColorPalette) {
-  return StyleSheet.create({
-    bar: {
-      flexGrow: 0,
-      marginTop: 6,
-    },
-    barContent: {
-      // Inset chips to the composer column so the first chip aligns with the
-      // text input it is completing, not the screen edge (FTY-147).
-      paddingHorizontal: spacing.base,
-    },
-    chip: {
-      backgroundColor: colors.controlBackground,
-      borderRadius: 18,
-      paddingVertical: 6,
-      paddingHorizontal: 14,
-      marginRight: 8,
-      justifyContent: "center",
-      alignItems: "center",
-    },
-    chipText: {
-      fontSize: typeScale.detail,
-      color: colors.text,
-      fontWeight: "500",
-    },
-  });
-}
+const styles = StyleSheet.create({
+  bar: {
+    flexGrow: 0,
+    marginTop: 6,
+  },
+  barContent: {
+    // Inset chips to the composer column so the first chip aligns with the
+    // text input it is completing, not the screen edge (FTY-147).
+    paddingHorizontal: spacing.base,
+  },
+  chip: {
+    marginRight: 8,
+  },
+});
