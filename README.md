@@ -152,6 +152,11 @@ curl -fsS http://localhost:8000/healthz/sources
 
 A 200 response from `/healthz` confirms the API is up. `/readyz` returns 200 when the database is ready, or 503 if it is unavailable — useful for orchestration and health checks. `/healthz/sources` shows which evidence sources are enabled and available — useful to verify your provider configuration without making any estimation calls.
 
+**Testing in an iOS simulator?** Run `make sim-smoke` first. It confirms the
+stack is coherent (backend images from one checkout, Alembic at head, health
+green) and prints the exact connect-screen URL derived from your `.env`
+`API_PORT`. See [Local Development Stack → Simulator Readiness Smoke](docs/operations/local-dev-stack.md#simulator-readiness-smoke-fty-250).
+
 ### Provider Availability
 
 Every optional provider (LLM, USDA FDC, OFF) can be omitted, and official-source
