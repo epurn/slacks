@@ -169,6 +169,7 @@ export function ClusterView({
                 key={event.id}
                 event={event}
                 onPress={onOpenClarify ? () => onOpenClarify(event) : undefined}
+                readOnly={readOnly}
               />
             );
           }
@@ -184,6 +185,7 @@ export function ClusterView({
                 onEditAsText={
                   onEditFailedAsText ? () => onEditFailedAsText(event) : undefined
                 }
+                readOnly={readOnly}
               />
             );
           }

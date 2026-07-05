@@ -79,6 +79,34 @@ function completedEntry(): LogEventEntryDTO {
   };
 }
 
+/** An unresolved needs_clarification entry from the past day (no item rows). */
+function needsClarificationEntry(): LogEventEntryDTO {
+  return {
+    event: event({
+      id: "evt-nc",
+      status: "needs_clarification",
+      raw_text: "some cereal",
+      created_at: "2026-06-28T08:00:00Z",
+      updated_at: "2026-06-28T08:00:00Z",
+    }),
+    items: [],
+  };
+}
+
+/** An unresolved failed-parse entry from the past day (no item rows). */
+function failedEntry(): LogEventEntryDTO {
+  return {
+    event: event({
+      id: "evt-failed",
+      status: "failed",
+      raw_text: "asdkfj",
+      created_at: "2026-06-28T09:00:00Z",
+      updated_at: "2026-06-28T09:00:00Z",
+    }),
+    items: [],
+  };
+}
+
 function allA11yLabels(tree: ReactTestRenderer): string[] {
   return tree.root
     .findAll((n) => typeof n.props.accessibilityLabel === "string")
@@ -154,6 +182,57 @@ describe("DayScreen — reuses the Today timeline (FTY-199)", () => {
         (l) => l.includes("Greek yogurt") && l.includes("150 kcal") && l.includes("USDA"),
       ),
     ).toBe(true);
+  });
+});
+
+describe("DayScreen — read-only, no inert CTAs (FTY-199)", () => {
+  it("neutralizes the 'Add a detail' chip for a historical needs_clarification entry", async () => {
+    const tree = mount(
+      <DayScreen
+        session={SESSION}
+        loadEntries={jest.fn().mockResolvedValue([needsClarificationEntry()])}
+        getDailySummary={jest.fn().mockResolvedValue(summary())}
+      />,
+    );
+    await act(async () => {});
+
+    // The row still renders (calm, legible)…
+    expect(
+      tree.root.findAll((n) => n.props.testID === "add-a-detail-row").length,
+    ).toBeGreaterThanOrEqual(1);
+    // …but the inert accent CTA chip is gone, and nothing is tappable.
+    expect(textContent(tree)).not.toContain("Add a detail");
+    expect(
+      tree.root.findAll(
+        (n) => n.props.testID === "add-a-detail-row" && typeof n.props.onPress === "function",
+      ),
+    ).toHaveLength(0);
+    // The needs-a-detail state is still conveyed to VoiceOver.
+    expect(
+      allA11yLabels(tree).some((l) => l.includes("needs a detail")),
+    ).toBe(true);
+  });
+
+  it("neutralizes Retry / Edit-as-text for a historical failed entry", async () => {
+    const tree = mount(
+      <DayScreen
+        session={SESSION}
+        loadEntries={jest.fn().mockResolvedValue([failedEntry()])}
+        getDailySummary={jest.fn().mockResolvedValue(summary())}
+      />,
+    );
+    await act(async () => {});
+
+    // The failed row still renders calmly…
+    expect(
+      tree.root.findAll((n) => n.props.testID === "failed-parse-row").length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(textContent(tree)).toContain("Couldn't read that");
+    // …with no inert Retry / Edit-as-text buttons.
+    expect(tree.root.findAll((n) => n.props.testID === "failed-retry")).toHaveLength(0);
+    expect(
+      tree.root.findAll((n) => n.props.testID === "failed-edit-as-text"),
+    ).toHaveLength(0);
   });
 });
 
