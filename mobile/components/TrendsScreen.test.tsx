@@ -179,6 +179,34 @@ function textContent(tree: ReactTestRenderer): string {
     .join(" ");
 }
 
+async function waitForAssertion(assertion: () => void) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await act(async () => { await Promise.resolve(); });
+    try {
+      assertion();
+      return;
+    } catch (err: unknown) {
+      lastError = err;
+    }
+  }
+  throw lastError;
+}
+
+async function waitForAdherenceSettled(tree: ReactTestRenderer) {
+  await waitForAssertion(() => {
+    expect(tree.root.findAll((n) => n.props.testID === "adherence-loading")).toHaveLength(0);
+  });
+}
+
+async function waitForSheetSettled(tree: ReactTestRenderer) {
+  await waitForAssertion(() => {
+    expect(tree.root.findAll((n) =>
+      String(n.props.accessibilityLabel).startsWith("Weight in"),
+    ).length).toBeGreaterThan(0);
+  });
+}
+
 /** The headline delta `Text` node (e.g. " ↓0.4 this month"). */
 function findHeadlineDeltaNode(tree: ReactTestRenderer) {
   return tree.root.findAll(
@@ -206,10 +234,6 @@ function findCellFillNode(tree: ReactTestRenderer, date: string) {
   return cell.findAllByType(View)[1]!;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// No session
-// ─────────────────────────────────────────────────────────────────────────────
-
 describe("TrendsScreen — no session", () => {
   it("shows a sign-in message when no session is present", () => {
     const list = jest.fn();
@@ -226,12 +250,8 @@ describe("TrendsScreen — no session", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Weight entries loading
-// ─────────────────────────────────────────────────────────────────────────────
-
 describe("TrendsScreen — weight entries", () => {
-  it("shows loading state while entries are fetching", () => {
+  it("shows loading state while entries are fetching", async () => {
     const list = jest.fn().mockReturnValue(new Promise(() => {}));
     const tree = mount(
       <TrendsScreen
@@ -245,6 +265,7 @@ describe("TrendsScreen — weight entries", () => {
       (n) => n.props.accessibilityLabel === "Loading weight trend",
     );
     expect(loading).toBeTruthy();
+    await waitForAdherenceSettled(tree);
   });
 
   it("loads entries for the selected range (1M default = 30 days)", async () => {
@@ -298,10 +319,6 @@ describe("TrendsScreen — weight entries", () => {
     expect(textContent(tree)).toContain("Log your first weigh-in");
   });
 });
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Range selector
-// ─────────────────────────────────────────────────────────────────────────────
 
 describe("TrendsScreen — range selector", () => {
   it("renders a native range control offering 1M, 3M, 6M", async () => {
@@ -373,10 +390,6 @@ describe("TrendsScreen — range selector", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Headline delta
-// ─────────────────────────────────────────────────────────────────────────────
-
 describe("TrendsScreen — headline delta", () => {
   it("shows headline delta with direction when entries exist", async () => {
     const entries = [
@@ -433,10 +446,6 @@ describe("TrendsScreen — headline delta", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Adherence summary
-// ─────────────────────────────────────────────────────────────────────────────
-
 describe("TrendsScreen — adherence summary", () => {
   it("shows avg kcal and days-on-target when summaries are available", async () => {
     const getSum = jest.fn().mockResolvedValue([
@@ -478,10 +487,6 @@ describe("TrendsScreen — adherence summary", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Past-day drilldown
-// ─────────────────────────────────────────────────────────────────────────────
-
 describe("TrendsScreen — past-day drilldown", () => {
   it("calls onDayPress with the tapped date when a strip cell is pressed", async () => {
     const onDayPress = jest.fn();
@@ -517,10 +522,6 @@ describe("TrendsScreen — past-day drilldown", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Weight entry sheet
-// ─────────────────────────────────────────────────────────────────────────────
-
 describe("TrendsScreen — log weight sheet", () => {
   it("opens the log-weight sheet when '+ Log weight' is pressed", async () => {
     const tree = mount(
@@ -537,6 +538,7 @@ describe("TrendsScreen — log weight sheet", () => {
       (n) => n.props.accessibilityLabel === "Log weight",
     );
     act(() => logBtn.props.onPress());
+    await waitForSheetSettled(tree);
 
     // The native sheet presents: its content (the weight field) is now mounted.
     const inputs = tree.root.findAll((n) =>
@@ -571,6 +573,7 @@ describe("TrendsScreen — log weight sheet", () => {
       (n) => n.props.accessibilityLabel === "Log weight",
     );
     act(() => logBtn.props.onPress());
+    await waitForSheetSettled(tree);
 
     // Find the weight input and enter a value
     const input = tree.root.find(
@@ -613,6 +616,7 @@ describe("TrendsScreen — log weight sheet", () => {
       (n) => n.props.accessibilityLabel === "Log weight",
     );
     act(() => logBtn.props.onPress());
+    await waitForSheetSettled(tree);
 
     const input = tree.root.find(
       (n) =>
@@ -668,10 +672,6 @@ describe("TrendsScreen — cadence card removed", () => {
     expect(textContent(tree)).not.toContain("WEIGH-IN REMINDER");
   });
 });
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Fan-out removal — the core correctness property (FTY-124)
-// ─────────────────────────────────────────────────────────────────────────────
 
 describe("TrendsScreen — adherence fan-out removal", () => {
   it("issues exactly one range request for a multi-day range (not one per day)", async () => {
@@ -1131,7 +1131,6 @@ describe("TrendsScreen — adherence honesty (FTY-188)", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Accessibility
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1565,6 +1564,7 @@ describe("TrendsScreen — human dates", () => {
       (n) => n.props.accessibilityLabel === "Log weight",
     );
     act(() => logBtn.props.onPress());
+    await waitForSheetSettled(tree);
 
     expect(textContent(tree)).toContain("Today");
     expect(textContent(tree)).not.toMatch(/\d{4}-\d{2}-\d{2}/);
