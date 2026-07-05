@@ -28,6 +28,7 @@ REQUIRED_FILES = [
     ".github/pull_request_template.md",
     ".github/workflows/governance.yml",
     ".github/workflows/mobile.yml",
+    ".github/workflows/mobile-e2e.yml",
     ".github/dependabot.yml",
     "docs/architecture/system-overview.md",
     "docs/standards/coding-standards.md",
@@ -59,7 +60,14 @@ FORBIDDEN_PATHS = [
 REQUIRED_STATUS_CHECKS = [
     "governance",
     "reviewer-approved",
-    "mobile-e2e",
+    "mobile",
+]
+
+STALE_REQUIRED_MOBILE_E2E_TEXT = [
+    "Require `mobile-e2e`",
+    "require the `mobile-e2e` status check",
+    "`mobile-e2e` (mobile end-to-end Maestro smoke gate",
+    "rely on the `mobile-e2e` CI job to enforce",
 ]
 
 
@@ -124,6 +132,11 @@ def main() -> None:
     for check in REQUIRED_STATUS_CHECKS:
         if f"`{check}`" not in github_setup_text:
             fail(f"github setup must document required status check {check!r}")
+    if "`mobile-e2e`" not in github_setup_text or "remove the historical required status" not in github_setup:
+        fail("github setup must document removing the historical required 'mobile-e2e' status check")
+    for stale in STALE_REQUIRED_MOBILE_E2E_TEXT:
+        if stale in github_setup_text:
+            fail(f"github setup still describes mobile-e2e as required: {stale!r}")
 
     branching_text = read("docs/operations/branching-and-prs.md")
     branching = branching_text.lower()
@@ -133,6 +146,23 @@ def main() -> None:
     for check in REQUIRED_STATUS_CHECKS:
         if f"`{check}`" not in branching_text:
             fail(f"branching docs must document required status check {check!r}")
+    if "`mobile-e2e`" not in branching_text or "remove the historical required status" not in branching:
+        fail("branching docs must document removing the historical required 'mobile-e2e' status check")
+    for stale in STALE_REQUIRED_MOBILE_E2E_TEXT:
+        if stale in branching_text:
+            fail(f"branching docs still describes mobile-e2e as required: {stale!r}")
+
+    testing_standards = read("docs/standards/testing-standards.md")
+    for term in [
+        "running-app flow-completion evidence",
+        "The required every-PR mobile gate is the fast `mobile` job",
+        "does not build native code, boot an emulator, or enforce the whole `.maestro/` suite",
+    ]:
+        if term not in testing_standards:
+            fail(f"testing standards must document new mobile E2E policy term {term!r}")
+    for stale in STALE_REQUIRED_MOBILE_E2E_TEXT:
+        if stale in testing_standards:
+            fail(f"testing standards still describes mobile-e2e as required: {stale!r}")
 
     review_policy = read("docs/review-policy.md")
     for term in ["reviewer-approved", "current PR head SHA", "other than the PR author"]:
@@ -140,16 +170,43 @@ def main() -> None:
             fail(f"review policy must document reviewer status gate term {term!r}")
 
     mobile_workflow = read(".github/workflows/mobile.yml")
-    if "\n  mobile-e2e:\n" not in f"\n{mobile_workflow}":
-        fail("mobile workflow must define the 'mobile-e2e' required status job")
-    if "\n    timeout-minutes: 30\n" not in mobile_workflow:
-        fail("mobile-e2e required status job must be bounded by a 30-minute timeout")
+    if "\n  pull_request:" not in mobile_workflow:
+        fail("mobile workflow must run the fast mobile job on pull requests")
+    if "\n  mobile:\n" not in f"\n{mobile_workflow}":
+        fail("mobile workflow must define the fast 'mobile' job")
+    if "make mobile" not in mobile_workflow:
+        fail("mobile workflow must run the fast mobile verification")
+    for forbidden in [
+        "PLATFORM=android ./verify-e2e.sh",
+        "reactivecircus/android-emulator-runner",
+        "Install Maestro",
+        "Enable KVM",
+    ]:
+        if forbidden in mobile_workflow:
+            fail(f"mobile pull-request workflow must not run native E2E: {forbidden!r}")
+    if "\n  mobile-e2e:\n" in f"\n{mobile_workflow}":
+        for term in [
+            "does not run E2E",
+            "Repository admins must remove required status check 'mobile-e2e' and require 'mobile'",
+            "workflow_dispatch/schedule path",
+        ]:
+            if term not in mobile_workflow:
+                fail(f"mobile-e2e compatibility job must log transition term {term!r}")
+
+    e2e_workflow = read(".github/workflows/mobile-e2e.yml")
+    for term in ["workflow_dispatch:", "schedule:", "PLATFORM=android ./verify-e2e.sh", "actions/upload-artifact@v4"]:
+        if term not in e2e_workflow:
+            fail(f"mobile-e2e workflow must retain full-suite evidence term {term!r}")
+    if "pull_request" in e2e_workflow:
+        fail("full mobile-e2e workflow must not run as a pull_request gate")
 
     protection = json.loads(read("docs/operations/main-branch-protection.json"))
     checks = protection.get("required_status_checks", {}).get("contexts", [])
-    for check in REQUIRED_STATUS_CHECKS:
-        if check not in checks:
-            fail(f"branch protection template must require {check!r}")
+    if checks != REQUIRED_STATUS_CHECKS:
+        fail(
+            "branch protection template must require exactly "
+            + ", ".join(REQUIRED_STATUS_CHECKS)
+        )
     required_reviews = protection.get("required_pull_request_reviews")
     if not isinstance(required_reviews, dict):
         fail("branch protection template must configure pull request reviews")

@@ -8,12 +8,20 @@ enforcement.
 The first commit must include:
 
 - `.github/workflows/governance.yml`
+- `.github/workflows/mobile.yml`
 
 Required status checks on `main`:
 
 - `governance`
 - `reviewer-approved`
-- `mobile-e2e` (the mobile end-to-end Maestro smoke gate, FTY-161)
+- `mobile` (the fast mobile typecheck/lint/test gate)
+
+Non-required full-suite evidence:
+
+- `.github/workflows/mobile-e2e.yml` runs the native Android debug build,
+  emulator, and full Maestro directory through `workflow_dispatch` and a weekly
+  schedule. It uploads Maestro artifacts on failure, but it is not a required
+  PR status check.
 
 ## Branch Protection
 
@@ -25,11 +33,17 @@ Configure `main` with:
 - require branches to be up to date before merging,
 - require the `governance` status check,
 - require the `reviewer-approved` status check,
-- require the `mobile-e2e` status check (FTY-161),
+- require the `mobile` status check,
 - keep native required approving review count at zero for the app-reviewer flow,
 - block force pushes,
 - block deletions,
 - include administrators when practical.
+
+FTY-248 branch-protection admin action: remove the historical required status
+check `mobile-e2e` and add or keep `mobile` as the required mobile check. A
+temporary PR compatibility job named `mobile-e2e` may still pass while this
+transition lands, but it only logs the policy change and does not run native
+E2E.
 
 Fatty enforces non-author review with the required `reviewer-approved` commit
 status published by the reviewer agent. The status may pass only after approval
@@ -41,7 +55,7 @@ submitted by the `fatty-reviewer` app as eligible native approvals.
 
 For the autonomous flow, the reviewer enables GitHub native auto-merge on a PR
 after it approves the current head; GitHub then merges automatically once
-`governance`, `mobile-e2e`, and `reviewer-approved` are green and branch
+`governance`, `mobile`, and `reviewer-approved` are green and branch
 protection is satisfied. This requires:
 
 - **Repo-level auto-merge enabled.** Settings → General → "Allow auto-merge",
@@ -90,6 +104,6 @@ When branch protection is available:
 10. Require branches to be up to date before merging.
 11. Require `governance`.
 12. Require `reviewer-approved`.
-13. Require `mobile-e2e` (FTY-161).
+13. Require `mobile`.
 14. Block force pushes and deletions.
 15. Apply to administrators if the plan allows it.
