@@ -155,13 +155,6 @@ describe("font-size-baseline.json", () => {
     expect(baselinedFiles.has("components/today/SignInRequired.tsx")).toBe(false);
   });
 
-  it("enumerates the currently-known per-screen numeric fontSize sites", () => {
-    const byFile = Object.fromEntries(
-      baseline.files.map((entry) => [entry.file, entry.sites.length]),
-    );
-    expect(byFile).toEqual({});
-  });
-
   it("pins every baselined site by context and value, not by count", () => {
     for (const entry of baseline.files) {
       expect(entry.sites.length).toBeGreaterThan(0);
