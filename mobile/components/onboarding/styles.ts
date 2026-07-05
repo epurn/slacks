@@ -62,11 +62,6 @@ export const styles = StyleSheet.create({
     marginTop: spacing.lg,
     marginBottom: spacing.xs,
   },
-  paceNote: {
-    fontSize: typeScale.footnote,
-    marginTop: spacing.sm,
-    textAlign: 'center',
-  },
   autoDetectRow: {
     padding: spacing.md,
     marginBottom: spacing.lg,

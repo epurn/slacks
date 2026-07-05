@@ -92,9 +92,6 @@ export function GoalStep({
             onSelect={onPaceChange}
             accessibilityLabel="Goal pace"
           />
-          <Text style={[styles.paceNote, { color: colors.textMuted }]}>
-            Steady is evidence-based and preserves lean mass.
-          </Text>
         </>
       )}
 
