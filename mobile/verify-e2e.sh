@@ -29,6 +29,17 @@
 #   E2E_MAESTRO_TIMEOUT_SECONDS
 #                     Maximum time to let the full directory-level Maestro suite
 #                     run before failing with a clear timeout (default: 720).
+#   E2E_UDID          (iOS only) UDID of an already-booted simulator to build
+#                     for, install to, and drive with Maestro. Unset (default)
+#                     → today's default device selection (Expo/Maestro pick
+#                     whatever's booted). Ignored on Android.
+#   E2E_METRO_PORT    (iOS only) Metro bundler port (default: 8081). Ignored
+#                     on Android, which always uses its own default port.
+#                     Running two invocations concurrently on one machine
+#                     requires distinct values for BOTH E2E_UDID and
+#                     E2E_METRO_PORT — callers (e.g. a command-centre harness)
+#                     own leasing the simulator and picking a free port; this
+#                     script does not allocate either.
 
 set -euo pipefail
 
@@ -48,7 +59,18 @@ if [ -n "${E2E_REDUCE_MOTION:-}" ]; then
 else
   export EXPO_PUBLIC_FATTY_E2E_REDUCE_MOTION="false"
 fi
-METRO_PORT="8081"
+# E2E_UDID/E2E_METRO_PORT are iOS-only. On Android, genuinely ignore them by
+# unsetting BEFORE resolution: METRO_PORT then resolves to its 8081 default
+# (expo run:android is never handed a matching -p or RCT_jsLocation repoint, so
+# honouring the port here would start/probe Metro on a port the Android build
+# can't reach) and no device targeting leaks in — Android behaves exactly as it
+# does today.
+if [ "$PLATFORM" = "android" ] && { [ -n "${E2E_UDID:-}" ] || [ -n "${E2E_METRO_PORT:-}" ]; }; then
+  echo "==> [verify-e2e] E2E_UDID/E2E_METRO_PORT are iOS-only; ignored on Android."
+  unset E2E_UDID E2E_METRO_PORT
+fi
+METRO_PORT="${E2E_METRO_PORT:-8081}"
+E2E_UDID="${E2E_UDID:-}"
 METRO_LOG="${E2E_METRO_LOG:-${TMPDIR:-/tmp}/fatty-e2e-metro.log}"
 METRO_PID=""
 METRO_STATUS_ERROR=""
@@ -64,7 +86,17 @@ if [ -n "${E2E_BUILD_CACHE:-}" ]; then
   BUILD_CACHE_LABEL="on"
 fi
 
-echo "==> [verify-e2e] Platform: $PLATFORM | Build cache: $BUILD_CACHE_LABEL | Metro port: $METRO_PORT"
+echo "==> [verify-e2e] Platform: $PLATFORM | Build cache: $BUILD_CACHE_LABEL | Metro port: $METRO_PORT | UDID: ${E2E_UDID:-<default>}"
+
+# A non-default Metro port only takes effect on the installed binary via the
+# RCT_jsLocation re-point below (see step 4), which needs a specific device to
+# spawn into — the script never falls back to the "booted" specifier. So a
+# non-default port without E2E_UDID is a broken combination, not a silent
+# no-op.
+if [ "$PLATFORM" = "ios" ] && [ "$METRO_PORT" != "8081" ] && [ -z "$E2E_UDID" ]; then
+  echo "ERROR: E2E_METRO_PORT=$METRO_PORT requires E2E_UDID (the RCT_jsLocation re-point needs a specific device)."
+  exit 1
+fi
 
 cleanup_metro() {
   if [ -n "$METRO_PID" ] && kill -0 "$METRO_PID" 2> /dev/null; then
@@ -134,9 +166,15 @@ start_metro() {
 run_maestro() {
   local maestro_pid
   local started_at
+  local -a maestro_args
 
   echo "==> [verify-e2e] Maestro timeout: ${MAESTRO_TIMEOUT_SECONDS}s"
-  MAESTRO_CLI_NO_ANALYTICS=1 maestro test .maestro/ &
+  maestro_args=(test)
+  if [ -n "$E2E_UDID" ]; then
+    maestro_args+=(--udid "$E2E_UDID")
+  fi
+  maestro_args+=(.maestro/)
+  MAESTRO_CLI_NO_ANALYTICS=1 maestro "${maestro_args[@]}" &
   maestro_pid="$!"
   started_at="$SECONDS"
 
@@ -181,10 +219,21 @@ if [ "$PLATFORM" = "android" ]; then
   EXPO_PUBLIC_FATTY_E2E=true npx expo run:android $BUILD_CACHE_FLAG --variant debug --no-bundler
 
 elif [ "$PLATFORM" = "ios" ]; then
+  # expo run:ios both installs AND launches the app, so any RCT_jsLocation
+  # re-point has to land before this command, not after.
+  if [ -n "$E2E_UDID" ]; then
+    echo "==> [verify-e2e] Repointing app at Metro (RCT_jsLocation=localhost:$METRO_PORT)..."
+    xcrun simctl spawn "$E2E_UDID" defaults write com.fatty RCT_jsLocation "localhost:$METRO_PORT"
+  fi
+
   echo "==> [verify-e2e] Building iOS simulator binary..."
   # No --simulator flag: Expo 57's run:ios rejects it, and the simulator is
   # already the default target when --device is not passed.
-  EXPO_PUBLIC_FATTY_E2E=true npx expo run:ios $BUILD_CACHE_FLAG --configuration Debug --no-bundler
+  ios_run_args=(--configuration Debug --no-bundler -p "$METRO_PORT")
+  if [ -n "$E2E_UDID" ]; then
+    ios_run_args+=(-d "$E2E_UDID")
+  fi
+  EXPO_PUBLIC_FATTY_E2E=true npx expo run:ios $BUILD_CACHE_FLAG "${ios_run_args[@]}"
 
 else
   echo "ERROR: Unknown PLATFORM='$PLATFORM'. Use 'ios' or 'android'."
