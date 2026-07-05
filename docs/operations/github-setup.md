@@ -20,8 +20,10 @@ Non-required full-suite evidence:
 
 - `.github/workflows/mobile-e2e.yml` runs the native Android debug build,
   emulator, and full Maestro directory through `workflow_dispatch` and a weekly
-  schedule. It uploads Maestro artifacts on failure, but it is not a required
-  PR status check.
+  schedule. It retries the emulator plus Maestro step once only for the known
+  software-GPU `Failed to find ColorBuffer` glitch or emulator boot/readiness
+  failure; rendered-app Maestro assertion failures are not retried. It uploads
+  Maestro artifacts on failure, but it is not a required PR status check.
 
 ## Branch Protection
 

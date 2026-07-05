@@ -67,7 +67,9 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: false
           script: echo "Generated AVD snapshot for caching."
-      - name: Build, install, and run Maestro flows
+      - name: Build, install, and run Maestro flows (attempt 1)
+        id: e2e_attempt_1
+        continue-on-error: true
         uses: reactivecircus/android-emulator-runner@v2
         env:
           # Reuse the restored Gradle cache so the emulator build stays bounded.
@@ -80,7 +82,84 @@ jobs:
           disable-animations: true
           working-directory: mobile
           # Fails this non-required evidence run if build, install, or any flow fails.
-          script: PLATFORM=android ./verify-e2e.sh
+          script: |
+            mkdir -p ../e2e-logs
+            set -o pipefail
+            PLATFORM=android ./verify-e2e.sh 2>&1 | tee ../e2e-logs/attempt-1.log
+      - name: Classify E2E attempt 1
+        id: classify_attempt_1
+        if: always()
+        run: |
+          if [[ "${{ steps.e2e_attempt_1.outcome }}" == "success" ]]; then
+            echo "retry=false" >> "$GITHUB_OUTPUT"
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if grep -q "Failed to find ColorBuffer" e2e-logs/attempt-1.log 2>/dev/null; then
+            echo "retry=true" >> "$GITHUB_OUTPUT"
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+            echo "trigger=software-GPU ColorBuffer glitch" >> "$GITHUB_OUTPUT"
+            echo "Retrying full mobile E2E attempt 2/2 after attempt 1 detected software-GPU ColorBuffer glitch."
+            exit 0
+          fi
+
+          if [[ ! -f e2e-logs/attempt-1.log ]]; then
+            echo "retry=true" >> "$GITHUB_OUTPUT"
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+            echo "trigger=emulator boot/readiness failure" >> "$GITHUB_OUTPUT"
+            echo "Retrying full mobile E2E attempt 2/2 after attempt 1 detected emulator boot/readiness failure."
+            exit 0
+          fi
+
+          echo "retry=false" >> "$GITHUB_OUTPUT"
+          echo "failed=true" >> "$GITHUB_OUTPUT"
+      - name: Build, install, and run Maestro flows (attempt 2)
+        id: e2e_attempt_2
+        if: steps.classify_attempt_1.outputs.retry == 'true'
+        continue-on-error: true
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          # Reuse the restored Gradle cache so the emulator build stays bounded.
+          E2E_BUILD_CACHE: "1"
+        with:
+          api-level: 34
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save
+          disable-animations: true
+          working-directory: mobile
+          # Retry only reaches this attempt after attempt 1 was classified as an emulator/graphics glitch.
+          script: |
+            mkdir -p ../e2e-logs
+            set -o pipefail
+            PLATFORM=android ./verify-e2e.sh 2>&1 | tee ../e2e-logs/attempt-2.log
+      - name: Record E2E result
+        if: always()
+        run: |
+          if [[ "${{ steps.e2e_attempt_1.outcome }}" == "success" ]]; then
+            echo "Full mobile E2E passed on attempt 1/2."
+            exit 0
+          fi
+
+          if [[ "${{ steps.classify_attempt_1.outputs.retry }}" != "true" ]]; then
+            echo "Full mobile E2E failed on attempt 1/2 without a retryable emulator/graphics glitch."
+            exit 1
+          fi
+
+          if [[ "${{ steps.e2e_attempt_2.outcome }}" == "success" ]]; then
+            echo "Full mobile E2E passed on attempt 2/2 after retry trigger: ${{ steps.classify_attempt_1.outputs.trigger }}."
+            exit 0
+          fi
+
+          if grep -q "Failed to find ColorBuffer" e2e-logs/attempt-2.log 2>/dev/null; then
+            echo "Full mobile E2E failed after attempt 2/2 with software-GPU ColorBuffer glitch still present."
+          elif [[ ! -f e2e-logs/attempt-2.log ]]; then
+            echo "Full mobile E2E failed after attempt 2/2 with emulator boot/readiness failure still present."
+          else
+            echo "Full mobile E2E failed on attempt 2/2 after retry trigger: ${{ steps.classify_attempt_1.outputs.trigger }}."
+          fi
+          exit 1
       - name: Upload Maestro artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -88,5 +167,6 @@ jobs:
           name: maestro-e2e-artifacts
           path: |
             ~/.maestro/tests/
+            e2e-logs/
           if-no-files-found: ignore
           retention-days: 7
