@@ -37,6 +37,8 @@ export function Timeline({
   phase,
   loadError,
   onRetry,
+  readOnly = false,
+  emptyLabel = "Log your first thing",
 }: {
   events: readonly LogEventDTO[];
   itemsByEvent: Readonly<Record<string, readonly DerivedItem[]>>;
@@ -44,17 +46,28 @@ export function Timeline({
   offlineStateById: ReadonlyMap<string, OutboxSyncState>;
   /** Event ids whose value row should ease in — the entry-resolve beat (FTY-181). */
   resolveAnimIds: ReadonlySet<string>;
-  onOpenItem: (item: DerivedItem, logPhrase: string) => void;
+  onOpenItem?: (item: DerivedItem, logPhrase: string) => void;
   /** Reopen the confirm sheet for an uncounted label proposal (FTY-197). */
-  onOpenProposal: (item: DerivedFoodItemDTO) => void;
-  onOpenClarify: (event: LogEventDTO) => void;
+  onOpenProposal?: (item: DerivedFoodItemDTO) => void;
+  onOpenClarify?: (event: LogEventDTO) => void;
   /** Retry a failed parse as a fresh attempt (FTY-176). */
-  onRetryFailed: (event: LogEventDTO) => void;
+  onRetryFailed?: (event: LogEventDTO) => void;
   /** Prefill the composer with a failed entry's text to fix + resubmit (FTY-176). */
-  onEditFailedAsText: (event: LogEventDTO) => void;
+  onEditFailedAsText?: (event: LogEventDTO) => void;
   phase: Phase;
   loadError: string | null;
   onRetry: () => void;
+  /**
+   * Read-only past-day timeline (FTY-199): render the same clustered rows
+   * non-interactively (no correction/clarify/retry affordances) because a
+   * historical day is view-only. Today leaves this off.
+   */
+  readOnly?: boolean;
+  /**
+   * Copy for the calm empty state. Today invites a first log ("Log your first
+   * thing"); a past day states plainly that nothing was logged (FTY-199).
+   */
+  emptyLabel?: string;
 }) {
   const { colors } = useTheme();
 
@@ -90,7 +103,7 @@ export function Timeline({
         ) : (
           <View style={styles.state} testID="today-timeline-ready">
             <Text style={[styles.stateText, { color: colors.textMuted }]}>
-              Log your first thing
+              {emptyLabel}
             </Text>
           </View>
         )}
@@ -123,6 +136,7 @@ export function Timeline({
           onOpenClarify={onOpenClarify}
           onRetryFailed={onRetryFailed}
           onEditFailedAsText={onEditFailedAsText}
+          readOnly={readOnly}
           colors={colors}
         />
       ))}

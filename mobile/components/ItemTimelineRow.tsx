@@ -1,7 +1,7 @@
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { DerivedItem } from "@/api/derivedItems";
-import { ProvenanceIcon, Skeleton } from "@/components/ui";
+import { ProvenanceIcon, provenancePresentation, Skeleton } from "@/components/ui";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
 import { useResolveFade } from "@/theme/motion";
 
@@ -47,6 +47,16 @@ type ItemTimelineRowProps =
       /** True for an uncounted label proposal awaiting confirm (FTY-196/197). */
       proposal?: boolean;
       onPress?: () => void;
+      /**
+       * Read-only mode for the past-day timeline (FTY-199). The same row, but
+       * rendered as a non-interactive element — no tap affordance, no correction
+       * sheet — because a historical day is view-only (editing past entries is a
+       * non-goal). It stays fully legible and its VoiceOver label carries the
+       * value *and* its provenance, so a source is still conveyed at a glance and
+       * to a screen reader; there is simply no false "tap to edit" affordance.
+       * Default off, so Today's interactive rows are unchanged.
+       */
+      readOnly?: boolean;
       /** Stable row id for E2E checks that assert the value resolves in place. */
       testID?: string;
       /**
@@ -134,6 +144,7 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
     proposal = false,
     onPress,
     testID,
+    readOnly = false,
   } = props;
   const allItems = additionalItems.length > 0
     ? [item, ...additionalItems]
@@ -173,6 +184,64 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
       ? "Tap to confirm before it counts"
       : "Tap to view details";
 
+  // The row's inner content is identical whether the row is interactive (Today)
+  // or read-only (a past day) — only the wrapping element and its accessibility
+  // treatment differ, so the two paths never drift visually.
+  const rowContent = (
+    <>
+      {/* Provenance icon — always on */}
+      <ProvenanceIcon source={source} is_edited={is_edited} />
+
+      {/* Name */}
+      <Text
+        style={[styles.name, { color: textColor }]}
+        numberOfLines={1}
+        accessibilityElementsHidden
+      >
+        {displayName}
+      </Text>
+
+      {/* Uncounted tag: "needs a detail" (clarify) or "not counted" (proposal) */}
+      {uncounted ? (
+        <View
+          style={[styles.needsDetailTag, { backgroundColor: colors.controlBackground }]}
+          accessibilityElementsHidden
+        >
+          <Text style={[styles.needsDetailText, { color: colors.textMuted }]}>
+            {needsClarification ? "needs a detail" : "not counted"}
+          </Text>
+        </View>
+      ) : null}
+
+      {/* Kcal — right-aligned. A proposal shows its parsed kcal (muted); a
+          needs-a-detail row has no value yet, so it shows an em dash. */}
+      <Text
+        style={[styles.kcal, { color: kcalColor }]}
+        accessibilityElementsHidden
+      >
+        {needsClarification ? "—" : formatKcal(kcal)}
+      </Text>
+    </>
+  );
+
+  // Read-only (FTY-199): render the value as a single, non-interactive
+  // accessibility element. No `button` role and no "tap to…" hint (there is
+  // nothing to tap on a view-only past day), but the label still carries the
+  // value *and* its provenance so a screen reader hears the source at a glance.
+  if (readOnly) {
+    const provenanceLabel = provenancePresentation(source, is_edited).accessibilityLabel;
+    return (
+      <View
+        testID={testID}
+        style={[styles.row, { borderBottomColor: colors.separator }]}
+        accessible
+        accessibilityLabel={`${a11yLabel}, ${provenanceLabel}`}
+      >
+        {rowContent}
+      </View>
+    );
+  }
+
   return (
     <Animated.View style={{ opacity: props.animateResolve === true ? fadeOpacity : 1 }}>
       <Pressable
@@ -187,38 +256,7 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
         accessibilityLabel={a11yLabel}
         accessibilityHint={a11yHint}
       >
-        {/* Provenance icon — always on */}
-        <ProvenanceIcon source={source} is_edited={is_edited} />
-
-        {/* Name */}
-        <Text
-          style={[styles.name, { color: textColor }]}
-          numberOfLines={1}
-          accessibilityElementsHidden
-        >
-          {displayName}
-        </Text>
-
-        {/* Uncounted tag: "needs a detail" (clarify) or "not counted" (proposal) */}
-        {uncounted ? (
-          <View
-            style={[styles.needsDetailTag, { backgroundColor: colors.controlBackground }]}
-            accessibilityElementsHidden
-          >
-            <Text style={[styles.needsDetailText, { color: colors.textMuted }]}>
-              {needsClarification ? "needs a detail" : "not counted"}
-            </Text>
-          </View>
-        ) : null}
-
-        {/* Kcal — right-aligned. A proposal shows its parsed kcal (muted); a
-            needs-a-detail row has no value yet, so it shows an em dash. */}
-        <Text
-          style={[styles.kcal, { color: kcalColor }]}
-          accessibilityElementsHidden
-        >
-          {needsClarification ? "—" : formatKcal(kcal)}
-        </Text>
+        {rowContent}
       </Pressable>
     </Animated.View>
   );

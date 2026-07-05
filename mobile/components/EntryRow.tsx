@@ -48,6 +48,7 @@ export function EntryRow({
   onPress,
   onRetry,
   onEditAsText,
+  readOnly = false,
 }: {
   event: LogEventDTO;
   /**
@@ -69,6 +70,17 @@ export function EntryRow({
    * for every other status.
    */
   onEditAsText?: () => void;
+  /**
+   * Read-only past-day timeline (FTY-199). A historical day is view-only, so an
+   * unresolved `needs_clarification` / `failed` event from that day must render
+   * as a calm, non-interactive informational row — never the accent
+   * "Add a detail ›" chip or the Retry / Edit-as-text buttons, which would look
+   * tappable but do nothing (an inert dead-end the design philosophy forbids
+   * under "acknowledge every action"). The state is still legible and conveyed
+   * to VoiceOver; there is simply no false affordance. Default off, so Today's
+   * interactive rows are unchanged.
+   */
+  readOnly?: boolean;
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -80,6 +92,31 @@ export function EntryRow({
   // wording back to the composer. The status icon + copy convey the failed state
   // to VoiceOver; each affordance is a distinct ≥44pt button.
   if (event.status === "failed") {
+    // Read-only past day (FTY-199): a calm "couldn't read that" row with no
+    // Retry / Edit-as-text buttons — those would be inert on a historical day.
+    // The whole row is one non-interactive a11y element carrying the state.
+    if (readOnly) {
+      return (
+        <View
+          testID="failed-parse-row"
+          style={styles.failedRow}
+          accessible
+          accessibilityLabel={`${event.raw_text}, couldn't read that, uncounted`}
+        >
+          <StatusIcon status={event.status} />
+          <View style={styles.body}>
+            <Text style={[styles.text, styles.clarifyText]} numberOfLines={2}>
+              {event.raw_text}
+            </Text>
+            <Text style={[styles.failedHint, { color: colors.textMuted }]}>
+              Couldn&apos;t read that
+            </Text>
+          </View>
+          {/* Visibly uncounted — never a fabricated number for a failed parse. */}
+          <Text style={[styles.uncounted, { color: colors.textMuted }]}>—</Text>
+        </View>
+      );
+    }
     return (
       <View testID="failed-parse-row" style={styles.failedRow}>
         <StatusIcon status={event.status} />
@@ -136,6 +173,29 @@ export function EntryRow({
   // missing-detail state and the resolve path unmistakable. FTY-177 collapses
   // the tag+CTA duplication into one chip and adds a truncation hint.
   if (event.status === "needs_clarification") {
+    // Read-only past day (FTY-199): a calm "needs a detail" row with no accent
+    // "Add a detail ›" chip and no tap target — resolving a clarify is not a
+    // historical-day action, so the affordance would be an inert dead-end. The
+    // row stays legible and one non-interactive a11y element conveys the state.
+    if (readOnly) {
+      return (
+        <View
+          testID="add-a-detail-row"
+          style={styles.clarifyRow}
+          accessible
+          accessibilityLabel={`${event.raw_text}, needs a detail, uncounted`}
+        >
+          <StatusIcon status={event.status} />
+          <View style={styles.body}>
+            <Text style={[styles.text, styles.clarifyText]} numberOfLines={2}>
+              {event.raw_text}
+            </Text>
+          </View>
+          {/* Visibly uncounted — never a number standing in for acknowledgement. */}
+          <Text style={[styles.uncounted, { color: colors.textMuted }]}>—</Text>
+        </View>
+      );
+    }
     const truncated = isLikelyTruncated(event.raw_text);
     return (
       <Pressable

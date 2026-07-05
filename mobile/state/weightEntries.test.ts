@@ -112,6 +112,10 @@ describe("formatHumanDate", () => {
     expect(formatHumanDate("2025-12-31", "2026-01-01")).toBe("Yesterday");
   });
 
+  it("renders a prior-year day as 'Month Day' (no year shown)", () => {
+    expect(formatHumanDate("2025-03-10", "2026-07-02")).toBe("March 10");
+  });
+
   it("never returns a raw ISO date string", () => {
     const result = formatHumanDate("2026-06-15", "2026-07-02");
     expect(result).not.toMatch(/^\d{4}-\d{2}-\d{2}$/);

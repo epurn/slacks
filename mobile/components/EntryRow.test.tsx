@@ -99,3 +99,43 @@ describe("EntryRow needs_clarification row", () => {
     ).toBe(0);
   });
 });
+
+function renderReadOnly(event: LogEventDTO) {
+  let tree: ReturnType<typeof create>;
+  act(() => {
+    tree = create(
+      <ThemeProvider override="light">
+        <EntryRow event={event} readOnly />
+      </ThemeProvider>,
+    );
+  });
+  return tree!;
+}
+
+// FTY-199: on a read-only past-day timeline an unresolved needs_clarification /
+// failed row must never show an affordance that looks tappable but is inert.
+describe("EntryRow read-only past day (FTY-199)", () => {
+  it("renders needs_clarification as a calm, non-interactive row — no 'Add a detail' chip", () => {
+    const tree = renderReadOnly(baseEvent({ raw_text: "milk" }));
+
+    // The row still renders and stays visibly uncounted…
+    const row = tree.root.findByProps({ testID: "add-a-detail-row" });
+    expect(textContent(tree)).toContain("—");
+    // …but the accent CTA chip is gone and the row is not a tappable button.
+    expect(textContent(tree)).not.toContain("Add a detail");
+    expect(row.props.onPress).toBeUndefined();
+    expect(row.props.accessibilityRole).not.toBe("button");
+    // The state is still conveyed to VoiceOver on one element.
+    expect(row.props.accessibilityLabel).toBe("milk, needs a detail, uncounted");
+  });
+
+  it("renders failed as a calm, non-interactive row — no Retry / Edit-as-text buttons", () => {
+    const tree = renderReadOnly(baseEvent({ status: "failed", raw_text: "asdkfj" }));
+
+    const row = tree.root.findByProps({ testID: "failed-parse-row" });
+    expect(textContent(tree)).toContain("Couldn't read that");
+    expect(tree.root.findAllByProps({ testID: "failed-retry" })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ testID: "failed-edit-as-text" })).toHaveLength(0);
+    expect(row.props.accessibilityLabel).toBe("asdkfj, couldn't read that, uncounted");
+  });
+});

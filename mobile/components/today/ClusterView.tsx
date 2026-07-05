@@ -34,17 +34,24 @@ export function ClusterView({
   onOpenClarify,
   onRetryFailed,
   onEditFailedAsText,
+  readOnly = false,
   colors,
 }: {
   cluster: { anchorTime: string; events: readonly LogEventDTO[] };
   itemsByEvent: Readonly<Record<string, readonly DerivedItem[]>>;
   offlineStateById: ReadonlyMap<string, OutboxSyncState>;
   resolveAnimIds: ReadonlySet<string>;
-  onOpenItem: (item: DerivedItem, logPhrase: string) => void;
-  onOpenProposal: (item: DerivedFoodItemDTO) => void;
-  onOpenClarify: (event: LogEventDTO) => void;
-  onRetryFailed: (event: LogEventDTO) => void;
-  onEditFailedAsText: (event: LogEventDTO) => void;
+  onOpenItem?: (item: DerivedItem, logPhrase: string) => void;
+  onOpenProposal?: (item: DerivedFoodItemDTO) => void;
+  onOpenClarify?: (event: LogEventDTO) => void;
+  onRetryFailed?: (event: LogEventDTO) => void;
+  onEditFailedAsText?: (event: LogEventDTO) => void;
+  /**
+   * Read-only past-day timeline (FTY-199): render the same rows non-interactively
+   * (no correction/clarify/retry affordances) because a historical day is
+   * view-only. Today leaves this off and passes the handlers as usual.
+   */
+  readOnly?: boolean;
   colors: ReturnType<typeof useTheme>["colors"];
 }) {
   return (
@@ -85,7 +92,8 @@ export function ClusterView({
                   key={event.id}
                   item={firstItem}
                   proposal
-                  onPress={() => onOpenProposal(firstItem)}
+                  onPress={onOpenProposal ? () => onOpenProposal(firstItem) : undefined}
+                  readOnly={readOnly}
                   testID={rowTestID}
                 />
               ) : (
@@ -94,7 +102,8 @@ export function ClusterView({
                   item={firstItem}
                   additionalItems={items.slice(1)}
                   needsClarification={false}
-                  onPress={() => onOpenItem(firstItem, event.raw_text)}
+                  onPress={onOpenItem ? () => onOpenItem(firstItem, event.raw_text) : undefined}
+                  readOnly={readOnly}
                   animateResolve
                   testID={rowTestID}
                 />
@@ -111,7 +120,8 @@ export function ClusterView({
                   key={key}
                   item={item}
                   proposal
-                  onPress={() => onOpenProposal(item)}
+                  onPress={onOpenProposal ? () => onOpenProposal(item) : undefined}
+                  readOnly={readOnly}
                   testID={testID}
                 />
               ) : (
@@ -119,7 +129,8 @@ export function ClusterView({
                   key={key}
                   item={item}
                   needsClarification={false}
-                  onPress={() => onOpenItem(item, event.raw_text)}
+                  onPress={onOpenItem ? () => onOpenItem(item, event.raw_text) : undefined}
+                  readOnly={readOnly}
                   animateResolve={animateResolve}
                   testID={testID}
                 />
@@ -143,7 +154,8 @@ export function ClusterView({
                 key={item.id}
                 item={item}
                 needsClarification={false}
-                onPress={() => onOpenItem(item, event.raw_text)}
+                onPress={onOpenItem ? () => onOpenItem(item, event.raw_text) : undefined}
+                readOnly={readOnly}
                 testID={itemTimelineExtraRowTestID(event.id, item.id)}
               />
             ));
@@ -156,7 +168,8 @@ export function ClusterView({
               <EntryRow
                 key={event.id}
                 event={event}
-                onPress={() => onOpenClarify(event)}
+                onPress={onOpenClarify ? () => onOpenClarify(event) : undefined}
+                readOnly={readOnly}
               />
             );
           }
@@ -168,8 +181,11 @@ export function ClusterView({
               <EntryRow
                 key={event.id}
                 event={event}
-                onRetry={() => onRetryFailed(event)}
-                onEditAsText={() => onEditFailedAsText(event)}
+                onRetry={onRetryFailed ? () => onRetryFailed(event) : undefined}
+                onEditAsText={
+                  onEditFailedAsText ? () => onEditFailedAsText(event) : undefined
+                }
+                readOnly={readOnly}
               />
             );
           }
