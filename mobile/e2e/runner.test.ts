@@ -94,6 +94,17 @@ describe('verify-e2e runner contract', () => {
     }
   });
 
+  it('genuinely ignores E2E_UDID / E2E_METRO_PORT on Android', () => {
+    const script = readText(scriptPath);
+
+    // Android must not honour the iOS-only vars. They are unset BEFORE
+    // METRO_PORT/E2E_UDID resolve, so Metro stays on its 8081 default and no
+    // device targeting leaks into the Android build — matching today's path.
+    expect(script).toMatch(
+      /\[ "\$PLATFORM" = "android" \][\s\S]*?unset E2E_UDID E2E_METRO_PORT[\s\S]*?METRO_PORT="\$\{E2E_METRO_PORT:-8081\}"/,
+    );
+  });
+
   it('runs directory-level Maestro flows against literal app IDs', () => {
     const script = readText(scriptPath);
     const expectedAppId = appConfig.expo.android?.package;

@@ -59,6 +59,16 @@ if [ -n "${E2E_REDUCE_MOTION:-}" ]; then
 else
   export EXPO_PUBLIC_FATTY_E2E_REDUCE_MOTION="false"
 fi
+# E2E_UDID/E2E_METRO_PORT are iOS-only. On Android, genuinely ignore them by
+# unsetting BEFORE resolution: METRO_PORT then resolves to its 8081 default
+# (expo run:android is never handed a matching -p or RCT_jsLocation repoint, so
+# honouring the port here would start/probe Metro on a port the Android build
+# can't reach) and no device targeting leaks in — Android behaves exactly as it
+# does today.
+if [ "$PLATFORM" = "android" ] && { [ -n "${E2E_UDID:-}" ] || [ -n "${E2E_METRO_PORT:-}" ]; }; then
+  echo "==> [verify-e2e] E2E_UDID/E2E_METRO_PORT are iOS-only; ignored on Android."
+  unset E2E_UDID E2E_METRO_PORT
+fi
 METRO_PORT="${E2E_METRO_PORT:-8081}"
 E2E_UDID="${E2E_UDID:-}"
 METRO_LOG="${E2E_METRO_LOG:-${TMPDIR:-/tmp}/fatty-e2e-metro.log}"
@@ -77,10 +87,6 @@ if [ -n "${E2E_BUILD_CACHE:-}" ]; then
 fi
 
 echo "==> [verify-e2e] Platform: $PLATFORM | Build cache: $BUILD_CACHE_LABEL | Metro port: $METRO_PORT | UDID: ${E2E_UDID:-<default>}"
-
-if [ "$PLATFORM" = "android" ] && { [ -n "$E2E_UDID" ] || [ -n "${E2E_METRO_PORT:-}" ]; }; then
-  echo "==> [verify-e2e] E2E_UDID/E2E_METRO_PORT are iOS-only; ignored on Android."
-fi
 
 # A non-default Metro port only takes effect on the installed binary via the
 # RCT_jsLocation re-point below (see step 4), which needs a specific device to
