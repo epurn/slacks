@@ -12,21 +12,28 @@
 // and walks the value side of every `color:` property looking for a `.accent`
 // member-access leaf (including inside a ternary / `&&` / `||` / `??`).
 //
-// Baseline-aware: `accent-text-baseline.json` pins a per-file COUNT of
-// pre-existing violations so the guard can be adopted without a flag-day
-// rewrite. Each file's first N accent-as-text sites (in source order) are
-// exempt, where N is that file's baseline count; anything beyond N — including
-// a brand-new file with no baseline entry — fails. Per-screen stories drain
-// their file's count to 0 (and delete the entry) as they swap to `accentText`.
+// Baseline-aware and SITE-BASED (ported from check-font-size-literal.js /
+// FTY-192 by FTY-230): `accent-text-baseline.json` pins each pre-existing
+// accent-as-text site by its enclosing style-key context (e.g.
+// `styles.axisLabel`) plus its accent-access value(s) (e.g. `colors.accent`),
+// so the guard can be adopted without a flag-day rewrite. Sites are matched
+// per file as a multiset of `context@values` keys: a scanned site is exempt
+// only if the file's baseline still has an unconsumed entry with the same
+// context and value. Any NEW site — a new style key, a different accent
+// accessor, a duplicate of an existing site, or any site in an unlisted file
+// — fails. Per-screen stories drain a file's site entries (and then the file
+// entry) as they swap to colors.accentText; the guard is fully strict once
+// this list is empty (it already is, as of FTY-207-212).
 //
 // Usage:
 //   node scripts/check-accent-as-text.js          # verify; exit 1 on new sites
-//   node scripts/check-accent-as-text.js --list    # print the live per-file counts
+//   node scripts/check-accent-as-text.js --list    # print the live per-file sites
 "use strict";
 
 const fs = require("fs");
 const path = require("path");
 const ts = require("typescript");
+const { contextOf, siteKey: sharedSiteKey } = require("./site-identity");
 
 const MOBILE_ROOT = path.resolve(__dirname, "..");
 const DEFAULT_BASELINE_PATH = path.join(MOBILE_ROOT, "accent-text-baseline.json");
@@ -65,17 +72,20 @@ function scriptKindFor(fileName) {
   return ts.ScriptKind.JS;
 }
 
-// Walks the value side of a `color: <expr>` property looking for a leaf
-// member access ending in `.accent` (e.g. `colors.accent`, but not
-// `colors.accentText` / `colors.accentForeground`). Unwraps parentheses and
-// descends into ternary / logical / nullish branches.
-function referencesAccentAsText(node) {
-  if (!node) return false;
+// Collects the source text of every leaf `<x>.accent` member access reachable
+// from a `color: <expr>` value (e.g. `color: colors.accent`, both arms of
+// `selected ? colors.accent : colors.text`, the operands of `&&` / `||` /
+// `??`) — but not token references like `colors.accentText`. Returns the
+// values found, [] when the expression holds no accent-as-text access.
+function collectAccentAccesses(node, out = []) {
+  if (!node) return out;
   if (ts.isParenthesizedExpression(node)) {
-    return referencesAccentAsText(node.expression);
+    return collectAccentAccesses(node.expression, out);
   }
   if (ts.isConditionalExpression(node)) {
-    return referencesAccentAsText(node.whenTrue) || referencesAccentAsText(node.whenFalse);
+    collectAccentAccesses(node.whenTrue, out);
+    collectAccentAccesses(node.whenFalse, out);
+    return out;
   }
   if (ts.isBinaryExpression(node)) {
     const op = node.operatorToken.kind;
@@ -84,14 +94,25 @@ function referencesAccentAsText(node) {
       op === ts.SyntaxKind.BarBarToken ||
       op === ts.SyntaxKind.QuestionQuestionToken
     ) {
-      return referencesAccentAsText(node.left) || referencesAccentAsText(node.right);
+      collectAccentAccesses(node.left, out);
+      collectAccentAccesses(node.right, out);
     }
-    return false;
+    return out;
   }
-  if (ts.isPropertyAccessExpression(node)) {
-    return node.name.kind === ts.SyntaxKind.Identifier && node.name.text === "accent";
+  if (
+    ts.isPropertyAccessExpression(node) &&
+    node.name.kind === ts.SyntaxKind.Identifier &&
+    node.name.text === "accent"
+  ) {
+    out.push(node.getText());
   }
-  return false;
+  return out;
+}
+
+// True when a `color: <expr>` value references `.accent` anywhere reachable
+// from it. Kept as a thin wrapper over collectAccentAccesses for readability.
+function referencesAccentAsText(node) {
+  return collectAccentAccesses(node).length > 0;
 }
 
 // True when the property key is literally `color` (identifier or string key),
@@ -102,8 +123,15 @@ function nameIsColor(name) {
   return false;
 }
 
-// Scan a single source string; returns the 1-based line numbers of every
-// accent-as-text `color:` site, in source order.
+// A stable multiset key for one site: enclosing context + sorted values.
+// contextOf (the enclosing style-key chain) is shared with
+// check-font-size-literal.js via ./site-identity.
+function siteKey(site) {
+  return sharedSiteKey(site.context, [...site.values].sort());
+}
+
+// Scan a single source string; returns every accent-as-text site, in source
+// order, as { line, context, values }.
 function scanSource(code, fileName) {
   const name = fileName || "virtual.tsx";
   const sourceFile = ts.createSourceFile(
@@ -113,37 +141,59 @@ function scanSource(code, fileName) {
     /* setParentNodes */ true,
     scriptKindFor(name),
   );
-  const positions = [];
+  const sites = [];
   function visit(node) {
-    if (
-      ts.isPropertyAssignment(node) &&
-      nameIsColor(node.name) &&
-      referencesAccentAsText(node.initializer)
-    ) {
-      positions.push(node.getStart(sourceFile));
+    if (ts.isPropertyAssignment(node) && nameIsColor(node.name)) {
+      const values = collectAccentAccesses(node.initializer);
+      if (values.length) {
+        sites.push({
+          pos: node.getStart(sourceFile),
+          line: sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1,
+          context: contextOf(node),
+          values,
+        });
+      }
     }
     ts.forEachChild(node, visit);
   }
   visit(sourceFile);
-  positions.sort((a, b) => a - b);
-  return positions.map((pos) => sourceFile.getLineAndCharacterOfPosition(pos).line + 1);
+  sites.sort((a, b) => a.pos - b.pos);
+  return sites.map(({ line, context, values }) => ({ line, context, values }));
 }
 
-function loadBaselineCounts(baselinePath) {
+// { relFile -> Map<siteKey, count> } from the committed baseline.
+function loadBaselineSites(baselinePath) {
   const data = JSON.parse(fs.readFileSync(baselinePath, "utf8"));
-  const counts = new Map();
-  for (const site of data.sites) {
-    counts.set(site.file, site.count);
+  const byFile = new Map();
+  for (const entry of data.files) {
+    const keys = new Map();
+    for (const site of entry.sites) {
+      const key = siteKey(site);
+      keys.set(key, (keys.get(key) ?? 0) + 1);
+    }
+    byFile.set(entry.file, keys);
   }
-  return counts;
+  return byFile;
 }
 
-// Given a file's relative path + source and the baseline map, return the line
-// numbers of the sites that EXCEED the file's baselined count (i.e. new debt).
-function evaluate(relFile, code, baselineCounts) {
-  const lines = scanSource(code, relFile);
-  const allowed = baselineCounts.get(relFile) ?? 0;
-  return lines.slice(allowed);
+// Given a file's relative path + source and the baseline map, return the
+// sites NOT covered by the file's baseline entries (i.e. new debt). Each
+// scanned site consumes at most one baseline entry with the same context and
+// value, so an inserted site fails even in a file that has a baseline entry
+// — including an exact duplicate of an existing site.
+function evaluate(relFile, code, baselineSites) {
+  const remaining = new Map(baselineSites.get(relFile) ?? []);
+  const fresh = [];
+  for (const site of scanSource(code, relFile)) {
+    const key = siteKey(site);
+    const available = remaining.get(key) ?? 0;
+    if (available > 0) {
+      remaining.set(key, available - 1);
+    } else {
+      fresh.push(site);
+    }
+  }
+  return fresh;
 }
 
 function collectFiles(root) {
@@ -167,30 +217,32 @@ function relOf(abs) {
   return path.relative(MOBILE_ROOT, abs).split(path.sep).join("/");
 }
 
-// { rel -> count } of every accent-as-text site in the live tree (for --list /
-// baseline regeneration).
+// { rel -> [{ context, values }] } of every accent-as-text site in the live
+// tree (for --list / baseline regeneration).
 function scanTree(root) {
-  const counts = {};
+  const files = {};
   for (const abs of collectFiles(root)) {
-    const lines = scanSource(fs.readFileSync(abs, "utf8"), relOf(abs));
-    if (lines.length) counts[relOf(abs)] = lines.length;
+    const sites = scanSource(fs.readFileSync(abs, "utf8"), relOf(abs));
+    if (sites.length) {
+      files[relOf(abs)] = sites.map(({ context, values }) => ({ context, values }));
+    }
   }
-  return counts;
+  return files;
 }
 
 function main(argv) {
   if (argv.includes("--list")) {
-    const counts = scanTree(MOBILE_ROOT);
-    console.log(JSON.stringify(counts, null, 2));
+    const files = scanTree(MOBILE_ROOT);
+    console.log(JSON.stringify(files, null, 2));
     return;
   }
 
-  const baselineCounts = loadBaselineCounts(DEFAULT_BASELINE_PATH);
+  const baselineSites = loadBaselineSites(DEFAULT_BASELINE_PATH);
   const failures = [];
   for (const abs of collectFiles(MOBILE_ROOT)) {
     const rel = relOf(abs);
-    const extra = evaluate(rel, fs.readFileSync(abs, "utf8"), baselineCounts);
-    if (extra.length) failures.push({ file: rel, lines: extra });
+    const fresh = evaluate(rel, fs.readFileSync(abs, "utf8"), baselineSites);
+    if (fresh.length) failures.push({ file: rel, fresh });
   }
 
   if (failures.length) {
@@ -204,10 +256,14 @@ function main(argv) {
       "  (backgroundColor / borderColor / fill / stroke uses of colors.accent are fine.)",
     );
     for (const f of failures) {
-      console.error(`  ${f.file}: new accent-as-text site(s) at line(s) ${f.lines.join(", ")}`);
+      for (const site of f.fresh) {
+        console.error(
+          `  ${f.file}:${site.line} — ${site.values.join("/")} as text in \`${site.context}\` has no baseline entry`,
+        );
+      }
     }
     console.error(
-      "  If a new pre-existing site is intentional, bump its count in accent-text-baseline.json.",
+      "  The baseline (accent-text-baseline.json) only shrinks: swap to colors.accentText rather than adding an entry.",
     );
     process.exitCode = 1;
     return;
@@ -224,9 +280,10 @@ module.exports = {
   MOBILE_ROOT,
   DEFAULT_BASELINE_PATH,
   referencesAccentAsText,
+  siteKey,
   scanSource,
   evaluate,
-  loadBaselineCounts,
+  loadBaselineSites,
   collectFiles,
   scanTree,
 };

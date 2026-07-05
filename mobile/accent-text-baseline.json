@@ -1,5 +1,5 @@
 {
-  "version": 1,
-  "description": "Baseline allowlist for scripts/check-accent-as-text.js — pre-existing colors.accent-as-text sites, seeded at FTY-191 by snapshotting the guard's own output on the live tree. Each entry is a per-file count of accent-as-text sites still present in that file, in source order; the guard exempts a file's first `count` sites and fails on anything beyond that. Per-screen application stories (FTY-207-212) drain their file's count to 0 and delete the entry as they swap to colors.accentText; the guard is fully strict once this list is empty.",
-  "sites": []
+  "version": 2,
+  "description": "Baseline allowlist for scripts/check-accent-as-text.js — the currently-known colors.accent-as-text sites, originally seeded at FTY-191 by snapshotting the guard's own output on the live tree and migrated to the site-based format at FTY-230 (mirroring font-size-baseline.json / FTY-192). Each file entry lists its pre-existing sites by enclosing style-key context plus accent-access value(s); the guard matches scanned sites against these as a per-file multiset, so any NEW site — a new style key, a different accent accessor, a duplicate of a known site, or a site in an unlisted file — fails. Per-screen application stories (FTY-207-212) drained every entry as they swapped to colors.accentText; the guard is fully strict now that this list is empty.",
+  "files": []
 }

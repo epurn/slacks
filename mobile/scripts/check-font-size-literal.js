@@ -28,6 +28,7 @@
 const fs = require("fs");
 const path = require("path");
 const ts = require("typescript");
+const { contextOf, siteKey: sharedSiteKey } = require("./site-identity");
 
 const MOBILE_ROOT = path.resolve(__dirname, "..");
 const DEFAULT_BASELINE_PATH = path.join(MOBILE_ROOT, "font-size-baseline.json");
@@ -104,31 +105,11 @@ function nameIsFontSize(name) {
   return false;
 }
 
-// The site's identity within its file: the chain of enclosing property /
-// variable names, outermost first (e.g. `styles.axisLabel`). Line numbers are
-// too brittle for a baseline (any edit above shifts them); the style-key path
-// survives unrelated edits while still distinguishing sites.
-function contextOf(node) {
-  const names = [];
-  let cur = node.parent;
-  while (cur) {
-    if (
-      ts.isPropertyAssignment(cur) &&
-      (ts.isIdentifier(cur.name) || ts.isStringLiteral(cur.name))
-    ) {
-      names.unshift(cur.name.text);
-    }
-    if (ts.isVariableDeclaration(cur) && ts.isIdentifier(cur.name)) {
-      names.unshift(cur.name.text);
-    }
-    cur = cur.parent;
-  }
-  return names.join(".") || "<anonymous>";
-}
-
 // A stable multiset key for one site: enclosing context + sorted values.
+// contextOf (the enclosing style-key chain) is shared with
+// check-accent-as-text.js via ./site-identity.
 function siteKey(site) {
-  return `${site.context}@${[...site.sizes].sort((a, b) => a - b).join(",")}`;
+  return sharedSiteKey(site.context, [...site.sizes].sort((a, b) => a - b));
 }
 
 // Scan a single source string; returns every numeric-fontSize site, in source
