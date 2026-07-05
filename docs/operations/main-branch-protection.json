@@ -4,7 +4,7 @@
     "contexts": [
       "governance",
       "reviewer-approved",
-      "mobile-e2e"
+      "mobile"
     ]
   },
   "enforce_admins": true,
