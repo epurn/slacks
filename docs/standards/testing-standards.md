@@ -26,6 +26,12 @@ Tests are part of the feature, not a follow-up.
 - Privacy/security change: negative test proving the control fails closed.
 - User-facing flow change: prove completion against the running app, not just a unit or render test. Use a targeted Maestro flow in `mobile/.maestro/` for durable app flows and regression guards, or story-specific running-app evidence such as committed screenshots/Maestro output when the assignment requires visual proof.
 - User-facing flow change: run targeted evidence locally or through the non-required manual `mobile-e2e` workflow when the change needs native E2E proof. The required every-PR mobile gate is the fast `mobile` job; it does not build native code, boot an emulator, or enforce the whole `.maestro/` suite.
+- The non-required `mobile-e2e` workflow may retry its Android emulator plus
+  Maestro execution once when the first attempt fails with the known software-GPU
+  `Failed to find ColorBuffer` glitch or before the Maestro script starts
+  because the emulator never becomes ready. It must not retry a rendered-app
+  Maestro assertion failure; those failures are treated as real regressions and
+  fail on the first attempt.
 - Normal mobile code changes that do not alter a user-facing flow are covered by the fast mobile checks plus focused tests at the right level.
 - User-facing flow change: rendering an empty, fallback, or placeholder state is an explicit failure. The flow test must assert the successful end state, meaning the action completes and the data is present and acted on.
 - User-facing flow change: unit and render tests do not satisfy this requirement; they can cover component logic, but they do not replace the flow-completion E2E.
