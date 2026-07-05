@@ -74,6 +74,59 @@ Server confirmation for the save: the item's `amount` went `200 → 215.5` and
 `420.5 → 432.9 kcal` — i.e. the sheet's edit is a real persisted correction, not
 an optimistic-only UI change.
 
+## Clarify-mode preserved on the fixed iOS sheet (opens populated + resolves)
+
+Clarify-mode reuses the very same `CorrectionSheet` → `NativeSheet` iOS path as
+the correction sheet (see `TodaySheetHost.tsx`: a `needs_clarification` entry
+mounts the same sheet with `needsClarification`), so the FTY-227 content host is
+what keeps its body from collapsing to blank too. The story requires clarify-mode
+to still open **and** resolve end-to-end on the fixed iOS path — verified below
+item-independently, both against the real backend and via the seeded clarify
+regression fixture.
+
+### Opens populated — real RC backend
+
+| File | What it shows |
+|------|---------------|
+| `clarify-01-ios-populated-realbackend.png` | Tapping the **"a glass of milk" → Add a detail** row on the iOS 26.5 sim opens the clarify sheet against the real backend with its body **fully rendered** (not blank): title "a glass of milk", **LOGGED PHRASE** "a glass of milk", the question ("We need a detail to count this entry." — the generic prompt the sheet shows when the clarification read carries no persisted question), the "Type your answer:" label, and the free-text input + **Done** submit. |
+| `clarify-02-ios-answer-interactive-realbackend.png` | The clarify body is **interactive**: typing `200 ml whole milk` into the answer field populates it and activates the (orange) **Done** submit — the content region is live, not a chrome-only strip. |
+
+> **Real-backend note on the resolve round-trip.** The submit could not be driven
+> to a *counted* item against this RC instance: the RC backend's clarification
+> **read** (`GET …/log-events/{id}/clarification`) returns **HTTP 500** for every
+> `needs_clarification` event (reproduced directly against the API for two
+> distinct entries), so the free-text path — which re-reads the question id at
+> submit time — honestly surfaces *"Could not load the question (status 500)"* and
+> leaves the row tappable (correct, non-blocking mobile behaviour; the fix does
+> not touch this logic). This is an RC-environment/read-model fault independent of
+> the mobile sheet fix; the app degrades gracefully and the sheet still renders
+> its full content. The **successful resolve** is therefore shown below on the
+> same fixed iOS sheet against the seeded clarify fixture.
+
+### Opens populated **and resolves** end-to-end — seeded clarify fixture (EXPO_PUBLIC_FATTY_E2E)
+
+Driving the repo's clarify regression fixture (the same seeded payload
+`.maestro/clarify.yaml` asserts on CI/Android) on the **iOS** dev build proves the
+fixed iOS native sheet renders the full clarify payload and completes the
+first-class answer round-trip:
+
+| File | Step | What it shows |
+|------|------|---------------|
+| `clarify-03-ios-populated-question-chips.png` | Submit "coffee" → tap the **Add a detail** row | The iOS clarify sheet renders the **full** payload: LOGGED PHRASE "coffee", Fatty's real question *"What size was the coffee — small, medium, or large?"*, the **Small / Medium / Large** quick-pick chips, and the free-text fallback. This is exactly `clarify.yaml`'s load-bearing "data-starved sheet" assertion — shown rendering on the fixed iOS sheet. |
+| `clarify-04-ios-resolved-counts.png` | Tap the **Large** chip → the answer round-trip resolves the **same** event → pull-to-refresh | The "needs a detail" treatment drops and the entry resolves **in place** (no duplicate row): "coffee" now shows ✓ **Logged**, and the day counts — hero **120 / 2,000 kcal · 6%** (`1,880 to go`), macros P `1/150g` · C `20/200g` · F `3/65g`. Clarify-mode opened **and** resolved end-to-end on the fixed iOS sheet. |
+
+Both the generic-prompt (real-backend) and full-payload (seeded) clarify sheets
+render their content on the actual iOS native sheet, and the chip-answer resolve
+counts — the blank body reported in FTY-227 does not recur in clarify-mode, and
+the clarify open→resolve path is preserved on iOS.
+
+> **iOS a11y-tree note (same as the correction captures):** XCUITest does not
+> surface the react-native-screens `formSheet`'s RN children in its queryable
+> accessibility tree even when they render, so the sheet body (question, chips,
+> input) is asserted **visually** (the screenshots above) while the Today-screen
+> anchors that *are* queryable (the `needs a detail` row leaving, the counted
+> hero label) are asserted with Maestro.
+
 ## Platforms & regression guard
 
 - **Android `Modal` fallback:** untouched by this fix (the non-iOS branch in
