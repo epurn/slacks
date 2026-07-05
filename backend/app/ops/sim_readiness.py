@@ -234,6 +234,53 @@ class ImageCoherence:
         )
 
 
+@dataclass(frozen=True)
+class WorkerHealth:
+    """Whether the Celery worker is running and answering ``inspect ping``.
+
+    The HTTP probes only cover the API; a stopped or wedged worker serves no
+    endpoint yet leaves estimator jobs stuck later. This mirrors the compose
+    worker healthcheck (``celery -A app.worker:celery_app inspect ping``).
+    """
+
+    responded: bool
+    detail: str
+
+    @property
+    def healthy(self) -> bool:
+        """True only when a worker answered the ping with a pong."""
+
+        return self.responded
+
+    @property
+    def message(self) -> str:
+        """A one-line, operator-facing worker-health summary."""
+
+        if self.responded:
+            return "Celery worker responding to inspect ping"
+        return (
+            f"worker not responding to inspect ping ({self.detail}) "
+            "— is the worker container running and connected to Redis?"
+        )
+
+
+def worker_health_from_ping(returncode: int, stdout: str, stderr: str) -> WorkerHealth:
+    """Interpret ``celery inspect ping`` output; healthy iff a worker ponged.
+
+    Celery exits non-zero and prints an error when no worker replies; a live
+    worker exits zero and echoes ``-> <node>: OK / pong``. Kept pure so the
+    happy and stopped-worker paths are unit-tested without a live stack.
+    """
+
+    if returncode == 0 and "pong" in f"{stdout}\n{stderr}".lower():
+        return WorkerHealth(responded=True, detail="pong")
+    first_line = next(
+        (line.strip() for line in (stderr + "\n" + stdout).splitlines() if line.strip()),
+        "no response",
+    )
+    return WorkerHealth(responded=False, detail=first_line[:80])
+
+
 def summarize_sources(payload: object) -> list[str]:
     """Format the ``/healthz/sources`` payload as redacted one-liners.
 
@@ -364,6 +411,30 @@ def query_image_ids(services: Sequence[str]) -> dict[str, str | None]:
     return ids
 
 
+def query_worker_health() -> WorkerHealth:
+    """Ping the Celery worker over the internal network via ``compose exec``.
+
+    Runs the same ``celery -A app.worker:celery_app inspect ping`` the compose
+    healthcheck uses, so a stopped or unhealthy worker is caught here rather than
+    surfacing later as stuck estimator jobs. Any failure (container down, no
+    reply) resolves to an unhealthy result — the smoke never mutates the stack.
+    """
+
+    result = _run_compose(
+        [
+            "exec",
+            "-T",
+            "worker",
+            ".venv/bin/celery",
+            "-A",
+            "app.worker:celery_app",
+            "inspect",
+            "ping",
+        ]
+    )
+    return worker_health_from_ping(result.returncode, result.stdout, result.stderr)
+
+
 def probe_http(url: str) -> HttpProbe:
     """GET ``url`` and capture status/body without raising on HTTP errors."""
 
@@ -385,6 +456,27 @@ def probe_http(url: str) -> HttpProbe:
 
 def _emit(line: str = "") -> None:
     print(line)
+
+
+def _probe_and_report_health(sim_url: str) -> bool:
+    """Probe the API health endpoints, print each result, and return overall ok."""
+
+    ok = True
+    _emit("")
+    for path in ("/healthz", "/readyz", "/healthz/sources"):
+        probe = probe_http(f"{sim_url}{path}")
+        status = probe.status if probe.status is not None else (probe.error or "no response")
+        _emit(f"[{'OK ' if probe.ok else 'FAIL'}] GET {path} -> {status}")
+        ok = ok and probe.ok
+        if path == "/healthz/sources" and probe.ok and probe.body is not None:
+            try:
+                payload = loads(probe.body)
+            except JSONDecodeError:
+                _emit("     (could not parse sources payload)")
+            else:
+                for line in summarize_sources(payload):
+                    _emit(f"     - {line}")
+    return ok
 
 
 def run() -> int:
@@ -419,23 +511,17 @@ def run() -> int:
     _emit(f"[{'OK ' if alembic.at_head else 'FAIL'}] alembic: {alembic.message}")
     ok = ok and alembic.at_head
 
-    # 3. Health probes.
-    _emit("")
-    for path in ("/healthz", "/readyz", "/healthz/sources"):
-        probe = probe_http(f"{sim_url}{path}")
-        status = probe.status if probe.status is not None else (probe.error or "no response")
-        _emit(f"[{'OK ' if probe.ok else 'FAIL'}] GET {path} -> {status}")
-        ok = ok and probe.ok
-        if path == "/healthz/sources" and probe.ok and probe.body is not None:
-            try:
-                payload = loads(probe.body)
-            except JSONDecodeError:
-                _emit("     (could not parse sources payload)")
-            else:
-                for line in summarize_sources(payload):
-                    _emit(f"     - {line}")
+    # 3. API health probes.
+    ok = _probe_and_report_health(sim_url) and ok
 
-    # 4. Non-secret config surface (active providers) and the connect URL.
+    # 4. Worker health. The HTTP probes only reach the API; a stopped or wedged
+    #    worker would leave estimator jobs stuck later, so require a live pong.
+    worker = query_worker_health()
+    _emit("")
+    _emit(f"[{'OK ' if worker.healthy else 'FAIL'}] worker: {worker.message}")
+    ok = ok and worker.healthy
+
+    # 5. Non-secret config surface (active providers) and the connect URL.
     _emit("")
     _emit("config (non-secret):")
     for key, value in reported_env(env):

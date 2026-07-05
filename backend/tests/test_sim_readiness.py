@@ -177,6 +177,39 @@ def test_image_coherence_unbuilt_service_is_not_coherent() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Worker health
+# --------------------------------------------------------------------------- #
+
+
+def test_worker_health_pong_is_healthy() -> None:
+    health = sr.worker_health_from_ping(0, "-> celery@host: OK\n        pong\n", "")
+    assert health.healthy is True
+    assert "responding" in health.message
+
+
+def test_worker_health_no_reply_is_unhealthy() -> None:
+    # Celery exits non-zero with "Error: No nodes replied..." when no worker is up.
+    health = sr.worker_health_from_ping(69, "", "Error: No nodes replied within time constraint.")
+    assert health.healthy is False
+    assert "No nodes replied" in health.detail
+    assert "worker not responding" in health.message
+
+
+def test_worker_health_container_down_is_unhealthy() -> None:
+    # `docker compose exec` against a stopped service fails before celery runs.
+    health = sr.worker_health_from_ping(1, "", 'service "worker" is not running')
+    assert health.healthy is False
+    assert "not responding" in health.message
+
+
+def test_worker_health_zero_exit_without_pong_is_unhealthy() -> None:
+    # Defensive: a clean exit that never printed a pong is still not a live worker.
+    health = sr.worker_health_from_ping(0, "", "")
+    assert health.healthy is False
+    assert health.detail == "no response"
+
+
+# --------------------------------------------------------------------------- #
 # Sources summary
 # --------------------------------------------------------------------------- #
 

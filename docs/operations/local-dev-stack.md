@@ -214,9 +214,15 @@ material). It reports:
   the code head read from `backend/alembic/versions/`. It prints **both**
   versions and fails when the database is behind (e.g. DB `0016` while code
   expects `0017`).
-- **Health.** `GET /healthz` (liveness), `GET /readyz` (DB readiness), and
+- **API health.** `GET /healthz` (liveness), `GET /readyz` (DB readiness), and
   `GET /healthz/sources` (evidence-source capabilities, including the active LLM
   provider — booleans only, no key values).
+- **Worker health.** It pings the Celery worker with the same
+  `celery -A app.worker:celery_app inspect ping` the compose healthcheck uses
+  (over `docker compose exec`, so no host port is needed) and fails when no
+  worker pongs back. The HTTP probes only reach the API; a stopped or wedged
+  worker serves no endpoint yet would leave estimator jobs stuck later, so the
+  smoke will **not** print READY until the worker answers.
 - **The simulator connect URL**, derived from `.env` `API_PORT`:
   `http://localhost:<API_PORT>`. With `API_PORT=18000` this is
   `http://localhost:18000`. This is the value to enter on the app's connect
@@ -247,6 +253,29 @@ its API base URL from the on-device connection store, which starts empty
 
 You must connect to the printed URL **before** sign-in; there is no persisted
 server to fall back to on a fresh install.
+
+### Live backend vs. hermetic E2E mock
+
+`make sim-smoke` and the connect flow above target the **real local backend** —
+the Docker Compose stack this document describes, published on `.env`'s
+`API_PORT` (e.g. `http://localhost:18000`). This is the live v1 target: your
+requests hit FastAPI, Postgres, the worker, and the configured providers.
+
+That is **not** the same simulator mode `mobile/verify-e2e.sh` runs. The E2E
+suite builds the app with `EXPO_PUBLIC_FATTY_E2E=true` baked in, which installs
+an **in-process mock `fetch`** (see `mobile/e2e/launchMode.ts`) so no request
+ever leaves the app. In that mode the app's server URL is the synthetic
+`E2E_SERVER_URL = 'http://localhost:8000'` in `mobile/e2e/fixtures.ts` — it is a
+hermetic placeholder that is only ever *matched* by the mock, never *connected*
+to. Nothing listens there, and it is **deliberately unrelated** to the live
+stack's `API_PORT`.
+
+So do not read that `localhost:8000` as the live v1 backend: when `.env`
+publishes `API_PORT=18000`, the real target is `http://localhost:18000` (what
+`make sim-smoke` prints), while `localhost:8000` in the E2E fixtures is a mocked
+constant that never touches the network. Use the printed smoke URL for live
+simulator testing; use `mobile/verify-e2e.sh` only for the hermetic Maestro
+suite.
 
 ## Container User
 
