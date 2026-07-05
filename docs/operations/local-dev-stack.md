@@ -186,6 +186,68 @@ credential is visible here. The `claude_code` entry specifically shows whether
 the CLI is installed and the session is valid — both must be `true` for the
 provider to work.
 
+## Simulator Readiness Smoke (FTY-250)
+
+Before testing Fatty in an iOS simulator, run one command to confirm the stack is
+actually *ready* — not just serving `/healthz`. A stack can be healthy at the
+process level yet fail the app later: backend images built from different
+checkouts, Postgres behind the code's Alembic head, or a simulator pointed at the
+wrong port. The smoke catches exactly those drifts and prints the connect URL.
+
+```sh
+docker compose up -d          # bring the stack up first
+make sim-smoke                # read-only readiness report (prints no secrets)
+```
+
+`make sim-smoke` runs `python -m app.ops.sim_readiness` in the backend uv
+environment. It is **read-only** — it detects drift and prints the fix path but
+never rebuilds, migrates, or restarts anything for you — and it **never prints
+secret values** (auth secret, DB password, provider keys, tokens, session
+material). It reports:
+
+- **Backend image coherence.** `api`, `worker`, and `migrate` all build from
+  `./backend`, so a coherent stack resolves them to one image id. Divergent ids
+  mean one was rebuilt from a different checkout than the others (the
+  2026-07-05 failure mode) — the smoke flags it as image DRIFT.
+- **Alembic drift.** It reads the running database's `alembic_version` (via
+  `docker compose exec postgres`, so no host port is needed) and compares it to
+  the code head read from `backend/alembic/versions/`. It prints **both**
+  versions and fails when the database is behind (e.g. DB `0016` while code
+  expects `0017`).
+- **Health.** `GET /healthz` (liveness), `GET /readyz` (DB readiness), and
+  `GET /healthz/sources` (evidence-source capabilities, including the active LLM
+  provider — booleans only, no key values).
+- **The simulator connect URL**, derived from `.env` `API_PORT`:
+  `http://localhost:<API_PORT>`. With `API_PORT=18000` this is
+  `http://localhost:18000`. This is the value to enter on the app's connect
+  screen — **not** the mobile code's `localhost:8000` fallback, which is only
+  correct when `API_PORT` is left at its default.
+
+When the smoke reports drift, the coherent fix path (also printed by the command)
+rebuilds the backend images from the current checkout, migrates to head, and
+restarts the API and worker on the new image:
+
+```sh
+docker compose build api worker migrate   # rebuild from this checkout
+docker compose run --rm migrate            # apply Alembic to head
+docker compose up -d api worker            # restart on the new image
+make sim-smoke                             # re-run until READY
+```
+
+### Connecting the simulator
+
+A **fresh simulator install has no persisted connected server** — the app resolves
+its API base URL from the on-device connection store, which starts empty
+(`mobile/api/config.ts`). So the first-run flow is:
+
+1. `docker compose up -d` and `make sim-smoke` until it reports **READY**.
+2. Launch the app in the simulator.
+3. On the connect screen, enter the printed URL (e.g. `http://localhost:18000`).
+4. Sign in or create an account.
+
+You must connect to the printed URL **before** sign-in; there is no persisted
+server to fall back to on a fresh install.
+
 ## Container User
 
 The backend image runs all three services (`migrate`, `api`, `worker`) as a
