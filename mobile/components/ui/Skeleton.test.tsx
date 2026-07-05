@@ -55,7 +55,7 @@ describe('Skeleton', () => {
     const node = tree.root.find(
       (n) => n.props.accessibilityRole === 'progressbar',
     );
-    const styles: Array<Record<string, unknown>> = Array.isArray(node.props.style)
+    const styles: Record<string, unknown>[] = Array.isArray(node.props.style)
       ? node.props.style
       : [node.props.style];
     const combined = Object.assign({}, ...styles);
@@ -67,34 +67,30 @@ describe('Skeleton', () => {
     const node = tree.root.find(
       (n) => n.props.accessibilityRole === 'progressbar',
     );
-    const styles: Array<Record<string, unknown>> = Array.isArray(node.props.style)
+    const styles: Record<string, unknown>[] = Array.isArray(node.props.style)
       ? node.props.style
       : [node.props.style];
     const combined = Object.assign({}, ...styles);
     expect(combined.height).toBe(48);
   });
 
-  it('starts the shimmer loop once Reduce Motion is known to be off', async () => {
+  it('starts the shimmer loop once Reduce Motion is known to be off', () => {
     const loopSpy = jest
       .spyOn(Animated, 'loop')
       .mockReturnValue({ start: jest.fn(), stop: jest.fn() } as never);
 
     mount(React.createElement(Skeleton, { width: 80, height: 20 }));
-    // Let the isReduceMotionEnabled promise resolve inside useEffect.
-    await act(async () => {});
 
     expect(loopSpy).toHaveBeenCalled();
   });
 
-  it('does not animate (no shimmer loop) when Reduce Motion is enabled', async () => {
+  it('does not animate (no shimmer loop) when Reduce Motion is enabled', () => {
     mockReduceMotion(true);
     const loopSpy = jest
       .spyOn(Animated, 'loop')
       .mockReturnValue({ start: jest.fn(), stop: jest.fn() } as never);
 
     const tree = mount(React.createElement(Skeleton, { width: 80, height: 20 }));
-    // Let the isReduceMotionEnabled promise resolve inside useEffect.
-    await act(async () => {});
 
     // The placeholder still renders, but the shimmer loop must never start.
     expect(
