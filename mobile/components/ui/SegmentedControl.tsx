@@ -24,6 +24,21 @@ import { StyleSheet } from 'react-native';
 export interface SegmentedControlOption<T extends string> {
   value: T;
   label: string;
+  /**
+   * Optional VoiceOver label for this segment, announced *instead of* the bare
+   * visible label when navigating the control — e.g. a pace segment shown as
+   * "Steady" that should announce "Steady: ~0.5% of bodyweight / week —
+   * recommended" (FTY-222).
+   *
+   * The platform `UISegmentedControl` exposes no per-segment accessibility-label
+   * hook (each segment's title *is* its label, and the library forwards no
+   * override), so when any option carries this field the wrapper folds the full
+   * set into the control's own `accessibilityLabel`. That keeps the descriptive
+   * copy in the accessibility tree — no information is lost versus a hand-rolled
+   * per-radio group — without restyling or forking the native control. Purely
+   * additive: options without the field render and announce exactly as before.
+   */
+  accessibilityLabel?: string;
 }
 
 export function SegmentedControl<T extends string>({
@@ -46,10 +61,21 @@ export function SegmentedControl<T extends string>({
     options.findIndex((o) => o.value === selected),
   );
 
+  // When any segment carries its own accessibility label, weave the full set
+  // into the control label so VoiceOver still announces the descriptive copy
+  // the native control can't attach per-segment. No per-segment labels → the
+  // control label is unchanged (FTY-186 call sites keep their exact label).
+  const hasPerSegmentLabels = options.some((o) => o.accessibilityLabel);
+  const composedAccessibilityLabel = hasPerSegmentLabels
+    ? `${accessibilityLabel}. ${options
+        .map((o) => o.accessibilityLabel ?? o.label)
+        .join('. ')}`
+    : accessibilityLabel;
+
   return (
     <RNSegmentedControl
       testID={testID}
-      accessibilityLabel={accessibilityLabel}
+      accessibilityLabel={composedAccessibilityLabel}
       values={options.map((o) => o.label)}
       selectedIndex={selectedIndex}
       onChange={(event) => {

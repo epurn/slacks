@@ -77,3 +77,62 @@ it("defaults selectedIndex to 0 when the value is not among the options", () => 
   const tree = render("kelvin" as Units, jest.fn());
   expect(findControl(tree).props.selectedIndex).toBe(0);
 });
+
+// ─── Per-segment accessibility labels (FTY-222, additive) ────────────────────
+
+type Pace = "gentle" | "steady";
+
+function findPace(tree: ReactTestRenderer) {
+  return tree.root.findAll(
+    (n) =>
+      n.props.testID === "pace" &&
+      Array.isArray(n.props.values) &&
+      typeof n.props.onChange === "function",
+  )[0];
+}
+
+function renderPace(
+  options: { value: Pace; label: string; accessibilityLabel?: string }[],
+): ReactTestRenderer {
+  let tree!: ReactTestRenderer;
+  act(() => {
+    tree = create(
+      <SegmentedControl<Pace>
+        testID="pace"
+        accessibilityLabel="Goal pace"
+        options={options}
+        selected="steady"
+        onSelect={jest.fn()}
+      />,
+    );
+  });
+  return tree;
+}
+
+it("leaves the visible segment titles untouched when per-segment labels are set", () => {
+  const tree = renderPace([
+    { value: "gentle", label: "Gentle", accessibilityLabel: "Gentle: slow" },
+    { value: "steady", label: "Steady", accessibilityLabel: "Steady: recommended" },
+  ]);
+  // The short labels remain the tappable titles; descriptions live in a11y only.
+  expect(findPace(tree).props.values).toEqual(["Gentle", "Steady"]);
+});
+
+it("folds per-segment accessibility labels into the control accessibility label", () => {
+  const tree = renderPace([
+    { value: "gentle", label: "Gentle", accessibilityLabel: "Gentle: slow" },
+    { value: "steady", label: "Steady", accessibilityLabel: "Steady: recommended" },
+  ]);
+  expect(findPace(tree).props.accessibilityLabel).toBe(
+    "Goal pace. Gentle: slow. Steady: recommended",
+  );
+});
+
+it("keeps the bare control accessibility label when no per-segment labels are given", () => {
+  // Additive guarantee: FTY-186 call sites (no per-segment labels) are unchanged.
+  const tree = renderPace([
+    { value: "gentle", label: "Gentle" },
+    { value: "steady", label: "Steady" },
+  ]);
+  expect(findPace(tree).props.accessibilityLabel).toBe("Goal pace");
+});

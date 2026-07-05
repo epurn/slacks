@@ -173,27 +173,44 @@ function byTestId(tree: ReactTestRenderer, id: string) {
   return tree.root.find((n) => n.props.testID === id);
 }
 
-function radioGroup(tree: ReactTestRenderer, label: string) {
-  return tree.root.find(
+// Goal Direction / Pace are the shared native `SegmentedControl` (FTY-222):
+// a single host node exposing its labels via `values`, its selection via
+// `selectedIndex`, and reporting taps through `onChange`.
+const DIRECTION_TESTID = "goal-direction-segmented-control";
+const PACE_TESTID = "goal-pace-segmented-control";
+
+function segmentedControl(tree: ReactTestRenderer, testID: string) {
+  return tree.root.findAll(
     (n) =>
-      n.props.accessibilityRole === "radiogroup" &&
-      n.props.accessibilityLabel === label,
-  );
+      n.props.testID === testID &&
+      Array.isArray(n.props.values) &&
+      typeof n.props.onChange === "function",
+  )[0];
 }
 
-function selectedRadio(tree: ReactTestRenderer, groupLabel: string): string | null {
-  const group = radioGroup(tree, groupLabel);
-  const selected = group.findAll(
-    (n) =>
-      n.props.accessibilityRole === "radio" &&
-      n.props.accessibilityState?.selected === true,
-  );
-  return selected[0]?.props.accessibilityLabel ?? null;
+/** The visible label of the currently-selected segment, or null if absent. */
+function selectedSegment(tree: ReactTestRenderer, testID: string): string | null {
+  const control = segmentedControl(tree, testID);
+  if (!control) return null;
+  const values = control.props.values as string[];
+  return values[control.props.selectedIndex as number] ?? null;
 }
 
-function pressRadio(tree: ReactTestRenderer, label: string): void {
+/** Drive a native segmented control to a segment by its visible label. */
+function selectSegment(
+  tree: ReactTestRenderer,
+  testID: string,
+  label: string,
+): void {
+  const control = segmentedControl(tree, testID);
+  if (!control) {
+    throw new Error(`No segmented control "${testID}"`);
+  }
+  const index = (control.props.values as string[]).indexOf(label);
   act(() => {
-    byLabel(tree, label).props.onPress();
+    control.props.onChange({
+      nativeEvent: { selectedSegmentIndex: index, value: label },
+    });
   });
 }
 
@@ -288,7 +305,7 @@ describe("step-flow", () => {
   it("goes back to step 1 and preserves the direction selection", async () => {
     const tree = await mount();
     // Change direction to gain.
-    pressRadio(tree, "Gain");
+    selectSegment(tree, DIRECTION_TESTID, "Gain");
     await act(async () => {
       byLabel(tree, "Continue to measurements").props.onPress();
       await new Promise((r) => setTimeout(r, 0));
@@ -296,38 +313,30 @@ describe("step-flow", () => {
     // Now on step 2 — press back.
     act(() => { byTestId(tree, "back-button").props.onPress(); });
     // Back on step 1, direction should still be Gain.
-    expect(
-      selectedRadio(tree, "Goal direction"),
-    ).toBe("Gain");
+    expect(selectedSegment(tree, DIRECTION_TESTID)).toBe("Gain");
   });
 
   it("hides the pace control when maintain is selected", async () => {
     const tree = await mount();
-    pressRadio(tree, "Maintain");
-    expect(
-      tree.root.findAll(
-        (n) =>
-          n.props.accessibilityRole === "radiogroup" &&
-          n.props.accessibilityLabel === "Goal pace",
-      ),
-    ).toHaveLength(0);
+    selectSegment(tree, DIRECTION_TESTID, "Maintain");
+    expect(segmentedControl(tree, PACE_TESTID)).toBeUndefined();
   });
 
   it("shows pace options when lose is selected", async () => {
     const tree = await mount();
-    pressRadio(tree, "Lose");
-    expect(radioGroup(tree, "Goal pace")).toBeTruthy();
+    selectSegment(tree, DIRECTION_TESTID, "Lose");
+    expect(segmentedControl(tree, PACE_TESTID)).toBeTruthy();
   });
 
   it("shows pace options when gain is selected", async () => {
     const tree = await mount();
-    pressRadio(tree, "Gain");
-    expect(radioGroup(tree, "Goal pace")).toBeTruthy();
+    selectSegment(tree, DIRECTION_TESTID, "Gain");
+    expect(segmentedControl(tree, PACE_TESTID)).toBeTruthy();
   });
 
   it("defaults to the steady pace (evidence-based recommendation)", async () => {
     const tree = await mount();
-    expect(selectedRadio(tree, "Goal pace")).toMatch(/Steady/);
+    expect(selectedSegment(tree, PACE_TESTID)).toMatch(/Steady/);
   });
 
   it("advance to step 3 after completing step 2", async () => {
@@ -433,7 +442,7 @@ describe("goal + measurement writes", () => {
     const tree = await mount({ createGoalFn, putProfileFn });
 
     // Step 1: select loss + faster
-    pressRadio(tree, "Faster: ~0.75–1% of bodyweight / week");
+    selectSegment(tree, PACE_TESTID, "Faster");
 
     await act(async () => {
       byLabel(tree, "Continue to measurements").props.onPress();
@@ -458,7 +467,7 @@ describe("goal + measurement writes", () => {
     const putProfileFn = jest.fn(async () => PROFILE_RESPONSE);
     const tree = await mount({ createGoalFn, putProfileFn });
 
-    pressRadio(tree, "Maintain");
+    selectSegment(tree, DIRECTION_TESTID, "Maintain");
     await act(async () => {
       byLabel(tree, "Continue to measurements").props.onPress();
       await new Promise((r) => setTimeout(r, 0));
@@ -664,14 +673,35 @@ describe("target reveal", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("accessibility", () => {
-  it("labels the goal direction radio group", async () => {
+  it("labels the goal direction native segmented control", async () => {
     const tree = await mount();
-    expect(radioGroup(tree, "Goal direction")).toBeTruthy();
+    const control = segmentedControl(tree, DIRECTION_TESTID);
+    expect(control).toBeTruthy();
+    expect(control.props.accessibilityLabel).toBe("Goal direction");
+    expect(control.props.values).toEqual(["Lose", "Maintain", "Gain"]);
   });
 
-  it("labels the goal pace radio group", async () => {
+  it("labels the goal pace native segmented control", async () => {
     const tree = await mount();
-    expect(radioGroup(tree, "Goal pace")).toBeTruthy();
+    const control = segmentedControl(tree, PACE_TESTID);
+    expect(control).toBeTruthy();
+    // Visible titles stay short; the control label starts with "Goal pace".
+    expect(control.props.values).toEqual(["Gentle", "Steady", "Faster"]);
+    expect(control.props.accessibilityLabel).toMatch(/^Goal pace\./);
+  });
+
+  it("preserves the pace descriptions in the control's accessibility label (no VoiceOver regression)", async () => {
+    // Migrating off the per-radio pill must not drop the evidence-based pace
+    // copy VoiceOver used to announce; the wrapper folds each segment's
+    // description into the control accessibility label (FTY-222).
+    const tree = await mount();
+    const label = segmentedControl(tree, PACE_TESTID).props
+      .accessibilityLabel as string;
+    expect(label).toContain("Gentle: ~0.25% of bodyweight / week");
+    expect(label).toContain(
+      "Steady: ~0.5% of bodyweight / week — recommended",
+    );
+    expect(label).toContain("Faster: ~0.75–1% of bodyweight / week");
   });
 
   it("stepper has progressbar role with correct value", async () => {

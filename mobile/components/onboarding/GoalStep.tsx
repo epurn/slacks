@@ -9,6 +9,7 @@
 import { Text } from 'react-native';
 
 import { Button } from '@/components/ui/Button';
+import { SegmentedControl, type SegmentedControlOption } from '@/components/ui';
 import {
   GAIN_PACE_OPTIONS,
   LOSS_PACE_OPTIONS,
@@ -17,19 +18,29 @@ import {
 } from '@/state/onboarding';
 import type { GoalDirection, PacePreset } from '@/api/goals';
 
-import {
-  SectionLabel,
-  Segmented,
-  StepContainer,
-  type ThemeColors,
-} from './primitives';
+import { SectionLabel, StepContainer, type ThemeColors } from './primitives';
 import { styles } from './styles';
 
-const DIRECTION_OPTIONS: readonly { value: GoalDirection; label: string }[] = [
+const DIRECTION_OPTIONS: readonly SegmentedControlOption<GoalDirection>[] = [
   { value: 'loss', label: 'Lose' },
   { value: 'maintain', label: 'Maintain' },
   { value: 'gain', label: 'Gain' },
 ];
+
+/**
+ * Map a pace preset to a segment that shows the short label but announces the
+ * evidence-based description to VoiceOver (FTY-222) — preserving exactly the
+ * copy the hand-rolled per-radio group used to announce.
+ */
+function paceSegments(
+  options: readonly { value: PacePreset; label: string; description: string }[],
+): readonly SegmentedControlOption<PacePreset>[] {
+  return options.map((o) => ({
+    value: o.value,
+    label: o.label,
+    accessibilityLabel: `${o.label}: ${o.description}`,
+  }));
+}
 
 export function GoalStep({
   goalState,
@@ -57,25 +68,27 @@ export function GoalStep({
       </Text>
 
       <SectionLabel label="Direction" colors={colors} />
-      <Segmented<GoalDirection>
+      <SegmentedControl<GoalDirection>
+        testID="goal-direction-segmented-control"
         options={DIRECTION_OPTIONS}
         selected={goalState.direction}
         onSelect={onDirectionChange}
         accessibilityLabel="Goal direction"
-        colors={colors}
       />
 
       {goalState.direction !== 'maintain' && (
         <>
           <SectionLabel label="Pace" colors={colors} />
-          <Segmented<PacePreset>
-            options={
-              goalState.direction === 'loss' ? LOSS_PACE_OPTIONS : GAIN_PACE_OPTIONS
-            }
+          <SegmentedControl<PacePreset>
+            testID="goal-pace-segmented-control"
+            options={paceSegments(
+              goalState.direction === 'loss'
+                ? LOSS_PACE_OPTIONS
+                : GAIN_PACE_OPTIONS,
+            )}
             selected={goalState.pace}
             onSelect={onPaceChange}
             accessibilityLabel="Goal pace"
-            colors={colors}
           />
           <Text style={[styles.paceNote, { color: colors.textMuted }]}>
             Steady is evidence-based and preserves lean mass.
