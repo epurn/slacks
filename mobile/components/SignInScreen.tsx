@@ -31,6 +31,7 @@ import { AuthApiError } from "@/api/auth";
 import { displayHost } from "@/api/serverConnection";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { SegmentedControl } from "@/components/ui";
 import { ThemedText } from "@/components/ui/ThemedText";
 import { useConnection } from "@/state/connection";
 import { useSessionController } from "@/state/session";
@@ -204,27 +205,17 @@ export function SignInScreen({
         ) : null}
 
         {/* Mode toggle — switch between signing in and creating an account. */}
-        <View
-          accessibilityRole="radiogroup"
+        <SegmentedControl<AuthMode>
+          testID="auth-mode-segmented-control"
           accessibilityLabel="Sign in or create an account"
-          style={[
-            styles.toggle,
-            { backgroundColor: colors.controlBackground },
+          options={[
+            { value: "signin", label: "Sign in" },
+            { value: "create", label: "Create account" },
           ]}
-        >
-          <ModeTab
-            label="Sign in"
-            selected={isSignIn}
-            onPress={() => switchMode("signin")}
-            colors={colors}
-          />
-          <ModeTab
-            label="Create account"
-            selected={!isSignIn}
-            onPress={() => switchMode("create")}
-            colors={colors}
-          />
-        </View>
+          selected={mode}
+          onSelect={switchMode}
+          style={styles.toggle}
+        />
 
         <Card style={styles.card}>
           <TextInput
@@ -336,35 +327,6 @@ export function SignInScreen({
   );
 }
 
-/** One option of the sign-in / create-account toggle. */
-function ModeTab({
-  label,
-  selected,
-  onPress,
-  colors,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-  colors: ReturnType<typeof useTheme>["colors"];
-}) {
-  return (
-    <Button
-      label={label}
-      variant="secondary"
-      onPress={onPress}
-      style={[
-        styles.toggleTab,
-        selected
-          ? { backgroundColor: colors.surfaceRaised }
-          : { backgroundColor: "transparent" },
-      ]}
-      accessibilityRole="radio"
-      accessibilityState={{ selected }}
-    />
-  );
-}
-
 /** A calm, in-place inline error for a single field. */
 function FieldError({
   message,
@@ -402,17 +364,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   toggle: {
-    flexDirection: "row",
-    borderRadius: radius.md,
-    padding: 3,
-    gap: 3,
     marginBottom: spacing.md,
-  },
-  toggleTab: {
-    flex: 1,
-    minWidth: 0,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.sm,
   },
   card: {
     padding: spacing.base,

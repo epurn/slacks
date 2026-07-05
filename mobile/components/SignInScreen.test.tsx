@@ -184,12 +184,29 @@ function submit(tree: ReactTestRenderer) {
       SUBMIT_LABELS.includes(n.props.accessibilityLabel as string),
   );
 }
-function modeTab(tree: ReactTestRenderer, label: string) {
-  return tree.root.find(
+/**
+ * The native mode `SegmentedControl` node (carries `values` + `onChange`).
+ * The sign-in / create-account toggle is now the shared native control
+ * (FTY-222), not a hand-rolled radio-group pill.
+ */
+function modeControl(tree: ReactTestRenderer) {
+  return tree.root.findAll(
     (n) =>
-      n.props.accessibilityRole === "radio" &&
-      n.props.accessibilityLabel === label,
-  );
+      n.props.testID === "auth-mode-segmented-control" &&
+      Array.isArray(n.props.values) &&
+      typeof n.props.onChange === "function",
+  )[0];
+}
+
+/** Drive the native mode control to a segment, as a tap would. */
+function selectMode(tree: ReactTestRenderer, label: string): void {
+  const control = modeControl(tree);
+  const index = (control.props.values as string[]).indexOf(label);
+  act(() => {
+    control.props.onChange({
+      nativeEvent: { selectedSegmentIndex: index, value: label },
+    });
+  });
 }
 async function pressSubmit(tree: ReactTestRenderer): Promise<void> {
   await act(async () => {
@@ -360,9 +377,20 @@ describe("accessibility + light/dark parity", () => {
     const labels = tree.root
       .findAll((n) => !!n.props.accessibilityLabel)
       .map((n) => n.props.accessibilityLabel as string);
+    // Email + password fields, the submit button ("Sign in"), and the native
+    // mode toggle labelled as a whole (its per-segment titles live in `values`).
     expect(labels).toEqual(
-      expect.arrayContaining(["Email", "Password", "Sign in", "Create account"]),
+      expect.arrayContaining([
+        "Email",
+        "Password",
+        "Sign in",
+        "Sign in or create an account",
+      ]),
     );
+    expect(modeControl(tree).props.values).toEqual([
+      "Sign in",
+      "Create account",
+    ]);
   });
 
   it("uses secure text entry on the password field", async () => {
@@ -375,14 +403,21 @@ describe("accessibility + light/dark parity", () => {
     expect(flattenStyle(submit(tree).props.style).minHeight).toBe(44);
   });
 
-  it("marks the mode tabs as a radio group selection", async () => {
+  it("reflects the current mode as the native control's selected segment", async () => {
+    const signin = await mount({ initialMode: "signin" });
+    expect(modeControl(signin).props.selectedIndex).toBe(0);
+    const create = await mount({ initialMode: "create" });
+    expect(modeControl(create).props.selectedIndex).toBe(1);
+  });
+
+  it("switches to create-account mode when its segment is tapped (drives the same state)", async () => {
     const tree = await mount({ initialMode: "signin" });
-    expect(modeTab(tree, "Sign in").props.accessibilityState).toEqual({
-      selected: true,
-    });
-    expect(modeTab(tree, "Create account").props.accessibilityState).toEqual({
-      selected: false,
-    });
+    expect(submit(tree).props.accessibilityLabel).toBe("Sign in");
+    selectMode(tree, "Create account");
+    // The tap flipped the mode end-to-end: submit + control both follow.
+    expect(submit(tree).props.accessibilityLabel).toBe("Create account");
+    expect(modeControl(tree).props.selectedIndex).toBe(1);
+    expect(texts(tree)).toContain("Create your account");
   });
 
   it("renders the email field with the light then dark text colour", async () => {

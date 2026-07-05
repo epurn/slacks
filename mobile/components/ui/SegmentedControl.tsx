@@ -19,11 +19,27 @@
 
 import RNSegmentedControl from '@react-native-segmented-control/segmented-control';
 import type { StyleProp, ViewStyle } from 'react-native';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+
+import { useTheme } from '@/theme';
+import { typeScale } from '@/theme/typography';
 
 export interface SegmentedControlOption<T extends string> {
   value: T;
   label: string;
+  /**
+   * Optional descriptive copy for this option (FTY-222). The platform
+   * `UISegmentedControl` exposes no per-segment accessibility-label hook — each
+   * segment's title *is* its label and the library forwards no override — so a
+   * description can't ride along the segment itself. Instead the wrapper renders
+   * the *selected* option's description as a visible caption below the control,
+   * updating as the selection changes. That surfaces the copy to every user
+   * (previously it reached only VoiceOver via a bespoke per-radio group) and,
+   * being ordinary on-screen text, it stays reachable by VoiceOver — no
+   * information regression. Purely additive: options without the field render no
+   * caption, exactly as before.
+   */
+  description?: string;
 }
 
 export function SegmentedControl<T extends string>({
@@ -41,26 +57,40 @@ export function SegmentedControl<T extends string>({
   testID?: string;
   style?: StyleProp<ViewStyle>;
 }) {
+  const { colors } = useTheme();
+
   const selectedIndex = Math.max(
     0,
     options.findIndex((o) => o.value === selected),
   );
+  const caption = options[selectedIndex]?.description;
 
   return (
-    <RNSegmentedControl
-      testID={testID}
-      accessibilityLabel={accessibilityLabel}
-      values={options.map((o) => o.label)}
-      selectedIndex={selectedIndex}
-      onChange={(event) => {
-        const index = event.nativeEvent.selectedSegmentIndex;
-        const option = options[index];
-        if (option) {
-          onSelect(option.value);
-        }
-      }}
-      style={[styles.control, style]}
-    />
+    <View>
+      <RNSegmentedControl
+        testID={testID}
+        accessibilityLabel={accessibilityLabel}
+        values={options.map((o) => o.label)}
+        selectedIndex={selectedIndex}
+        onChange={(event) => {
+          const index = event.nativeEvent.selectedSegmentIndex;
+          const option = options[index];
+          if (option) {
+            onSelect(option.value);
+          }
+        }}
+        style={[styles.control, style]}
+      />
+      {caption != null && caption !== '' && (
+        <Text
+          testID={testID ? `${testID}-caption` : undefined}
+          accessibilityLiveRegion="polite"
+          style={[styles.caption, { color: colors.textMuted }]}
+        >
+          {caption}
+        </Text>
+      )}
+    </View>
   );
 }
 
@@ -68,5 +98,10 @@ const styles = StyleSheet.create({
   // Keep the native pill's look but guarantee the app-wide ≥44pt target.
   control: {
     minHeight: 44,
+  },
+  caption: {
+    fontSize: typeScale.footnote,
+    marginTop: 8,
+    textAlign: 'center',
   },
 });

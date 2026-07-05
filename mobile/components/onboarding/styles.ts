@@ -62,28 +62,6 @@ export const styles = StyleSheet.create({
     marginTop: spacing.lg,
     marginBottom: spacing.xs,
   },
-  segmented: {
-    flexDirection: 'row',
-    borderRadius: radius.md,
-    padding: 2,
-    gap: 2,
-  },
-  segment: {
-    flex: 1,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.sm,
-    alignItems: 'center',
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  segmentLabel: {
-    fontSize: typeScale.footnote,
-  },
-  paceNote: {
-    fontSize: typeScale.footnote,
-    marginTop: spacing.sm,
-    textAlign: 'center',
-  },
   autoDetectRow: {
     padding: spacing.md,
     marginBottom: spacing.lg,

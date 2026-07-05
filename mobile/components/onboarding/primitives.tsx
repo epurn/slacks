@@ -3,9 +3,9 @@
  *
  * Extracted from `OnboardingScreen.tsx` (FTY-206). These are the small,
  * presentation-only building blocks the step sections compose from:
- * `StepContainer`, `Stepper`, `SectionLabel`, `LabelledInput`, `FieldError`,
- * and `Segmented`. Kept local to onboarding per the story scope — a
- * cross-screen consolidation is a possible separate follow-up.
+ * `StepContainer`, `Stepper`, `SectionLabel`, `LabelledInput`, and
+ * `FieldError`. (Goal Direction/Pace now use the shared native
+ * `components/ui/SegmentedControl` — FTY-222 — not a local pill group.)
  */
 
 import type { ReactNode } from 'react';
@@ -153,55 +153,3 @@ export function FieldError({
   );
 }
 
-export function Segmented<T extends string>({
-  options,
-  selected,
-  onSelect,
-  accessibilityLabel,
-  colors,
-}: {
-  options: readonly { value: T; label: string; description?: string }[];
-  selected: T;
-  onSelect: (v: T) => void;
-  accessibilityLabel: string;
-  colors: ThemeColors;
-}) {
-  return (
-    <View
-      accessibilityRole="radiogroup"
-      accessibilityLabel={accessibilityLabel}
-      style={[styles.segmented, { backgroundColor: colors.controlBackground }]}
-    >
-      {options.map((opt) => {
-        const isSelected = opt.value === selected;
-        return (
-          <Pressable
-            key={opt.value}
-            accessibilityRole="radio"
-            accessibilityState={{ selected: isSelected }}
-            accessibilityLabel={
-              opt.description ? `${opt.label}: ${opt.description}` : opt.label
-            }
-            onPress={() => onSelect(opt.value)}
-            style={[
-              styles.segment,
-              isSelected && { backgroundColor: colors.surfaceRaised },
-            ]}
-          >
-            <Text
-              style={[
-                styles.segmentLabel,
-                {
-                  color: isSelected ? colors.text : colors.textSecondary,
-                  fontWeight: isSelected ? '600' : '400',
-                },
-              ]}
-            >
-              {opt.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
