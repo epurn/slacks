@@ -4,6 +4,8 @@ export { DisplayText } from './DisplayText';
 export { Card } from './Card';
 export { Skeleton } from './Skeleton';
 export { Button } from './Button';
+export { Chip, CHIP_HIT_SLOP } from './Chip';
+export type { ChipProps } from './Chip';
 export { ProvenanceIcon, provenancePresentation } from './ProvenanceIcon';
 export type { ProvenancePresentation } from './ProvenanceIcon';
 export { AppIcon } from './AppIcon';

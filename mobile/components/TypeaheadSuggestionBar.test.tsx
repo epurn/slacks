@@ -1,6 +1,7 @@
 import { act, create as render, type ReactTestRenderer } from "react-test-renderer";
 
 import { TypeaheadSuggestionBar } from "./TypeaheadSuggestionBar";
+import { CHIP_HIT_SLOP } from "@/components/ui";
 import type { SavedFoodDTO, SavedFoodSession } from "@/api/savedFoods";
 
 const SESSION: SavedFoodSession = {
@@ -211,6 +212,54 @@ describe("TypeaheadSuggestionBar – rendering matches", () => {
       );
     });
     expect(tree.toJSON()).toBeNull();
+  });
+});
+
+describe("TypeaheadSuggestionBar – shared chip style + hit target (FTY-193)", () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  it("renders each chip with the shared Chip primitive's hitSlop, giving a >=44pt effective touch target", async () => {
+    const foods = [savedFood({ id: "a", name: "Greek yogurt" })];
+    const search = jest.fn().mockResolvedValue({ items: foods, limit: 20 });
+
+    const tree = mount(
+      <TypeaheadSuggestionBar query="greek" session={SESSION} onSelect={jest.fn()} search={search} />,
+    );
+    await act(async () => {
+      jest.advanceTimersByTime(400);
+    });
+
+    const chip = tree.root.find(
+      (n) =>
+        n.props.accessibilityLabel === "Use saved food: Greek yogurt" &&
+        n.props.accessibilityRole === "button",
+    );
+    expect(chip.props.hitSlop).toEqual(CHIP_HIT_SLOP);
+
+    const flatStyle: Array<Record<string, unknown>> = Array.isArray(chip.props.style)
+      ? chip.props.style
+      : [chip.props.style];
+    const combined = Object.assign({}, ...flatStyle);
+    expect(typeof combined.minHeight).toBe("number");
+    expect((combined.minHeight as number) + CHIP_HIT_SLOP.top + CHIP_HIT_SLOP.bottom).toBeGreaterThanOrEqual(44);
+  });
+
+  it("still fires onSelect on tap once the shared chip is adopted", async () => {
+    const food = savedFood({ id: "a", name: "Greek yogurt" });
+    const search = jest.fn().mockResolvedValue({ items: [food], limit: 20 });
+    const onSelect = jest.fn();
+
+    const tree = mount(
+      <TypeaheadSuggestionBar query="greek" session={SESSION} onSelect={onSelect} search={search} />,
+    );
+    await act(async () => {
+      jest.advanceTimersByTime(400);
+    });
+
+    press(tree, "Use saved food: Greek yogurt");
+
+    expect(onSelect).toHaveBeenCalledWith(food);
   });
 });
 
