@@ -105,12 +105,18 @@ immediately followed by:
 - runFlow: common/accept-open-in-fatty.yaml
 ```
 
-`common/accept-open-in-fatty.yaml` only taps "Open" when that exact dialog is visible;
-it is a no-op on Android (where the dialog never appears) and on an iOS
-simulator that has already accepted it. It does not swallow real failures — the
-following `extendedWaitUntil` on the preset's settled marker still fails when
-the preset never actually loads. No universal-links / associated-domains
-entitlement is added; the `fatty://` scheme stays a debug-only custom scheme.
+`common/accept-open-in-fatty.yaml` waits (optionally) for the exact system alert
+title and, only while it is visible, taps the alert's `Open` button. The title
+matcher is `Open in .Fatty.*` — quote-agnostic (iOS renders the title with smart
+quotes, `Open in “Fatty”?`) and full-match-safe (Maestro's `text:` is a
+full-match regex), so it matches the real alert; the wait then resolves the
+moment the alert appears and the `when:` gate taps it. It is a no-op on Android
+(where the dialog never appears) and on an iOS simulator that has already
+accepted it: the wait warns and the gate is skipped, so nothing is tapped and no
+app-owned control is ever hit. It does not swallow real failures — the following
+`extendedWaitUntil` on the preset's settled marker still fails when the preset
+never actually loads. No universal-links / associated-domains entitlement is
+added; the `fatty://` scheme stays a debug-only custom scheme.
 
 Any new flow that opens a visual-review preset via `openLink` on iOS should add
 the same `runFlow: common/accept-open-in-fatty.yaml` step right after — that is the

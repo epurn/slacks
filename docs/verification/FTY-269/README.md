@@ -15,23 +15,49 @@ new `runFlow: common/accept-open-in-fatty.yaml` step FTY-269 adds after every
 ```yaml
 - extendedWaitUntil:
     visible:
-      text: 'Open in "Fatty"'
+      text: "Open in .Fatty.*"
     timeout: 10000
     optional: true
-- tapOn:
-    text: "Open"
-    optional: true
+- runFlow:
+    when:
+      visible:
+        text: "Open in .Fatty.*"
+    commands:
+      - tapOn:
+          text: "Open"
 ```
 
-Both steps are `optional`, so on Android (where this dialog never appears) or on
-an iOS simulator that has already accepted it (a permanent per-simulator OS
-choice), the subflow warns-and-continues as a no-op — it never taps blindly and
-never swallows a real failure, since the next `extendedWaitUntil` on the
-preset's settled marker still fails normally if a preset never loads.
+The `extendedWaitUntil` waits (optionally, up to 10s) for the exact system alert
+title, matched by the quote-agnostic, full-match-safe regex `Open in .Fatty.*`
+(see "Root cause" below). Because the matcher now matches the real smart-quote
+title, the wait resolves the instant the alert appears, and the `when:` gate that
+follows sees it and taps the alert's own `Open` button — the gate is not racing a
+late alert, and `text: "Open"` full-matches only the button, never the longer
+title. Being `optional`, on Android (where this dialog never appears) or on an
+iOS simulator that has already accepted it (a permanent per-simulator OS choice)
+the title is absent, so the wait warns and the gate is skipped — nothing is
+tapped and the subflow is a no-op. It never taps an app-owned control (the gate
+only fires while the exact system title is visible) and never swallows a real
+failure, since the next `extendedWaitUntil` on the preset's settled marker still
+fails normally if a preset never loads.
 `mobile/.maestro/visual-review-smoke.yaml` and
 `mobile/.maestro/correction-visual-review-seam.yaml` (the two committed flows
 that call `openLink` on the `fatty://` scheme) both run this step after every
 `openLink`, with no `tapOn: Open` left as a manual/ad-hoc step anywhere.
+
+## Root cause of the earlier bounce, and the fix
+
+Maestro's `text:` matcher is a **full-match regex**, and iOS renders this alert's
+title with **smart quotes**: `Open in “Fatty”?`. The earlier selector
+`Open in "Fatty"` (straight quotes, no trailing `?`) therefore never matched the
+real alert — so the wait always warned and the `when:` gate never fired,
+leaving the dialog up on a cold simulator regardless of timing. Inspecting the
+live accessibility hierarchy confirmed the title node's `accessibilityText` is
+`Open in “Fatty”?` and the button's is exactly `Open`. The fixed selector
+`Open in .Fatty.*` is quote-agnostic (`.` matches the smart *or* straight quote)
+and full-match-safe (`.*` absorbs the trailing `?`), so it matches the real
+system alert; the wait now resolves the instant the alert appears and the gate
+taps the alert's own `Open` button.
 
 ## Proof the dialog is real and is handled without a manual tap
 
@@ -43,26 +69,29 @@ already-accepted device. The Maestro run log for the first preset:
 ```
 Open fatty://__visual-review?preset=today.populated&theme=light... COMPLETED
 Run common/accept-open-in-fatty.yaml...
-  Assert that (Optional) "Open in "Fatty"" is visible... WARNED
-  Tap on (Optional) "Open"... COMPLETED
+  Assert that (Optional) "Open in .Fatty.*" is visible... COMPLETED
+  Run flow when "Open in .Fatty.*" is visible...
+    Tap on "Open"... COMPLETED
+  Run flow when "Open in .Fatty.*" is visible... COMPLETED
 Run common/accept-open-in-fatty.yaml... COMPLETED
 Assert that id: visual-review-settled:today.populated is visible... COMPLETED
+Assert that id: today-screen is visible... COMPLETED
+Take screenshot today-populated-light... COMPLETED
 ```
 
-The `extendedWaitUntil` step warned (the dialog had not yet rendered on the
-first check — a fresh/erased simulator's first system alert can take longer than
-Maestro's default ~7s visibility timeout), and the subsequent `tapOn` — which
-waits on its own for the target text — found and tapped "Open" once the alert
-appeared, letting the flow proceed with **no manual/ad-hoc tap step** anywhere in
-the committed flow. Every later preset's accept step reports both sub-steps
-`WARNED` (the dialog never reappears once accepted — a permanent per-simulator
-OS choice), which is the expected no-op path:
+The optional `extendedWaitUntil` **matched** the real alert and resolved on its
+appearance, the `when:` gate saw it and tapped the alert's `Open` button, and the
+preset then reached its settled marker — with **no manual/ad-hoc tap step**
+anywhere in the committed flow. Every later preset's accept step reports the wait
+`WARNED` and the gate `SKIPPED` (the dialog never reappears once accepted — a
+permanent per-simulator OS choice), the expected no-op path:
 
 ```
 Open fatty://__visual-review?preset=trends.populated&theme=dark... COMPLETED
 Run common/accept-open-in-fatty.yaml...
-  Assert that (Optional) "Open in "Fatty"" is visible... WARNED
-  Tap on (Optional) "Open"... WARNED
+  Assert that (Optional) "Open in .Fatty.*" is visible... WARNED
+  Run flow when "Open in .Fatty.*" is visible...
+  Run flow when "Open in .Fatty.*" is visible... SKIPPED
 Run common/accept-open-in-fatty.yaml... COMPLETED
 Assert that id: visual-review-settled:trends.populated is visible... COMPLETED
 ```
@@ -86,7 +115,7 @@ dialog was auto-dismissed on the very first preset — no rebuild, no manual ste
 | `today-confirm-parsed-light.png` | `today.confirm_parsed` | Today-owned sub-state seam (FTY-262) opens dialog-free |
 | `correction-detail-light.png` | `correction.detail` | Correction sheet sub-state seam (FTY-263) opens dialog-free |
 
-13 consecutive `openLink` calls (including the one that hit the real dialog)
+11 consecutive `openLink` calls (including the one that hit the real dialog)
 reached their settled marker with zero manual dismissal steps in the committed
 flow.
 
