@@ -22,6 +22,12 @@
 # settled, so a data-starved or wrong-screen launch fails here rather than going
 # green on the always-mounted shell. `takeScreenshot` captures the settled frame.
 #
+# The settings.goal_edit / settings.body_edit / settings.appearance presets near
+# the end (FTY-267) are registered from the settings lane, not this file — they
+# prove the per-screen E2E-only initial-state seam: each opens Settings with its
+# sub-state already active (the goal/body editor open, or scrolled to
+# Preferences) with no simulated tap or scroll.
+#
 # Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
 # directory-level Maestro runs launch the installed app under test reliably.
 appId: com.fatty
@@ -97,6 +103,40 @@ appId: com.fatty
 - assertVisible:
     id: today-screen
 - takeScreenshot: today-populated-after-signed-out-light
+
+# settings.goal_edit (FTY-267): the E2E-only initial-state seam opens Settings
+# with the goal editor already active — no simulated tap on the Goal row.
+- openLink: "fatty://__visual-review?preset=settings.goal_edit&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:settings.goal_edit"
+    timeout: 20000
+- assertVisible:
+    id: goal-edit-card
+- takeScreenshot: settings-goal-edit-light
+
+# settings.body_edit (FTY-267): same seam, the weight editor is open.
+- openLink: "fatty://__visual-review?preset=settings.body_edit&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:settings.body_edit"
+    timeout: 20000
+- assertVisible:
+    id: body-metric-edit-card
+- takeScreenshot: settings-body-edit-light
+
+# settings.appearance (FTY-267): the seam scrolls straight to the Preferences
+# section so the Appearance control is on screen with no manual scroll gesture.
+# Assert the segmented control itself is visible/interactable — not just the
+# label — so a collapsed or off-screen control fails here.
+- openLink: "fatty://__visual-review?preset=settings.appearance&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:settings.appearance"
+    timeout: 20000
+- assertVisible:
+    id: "appearance-segmented-control"
+- takeScreenshot: settings-appearance-light
 
 # today.confirm_parsed (FTY-262, light): a Today-owned sub-state preset — no
 # route param opens the parsed-confirmation sheet, so Today's own E2E-only
