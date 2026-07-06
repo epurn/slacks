@@ -1,0 +1,27 @@
+# FTY-269: shared subflow — deterministically clears the iOS system "Open in
+# Fatty?" confirmation that `openLink` can surface on a fresh simulator, without
+# masking a real failure.
+#
+# On iOS, `openLink` can trigger a one-time OS confirmation the first time the
+# app is opened via its custom URL scheme on a given simulator (accepting it is
+# a permanent per-simulator choice — see docs.maestro.dev/reference/commands-
+# available/openlink). A cold/just-erased simulator can take noticeably longer
+# than Maestro's default ~7s visibility timeout to present that first alert, so
+# this waits up to 10s (rather than relying on the shorter default) before the
+# tap — both steps are `optional`, so on Android, or an iOS simulator that
+# already accepted the dialog, they warn-and-continue as a no-op with no
+# try-catch swallowing a real failure: the next `extendedWaitUntil` on the
+# preset's settled marker still fails a genuine regression normally.
+#
+# Every openLink call in this directory's visual-review flows runs this right
+# after, so the dialog can never block reaching the settled marker.
+appId: com.fatty
+---
+- extendedWaitUntil:
+    visible:
+      text: 'Open in "Fatty"'
+    timeout: 10000
+    optional: true
+- tapOn:
+    text: "Open"
+    optional: true

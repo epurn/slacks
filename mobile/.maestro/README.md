@@ -92,6 +92,31 @@ Entry point, preset manifest, settled markers, and the registration API for
 per-screen sub-state presets are documented in
 [`../e2e/visualReview/README.md`](../e2e/visualReview/README.md).
 
+### iOS launch: no manual "Open in Fatty?" dismissal (FTY-269)
+
+Opening the `fatty://` deep link on the iOS simulator can surface a one-time OS
+security confirmation ("Open in Fatty?") the first time the app is opened via
+its custom scheme on a given simulator — accepting it is a permanent choice for
+that simulator, so a fresh/erased simulator can see it again. Every `openLink`
+step in `visual-review-smoke.yaml` and `correction-visual-review-seam.yaml` is
+immediately followed by:
+
+```yaml
+- runFlow: common/accept-open-in-fatty.yaml
+```
+
+`common/accept-open-in-fatty.yaml` only taps "Open" when that exact dialog is visible;
+it is a no-op on Android (where the dialog never appears) and on an iOS
+simulator that has already accepted it. It does not swallow real failures — the
+following `extendedWaitUntil` on the preset's settled marker still fails when
+the preset never actually loads. No universal-links / associated-domains
+entitlement is added; the `fatty://` scheme stays a debug-only custom scheme.
+
+Any new flow that opens a visual-review preset via `openLink` on iOS should add
+the same `runFlow: common/accept-open-in-fatty.yaml` step right after — that is the
+dialog-free launch recipe FTY-235..241 and other iOS evidence tooling should
+reuse instead of a manual `tapOn: Open`.
+
 ## E2E launch mode (deterministic boot)
 
 When the app is launched from the E2E binary it enters a gated launch mode:
