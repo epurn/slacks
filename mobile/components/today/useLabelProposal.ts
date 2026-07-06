@@ -10,8 +10,15 @@ import {
 } from "@/api/dailySummary";
 import { getLabelProposal as getLabelProposalApi } from "@/api/labelProposal";
 import { type LogEventDTO } from "@/api/logEvents";
+import { isE2EMode } from "@/e2e/launchMode";
+import { useVisualReviewCore } from "@/e2e/visualReview";
 import { type ApiSession } from "@/state/session";
 import { sortByNewest } from "@/state/today";
+
+import {
+  CONFIRM_PARSED_ITEM,
+  CONFIRM_PARSED_PRESET_NAME,
+} from "./visualReviewConfirmParsed";
 
 /**
  * Label-capture proposal flow (FTY-064 + FTY-196/197). A legible label upload
@@ -19,6 +26,13 @@ import { sortByNewest } from "@/state/today";
  * counts; an unreadable result has no proposal and leaves the event in place.
  * Owns the proposal state and its confirm/dismiss/reopen handlers, driving
  * Today's shared timeline/summary state through the passed setters.
+ *
+ * E2E-only initial-state seam (FTY-262): the `today.confirm_parsed`
+ * visual-review preset has no route param to open this component-local
+ * sub-state, so when that preset is the active one — and only under
+ * `isE2EMode()`, so this is dead in release builds even if the runtime state
+ * were somehow non-null — the proposal starts already set and visible, the
+ * same shape a real legible label upload produces. No taps are simulated.
  */
 export function useLabelProposal({
   apiSession,
@@ -41,13 +55,34 @@ export function useLabelProposal({
   setSummaryError: Dispatch<SetStateAction<string | null>>;
   setLabelCaptureOpen: Dispatch<SetStateAction<boolean>>;
 }) {
+  const visualReviewCore = useVisualReviewCore();
+  const confirmParsedPresetActive =
+    isE2EMode() && visualReviewCore.presetName === CONFIRM_PARSED_PRESET_NAME;
+
   // The uncounted label parse awaiting confirm/adjust (FTY-196/197). Set after a
   // legible label upload; the confirm sheet renders it and commits it — until
-  // then it never counts. `null` when there is no proposal to confirm.
+  // then it never counts. `null` when there is no proposal to confirm. Seeded
+  // from the visual-review preset (FTY-262) on mount when that preset is active;
+  // `null`/`false` otherwise, which is every real launch and every release build.
   const [labelProposal, setLabelProposal] = useState<DerivedFoodItemDTO | null>(
-    null,
+    () => (confirmParsedPresetActive ? CONFIRM_PARSED_ITEM : null),
   );
-  const [labelProposalVisible, setLabelProposalVisible] = useState(false);
+  const [labelProposalVisible, setLabelProposalVisible] = useState(
+    () => confirmParsedPresetActive,
+  );
+
+  // The settled-marker testID for the confirm-parsed preset (FTY-262), or `null`
+  // when it is not the active preset. The shared `VisualReviewSettleOverlay`
+  // (FTY-247) renders its marker in the navigator's own window, but the confirm
+  // sheet is a `<Modal accessibilityViewIsModal>` — iOS accessibility restricts
+  // the reachable tree to the modal's own subtree while one is presented, so the
+  // shared marker is unreachable to Maestro for the whole time this sub-state is
+  // up. The sheet renders this marker itself, inside its own modal, using the
+  // exact same `visual-review-settled:<preset>` convention so screenshot
+  // automation waits on it identically to every other preset.
+  const labelProposalSettledMarker = confirmParsedPresetActive
+    ? `visual-review-settled:${CONFIRM_PARSED_PRESET_NAME}`
+    : null;
 
   // Label capture upload (FTY-064 + FTY-196/197). The backend created and
   // extracted the event in-request; add the returned event to the timeline, then
@@ -129,6 +164,7 @@ export function useLabelProposal({
   return {
     labelProposal,
     labelProposalVisible,
+    labelProposalSettledMarker,
     handleLabelUploaded,
     handleProposalConfirmed,
     handleProposalDismissed,

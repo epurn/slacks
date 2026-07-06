@@ -390,6 +390,7 @@ export function useTodayData({
   const {
     labelProposal,
     labelProposalVisible,
+    labelProposalSettledMarker,
     handleLabelUploaded,
     handleProposalConfirmed,
     handleProposalDismissed,
@@ -591,6 +592,7 @@ export function useTodayData({
     setLabelCaptureOpen,
     labelProposal,
     labelProposalVisible,
+    labelProposalSettledMarker,
     sheetTarget,
     sheetVisible,
     inputRef,
