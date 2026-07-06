@@ -38,29 +38,31 @@ export function PreferencesSection({
       <GroupedCard colors={colors}>
         <View style={styles.prefRow}>
           <Text style={[styles.prefLabel, { color: colors.text }]}>Units</Text>
-          <SegmentedControl<UnitsPreference>
-            testID="units-segmented-control"
-            options={[
-              { value: 'metric', label: 'Metric' },
-              { value: 'imperial', label: 'Imperial' },
-            ]}
-            selected={c.profile?.units_preference ?? 'metric'}
-            onSelect={(v) => void c.handleUnitsChange(v)}
-            accessibilityLabel="Units preference"
-            style={styles.prefControl}
-          />
+          <View style={styles.prefControl}>
+            <SegmentedControl<UnitsPreference>
+              testID="units-segmented-control"
+              options={[
+                { value: 'metric', label: 'Metric' },
+                { value: 'imperial', label: 'Imperial' },
+              ]}
+              selected={c.profile?.units_preference ?? 'metric'}
+              onSelect={(v) => void c.handleUnitsChange(v)}
+              accessibilityLabel="Units preference"
+            />
+          </View>
         </View>
         <Separator colors={colors} />
         <View style={styles.prefRow}>
           <Text style={[styles.prefLabel, { color: colors.text }]}>Appearance</Text>
-          <SegmentedControl<ColorSchemeOverride>
-            testID="appearance-segmented-control"
-            options={APPEARANCE_OPTIONS}
-            selected={c.appearance}
-            onSelect={(v) => void c.handleAppearanceChange(v)}
-            accessibilityLabel="Appearance"
-            style={styles.prefControl}
-          />
+          <View style={styles.prefControl}>
+            <SegmentedControl<ColorSchemeOverride>
+              testID="appearance-segmented-control"
+              options={APPEARANCE_OPTIONS}
+              selected={c.appearance}
+              onSelect={(v) => void c.handleAppearanceChange(v)}
+              accessibilityLabel="Appearance"
+            />
+          </View>
         </View>
         <Separator colors={colors} />
         <View style={styles.prefColumn}>
@@ -101,8 +103,11 @@ const styles = StyleSheet.create({
   prefLabel: {
     fontSize: typeScale.body,
   },
-  // The inline control takes the remaining row width so its native segments
-  // size evenly beside the label.
+  // Wraps the inline control so this View (a direct row child) claims the
+  // remaining row width via flex; the SegmentedControl then stretches to fill
+  // it. The flex must live on a direct child of the row — SegmentedControl nests
+  // its native control inside a caption wrapper (FTY-222), so a `style` passed
+  // straight to it lands in that column wrapper and never sizes the row.
   prefControl: {
     flex: 1,
     maxWidth: 220,

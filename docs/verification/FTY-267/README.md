@@ -11,7 +11,7 @@ scroll gesture involved in reaching the sub-state itself.
 |------------|--------|-----------|--------|
 | `settings-goal-edit-light.png` | `settings.goal_edit` | `fatty://__visual-review?preset=settings.goal_edit&theme=light` | The E2E-only initial-state seam opens Settings with the goal editor (`goal-edit-card`) already active, seeded from the loaded goal (Lose · Steady) — not the `loss`/`steady` defaults, and not reached via a tap on the Goal row |
 | `settings-body-edit-light.png` | `settings.body_edit` | `fatty://__visual-review?preset=settings.body_edit&theme=light` | The same seam opens the weight editor (`body-metric-edit-card`, "NEW WEIGHT (KG)") already active |
-| `settings-appearance-light.png` | `settings.appearance` | `fatty://__visual-review?preset=settings.appearance&theme=light` | The seam scrolls the settings screen straight to the PREFERENCES section (large title collapsed to the small title, confirming a real scroll occurred) so the Appearance control is on screen with no manual scroll gesture |
+| `settings-appearance-light.png` | `settings.appearance` | `fatty://__visual-review?preset=settings.appearance&theme=light` | The seam scrolls the settings screen straight to the PREFERENCES section (large title collapsed, confirming a real scroll occurred) so the Appearance segmented control (`appearance-segmented-control`, Light/Dark/System) is fully on screen and interactable — the smoke flow asserts the control id, not just the label — with no manual scroll gesture |
 
 All three presets are registered from settings-owned code
 (`mobile/components/settings/visualReviewPresets.ts`) through FTY-247's

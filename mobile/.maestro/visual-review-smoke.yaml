@@ -113,13 +113,15 @@ appId: com.fatty
 
 # settings.appearance (FTY-267): the seam scrolls straight to the Preferences
 # section so the Appearance control is on screen with no manual scroll gesture.
+# Assert the segmented control itself is visible/interactable — not just the
+# label — so a collapsed or off-screen control fails here.
 - openLink: "fatty://__visual-review?preset=settings.appearance&theme=light"
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:settings.appearance"
     timeout: 20000
 - assertVisible:
-    text: "Appearance"
+    id: "appearance-segmented-control"
 - takeScreenshot: settings-appearance-light
 
 # today.confirm_parsed (FTY-262, light): a Today-owned sub-state preset — no
