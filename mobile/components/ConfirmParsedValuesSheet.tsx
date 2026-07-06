@@ -238,14 +238,7 @@ export function ConfirmParsedValuesSheet({
       accessibilityViewIsModal
     >
       <View style={styles.overlay}>
-        {/* Visual-review settled marker (FTY-268): this sheet is a native Modal,
-            a separate presented context from the screen behind it, so the
-            shared root-level marker (app/_layout.tsx) is not reliably reachable
-            while this is up top. Mounting the same component here (unmodified,
-            just imported) exposes the marker in the presented context that's
-            actually visible; it self-gates to isE2EMode() and renders nothing
-            in every other build/state. */}
-        <VisualReviewSettleOverlay />
+        <VisualReviewSettleOverlay />{/* FTY-268: re-mounted here so the settled marker lives in this native Modal's own presented context (the root marker in app/_layout.tsx isn't reachable while the sheet is up); self-gates to isE2EMode(), renders nothing otherwise. */}
         <Pressable
           style={StyleSheet.absoluteFill}
           onPress={onClose}
