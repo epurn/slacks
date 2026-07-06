@@ -92,6 +92,41 @@ Entry point, preset manifest, settled markers, and the registration API for
 per-screen sub-state presets are documented in
 [`../e2e/visualReview/README.md`](../e2e/visualReview/README.md).
 
+### iOS launch: no manual "Open in Fatty?" dismissal (FTY-269)
+
+Opening the `fatty://` deep link on the iOS simulator can surface a one-time OS
+security confirmation ("Open in Fatty?") the first time the app is opened via
+its custom scheme on a given simulator — accepting it is a permanent choice for
+that simulator, so a fresh/erased simulator can see it again. Every `openLink`
+step in `visual-review-smoke.yaml` and `correction-visual-review-seam.yaml` is
+immediately followed by:
+
+```yaml
+- runFlow: common/accept-open-in-fatty.yaml
+```
+
+`common/accept-open-in-fatty.yaml` runs its whole body inside a
+`when: platform: iOS` gate, so **Android skips it instantly** — the confirmation
+is an iOS-only system dialog, and Android never enters the wait, so the retained
+Android `mobile-e2e` suite's `openLink` launch path is unchanged and adds no
+delay. On iOS the subflow waits (optionally) for the exact system alert title
+and, only while it is visible, taps the alert's `Open` button. The title matcher
+is `Open in .Fatty.*` — quote-agnostic (iOS renders the title with smart quotes,
+`Open in “Fatty”?`) and full-match-safe (Maestro's `text:` is a full-match
+regex), so it matches the real alert; the wait then resolves the moment the alert
+appears and the `when:` gate taps it. It is also a no-op on an iOS simulator that
+has already accepted the dialog: the wait warns and the gate is skipped, so
+nothing is tapped and no app-owned control is ever hit. It does not swallow real
+failures — the following
+`extendedWaitUntil` on the preset's settled marker still fails when the preset
+never actually loads. No universal-links / associated-domains entitlement is
+added; the `fatty://` scheme stays a debug-only custom scheme.
+
+Any new flow that opens a visual-review preset via `openLink` on iOS should add
+the same `runFlow: common/accept-open-in-fatty.yaml` step right after — that is the
+dialog-free launch recipe FTY-235..241 and other iOS evidence tooling should
+reuse instead of a manual `tapOn: Open`.
+
 ## E2E launch mode (deterministic boot)
 
 When the app is launched from the E2E binary it enters a gated launch mode:

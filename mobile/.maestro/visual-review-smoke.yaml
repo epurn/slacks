@@ -28,6 +28,13 @@
 # sub-state already active (the goal/body editor open, or scrolled to
 # Preferences) with no simulated tap or scroll.
 #
+# Dialog-free iOS launch (FTY-269): every `openLink` below is immediately
+# followed by `runFlow: common/accept-open-in-fatty.yaml`, a tolerant subflow that
+# dismisses iOS's one-time "Open in Fatty?" system confirmation if (and only if)
+# it is on screen — see that file for why the confirmation can appear and why
+# the tolerant check cannot mask a real failure. No step here ever taps a
+# confirmation manually.
+#
 # Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
 # directory-level Maestro runs launch the installed app under test reliably.
 appId: com.fatty
@@ -37,6 +44,7 @@ appId: com.fatty
 
 # today.populated (light): a resolved multi-item day + a counting hero.
 - openLink: "fatty://__visual-review?preset=today.populated&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:today.populated"
@@ -47,6 +55,7 @@ appId: com.fatty
 
 # trends.populated (dark): the weight + adherence cards with synthetic data.
 - openLink: "fatty://__visual-review?preset=trends.populated&theme=dark"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:trends.populated"
@@ -57,6 +66,7 @@ appId: com.fatty
 
 # today.empty (light): the calm empty-day invite, no entries, full budget.
 - openLink: "fatty://__visual-review?preset=today.empty&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:today.empty"
@@ -71,6 +81,7 @@ appId: com.fatty
 # components/TrendsScreen.tsx through the FTY-247 registration API, not this
 # shared registry/manifest.
 - openLink: "fatty://__visual-review?preset=weight.sheet&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:weight.sheet"
@@ -83,6 +94,7 @@ appId: com.fatty
 # Open today.signed_out — the E2E session store hydrates a null session, so the
 # auth gate reaches the sign-in surface and the settled marker appears.
 - openLink: "fatty://__visual-review?preset=today.signed_out&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:today.signed_out"
@@ -96,6 +108,7 @@ appId: com.fatty
 # which reseeds the synthetic session from the now-active preset, so Today opens
 # directly at runtime instead of staying on the cleared/signed-out session.
 - openLink: "fatty://__visual-review?preset=today.populated&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:today.populated"
@@ -107,6 +120,7 @@ appId: com.fatty
 # settings.goal_edit (FTY-267): the E2E-only initial-state seam opens Settings
 # with the goal editor already active — no simulated tap on the Goal row.
 - openLink: "fatty://__visual-review?preset=settings.goal_edit&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:settings.goal_edit"
@@ -117,6 +131,7 @@ appId: com.fatty
 
 # settings.body_edit (FTY-267): same seam, the weight editor is open.
 - openLink: "fatty://__visual-review?preset=settings.body_edit&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:settings.body_edit"
@@ -130,6 +145,7 @@ appId: com.fatty
 # Assert the segmented control itself is visible/interactable — not just the
 # label — so a collapsed or off-screen control fails here.
 - openLink: "fatty://__visual-review?preset=settings.appearance&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:settings.appearance"
@@ -147,6 +163,7 @@ appId: com.fatty
 # underneath is (correctly) unreachable while it is presented — assert the
 # sheet's own content instead of the screen behind it.
 - openLink: "fatty://__visual-review?preset=today.confirm_parsed&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:today.confirm_parsed"
@@ -167,6 +184,7 @@ appId: com.fatty
 # undimmed behind it. The marker only appears after the sheet + synthetic item
 # have rendered.
 - openLink: "fatty://__visual-review?preset=correction.detail&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:correction.detail"
@@ -185,6 +203,7 @@ appId: com.fatty
 # painted, so this waits on the in-modal marker itself — no animation-wait
 # fallback.
 - openLink: "fatty://__visual-review?preset=correction.typeahead&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:correction.typeahead"
@@ -198,6 +217,7 @@ appId: com.fatty
 # fixture, no scripted taps. Reachable purely through the deep link + fixture,
 # same as every other preset above.
 - openLink: "fatty://__visual-review?preset=trends.adherence_retry&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:trends.adherence_retry"
@@ -214,6 +234,7 @@ appId: com.fatty
 # preset activates, no scripted "Scan barcode" tap — with the granted camera
 # permission the E2E harness already mocks for every build (FTY-194).
 - openLink: "fatty://__visual-review?preset=capture.barcode_granted&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:capture.barcode_granted"
@@ -226,6 +247,7 @@ appId: com.fatty
 # (FTY-268), opened via the same initial-state seam — no scripted "Capture
 # label" tap.
 - openLink: "fatty://__visual-review?preset=capture.label_guidance&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:capture.label_guidance"
@@ -238,6 +260,7 @@ appId: com.fatty
 # seeded through the real label-proposal read (a registered fixture, no live
 # upload, no camera) — no scripted capture taps.
 - openLink: "fatty://__visual-review?preset=capture.confirm_parsed&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:capture.confirm_parsed"
@@ -254,6 +277,7 @@ appId: com.fatty
 # seed and opens the wizard on step 1 via its own E2E-only initial-state seam.
 # Proves the per-screen seam join contract from onboarding's own lane.
 - openLink: "fatty://__visual-review?preset=onboarding.goal&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:onboarding.goal"
@@ -265,6 +289,7 @@ appId: com.fatty
 # onboarding.measurements_formula (FTY-266, light): the wizard opens directly
 # on step 2 with a prefilled form and a metabolic-formula variant selected.
 - openLink: "fatty://__visual-review?preset=onboarding.measurements_formula&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:onboarding.measurements_formula"
@@ -276,6 +301,7 @@ appId: com.fatty
 # onboarding.target_reveal (FTY-266, light): the wizard opens directly on step
 # 3 with a synthetic, already-settled target reveal (no fade to wait out).
 - openLink: "fatty://__visual-review?preset=onboarding.target_reveal&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:onboarding.target_reveal"

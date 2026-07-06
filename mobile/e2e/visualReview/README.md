@@ -30,12 +30,22 @@ Example (Maestro):
 
 ```yaml
 - openLink: "fatty://__visual-review?preset=today.populated&theme=dark"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:today.populated"
     timeout: 20000
 - takeScreenshot: today-populated-dark
 ```
+
+On iOS, `openLink` can surface a one-time system "Open in Fatty?" confirmation
+the first time the app opens via its custom scheme on a given simulator (see
+[`../../.maestro/README.md`](../../.maestro/README.md#ios-launch-no-manual-open-in-fatty-dismissal-fty-269)).
+`runFlow: common/accept-open-in-fatty.yaml` (defined in `mobile/.maestro/`)
+deterministically dismisses it if — and only if — it is on screen, so every
+`openLink` call should be followed by that step. It is a no-op on Android and on
+an iOS simulator that has already accepted the dialog, and it never masks a
+preset that genuinely fails to reach its settled marker.
 
 ## Settled marker
 

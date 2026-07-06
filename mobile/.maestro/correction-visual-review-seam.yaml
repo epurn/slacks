@@ -37,6 +37,7 @@ appId: com.fatty
 - launchApp:
     clearState: false
 - openLink: "fatty://__visual-review?preset=correction.detail&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:correction.detail"
@@ -62,6 +63,7 @@ appId: com.fatty
 - launchApp:
     clearState: false
 - openLink: "fatty://__visual-review?preset=correction.typeahead&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:correction.typeahead"
@@ -79,6 +81,7 @@ appId: com.fatty
 - launchApp:
     clearState: false
 - openLink: "fatty://__visual-review?preset=correction.confirm_apply&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:correction.confirm_apply"
