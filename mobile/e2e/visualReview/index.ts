@@ -9,6 +9,12 @@
  *
  * Everything here is gated behind `isE2EMode()` at its call sites; release builds
  * dead-code-eliminate the activation paths.
+ *
+ * Modal-based sub-state seams (FTY-262..268) additionally import
+ * {@link VisualReviewSettleMarker} to mount the settled marker inside their own
+ * `<Modal accessibilityViewIsModal>` subtree — see the README's "Modal
+ * sub-states" section (FTY-270) for why the navigator-level
+ * `VisualReviewSettleOverlay` marker is unreachable there.
  */
 
 import './presets';
@@ -36,3 +42,8 @@ export {
   useVisualReviewTheme,
 } from './hooks';
 export { VisualReviewSettleOverlay } from './VisualReviewSettleOverlay';
+export {
+  VisualReviewSettleMarker,
+  QUIET_MS,
+  type VisualReviewSettleMarkerProps,
+} from './VisualReviewSettleMarker';
