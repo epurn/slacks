@@ -81,7 +81,7 @@ app under test reliably. If the app ID changes, update `app.json` and every flow
 | `target.yaml` | Target-reached beat (beat 3) real data-path: hero mounts under target ("0 of 2,000 kcal", seeds not-reached) → submit a large log → pull-to-refresh → the day summary crosses the target and the hero flips to its over-budget end state ("2,100 of 2,000 kcal, 100 over budget"), the crossing the target-reached beat rides (FTY-181) |
 | `reduce-motion.yaml` | Reduce Motion (all beats): under the reduce-motion build the harness forces `isReduceMotionEnabled` true, so the beats take their no-motion branch; the resolve value row still eases in (a fade, not a spring) and counts, proving the no-motion path reaches the same successful end state. Run via `E2E_REDUCE_MOTION=1 ./verify-e2e.sh` (see below) (FTY-181) |
 | `barcode-manual-entry.yaml` | Barcode "Type it instead" fallback: open the scanner from Today → the granted chrome renders ("Point at a barcode"; permission granted via the E2E stub since the simulator has no camera) → tap "Type it instead" → the scanner dismisses and the composer is pre-filled with the "1 serving of " starter, the never-a-dead-end running start into NL logging (FTY-194) |
-| `visual-review-smoke.yaml` | Visual-review mode launcher: open named presets by deep link (`fatty://__visual-review?preset=…&theme=…`) and wait for each `visual-review-settled:<preset>` marker before screenshotting — `today.populated` (light), `trends.populated` (dark), `today.empty`. The reusable launcher the screen visual audits (FTY-235..241) consume instead of hand-writing temporary YAML (FTY-247) |
+| `visual-review-smoke.yaml` | Visual-review mode launcher: open named presets by deep link (`fatty://__visual-review?preset=…&theme=…`) and wait for each `visual-review-settled:<preset>` marker before screenshotting — `today.populated` (light), `trends.populated` (dark), `today.empty`, and the onboarding-owned sub-state presets `onboarding.goal` / `onboarding.measurements_formula` / `onboarding.target_reveal` (FTY-266). The reusable launcher the screen visual audits (FTY-235..241) consume instead of hand-writing temporary YAML (FTY-247) |
 
 ## Visual-review mode (named-state launcher)
 
@@ -100,7 +100,9 @@ When the app is launched from the E2E binary it enters a gated launch mode:
 - An **in-process fetch mock** returns hermetic fixture responses for all API
   calls (no live backend, no network timing).
 - **Onboarding is pre-completed** for the synthetic user so the wizard never
-  appears.
+  appears — except under an active `onboarding.*` visual-review preset
+  (FTY-266), which overrides the onboarding status so the wizard opens
+  directly on that preset's step for the visual audit.
 
 The gate is hard-closed in release builds: `__DEV__` is `false` at compile time
 in a production bundle, making the E2E branch dead code that Metro eliminates.

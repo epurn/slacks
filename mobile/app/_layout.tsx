@@ -40,9 +40,11 @@ import {
   e2eConnectionStore,
 } from '@/e2e/launchMode';
 import {
+  useVisualReviewCore,
   useVisualReviewRevision,
   VisualReviewSettleOverlay,
 } from '@/e2e/visualReview';
+import { onboardingStatusOverrideForVisualReview } from '@/components/onboarding/visualReviewOnboardingSteps';
 
 // Install the E2E mock fetch and mark onboarding complete for the synthetic
 // user before any provider mounts. In release builds __DEV__ is false so
@@ -78,6 +80,7 @@ function AuthGate() {
   const segments = useSegments();
   const router = useRouter();
   const navState = useRootNavigationState();
+  const visualReviewCore = useVisualReviewCore();
 
   // Track which userId was last checked and what the result was. The derived
   // onboardingStatus below avoids synchronous setState in effects.
@@ -86,14 +89,25 @@ function AuthGate() {
   const prevAtOnboardingRef = useRef(false);
   const atOnboarding = segments[0] === 'onboarding';
 
+  // FTY-266: an active onboarding visual-review preset overrides status to
+  // 'incomplete', skipping the E2E harness's boot-time onboarding-complete
+  // seed (setupE2EMode() → markOnboardingComplete()) so the wizard actually
+  // renders for that preset instead of the gate routing straight to Today.
+  // `null` (no override) for every other preset and every release build.
+  const onboardingVisualReviewOverride = isE2EMode()
+    ? onboardingStatusOverrideForVisualReview(visualReviewCore.presetName)
+    : null;
+
   // Derive onboarding status without synchronous setState in effects:
   // — no userId → 'checking' (gate will route to sign-in anyway)
+  // — an active onboarding visual-review preset → 'incomplete' (FTY-266)
   // — module-level completion flag set → 'complete' (immediate after wizard)
   // — userId not yet checked → 'checking' (holds the gate)
   // — otherwise use the last API result
   const currentUserId = session?.userId ?? null;
   const onboardingStatus: OnboardingStatus = (() => {
     if (!currentUserId) return 'checking';
+    if (onboardingVisualReviewOverride) return onboardingVisualReviewOverride;
     if (isOnboardingCompleteForUser(currentUserId)) return 'complete';
     if (checkedForUserId !== currentUserId) return 'checking';
     return checkedResult;
