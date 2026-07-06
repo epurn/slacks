@@ -102,3 +102,18 @@ appId: com.fatty
 - assertVisible:
     id: "visual-review-settled:today.confirm_parsed"
 - takeScreenshot: today-confirm-parsed-light
+
+# trends.adherence_retry (light): the adherence-strip retry state (FTY-264),
+# registered from the Trends lane through the FTY-247 API — a range-read error
+# fixture, no scripted taps. Reachable purely through the deep link + fixture,
+# same as every other preset above.
+- openLink: "fatty://__visual-review?preset=trends.adherence_retry&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:trends.adherence_retry"
+    timeout: 20000
+- assertVisible:
+    id: trends-screen
+- assertVisible:
+    text: "Try again"
+- takeScreenshot: trends-adherence-retry-light
