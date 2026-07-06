@@ -3,12 +3,13 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import {
+  FLOATING_SWITCHER_BOTTOM_GAP,
   FLOATING_SWITCHER_HEIGHT,
   FloatingSwitcher,
   floatingSwitcherClearance,
   type FloatingSwitcherSegment,
 } from './FloatingSwitcher';
-import { ThemeProvider } from '@/theme';
+import { spacing, ThemeProvider } from '@/theme';
 
 // Stub the native blur so the pill renders without the native module; expose the
 // tint so the light/dark material can be asserted.
@@ -151,12 +152,22 @@ describe('FloatingSwitcher (FTY-242)', () => {
 });
 
 describe('floatingSwitcherClearance', () => {
-  it('reserves the switcher footprint above the safe-area bottom', () => {
+  // Footprint = gap beneath the pill + pill height + one breathing step above,
+  // i.e. everything the clearance reserves on top of the safe-area bottom.
+  const footprint = FLOATING_SWITCHER_BOTTOM_GAP + FLOATING_SWITCHER_HEIGHT + spacing.lg;
+
+  it('equals the pill footprint plus the safe-area bottom exactly', () => {
     const bottomInset = 34;
-    const clearance = floatingSwitcherClearance(bottomInset);
-    // Strictly more than the bare inset plus the pill height, so the last row
-    // clears both the home indicator and the pill.
-    expect(clearance).toBeGreaterThanOrEqual(bottomInset + FLOATING_SWITCHER_HEIGHT);
-    expect(clearance).toBeGreaterThan(bottomInset);
+    // Exact contract (not a loose lower bound): footprint + safe-area bottom, so
+    // a downstream screen reserving this value clears the pill and no more.
+    expect(floatingSwitcherClearance(bottomInset)).toBe(bottomInset + footprint);
+    // Pinned numerics so a silent change to any footprint constant trips here.
+    expect(footprint).toBe(80);
+    expect(floatingSwitcherClearance(bottomInset)).toBe(114);
+  });
+
+  it('is a positive number equal to the footprint when there is no home indicator', () => {
+    expect(floatingSwitcherClearance(0)).toBe(footprint);
+    expect(floatingSwitcherClearance(0)).toBeGreaterThan(0);
   });
 });

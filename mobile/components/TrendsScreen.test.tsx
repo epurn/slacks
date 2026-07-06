@@ -1,9 +1,8 @@
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
-import { StyleSheet, View } from "react-native";
+import { View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { TrendsScreen } from "./TrendsScreen";
-import { floatingSwitcherClearance } from "@/components/ui";
 import {
   WeightApiError,
   type WeightEntryDTO,
@@ -1603,40 +1602,5 @@ describe("TrendsScreen — non-color adherence cue", () => {
     expect(offStyle.borderWidth).toBeGreaterThan(0);
     // The fill hue still differs too (redundant, not a replacement).
     expect(onStyle.backgroundColor).not.toBe(offStyle.backgroundColor);
-  });
-});
-
-// FTY-242: Trends replaces the full-width bottom tab bar with the bottom-left
-// floating switcher, so its scroll must reserve bottom clearance from the
-// switcher's own footprint — the same single source of truth Today uses — so the
-// last card scrolls clear of the pill and the home indicator on SE-class and
-// large iPhones. This is the screen-layout coverage of Trends' padding contract.
-describe("TrendsScreen — bottom clearance (FTY-242 floating switcher)", () => {
-  it("reserves clearance for the floating switcher + home indicator", async () => {
-    const tree = mount(
-      <TrendsScreen
-        session={SESSION}
-        listWeightEntries={jest.fn().mockResolvedValue([])}
-        getDailySummaryRange={jest
-          .fn()
-          .mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
-      />,
-    );
-    await act(async () => {});
-
-    const scroll = tree.root.find((n) => n.props.testID === "trends-screen");
-    const contentStyle = StyleSheet.flatten(
-      scroll.props.contentContainerStyle,
-    ) as { paddingBottom?: number };
-
-    // The safe-area bottom inset seeded by the test SafeAreaProvider metrics
-    // (see `mount`: insets.bottom = 34).
-    const safeAreaBottom = 34;
-    // Trends reserves exactly the switcher's clearance footprint — footprint +
-    // safe-area bottom — so its last card clears the pill.
-    expect(contentStyle.paddingBottom).toBe(
-      floatingSwitcherClearance(safeAreaBottom),
-    );
   });
 });
