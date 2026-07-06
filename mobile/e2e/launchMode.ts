@@ -77,6 +77,10 @@ import {
   E2E_BARCODE_ENTRY,
   E2E_BARCODE_SUMMARY,
 } from './barcodeFixtures';
+import {
+  recordVisualReviewServed,
+  resolveVisualReviewFetch,
+} from './visualReview/session';
 
 /**
  * True only in a DEV build that was compiled with EXPO_PUBLIC_FATTY_E2E=true.
@@ -262,6 +266,15 @@ export function createE2EMockFetch(): typeof fetch {
     ).toUpperCase();
 
     const pathEnd = url.split('?')[0];
+
+    // Visual-review preset overrides (FTY-247). When a preset is active it seeds
+    // the endpoints for its named state before the default flows below, and
+    // every request bumps the settle tracker so the marker can wait for the
+    // screen to go network-quiet. Both are no-ops when no preset is active, so
+    // the normal E2E flows are untouched.
+    recordVisualReviewServed();
+    const visualReviewResponse = resolveVisualReviewFetch({ url, method, pathEnd });
+    if (visualReviewResponse) return visualReviewResponse;
 
     // /log-events/by-date — the item-forward day feed (FTY-198): each event with
     // its derived items. This is the read the entry-resolve beat (FTY-181) needs,

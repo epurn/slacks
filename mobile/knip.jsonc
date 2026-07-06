@@ -15,7 +15,13 @@
     // modules are entry points the verify-e2e.sh path consumes, not dead code.
     "e2e/fixtures.ts",
     "e2e/launchMode.ts",
-    "e2e/barcodeFixtures.ts"
+    "e2e/barcodeFixtures.ts",
+    // Visual-review mode barrel (FTY-247). Its public API is consumed by the
+    // E2E-only deep-link route and, in follow-up seam stories (FTY-262..268), by
+    // screen-owned modules that register sub-state presets — neither of which
+    // knip's static graph attributes to every re-export. Declared an entry like
+    // the other E2E harness modules.
+    "e2e/visualReview/index.ts"
   ],
   "ignoreDependencies": [
     // knip's Expo plugin infers these from a default app profile, but neither is

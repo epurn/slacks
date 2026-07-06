@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   Stack,
   useRootNavigationState,
@@ -39,6 +39,10 @@ import {
   e2eSessionStore,
   e2eConnectionStore,
 } from '@/e2e/launchMode';
+import {
+  useVisualReviewRevision,
+  VisualReviewSettleOverlay,
+} from '@/e2e/visualReview';
 
 // Install the E2E mock fetch and mark onboarding complete for the synthetic
 // user before any provider mounts. In release builds __DEV__ is false so
@@ -208,12 +212,36 @@ export default function RootLayout() {
           <GoalDirectionProvider>
             <SafeAreaProvider>
               <ThemedStatusBar />
-              <AuthGate />
-              <Stack screenOptions={{ headerShown: false }} />
+              <NavigatorHost />
             </SafeAreaProvider>
           </GoalDirectionProvider>
         </SessionProvider>
       </ConnectionProvider>
     </AppearanceProvider>
+  );
+}
+
+/**
+ * The auth gate + navigator, keyed on the visual-review revision (FTY-247).
+ *
+ * Activating a visual-review preset (E2E only) bumps the revision, remounting
+ * this subtree so the target screen mounts fresh with the preset's seeded
+ * fixtures in place instead of showing stale data from a screen mounted before
+ * activation. The `VisualReviewDriver` then navigates to the preset's route and
+ * the `VisualReviewSettleOverlay` exposes the screenshot marker once the screen
+ * has settled. In release / normal use the revision is a constant `0`, so the
+ * key never changes and this behaves exactly like a plain `<AuthGate/> +
+ * <Stack/>`; the driver and overlay render nothing.
+ */
+function NavigatorHost() {
+  const revision = useVisualReviewRevision();
+  return (
+    <Fragment key={revision}>
+      <AuthGate />
+      <Stack screenOptions={{ headerShown: false }} />
+      {/* Rendered after the navigator so its settled marker sits on top of the
+          screen (not occluded), where screenshot automation can find it. */}
+      <VisualReviewSettleOverlay />
+    </Fragment>
   );
 }
