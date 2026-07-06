@@ -36,6 +36,7 @@ export function TodaySheetHost({
   saveFood,
   labelProposal,
   labelProposalVisible,
+  labelProposalSettledMarker,
   onProposalDismissed,
   onProposalConfirmed,
   confirmLabelProposal,
@@ -56,6 +57,13 @@ export function TodaySheetHost({
   saveFood: typeof saveFoodApi;
   labelProposal: DerivedFoodItemDTO | null;
   labelProposalVisible: boolean;
+  /**
+   * The `visual-review-settled:<preset>` testID to render inside the confirm
+   * sheet's own modal once it settles (FTY-262), or `null` outside the
+   * `today.confirm_parsed` visual-review preset — every real launch and every
+   * release build.
+   */
+  labelProposalSettledMarker: string | null;
   onProposalDismissed: () => void;
   onProposalConfirmed: (committed: DerivedFoodItemDTO) => void;
   confirmLabelProposal: typeof confirmLabelProposalApi;
@@ -120,6 +128,7 @@ export function TodaySheetHost({
           onClose={onProposalDismissed}
           onConfirmed={onProposalConfirmed}
           confirm={confirmLabelProposal}
+          testMarker={labelProposalSettledMarker ?? undefined}
         />
       ) : null}
     </>
