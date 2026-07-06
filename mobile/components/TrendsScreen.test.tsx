@@ -1,6 +1,8 @@
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
-import { View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+
+import { floatingSwitcherClearance } from "@/components/ui";
 
 import { TrendsScreen } from "./TrendsScreen";
 import {
@@ -1602,5 +1604,58 @@ describe("TrendsScreen — non-color adherence cue", () => {
     expect(offStyle.borderWidth).toBeGreaterThan(0);
     // The fill hue still differs too (redundant, not a replacement).
     expect(onStyle.backgroundColor).not.toBe(offStyle.backgroundColor);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bottom clearance for the floating switcher (FTY-258): Trends' scroll content
+// must reserve at least the shared switcher footprint (FTY-242's
+// `floatingSwitcherClearance`) so the last card scrolls clear of the pill and
+// the home indicator, and it must derive that value from the shared helper
+// rather than a re-hardcoded tab-bar-era height.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("TrendsScreen — floating switcher bottom clearance (FTY-258)", () => {
+  it("reserves bottom clearance at least equal to the shared switcher inset", async () => {
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+
+    const scroll = tree.root.find((n) => n.props.testID === "trends-screen");
+    const contentStyle = StyleSheet.flatten(scroll.props.contentContainerStyle) as {
+      paddingBottom?: number;
+    };
+
+    // The safe-area bottom inset seeded by `mount`'s SafeAreaProvider metrics.
+    const safeAreaBottom = 34;
+    const expectedClearance = floatingSwitcherClearance(safeAreaBottom);
+
+    expect(typeof contentStyle.paddingBottom).toBe("number");
+    expect(contentStyle.paddingBottom as number).toBeGreaterThanOrEqual(
+      expectedClearance,
+    );
+  });
+
+  it("renders no full-width tab-bar-style bottom fade", async () => {
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+
+    const scrim = tree.root.findAll(
+      (n) => n.props.testID === "tab-bar-scrim",
+    );
+    expect(scrim.length).toBe(0);
   });
 });
