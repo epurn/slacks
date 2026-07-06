@@ -44,8 +44,8 @@
     "mobile/components/TrendsScreen.tsx": {
       "kind": "source",
       "lane": "mobile",
-      "lines": 791,
-      "reason": "FTY-265 adds the visual-review `weight.sheet` sub-state seam: registers the preset through the FTY-247 API, reads an E2E-only, isE2EMode()-gated initial value for the weight-log sheet's `sheetVisible` state, and computes the settled-marker testID (passed to WeightLogSheet, gated on the weight-entries read reaching \"ready\"), crossing the 750-line source threshold."
+      "lines": 795,
+      "reason": "FTY-265 adds the visual-review `weight.sheet` sub-state seam: registers the preset through the FTY-247 API, reads an E2E-only, isE2EMode()-gated initial value for the weight-log sheet's `sheetVisible` state, and computes the settled-marker testID (passed to WeightLogSheet, gated on the weight-entries read reaching \"ready\"), crossing the 750-line source threshold; +4 from merging main's FTY-264 side-effect import of components/trends/visualReviewPresets (registering the `trends.adherence_retry` preset) with its explanatory comment."
     },
     "mobile/components/CorrectionSheet.test.tsx": {
       "kind": "test",
