@@ -1,22 +1,12 @@
-export { ThemedText } from './ThemedText';
 export { ThemedNumber } from './ThemedNumber';
 export { DisplayText } from './DisplayText';
-export { Card } from './Card';
 export { Skeleton } from './Skeleton';
 export { Button } from './Button';
 export { Chip, CHIP_HIT_SLOP } from './Chip';
-export type { ChipProps } from './Chip';
 export { ProvenanceIcon, provenancePresentation } from './ProvenanceIcon';
-export type { ProvenancePresentation } from './ProvenanceIcon';
 export { AppIcon } from './AppIcon';
-export type { AppIconName } from './AppIcon';
 export { ScreenHeader } from './ScreenHeader';
-export {
-  FloatingSwitcher,
-  FLOATING_SWITCHER_HEIGHT,
-  FLOATING_SWITCHER_BOTTOM_GAP,
-  floatingSwitcherClearance,
-} from './FloatingSwitcher';
+export { FloatingSwitcher } from './FloatingSwitcher';
 export type { FloatingSwitcherSegment } from './FloatingSwitcher';
 export { TabBarScrim } from './TabBarScrim';
 export { SegmentedControl } from './SegmentedControl';

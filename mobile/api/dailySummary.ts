@@ -19,7 +19,7 @@ import {
 import type { ApiSession } from "@/api/client";
 
 /** Provenance of a target value: derived by the calculator vs. set by the user. */
-export type TargetSource = "derived" | "user";
+type TargetSource = "derived" | "user";
 
 /**
  * One target value (calorie or a macro) with explicit provenance (FTY-095).
@@ -29,7 +29,7 @@ export type TargetSource = "derived" | "user";
  * says which of the two `effective` came from. All whole numbers in canonical
  * units (kcal for calories, grams for macros).
  */
-export interface TargetComponent {
+interface TargetComponent {
   readonly effective: number;
   readonly derived: number;
   readonly source: TargetSource;

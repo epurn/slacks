@@ -36,7 +36,7 @@ import { useIntervalPolling } from "@/state/polling";
 import type { ReachabilityState } from "@/state/reachability";
 
 /** Default reconnect-retry cadence: calm on battery, prompt enough to feel live. */
-export const OUTBOX_RETRY_INTERVAL_MS = 8000;
+const OUTBOX_RETRY_INTERVAL_MS = 8000;
 
 /** What a screen needs from the offline queue. */
 export interface OfflineQueue {

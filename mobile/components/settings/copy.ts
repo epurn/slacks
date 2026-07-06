@@ -19,7 +19,7 @@ export const APPEARANCE_OPTIONS: readonly {
   { value: 'system', label: 'System' },
 ];
 
-export const SETTINGS_METABOLIC_FORMULA_COPY: Record<
+const SETTINGS_METABOLIC_FORMULA_COPY: Record<
   MetabolicFormula,
   { readonly label: string; readonly description: string }
 > = {

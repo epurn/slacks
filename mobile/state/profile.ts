@@ -63,10 +63,10 @@ export const METABOLIC_FORMULA_OPTIONS: readonly MetabolicFormulaOption[] = [
 ];
 
 /** Plausible canonical ranges. Mirror the FTY-020 bounds, tightened for input. */
-export const HEIGHT_M_RANGE = { min: 0.5, max: 2.72 } as const;
-export const WEIGHT_KG_RANGE = { min: 2, max: 650 } as const;
+const HEIGHT_M_RANGE = { min: 0.5, max: 2.72 } as const;
+const WEIGHT_KG_RANGE = { min: 2, max: 650 } as const;
 /** Earliest plausible birth year; the latest is the current year (injected). */
-export const MIN_BIRTH_YEAR = 1900;
+const MIN_BIRTH_YEAR = 1900;
 
 // Exact conversion factors (international definitions).
 const CM_PER_M = 100;

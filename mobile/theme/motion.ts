@@ -14,7 +14,7 @@ export const defaultSpring: Omit<Animated.SpringAnimationConfig, 'toValue'> = {
 /**
  * Gentle spring for in-place content reveals (skeleton → value).
  */
-export const gentleSpring: Omit<Animated.SpringAnimationConfig, 'toValue'> = {
+const gentleSpring: Omit<Animated.SpringAnimationConfig, 'toValue'> = {
   tension: 80,
   friction: 12,
   useNativeDriver: true,
@@ -47,7 +47,7 @@ export function useReduceMotion(): boolean {
  * known (e.g. the resolve fade, which plays exactly once) read the nullable form;
  * most callers use {@link useReduceMotion}, which coalesces `null` to "on".
  */
-export function useReduceMotionState(): boolean | null {
+function useReduceMotionState(): boolean | null {
   const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
 
   useEffect(() => {

@@ -1,0 +1,27 @@
+{
+  // knip dead-code + dependency gate (FTY-232). Expo/React Native auto-detection
+  // handles app/, expo-router entries, and jest test files with zero config; the
+  // only overrides are the entry points and dependencies knip's static graph
+  // cannot see on its own.
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    // Babel config consumed by Metro bundling and the jest-expo transform; it has
+    // no importer in source, so it must be declared an entry, not deleted.
+    "babel.config.js",
+    // E2E fixtures/harness are baked into the app only under EXPO_PUBLIC_FATTY_E2E
+    // and their constants are read literally by the Maestro flows in .maestro/
+    // (e.g. E2E_CLARIFY_CHIP -> the "Large" chip in clarify.yaml). knip's static
+    // graph can't follow the Maestro YAML or the E2E-only build, so these fixture
+    // modules are entry points the verify-e2e.sh path consumes, not dead code.
+    "e2e/fixtures.ts",
+    "e2e/launchMode.ts",
+    "e2e/barcodeFixtures.ts"
+  ],
+  "ignoreDependencies": [
+    // knip's Expo plugin infers these from a default app profile, but neither is
+    // imported by first-party code (only surfaced via app.json defaults). Per
+    // FTY-232 they are ignored here rather than installed as unused packages.
+    "expo-updates",
+    "expo-system-ui"
+  ]
+}
