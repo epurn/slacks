@@ -59,6 +59,8 @@ import type { GoalDirection } from "@/api/goals";
 import { AdherenceStrip } from "@/components/AdherenceStrip";
 import { EWMATrendChart } from "@/components/EWMATrendChart";
 import { WeightLogSheet } from "@/components/WeightLogSheet";
+import { isE2EMode } from "@/e2e/launchMode";
+import { registerVisualReviewPreset, useVisualReviewCore } from "@/e2e/visualReview";
 import { useGoalDirection } from "@/state/goalDirection";
 import type { UnitsPreference } from "@/state/profile";
 import { useSession, toApiSession, type Session, type ApiSession } from "@/state/session";
@@ -91,6 +93,28 @@ function weightMessageFor(error: unknown): string {
     ? error.message
     : "Could not load your weight trend. Please try again.";
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Visual-review sub-state seam (FTY-265)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Registers the `weight.sheet` sub-state preset with the FTY-247 visual-review
+ * registry from this weight-owned module — not the shared registry/manifest
+ * files (`e2e/visualReview/registry.ts` / `presets.ts`). The weight-log sheet
+ * sits behind `sheetVisible`, a press-only sub-state (see below), so it is one
+ * of the "deferred sub-state presets" the FTY-247 README calls out as needing a
+ * screen-owned seam. Registration is a plain map insert with no secrets and no
+ * auth state (see `e2e/visualReview/types.ts`), so it runs unconditionally at
+ * module load, same as the in-scope presets in `e2e/visualReview/presets.ts`;
+ * only *activating* it reaches a real screen, and only through the
+ * `isE2EMode()`-gated deep-link route.
+ */
+registerVisualReviewPreset({
+  name: "weight.sheet",
+  route: "/trends",
+  settledPath: "/trends",
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
@@ -295,7 +319,28 @@ export function TrendsScreen({
   );
 
   // ── Log weight sheet ───────────────────────────────────────────────────────
-  const [sheetVisible, setSheetVisible] = useState(false);
+  // E2E-only initial-state seam (FTY-265): the sheet is normally opened only by
+  // the "+ Log weight" press below. When the `weight.sheet` visual-review preset
+  // is the one active at mount, the sheet instead opens immediately — a real
+  // reachable state, not a scripted tap — so the FTY-238 weight audit can
+  // screenshot it. Read once, lazily: the whole navigator subtree remounts on
+  // every preset activation (app/_layout.tsx keys on the revision), so a
+  // freshly-mounted TrendsScreen always reflects the currently active preset.
+  // `isE2EMode()` gates the read so a release build never opens the sheet on
+  // mount, regardless of this module's registered preset state.
+  const activeVisualReviewPreset = useVisualReviewCore().presetName;
+  const [sheetVisible, setSheetVisible] = useState(
+    () => isE2EMode() && activeVisualReviewPreset === "weight.sheet",
+  );
+  // The settled marker for this preset (see WeightLogSheet's settledMarkerTestID
+  // doc): only set once the weight-entries read has resolved, so screenshot
+  // automation never captures the sheet before its seeded data has settled.
+  // Undefined whenever this preset isn't the active one, so a normal "+ Log
+  // weight" open never renders it.
+  const weightSheetSettledMarker =
+    isE2EMode() && activeVisualReviewPreset === "weight.sheet" && weightPhase === "ready"
+      ? "visual-review-settled:weight.sheet"
+      : undefined;
   const lastEntry: WeightEntryDTO | null =
     entries.length > 0 ? entries[entries.length - 1]! : null;
 
@@ -537,6 +582,7 @@ export function TrendsScreen({
           lastEntry={lastEntry}
           today={todayStr}
           create={createWeightEntry}
+          settledMarkerTestID={weightSheetSettledMarker}
         />
       ) : null}
     </>

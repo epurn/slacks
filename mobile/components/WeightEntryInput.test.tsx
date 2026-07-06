@@ -170,6 +170,71 @@ describe("WeightEntryInput — metric", () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Late-arriving seed value (FTY-265): the visual-review `weight.sheet` seam
+// opens WeightLogSheet before Trends' own weight-entries read resolves, so
+// `initialValue` starts `undefined` and updates once the read settles —
+// unlike the "+ Log weight" press, which is only reachable after that data has
+// already loaded. Without this, the field stayed on the blank placeholder
+// forever once mounted pristine, even after a real seed value arrived.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("WeightEntryInput — late-arriving seed value (FTY-265)", () => {
+  it("fills the field once a seed value arrives after mount, while still pristine", () => {
+    const tree = render(
+      <WeightEntryInput
+        unitsPreference="metric"
+        submitting={false}
+        submitError={null}
+        onSubmit={jest.fn()}
+      />,
+    );
+    expect(inputNode(tree, "Weight in kg").props.value).toBe("");
+
+    act(() => {
+      tree.update(
+        <WeightEntryInput
+          unitsPreference="metric"
+          submitting={false}
+          submitError={null}
+          onSubmit={jest.fn()}
+          initialValue={74.8}
+        />,
+      );
+    });
+
+    expect(inputNode(tree, "Weight in kg").props.value).toBe("74.8");
+  });
+
+  it("does not clobber text the user already typed before the seed value arrives", () => {
+    const tree = render(
+      <WeightEntryInput
+        unitsPreference="metric"
+        submitting={false}
+        submitError={null}
+        onSubmit={jest.fn()}
+      />,
+    );
+    act(() => {
+      inputNode(tree, "Weight in kg").props.onChangeText("60");
+    });
+
+    act(() => {
+      tree.update(
+        <WeightEntryInput
+          unitsPreference="metric"
+          submitting={false}
+          submitError={null}
+          onSubmit={jest.fn()}
+          initialValue={74.8}
+        />,
+      );
+    });
+
+    expect(inputNode(tree, "Weight in kg").props.value).toBe("60");
+  });
+});
+
 describe("WeightEntryInput — imperial", () => {
   it("renders a weight input labelled in lb", () => {
     const tree = render(

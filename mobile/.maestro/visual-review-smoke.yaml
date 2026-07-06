@@ -59,6 +59,20 @@ appId: com.fatty
     id: today-screen
 - takeScreenshot: today-empty-light
 
+# weight.sheet (light): the weight-log sheet's sub-state (FTY-265) — a
+# screen-owned (mobile-weight) E2E-only initial-state seam opens the sheet on
+# mount, not a scripted "+ Log weight" tap. Registered from
+# components/TrendsScreen.tsx through the FTY-247 registration API, not this
+# shared registry/manifest.
+- openLink: "fatty://__visual-review?preset=weight.sheet&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:weight.sheet"
+    timeout: 20000
+- assertVisible:
+    id: weight-log-sheet
+- takeScreenshot: weight-sheet-light
+
 # Signed-out reseed guard (FTY-247): the signed-out preset must NOT be sticky.
 # Open today.signed_out — the E2E session store hydrates a null session, so the
 # auth gate reaches the sign-in surface and the settled marker appears.
