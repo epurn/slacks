@@ -61,6 +61,50 @@ Screenshot automation should wait for this marker (it is an accessibility
 `testID`) before capturing, so it never grabs a mid-load frame. The marker is an
 invisible 1×1, non-interactive view — it never shifts layout or blocks touches.
 
+### Modal sub-states (FTY-270)
+
+`VisualReviewSettleOverlay` renders its marker as a **sibling of the navigator
+Stack**. That is unreachable for a sub-state presented as a React Native
+`<Modal accessibilityViewIsModal>`: on iOS that flag isolates the modal's own
+accessibility subtree from everything outside it, so while the modal is
+presented Maestro/XCUITest cannot see the shared overlay's marker at all — it
+still renders, but outside the reachable tree.
+
+**Rule:** a modal-based seam must render its own
+`visual-review-settled:<preset>` marker **inside the modal's own subtree**,
+under the same canonical testID convention. Use the shared
+`VisualReviewSettleMarker` component so the testID, the invisible/
+non-interactive styling, and the network-quiet settle-timing rule never need
+reimplementing:
+
+```tsx
+import { VisualReviewSettleMarker } from '@/e2e/visualReview';
+
+function MySheet({ visible, e2ePresetName }: Props) {
+  return (
+    <Modal accessibilityViewIsModal visible={visible}>
+      {/* ...sheet content... */}
+      <VisualReviewSettleMarker preset={e2ePresetName} />
+    </Modal>
+  );
+}
+```
+
+- `preset` is the active preset's name while this seam's sub-state is the one
+  presented, or `null`/`undefined` otherwise — the marker renders nothing until
+  its own preset is active.
+- An optional `ready` prop (default `true`) adds a further readiness gate for a
+  sub-state whose own async data must also settle (e.g. a search result list or
+  a pre-seeded draft) before the state is truly done loading — the marker waits
+  for both the shared network-quiet window and `ready`.
+- The helper is gated the same way as the rest of this module: inert outside
+  `isE2EMode()`, so it is dead code in release builds.
+
+`VisualReviewSettleOverlay` itself is built on this same component (passed the
+navigator-reachable preset name), so there is one marker source of truth for
+both the non-modal and the modal case — extending the convention here never
+means redefining it per screen.
+
 ## Preset manifest (in-scope, FTY-247)
 
 These presets are reachable purely through public navigation, shared fixtures,
@@ -95,6 +139,10 @@ onboarding steps) are **not** here. Reaching them needs a small E2E-only
 initial-state seam in the screen's own code, which the per-screen seam stories
 (FTY-262..268) add in their own lane. Until a seam story registers such a preset,
 its name is unregistered and fails closed.
+
+Most of these sub-states are presented as a `<Modal accessibilityViewIsModal>`,
+so their settled marker also needs the in-modal-subtree rule above (see "Modal
+sub-states"), not just the registration below.
 
 ## Registration API (the join contract for FTY-262..268)
 
