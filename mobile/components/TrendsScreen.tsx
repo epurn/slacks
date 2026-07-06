@@ -59,6 +59,10 @@ import type { GoalDirection } from "@/api/goals";
 import { AdherenceStrip } from "@/components/AdherenceStrip";
 import { EWMATrendChart } from "@/components/EWMATrendChart";
 import { WeightLogSheet } from "@/components/WeightLogSheet";
+// Registers the `trends.adherence_retry` visual-review preset (FTY-264) as a
+// side effect, so the deep-link route can find it. See the module doc there —
+// this import has no effect outside an active visual-review session.
+import "@/components/trends/visualReviewPresets";
 import { useGoalDirection } from "@/state/goalDirection";
 import type { UnitsPreference } from "@/state/profile";
 import { useSession, toApiSession, type Session, type ApiSession } from "@/state/session";
