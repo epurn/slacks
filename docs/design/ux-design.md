@@ -33,10 +33,14 @@ tracker**. The wedge is two things competitors don't do well together:
 
 ## 2. Information architecture & navigation
 
-- **Bottom tab bar — two tabs: Today · Trends.** A standard native tab bar (see
-  Visual). **Today is the single logging surface and the dashboard** — there is no
-  separate Log tab (consolidated in FTY-147; a separate surface duplicated the
-  composer and drifted, and added a navigation hop to the core loop for no benefit).
+- **Floating glass switcher — two destinations: Today · Trends.** A persistent
+  bottom-left segmented glass pill (see Visual), inspired by the iOS 26 Photos
+  chrome, replaces the old full-width bottom tab bar (FTY-242) so the app presents
+  as a modern full-screen shell rather than a conventional tab app. The routes are
+  unchanged. **Today is the single logging surface and the dashboard** — there is
+  no separate Log destination (consolidated in FTY-147; a separate surface
+  duplicated the composer and drifted, and added a navigation hop to the core loop
+  for no benefit).
 - **Profile / Settings is a persistent gear** in the header on every screen — not a
   tab.
 - Logging is always one tap away: the **composer sits directly beneath the Today
@@ -237,9 +241,12 @@ It mirrors the inputs onboarding captures, so this is where you edit them later.
 The balance is *native skeleton, bespoke soul* — native in structure and behaviour,
 unmistakable in a few expressive carriers (see the principle of that name).
 
-- **Tab bar: standard native 2-tab bar** (Today · Trends), two equal SF-Symbol
-  tabs. No restyled chrome, no raised center button. (Logging lives on Today, not
-  a separate tab — FTY-147.)
+- **Navigation: a bottom-left floating glass switcher** (Today · Trends) — a
+  compact segmented pill of translucent blur material with SF-Symbol segments and
+  a clear selected state, floating over a full-screen shell (FTY-242, replacing the
+  old full-width tab bar). Native materials and safe-area/accessibility rules, not
+  decorative custom chrome; no raised center button. (Logging lives on Today, not a
+  separate destination — FTY-147.)
 - **Aesthetic: minimal monochrome + one accent** — neutral canvas, airy whitespace,
   crisp bold type, a single accent for actions, emphasis, and progress.
 - **Accent: warm amber / honey.** Distinctive and premium-calm — deliberately not the
@@ -256,9 +263,10 @@ unmistakable in a few expressive carriers (see the principle of that name).
   native feel. *Open: the exact licensed font (must have tabular figures, be
   bundle-able, and hold up at very large sizes).*
 - **Materials & depth: restrained system materials.** iOS blur only where iOS
-  naturally blurs — tab bar (.ultraThin), correction sheets (frosted, content dims
-  behind), large-title nav frosting on scroll. Timeline cards stay flat opaque.
-  Layered and native, but calm — no "glass everywhere".
+  naturally blurs — the floating switcher pill (system chrome material), correction
+  sheets (frosted, content dims behind), large-title nav frosting on scroll.
+  Timeline cards stay flat opaque. Layered and native, but calm — no "glass
+  everywhere".
 - **Motion & haptics: restrained by default + a few signature moments.** Quiet,
   physical default motion — short springs, in-place fades (skeleton → value), the hero
   bar easing as it fills; no layout shift. Identity lives in a small set of designed

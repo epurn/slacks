@@ -11,6 +11,13 @@ export type { ProvenancePresentation } from './ProvenanceIcon';
 export { AppIcon } from './AppIcon';
 export type { AppIconName } from './AppIcon';
 export { ScreenHeader } from './ScreenHeader';
+export {
+  FloatingSwitcher,
+  FLOATING_SWITCHER_HEIGHT,
+  FLOATING_SWITCHER_BOTTOM_GAP,
+  floatingSwitcherClearance,
+} from './FloatingSwitcher';
+export type { FloatingSwitcherSegment } from './FloatingSwitcher';
 export { TabBarScrim } from './TabBarScrim';
 export { SegmentedControl } from './SegmentedControl';
 export type { SegmentedControlOption } from './SegmentedControl';

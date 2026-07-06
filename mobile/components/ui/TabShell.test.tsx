@@ -1,231 +1,208 @@
 import React from 'react';
-import { act, create } from 'react-test-renderer';
-import { useColorScheme } from 'react-native';
+import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { ThemeProvider } from '@/theme';
+
 import TabLayout from '@/app/(tabs)/_layout';
+import { ThemeProvider } from '@/theme';
 
 // ---------------------------------------------------------------------------
-// Mock expo-symbols — replace SymbolView with a View stub that exposes the
-// SF Symbol name via testID so tests can assert which glyph was requested
-// without requiring the native module.
+// Capture the props the layout hands to expo-router's `Tabs` — the global
+// `screenOptions`, the custom `tabBar` render prop (the floating switcher), and
+// each registered `Tabs.Screen` name — so the shell contract can be asserted
+// without a live navigation runtime.
 // ---------------------------------------------------------------------------
+
+let capturedScreenOptions: Record<string, unknown> | undefined;
+let capturedTabBar:
+  | ((props: {
+      state: { index: number; routes: { key: string; name: string }[] };
+      navigation: {
+        emit: (e: unknown) => { defaultPrevented: boolean };
+        navigate: (name: string) => void;
+      };
+    }) => React.ReactNode)
+  | undefined;
+let mockRegisteredScreens: string[] = [];
+
+jest.mock('expo-router', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const ReactLib = require('react');
+  const Tabs = ({
+    screenOptions,
+    tabBar,
+    children,
+  }: {
+    screenOptions: Record<string, unknown>;
+    tabBar: (props: unknown) => React.ReactNode;
+    children: React.ReactNode;
+  }) => {
+    capturedScreenOptions = screenOptions;
+    capturedTabBar = tabBar as typeof capturedTabBar;
+    return ReactLib.createElement(ReactLib.Fragment, null, children);
+  };
+  Tabs.Screen = function TabsScreen({ name }: { name: string }) {
+    mockRegisteredScreens.push(name);
+    return null;
+  };
+  return { Tabs };
+});
+
+jest.mock('expo-blur', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const ReactNative = require('react-native');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const ReactLib = require('react');
+  return {
+    BlurView: (props: Record<string, unknown>) =>
+      ReactLib.createElement(ReactNative.View, { testID: 'switcher-blur', ...props }),
+  };
+});
 
 jest.mock('expo-symbols', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const React = require('react');
+  const ReactNative = require('react-native');
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { View } = require('react-native');
+  const ReactLib = require('react');
   return {
-    SymbolView: ({
-      name,
-      accessibilityLabel,
-    }: {
-      name: string;
-      tintColor?: string;
-      size?: number;
-      accessibilityLabel?: string;
-    }) =>
-      React.createElement(View, {
-        testID: `sf-symbol-${String(name)}`,
-        accessibilityLabel,
-      }),
+    SymbolView: ({ name }: { name: string }) =>
+      ReactLib.createElement(ReactNative.View, { testID: `sf-symbol-${String(name)}` }),
   };
 });
 
-// ---------------------------------------------------------------------------
-// Mock expo-router — replace Tabs with simple View-based stubs so the layout
-// can be rendered without the full navigation runtime.
-// ---------------------------------------------------------------------------
-
-jest.mock('expo-router', () => {
-  // require() inside factory — jest.mock() factories run before module-scope
-  // imports and cannot close over them.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const React = require('react');
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { View, Text } = require('react-native');
-
-  const MockTabsScreen = ({
-    name,
-    options,
-  }: {
-    name: string;
-    options?: {
-      title?: string;
-      tabBarAccessibilityLabel?: string;
-      tabBarIcon?: (opts: { color: string; focused: boolean; size: number }) => React.ReactNode;
-    };
-  }) => {
-    // Invoke tabBarIcon so the icon is included in the rendered tree.
-    const icon = options?.tabBarIcon?.({ color: '#000000', focused: true, size: 22 });
-    return React.createElement(
-      View,
-      { testID: `tab-screen-${name}` },
-      React.createElement(Text, {}, options?.title ?? name),
-      icon
-        ? React.createElement(View, { testID: `tab-icon-${name}` }, icon)
-        : null,
-    );
-  };
-
-  const MockTabs = ({
-    children,
-    screenOptions,
-  }: {
-    children: React.ReactNode;
-    screenOptions?: {
-      headerShown?: boolean;
-      headerRight?: () => React.ReactNode;
-      [key: string]: unknown;
-    };
-  }) => {
-    // Render a marker node so tests can assert headerShown: false is set globally.
-    const headerHiddenMarker =
-      screenOptions?.headerShown === false
-        ? React.createElement(View, { testID: 'tabs-native-header-hidden' })
-        : null;
-    // Invoke headerRight if present (should be absent after FTY-151).
-    const headerRight = screenOptions?.headerRight ? screenOptions.headerRight() : null;
-    return React.createElement(
-      View,
-      { testID: 'tabs-container' },
-      headerHiddenMarker,
-      headerRight,
-      children,
-    );
-  };
-
-  MockTabs.Screen = MockTabsScreen;
-
-  return {
-    Tabs: MockTabs,
-    useRouter: jest.fn(() => ({ push: jest.fn() })),
-    useLocalSearchParams: jest.fn(() => ({})),
-  };
-});
-
-// jest-expo's preset already mocks useColorScheme as a jest.fn() returning 'light'.
-const mockUseColorScheme = useColorScheme as jest.MockedFunction<typeof useColorScheme>;
-
-// ---------------------------------------------------------------------------
-// Test helpers
-// ---------------------------------------------------------------------------
-
-function mount() {
-  let tree: ReturnType<typeof create> | null = null;
+function renderLayout(): void {
+  capturedScreenOptions = undefined;
+  capturedTabBar = undefined;
+  mockRegisteredScreens = [];
   act(() => {
-    tree = create(
-      React.createElement(
-        SafeAreaProvider,
-        {
-          initialMetrics: {
-            frame: { x: 0, y: 0, width: 390, height: 844 },
-            insets: { top: 47, left: 0, right: 0, bottom: 34 },
-          },
-        },
-        React.createElement(
-          ThemeProvider,
-          { override: 'light' },
-          React.createElement(TabLayout),
-        ),
-      ),
+    create(
+      <ThemeProvider override="light">
+        <TabLayout />
+      </ThemeProvider>,
     );
   });
-  return tree!;
 }
 
-// ---------------------------------------------------------------------------
-// TabLayout tests
-// ---------------------------------------------------------------------------
-
-describe('TabLayout', () => {
-  beforeEach(() => {
-    mockUseColorScheme.mockReturnValue('light');
-  });
-
-  it('renders a tab-screen for "index" with title "Today"', () => {
-    const tree = mount();
-    const node = tree.root.find((n) => n.props.testID === 'tab-screen-index');
-    expect(node).toBeTruthy();
-    const textNode = node.find(
-      (n) => (n.type as unknown as string) === 'Text' && n.props.children === 'Today',
+/** Mount the captured `tabBar` render prop (the floating switcher) for a state. */
+function renderSwitcher(
+  activeIndex: number,
+  navigation: {
+    emit: (e: unknown) => { defaultPrevented: boolean };
+    navigate: (name: string) => void;
+  },
+): ReactTestRenderer {
+  const state = {
+    index: activeIndex,
+    routes: [
+      { key: 'index-key', name: 'index' },
+      { key: 'trends-key', name: 'trends' },
+    ],
+  };
+  let tree!: ReactTestRenderer;
+  act(() => {
+    tree = create(
+      <SafeAreaProvider
+        initialMetrics={{
+          frame: { x: 0, y: 0, width: 390, height: 844 },
+          insets: { top: 47, left: 0, right: 0, bottom: 34 },
+        }}
+      >
+        <ThemeProvider override="light">
+          {capturedTabBar!({ state, navigation }) as React.ReactElement}
+        </ThemeProvider>
+      </SafeAreaProvider>,
     );
-    expect(textNode).toBeTruthy();
+  });
+  return tree;
+}
+
+describe('TabLayout shell (FTY-242 floating switcher)', () => {
+  it('suppresses the native header globally', () => {
+    renderLayout();
+    expect(capturedScreenOptions?.headerShown).toBe(false);
   });
 
-  it('renders a tab-screen for "trends" with title "Trends"', () => {
-    const tree = mount();
-    const node = tree.root.find((n) => n.props.testID === 'tab-screen-trends');
-    expect(node).toBeTruthy();
-    const textNode = node.find(
-      (n) => (n.type as unknown as string) === 'Text' && n.props.children === 'Trends',
+  it('exposes exactly two destinations — Today (index) and Trends (trends), no Log', () => {
+    renderLayout();
+    expect(mockRegisteredScreens.sort()).toEqual(['index', 'trends']);
+    expect(mockRegisteredScreens).not.toContain('log');
+  });
+
+  it('no longer configures a full-width tab-bar background or scrim contract', () => {
+    renderLayout();
+    // The retired FTY-185/FTY-218 full-width tab-bar chrome: a `tabBarBackground`
+    // BlurView, an absolute `tabBarStyle`, and the tab-bar scrim. None survive.
+    expect(capturedScreenOptions).not.toHaveProperty('tabBarBackground');
+    expect(capturedScreenOptions).not.toHaveProperty('tabBarStyle');
+    // Navigation is a custom `tabBar` render prop instead.
+    expect(typeof capturedTabBar).toBe('function');
+  });
+
+  it('renders the floating switcher with both segments and their SF Symbols', () => {
+    renderLayout();
+    const tree = renderSwitcher(0, {
+      emit: () => ({ defaultPrevented: false }),
+      navigate: jest.fn(),
+    });
+
+    expect(tree.root.find((n) => n.props.testID === 'floating-switcher')).toBeTruthy();
+    expect(tree.root.find((n) => n.props.testID === 'floating-switcher-index')).toBeTruthy();
+    expect(tree.root.find((n) => n.props.testID === 'floating-switcher-trends')).toBeTruthy();
+    expect(tree.root.find((n) => n.props.testID === 'sf-symbol-sun.max')).toBeTruthy();
+    expect(
+      tree.root.find((n) => n.props.testID === 'sf-symbol-chart.line.uptrend.xyaxis'),
+    ).toBeTruthy();
+  });
+
+  it('marks the focused route as the selected segment', () => {
+    renderLayout();
+    const tree = renderSwitcher(1, {
+      emit: () => ({ defaultPrevented: false }),
+      navigate: jest.fn(),
+    });
+    const trends = tree.root.find((n) => n.props.testID === 'floating-switcher-trends');
+    const today = tree.root.find((n) => n.props.testID === 'floating-switcher-index');
+    expect(trends.props.accessibilityState).toEqual({ selected: true });
+    expect(today.props.accessibilityState).toEqual({ selected: false });
+  });
+
+  it('navigates to the tapped destination via a tabPress event', () => {
+    renderLayout();
+    const emit = jest.fn(() => ({ defaultPrevented: false }));
+    const navigate = jest.fn();
+    const tree = renderSwitcher(0, { emit, navigate });
+
+    act(() => {
+      tree.root.find((n) => n.props.testID === 'floating-switcher-trends').props.onPress();
+    });
+
+    expect(emit).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'tabPress', target: 'trends-key' }),
     );
-    expect(textNode).toBeTruthy();
+    expect(navigate).toHaveBeenCalledWith('trends');
   });
 
-  it('does not render a tab-screen for any unexpected name', () => {
-    const tree = mount();
-    const knownScreens = ['index', 'trends'];
-    const unexpectedScreens = tree.root.findAll(
-      (n) =>
-        typeof n.props.testID === 'string' &&
-        n.props.testID.startsWith('tab-screen-') &&
-        !knownScreens.some((name) => n.props.testID === `tab-screen-${name}`),
-    );
-    expect(unexpectedScreens).toHaveLength(0);
+  it('does not re-navigate when the already-focused segment is tapped', () => {
+    renderLayout();
+    const emit = jest.fn(() => ({ defaultPrevented: false }));
+    const navigate = jest.fn();
+    const tree = renderSwitcher(0, { emit, navigate });
+
+    act(() => {
+      tree.root.find((n) => n.props.testID === 'floating-switcher-index').props.onPress();
+    });
+    // tabPress still fires (scroll-to-top semantics) but no navigation occurs.
+    expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('sets headerShown: false globally so the native header is suppressed on every tab', () => {
-    // The mock renders a marker node when screenOptions.headerShown === false.
-    const tree = mount();
-    const marker = tree.root.find(
-      (n) => n.props.testID === 'tabs-native-header-hidden',
-    );
-    expect(marker).toBeTruthy();
-  });
+  it('respects a prevented tabPress (no navigation)', () => {
+    renderLayout();
+    const emit = jest.fn(() => ({ defaultPrevented: true }));
+    const navigate = jest.fn();
+    const tree = renderSwitcher(0, { emit, navigate });
 
-  it('does not render a global headerRight gear (gear lives in per-screen ScreenHeader after FTY-151)', () => {
-    const tree = mount();
-    // No element with "Open profile" label should exist in the tab shell —
-    // the gear is now owned by each screen's ScreenHeader, not the layout.
-    const gearButtons = tree.root.findAll(
-      (n) => n.props.accessibilityLabel === 'Open profile',
-    );
-    expect(gearButtons).toHaveLength(0);
-  });
-
-  // -------------------------------------------------------------------------
-  // SF Symbol icon assertions (FTY-145) — emoji replaced with AppIcon
-  // -------------------------------------------------------------------------
-
-  it('Today tab icon renders SF Symbol "sun.max" (not an emoji Text)', () => {
-    const tree = mount();
-    const iconContainer = tree.root.find((n) => n.props.testID === 'tab-icon-index');
-    const symbol = iconContainer.find((n) => n.props.testID === 'sf-symbol-sun.max');
-    expect(symbol).toBeTruthy();
-  });
-
-  it('Trends tab icon renders SF Symbol "chart.line.uptrend.xyaxis" (not an emoji Text)', () => {
-    const tree = mount();
-    const iconContainer = tree.root.find((n) => n.props.testID === 'tab-icon-trends');
-    const symbol = iconContainer.find(
-      (n) => n.props.testID === 'sf-symbol-chart.line.uptrend.xyaxis',
-    );
-    expect(symbol).toBeTruthy();
-  });
-
-  it('contains no emoji codepoints as chrome glyphs in any tab icon', () => {
-    const tree = mount();
-    // Emoji range guard: collect every Text node in the rendered tree and
-    // assert its content is free of common emoji codepoints that were
-    // previously used as tab/header chrome.
-    const emojiPattern = /[\u{1F300}-\u{1FFFF}]|\u{2699}|\u{2600}|＋/u;
-    const textNodes = tree.root.findAll(
-      (n) => (n.type as unknown as string) === 'Text' && typeof n.props.children === 'string',
-    );
-    for (const node of textNodes) {
-      expect(node.props.children as string).not.toMatch(emojiPattern);
-    }
+    act(() => {
+      tree.root.find((n) => n.props.testID === 'floating-switcher-trends').props.onPress();
+    });
+    expect(navigate).not.toHaveBeenCalled();
   });
 });

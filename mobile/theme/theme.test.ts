@@ -165,6 +165,38 @@ describe('darkPalette — WCAG AA token contrast on surface', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Floating switcher segment tints — WCAG AA (FTY-242)
+//
+// The pill's inactive/active icon+label tints render as text over the switcher
+// glass (rgba white/dark over `surface`, plus a light/dark system blur). The
+// glass is at least as light (light mode) / dark (dark mode) as `surface`, so
+// contrast against `surface` is the conservative lower bound: if a tint meets
+// AA on `surface`, it meets AA on the whiter/darker glass in front of it. The
+// inactive tint was #8E8E93, which sat below AA on the light glass; this guard
+// keeps both segment tints legible.
+// ---------------------------------------------------------------------------
+
+describe('lightPalette — WCAG AA: floating switcher segment tints', () => {
+  it('tabInactive (#636366) on surface meets 4.5:1', () => {
+    expect(contrastRatio(lightPalette.tabInactive, lightPalette.surface)).toBeGreaterThanOrEqual(WCAG_AA);
+  });
+
+  it('tabActive (#1C1C1E) on surface meets 4.5:1', () => {
+    expect(contrastRatio(lightPalette.tabActive, lightPalette.surface)).toBeGreaterThanOrEqual(WCAG_AA);
+  });
+});
+
+describe('darkPalette — WCAG AA: floating switcher segment tints', () => {
+  it('tabInactive (#8E8E93) on surface meets 4.5:1', () => {
+    expect(contrastRatio(darkPalette.tabInactive, darkPalette.surface)).toBeGreaterThanOrEqual(WCAG_AA);
+  });
+
+  it('tabActive (#F2F2F7) on surface meets 4.5:1', () => {
+    expect(contrastRatio(darkPalette.tabActive, darkPalette.surface)).toBeGreaterThanOrEqual(WCAG_AA);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Trends headline delta + adherence cue — WCAG AA (FTY-189)
 //
 // The goal-aware headline delta (TrendsScreen.tsx) renders as `accentText`
