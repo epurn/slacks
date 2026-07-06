@@ -44,6 +44,7 @@ import {
 import { AppIcon } from "@/components/ui/AppIcon";
 import { provenancePresentation } from "@/components/ui/ProvenanceIcon";
 import { ThemedNumber } from "@/components/ui/ThemedNumber";
+import { VisualReviewSettleOverlay } from "@/e2e/visualReview";
 import type { ApiSession } from "@/state/session";
 import { formatValue } from "@/state/derivedItems";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
@@ -234,6 +235,14 @@ export function ConfirmParsedValuesSheet({
       accessibilityViewIsModal
     >
       <View style={styles.overlay}>
+        {/* Visual-review settled marker (FTY-268): this sheet is a native Modal,
+            a separate presented context from the screen behind it, so the
+            shared root-level marker (app/_layout.tsx) is not reliably reachable
+            while this is up top. Mounting the same component here (unmodified,
+            just imported) exposes the marker in the presented context that's
+            actually visible; it self-gates to isE2EMode() and renders nothing
+            in every other build/state. */}
+        <VisualReviewSettleOverlay />
         <Pressable
           style={StyleSheet.absoluteFill}
           onPress={onClose}
