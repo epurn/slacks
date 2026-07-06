@@ -1,0 +1,75 @@
+# FTY-263: Correction sheet visual-review seam — opens each of the correction
+# sheet's `detail` / `typeahead` / `confirm_apply` sub-states directly over a
+# synthetic resolved "Oatmeal" entry via the E2E-only initial-state seam
+# (components/correction/visualReviewSeam.ts), never a scripted tap on a
+# rendered row. Complements the shared `visual-review-smoke.yaml` (which only
+# proves `correction.detail`, the one preset that leaves the timeline
+# undimmed/interactive behind the sheet) with the two presets that open at the
+# large, dimmed detent.
+#
+# Each preset is registered through FTY-247's registration API from
+# correction-owned code — no shared registry/route/theme/marker edits.
+#
+# Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
+# directory-level Maestro runs launch the installed app under test reliably.
+appId: com.fatty
+---
+# Each preset below relaunches the app first rather than switching straight
+# from the previous preset. A native sheet is a real presented UIViewController
+# (react-native-screens' formSheet, see NativeSheet.tsx); activating a new
+# preset while one is still on-screen races its native dismissal against the
+# next preset's sheet presentation, and UIKit can drop the second `present`
+# call while a dismissal is in flight. That race needs two consecutive
+# sheet-opening presets in one running session — unreachable in real usage,
+# where nothing ever opens a second preset while the first's sheet is up — so
+# relaunching between captures sidesteps it rather than adding product code to
+# chase a harness-only interaction.
+
+# correction.detail (light): the quick-fix mode — Portion stepper, Change
+# match lever, Advanced override rows, all populated from the synthetic entry.
+- launchApp:
+    clearState: false
+- openLink: "fatty://__visual-review?preset=correction.detail&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:correction.detail"
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      text: ".*Oatmeal.*"
+    timeout: 10000
+- takeScreenshot: correction-detail-light
+
+# correction.typeahead (light): the Change-match panel opens directly, with its
+# candidate list already loaded from the shared source-candidates fixture —
+# not the blank "no alternatives" state a naive initial-mode-only seam would
+# leave it in. This preset opens the sheet at its large, DIMMED detent
+# (change-match narrows to large-only, see useCorrectionSheet's `expanded`);
+# that dimmed native presentation makes every base-layer/sheet-content
+# accessibility query (the settled marker, plain text) come back not-found on
+# this simulator even though the content is genuinely rendered correctly (see
+# docs/verification/FTY-263 for the on-device screenshot proof) — a query
+# limitation of this exact presentation style, not a rendering gap. So this
+# waits for the native sheet's presentation animation to finish instead of
+# asserting on content; `correction.detail`'s undimmed presentation is what the
+# shared smoke flow already proves the marker + content against.
+- launchApp:
+    clearState: false
+- openLink: "fatty://__visual-review?preset=correction.typeahead&theme=light"
+- waitForAnimationToEnd:
+    timeout: 15000
+- takeScreenshot: correction-typeahead-light
+
+# correction.confirm_apply (light): the advanced override panel opens
+# directly with the item's current calories pre-filled — a value ready to
+# confirm/apply, not a blank input. Same large/dimmed presentation as
+# `typeahead` above, so this also waits for the presentation to settle rather
+# than asserting on content.
+- launchApp:
+    clearState: false
+- openLink: "fatty://__visual-review?preset=correction.confirm_apply&theme=light"
+- waitForAnimationToEnd:
+    timeout: 15000
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: correction-confirm-apply-light

@@ -18,6 +18,7 @@ import {
   type LogEventDTO,
 } from "@/api/logEvents";
 import { type SavedFoodDTO } from "@/api/savedFoods";
+import { useCorrectionVisualReviewSeam } from "@/components/correction/visualReviewSeam";
 import {
   type OutboxStore,
   type OutboxSyncState,
@@ -423,6 +424,19 @@ export function useTodayData({
     setItemsByEvent,
     setSubmitError,
   });
+
+  // Visual-review seam (FTY-263): when a `correction.*` preset is active
+  // (isE2EMode() only — always null otherwise), open the sheet directly over
+  // the synthetic resolved entry in the requested mode. FTY-247 remounts this
+  // whole provider subtree on every preset activation (keyed on the revision),
+  // so `presetName` changing is the only re-trigger this needs — not a
+  // re-render guard.
+  const correctionSeam = useCorrectionVisualReviewSeam();
+  useEffect(() => {
+    if (!correctionSeam) return;
+    openItemSheet(correctionSeam.item, correctionSeam.logPhrase, correctionSeam.mode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [correctionSeam?.presetName]);
 
   // One poll: refetch the day and reconcile into the timeline, preserving any
   // unacknowledged optimistic entry. Also refetch the daily summary so it

@@ -48,7 +48,10 @@ import { ChangeMatchPanel } from "@/components/correction/ChangeMatchPanel";
 import { OverridePanel } from "@/components/correction/OverridePanel";
 import { ProvenanceBlock } from "@/components/correction/ProvenanceBlock";
 import { SaveFoodRow } from "@/components/correction/SaveFoodRow";
-import { useCorrectionSheet } from "@/components/correction/useCorrectionSheet";
+import {
+  useCorrectionSheet,
+  type SheetMode,
+} from "@/components/correction/useCorrectionSheet";
 import { DisplayText } from "@/components/ui/DisplayText";
 import { NativeSheet } from "@/components/ui/NativeSheet";
 import { provenancePresentation } from "@/components/ui/ProvenanceIcon";
@@ -74,6 +77,12 @@ export interface CorrectionSheetBaseProps {
   reResolve?: typeof reResolveItemApi;
   /** Injectable for tests (FTY-052/053 save-as-food). */
   saveFood?: typeof saveFoodApi;
+  /**
+   * E2E-only: opens the sheet directly into this mode (FTY-263 visual-review
+   * seam). Never set by a real caller — Today's sheet host only supplies it
+   * from the visual-review seam, which is itself gated behind `isE2EMode()`.
+   */
+  e2eInitialMode?: SheetMode;
 }
 
 /**
@@ -128,6 +137,7 @@ export function CorrectionSheet({
   listCandidates = listSourceCandidatesApi,
   reResolve = reResolveItemApi,
   saveFood = saveFoodApi,
+  e2eInitialMode,
 }: CorrectionSheetProps) {
   const { colors } = useTheme();
 
@@ -143,6 +153,7 @@ export function CorrectionSheet({
     listCandidates,
     reResolve,
     saveFood,
+    initialMode: e2eInitialMode,
   });
   const { item, mode, expanded } = sheet;
 

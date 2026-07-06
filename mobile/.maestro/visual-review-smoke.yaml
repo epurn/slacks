@@ -83,3 +83,20 @@ appId: com.fatty
 - assertVisible:
     id: today-screen
 - takeScreenshot: today-populated-after-signed-out-light
+
+# correction.detail (light): the correction lane's seam (FTY-263) — the
+# correction sheet opens directly over a synthetic resolved entry via the
+# E2E-only initial-state seam, never a scripted tap, registered through this
+# same registration API from components/correction/visualReviewSeam.ts.
+- openLink: "fatty://__visual-review?preset=correction.detail&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:correction.detail"
+    timeout: 20000
+- assertVisible:
+    id: today-screen
+- extendedWaitUntil:
+    visible:
+      text: ".*Oatmeal.*"
+    timeout: 10000
+- takeScreenshot: correction-detail-light

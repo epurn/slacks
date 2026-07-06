@@ -12,6 +12,7 @@ import {
   type LogEventDTO,
 } from "@/api/logEvents";
 import { type ClarificationData } from "@/components/CorrectionSheet";
+import { type SheetMode } from "@/components/correction/useCorrectionSheet";
 import { type ApiSession } from "@/state/session";
 import { sortByNewest } from "@/state/today";
 
@@ -42,6 +43,11 @@ export type SheetTarget = {
    * resolves. Calm, no layout jump.
    */
   clarificationData?: ClarificationData;
+  /**
+   * E2E-only: opens the sheet directly into this mode (FTY-263 visual-review
+   * seam). Never set by a real tap — only the visual-review seam supplies it.
+   */
+  initialMode?: SheetMode;
 };
 
 /**
@@ -75,10 +81,13 @@ export function useCorrectionSheet({
   // Open the correction/detail sheet for a tapped timeline item (FTY-148). The
   // sheet stays put — the timeline does not navigate away — honouring "calm by
   // default": a correction happens in a slide-up sheet, not a screen push.
-  const openItemSheet = useCallback((item: DerivedItem, logPhrase: string) => {
-    setSheetTarget({ item, logPhrase });
-    setSheetVisible(true);
-  }, []);
+  const openItemSheet = useCallback(
+    (item: DerivedItem, logPhrase: string, initialMode?: SheetMode) => {
+      setSheetTarget({ item, logPhrase, initialMode });
+      setSheetVisible(true);
+    },
+    [],
+  );
   const closeItemSheet = useCallback(() => setSheetVisible(false), []);
 
   // Open the correction sheet in clarify-mode for a needs_clarification entry
