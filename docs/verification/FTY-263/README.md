@@ -7,14 +7,15 @@ in the named mode** via the E2E-only initial-state seam — no tap on any render
 row — over the synthetic resolved "Oatmeal" entry (140 kcal, the same fixture
 `correction.yaml`/`correction-beat.yaml` already use).
 
-The screenshots below were captured on the iOS simulator (`Fatty-Slot-0`,
-iOS 26.5) to show each rendered sub-state. The **load-bearing regression
+The screenshots below were captured on iOS 26.5 simulators to show each rendered
+sub-state. The **load-bearing regression
 assertion** — waiting on each in-modal `visual-review-settled:<preset>` marker —
-runs in CI on Android (see "Where the marker is asserted" below).
+runs in CI on Android (see "Where the marker is asserted" below); the iOS images
+are visual evidence, not the marker-reachability gate.
 
 | Screenshot | Preset | Deep link | Proves |
 |------------|--------|-----------|--------|
-| `correction-detail-light.png` | `correction.detail` | `fatty://__visual-review?preset=correction.detail&theme=light` | The quick-fix ("normal") mode: Portion stepper (`1 cup`, `140 kcal · P5 C27 F3`), the "Change match" lever, and the Advanced override rows, all populated from the synthetic entry — reached via the seam, not a tap on a timeline row. |
+| `correction-detail-light.png` | `correction.detail` | `fatty://__visual-review?preset=correction.detail&theme=light` | The quick-fix ("normal") mode: Portion stepper (`1 cup`, `140 kcal · P5 C27 F3`), the collapsed "Change match" lever, and the Advanced override rows, all populated from the synthetic entry — reached via the seam, not a tap on a timeline row. |
 | `correction-typeahead-light.png` | `correction.typeahead` | `fatty://__visual-review?preset=correction.typeahead&theme=light` | The Change-match panel opens directly at the sheet's large detent, with its candidate list **already loaded** ("Chicken, grilled, USDA · 165 kcal / 100g") from the shared `source-candidates` fixture — not the blank "no alternatives" state a naive initial-mode-only seam would leave it in. |
 | `correction-confirm-apply-light.png` | `correction.confirm_apply` | `fatty://__visual-review?preset=correction.confirm_apply&theme=light` | The advanced override panel opens directly with the item's current value **pre-filled** (`140` kcal, focused, ready to edit) rather than a blank input — "confirm/apply" is a real, in-progress action, not an empty form. |
 
