@@ -335,182 +335,196 @@ export function TrendsScreen({
 
   return (
     <>
-      <ScrollView
-        testID="trends-screen"
-        style={[styles.screen, { backgroundColor: colors.surface }]}
-        contentContainerStyle={[
-          styles.content,
-          {
-            // Reserve at least the floating switcher's own footprint (FTY-242)
-            // so the last card scrolls clear of the pill and the home indicator,
-            // not a hand-derived tab-bar-era height (FTY-258).
-            paddingBottom: floatingSwitcherClearance(insets.bottom),
-          },
-        ]}
-      >
-        <ScreenHeader
-          title="Trends"
-          actions={
-            onPressProfile ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Open profile"
-                accessibilityHint="Opens profile and settings"
-                onPress={onPressProfile}
-                style={styles.headerAction}
-              >
-                <AppIcon name="gear" size={22} color={colors.text} />
-              </Pressable>
-            ) : null
-          }
-        />
-
-        {/* Headline delta */}
-        {headline ? (
-          <View
-            style={styles.headlineRow}
-            accessibilityLabel={`Current weight trend: ${headline.current} ${headline.unit}, ${headline.direction === "↑" ? "up" : headline.direction === "↓" ? "down" : "stable"} ${Math.abs(headline.delta)} ${headline.unit} ${rangeProse(range)}${
-              deltaGoalState === "toward"
-                ? ", toward your goal"
-                : deltaGoalState === "away"
-                  ? ", away from your goal"
-                  : ""
-            }`}
-          >
-            <ThemedNumber
-              value={`${headline.current} ${headline.unit}`}
-              scale="title1"
-            />
-            <Text
-              style={[
-                styles.headlineDelta,
-                {
-                  // Goal-aware: keyed off progress toward the user's goal
-                  // direction, not "down = good" (ux-design §4b, FTY-189).
-                  // `accentText` (not `accent`) is the AA-safe token for text.
-                  color:
-                    deltaGoalState === "toward"
-                      ? colors.accentText
-                      : deltaGoalState === "away"
-                        ? colors.coral
-                        : colors.textSecondary,
-                },
-              ]}
-            >
-              {` ${headline.direction}${Math.abs(headline.delta)} ${rangeProse(range)}`}
-            </Text>
-          </View>
-        ) : null}
-
-        {/* Range selector */}
-        <RangeSelector
-          selected={range}
-          onChange={(r) => {
-            setRange(r);
-          }}
-        />
-
-        {/* Weight card */}
-        <View
-          style={[
-            styles.card,
-            { backgroundColor: colors.surfaceRaised, borderRadius: radius.lg },
+      <View style={[styles.screen, { backgroundColor: colors.surface }]}>
+        <ScrollView
+          testID="trends-screen"
+          style={styles.scroll}
+          contentContainerStyle={[
+            styles.content,
+            {
+              // Reserve at least the floating switcher's own footprint (FTY-242)
+              // so the last card scrolls clear of the pill and the home indicator,
+              // not a hand-derived tab-bar-era height (FTY-258).
+              paddingBottom: floatingSwitcherClearance(insets.bottom),
+            },
           ]}
-          onLayout={(e) => setChartWidth(e.nativeEvent.layout.width - spacing.base * 2)}
         >
-          <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
-            WEIGHT TREND
-          </Text>
-          <EWMATrendChart
-            entries={entries}
-            ewmaKg={ewmaKg}
-            unitsPreference={unitsPreference}
-            loading={weightPhase === "loading"}
-            error={weightPhase === "error" ? weightError : null}
-            onRetry={reloadWeight}
-            today={todayStr}
-            width={chartWidth}
+          <ScreenHeader
+            title="Trends"
+            actions={
+              onPressProfile ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Open profile"
+                  accessibilityHint="Opens profile and settings"
+                  onPress={onPressProfile}
+                  style={styles.headerAction}
+                >
+                  <AppIcon name="gear" size={22} color={colors.text} />
+                </Pressable>
+              ) : null
+            }
           />
-          <Pressable
-            testID="log-weight-btn"
-            accessibilityRole="button"
-            accessibilityLabel="Log weight"
-            onPress={() => setSheetVisible(true)}
-            style={styles.logWeightBtn}
-          >
-            <Text style={[styles.logWeightLabel, { color: colors.accentText }]}>
-              + Log weight
-            </Text>
-          </Pressable>
-        </View>
 
-        {/* Adherence card */}
-        <View
-          style={[
-            styles.card,
-            { backgroundColor: colors.surfaceRaised, borderRadius: radius.lg },
-          ]}
-        >
-          <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
-            INTAKE ADHERENCE
-          </Text>
-
-          {adherencePhase === "loading" ? (
-            // In-place skeleton placeholder. It always resolves: the range
-            // effect drives `adherencePhase` to `ready`/`error`, so this is
-            // never a permanent placeholder (FTY-188). Skeleton honors Reduce
-            // Motion, degrading to a static block.
+          {/* Headline delta */}
+          {headline ? (
             <View
-              testID="adherence-loading"
-              accessibilityRole="progressbar"
-              accessibilityLabel="Loading intake adherence"
-              style={styles.adherenceLoading}
+              style={styles.headlineRow}
+              accessibilityLabel={`Current weight trend: ${headline.current} ${headline.unit}, ${headline.direction === "↑" ? "up" : headline.direction === "↓" ? "down" : "stable"} ${Math.abs(headline.delta)} ${headline.unit} ${rangeProse(range)}${
+                deltaGoalState === "toward"
+                  ? ", toward your goal"
+                  : deltaGoalState === "away"
+                    ? ", away from your goal"
+                    : ""
+              }`}
             >
-              <Skeleton width={168} height={18} borderRadius={6} />
-              <Skeleton width={132} height={18} borderRadius={6} />
-            </View>
-          ) : adherencePhase === "error" ? (
-            <View
-              accessibilityRole="alert"
-              accessibilityLabel="Intake adherence failed to load"
-              style={styles.errorBox}
-            >
-              <Text style={[styles.errorText, { color: colors.textSecondary }]}>
-                {adherenceError ?? "Could not load your intake history. Please try again."}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Try again"
-                onPress={reloadAdherence}
-                style={[styles.retryBtn, { borderRadius: radius.md }]}
+              <ThemedNumber
+                value={`${headline.current} ${headline.unit}`}
+                scale="title1"
+              />
+              <Text
+                style={[
+                  styles.headlineDelta,
+                  {
+                    // Goal-aware: keyed off progress toward the user's goal
+                    // direction, not "down = good" (ux-design §4b, FTY-189).
+                    // `accentText` (not `accent`) is the AA-safe token for text.
+                    color:
+                      deltaGoalState === "toward"
+                        ? colors.accentText
+                        : deltaGoalState === "away"
+                          ? colors.coral
+                          : colors.textSecondary,
+                  },
+                ]}
               >
-                <Text style={[styles.retryLabel, { color: colors.accentText }]}>
-                  Try again
-                </Text>
-              </Pressable>
+                {` ${headline.direction}${Math.abs(headline.delta)} ${rangeProse(range)}`}
+              </Text>
             </View>
-          ) : contentState === "uncounted" ? (
-            <AdherenceUncountedRow
-              count={adherence.uncountedEntries}
-              colors={colors}
+          ) : null}
+
+          {/* Range selector */}
+          <RangeSelector
+            selected={range}
+            onChange={(r) => {
+              setRange(r);
+            }}
+          />
+
+          {/* Weight card */}
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: colors.surfaceRaised, borderRadius: radius.lg },
+            ]}
+            onLayout={(e) => setChartWidth(e.nativeEvent.layout.width - spacing.base * 2)}
+          >
+            <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
+              WEIGHT TREND
+            </Text>
+            <EWMATrendChart
+              entries={entries}
+              ewmaKg={ewmaKg}
+              unitsPreference={unitsPreference}
+              loading={weightPhase === "loading"}
+              error={weightPhase === "error" ? weightError : null}
+              onRetry={reloadWeight}
+              today={todayStr}
+              width={chartWidth}
             />
-          ) : contentState === "empty" ? (
-            <AdherenceEmptyInvite colors={colors} />
-          ) : (
-            <>
-              <AdherenceSummaryRow
-                adherence={adherence}
+            <Pressable
+              testID="log-weight-btn"
+              accessibilityRole="button"
+              accessibilityLabel="Log weight"
+              onPress={() => setSheetVisible(true)}
+              style={styles.logWeightBtn}
+            >
+              <Text style={[styles.logWeightLabel, { color: colors.accentText }]}>
+                + Log weight
+              </Text>
+            </Pressable>
+          </View>
+
+          {/* Adherence card */}
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: colors.surfaceRaised, borderRadius: radius.lg },
+            ]}
+          >
+            <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
+              INTAKE ADHERENCE
+            </Text>
+
+            {adherencePhase === "loading" ? (
+              // In-place skeleton placeholder. It always resolves: the range
+              // effect drives `adherencePhase` to `ready`/`error`, so this is
+              // never a permanent placeholder (FTY-188). Skeleton honors Reduce
+              // Motion, degrading to a static block.
+              <View
+                testID="adherence-loading"
+                accessibilityRole="progressbar"
+                accessibilityLabel="Loading intake adherence"
+                style={styles.adherenceLoading}
+              >
+                <Skeleton width={168} height={18} borderRadius={6} />
+                <Skeleton width={132} height={18} borderRadius={6} />
+              </View>
+            ) : adherencePhase === "error" ? (
+              <View
+                accessibilityRole="alert"
+                accessibilityLabel="Intake adherence failed to load"
+                style={styles.errorBox}
+              >
+                <Text style={[styles.errorText, { color: colors.textSecondary }]}>
+                  {adherenceError ?? "Could not load your intake history. Please try again."}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Try again"
+                  onPress={reloadAdherence}
+                  style={[styles.retryBtn, { borderRadius: radius.md }]}
+                >
+                  <Text style={[styles.retryLabel, { color: colors.accentText }]}>
+                    Try again
+                  </Text>
+                </Pressable>
+              </View>
+            ) : contentState === "uncounted" ? (
+              <AdherenceUncountedRow
+                count={adherence.uncountedEntries}
                 colors={colors}
               />
-              <AdherenceStrip
-                days={adherence.days}
-                today={todayStr}
-                onDayPress={onDayPress}
-              />
-            </>
-          )}
-        </View>
-      </ScrollView>
+            ) : contentState === "empty" ? (
+              <AdherenceEmptyInvite colors={colors} />
+            ) : (
+              <>
+                <AdherenceSummaryRow
+                  adherence={adherence}
+                  colors={colors}
+                />
+                <AdherenceStrip
+                  days={adherence.days}
+                  today={todayStr}
+                  onDayPress={onDayPress}
+                />
+              </>
+            )}
+          </View>
+        </ScrollView>
+
+        {/* Opaque status-bar backdrop (FTY-261): ScreenHeader scrolls away with
+            the body, so this sibling pins the top safe-area inset above the
+            ScrollView to keep scrolled content off the status bar. */}
+        <View
+          testID="trends-status-bar-backdrop"
+          pointerEvents="none"
+          style={[
+            styles.statusBarBackdrop,
+            { height: insets.top, backgroundColor: colors.surface },
+          ]}
+        />
+      </View>
 
       {/* Weight log sheet */}
       {apiSession ? (
@@ -648,7 +662,14 @@ function AdherenceSummaryRow({
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  scroll: { flex: 1 },
   content: { paddingHorizontal: spacing.base, gap: spacing.base },
+  statusBarBackdrop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+  },
 
   center: { flex: 1, paddingHorizontal: 24, alignItems: "center" },
   centerTitle: {

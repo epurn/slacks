@@ -1659,3 +1659,81 @@ describe("TrendsScreen — floating switcher bottom clearance (FTY-258)", () => 
     expect(scrim.length).toBe(0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Top status-bar containment (FTY-261): the FTY-259 audit's SE captures showed
+// the large weight metric riding up under the status bar once Trends is
+// scrolled near the bottom, because `ScreenHeader` (the only thing covering the
+// top inset) scrolls away with the body. An opaque backdrop pinned to the top
+// safe-area inset must sit outside the scrollable content so the status-bar
+// strip stays opaque screen chrome at any scroll position, in both palettes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("TrendsScreen — status-bar top containment (FTY-261)", () => {
+  it("renders an opaque backdrop covering the top safe-area inset, outside the scroll content", async () => {
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+
+    const scroll = tree.root.find((n) => n.props.testID === "trends-screen");
+    const backdrop = tree.root.find(
+      (n) => n.props.testID === "trends-status-bar-backdrop",
+    );
+
+    // Sized to the safe-area top inset seeded by `mount`'s SafeAreaProvider
+    // metrics, so it covers exactly the status-bar strip.
+    const backdropStyle = StyleSheet.flatten(backdrop.props.style) as {
+      height?: number;
+      position?: string;
+    };
+    const safeAreaTop = 47;
+    expect(backdropStyle.height).toBe(safeAreaTop);
+    expect(backdropStyle.position).toBe("absolute");
+
+    // It must not be part of the scrollable content — otherwise it would
+    // scroll away with the body exactly like `ScreenHeader` does, and the
+    // status bar would be exposed again once scrolled.
+    const nestedInScroll = scroll.findAll(
+      (n) => n.props.testID === "trends-status-bar-backdrop",
+    );
+    expect(nestedInScroll.length).toBe(0);
+
+    // It never blocks scroll/tap gestures for the content underneath it.
+    expect(backdrop.props.pointerEvents).toBe("none");
+  });
+
+  it("colors the backdrop from the FTY-097 surface token in both light and dark, never a hardcoded hex", async () => {
+    for (const scheme of ["light", "dark"] as const) {
+      const palette = scheme === "light" ? lightPalette : darkPalette;
+      const tree = mount(
+        <ThemeProvider override={scheme}>
+          <TrendsScreen
+            session={SESSION}
+            listWeightEntries={jest.fn().mockResolvedValue([])}
+            getDailySummaryRange={jest.fn().mockResolvedValue([
+              makeSummary("2026-06-27", 0, null),
+            ])}
+            now={NOW}
+          />
+        </ThemeProvider>,
+      );
+      await act(async () => {});
+
+      const backdrop = tree.root.find(
+        (n) => n.props.testID === "trends-status-bar-backdrop",
+      );
+      const backdropStyle = StyleSheet.flatten(backdrop.props.style) as {
+        backgroundColor?: string;
+      };
+      expect(backdropStyle.backgroundColor).toBe(palette.surface);
+    }
+    // The swap only matters if the token differs across palettes.
+    expect(lightPalette.surface).not.toBe(darkPalette.surface);
+  });
+});
