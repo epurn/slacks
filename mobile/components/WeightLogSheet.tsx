@@ -45,6 +45,17 @@ interface WeightLogSheetProps {
   /** Today's date string (YYYY-MM-DD), injectable for tests. */
   today: string;
   create?: typeof createWeightEntryApi;
+  /**
+   * E2E-only (FTY-265): when set, renders an invisible, non-interactive marker
+   * with this testID once the sheet's content has mounted. The caller only sets
+   * this under `isE2EMode()` for the active `weight.sheet` visual-review preset,
+   * once its data has settled — undefined in every normal (non-preset) open, so
+   * this never renders in a release build or a real user's "+ Log weight" tap.
+   * A shared marker rendered outside this sheet (e.g. at the navigator level)
+   * cannot work here: a presented native sheet occludes its presenter from the
+   * accessibility tree, so screenshot automation would never find it.
+   */
+  settledMarkerTestID?: string;
 }
 
 function messageFor(error: unknown): string {
@@ -62,6 +73,7 @@ export function WeightLogSheet({
   lastEntry,
   today,
   create = createWeightEntryApi,
+  settledMarkerTestID,
 }: WeightLogSheetProps) {
   const { colors } = useTheme();
   const [submitting, setSubmitting] = useState(false);
@@ -136,6 +148,16 @@ export function WeightLogSheet({
             onSubmit={(w) => void handleSubmit(w)}
           />
         </View>
+
+        {settledMarkerTestID ? (
+          <View
+            testID={settledMarkerTestID}
+            accessible
+            accessibilityLabel={settledMarkerTestID}
+            pointerEvents="none"
+            style={styles.settledMarker}
+          />
+        ) : null}
       </View>
     </NativeSheet>
   );
@@ -173,5 +195,12 @@ const styles = StyleSheet.create({
   },
   inputCard: {
     padding: spacing.base,
+  },
+  settledMarker: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: 4,
+    height: 4,
   },
 });
