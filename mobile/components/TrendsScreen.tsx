@@ -34,7 +34,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AppIcon, ScreenHeader, SegmentedControl, Skeleton, ThemedNumber } from "@/components/ui";
+import { AppIcon, ScreenHeader, SegmentedControl, Skeleton, ThemedNumber, floatingSwitcherClearance } from "@/components/ui";
 
 import {
   WeightApiError,
@@ -334,7 +334,8 @@ export function TrendsScreen({
         contentContainerStyle={[
           styles.content,
           {
-            paddingBottom: insets.bottom + 80 + spacing.xl,
+            // Clearance for the floating switcher + home indicator (FTY-242).
+            paddingBottom: floatingSwitcherClearance(insets.bottom),
           },
         ]}
       >

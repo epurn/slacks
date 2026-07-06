@@ -36,9 +36,9 @@ appId: com.fatty
     timeout: 15000
 
 # ── Trends range native segmented control ────────────────────────────────────
-# Step 2: Navigate to Trends via the tab bar (tabBarAccessibilityLabel).
+# Step 2: Navigate to Trends via the floating switcher's Trends segment (FTY-242).
 - tapOn:
-    text: "Trends tab"
+    id: "floating-switcher-trends"
 - extendedWaitUntil:
     visible:
       id: trends-screen

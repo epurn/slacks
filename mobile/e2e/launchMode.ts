@@ -61,11 +61,6 @@ import {
   E2E_TARGET_EVENT,
   E2E_TARGET_ENTRY,
   E2E_TARGET_SUMMARY,
-  E2E_OCCLUSION_RAW_TEXT,
-  E2E_OCCLUSION_PENDING_EVENT,
-  E2E_OCCLUSION_EVENT,
-  E2E_OCCLUSION_ENTRY,
-  E2E_OCCLUSION_SUMMARY,
   e2eWeightEntries,
   e2eDailySummaryRange,
   E2E_SAVED_FOOD,
@@ -209,10 +204,6 @@ export function createE2EMockFetch(): typeof fetch {
   // entry that crosses the calorie target is created, flipping the day summary
   // over target. Keyed on its own raw_text.
   let targetStage: 0 | 1 = 0;
-  // FTY-185 tab-bar occlusion flow: 0 before the log, 1 once the multi-item
-  // "big mixed plate" entry is created, so GET serves a long timeline that
-  // scrolls beneath the floating tab bar. Keyed on its own raw_text.
-  let occlusionStage: 0 | 1 = 0;
   // FTY-225 barcode manual-entry flow: 0 before the log, 1 once the seeded
   // "1 serving of greek yogurt" entry is created. POST returns it pending
   // (skeleton visible); a refresh GET then serves the completed event whose
@@ -286,7 +277,6 @@ export function createE2EMockFetch(): typeof fetch {
       if (resolveStage === 1) return json([E2E_RESOLVE_ENTRY]);
       if (correctionStage === 1) return json([E2E_CORRECTION_ENTRY]);
       if (targetStage === 1) return json([E2E_TARGET_ENTRY]);
-      if (occlusionStage === 1) return json([E2E_OCCLUSION_ENTRY]);
       if (barcodeStage === 1) return json([E2E_BARCODE_ENTRY]);
       if (phase === 0) return json([]);
       if (phase === 1) return json([{ event: E2E_CLARIFY_EVENT, items: [] }]);
@@ -346,13 +336,6 @@ export function createE2EMockFetch(): typeof fetch {
           targetStage = 1;
           return json(E2E_TARGET_EVENT, 201);
         }
-        // FTY-185 tab-bar occlusion: the seed appears pending first (skeleton),
-        // then a pull-to-refresh GET resolves it to a long multi-item timeline
-        // the flow scrolls under the floating tab bar. Keyed on its own raw_text.
-        if (rawTextOf(init) === E2E_OCCLUSION_RAW_TEXT) {
-          occlusionStage = 1;
-          return json(E2E_OCCLUSION_PENDING_EVENT, 201);
-        }
         // FTY-225 barcode manual-entry: the seeded "1 serving of …" phrase
         // appears pending first (skeleton), then a pull-to-refresh GET resolves
         // it to the counted packaged-food item. Keyed on its own raw_text.
@@ -382,7 +365,6 @@ export function createE2EMockFetch(): typeof fetch {
       // poll never drops the reconciled row (their items ride the feed above).
       if (correctionStage === 1) return json([E2E_CORRECTION_EVENT]);
       if (targetStage === 1) return json([E2E_TARGET_EVENT]);
-      if (occlusionStage === 1) return json([E2E_OCCLUSION_EVENT]);
       // The barcode flow's GET likewise lists its completed entry so a
       // refresh/poll keeps the reconciled row (items ride the feed above).
       if (barcodeStage === 1) return json([E2E_BARCODE_EVENT]);
@@ -455,7 +437,6 @@ export function createE2EMockFetch(): typeof fetch {
       if (resolveStage === 1) return json(E2E_RESOLVE_SUMMARY);
       if (targetStage === 1) return json(E2E_TARGET_SUMMARY);
       if (correctionStage === 1) return json(E2E_CORRECTION_SUMMARY);
-      if (occlusionStage === 1) return json(E2E_OCCLUSION_SUMMARY);
       if (barcodeStage === 1) return json(E2E_BARCODE_SUMMARY);
       return json(phase === 2 ? E2E_RESOLVED_SUMMARY : E2E_DAILY_SUMMARY);
     }

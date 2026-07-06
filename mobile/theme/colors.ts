@@ -24,10 +24,16 @@ export interface ColorPalette {
   readonly separator: string;
   /** Background for buttons and input controls. */
   readonly controlBackground: string;
-  /** Tab bar active icon / tint. */
+  /** Active segment icon / label tint in the floating switcher. */
   readonly tabActive: string;
-  /** Tab bar inactive icon / tint. */
+  /** Inactive segment icon / label tint in the floating switcher. */
   readonly tabInactive: string;
+  /**
+   * Translucent fill behind the floating switcher's blur material — the
+   * token-sourced fallback so the pill stays legible where the native blur is
+   * weak or unsupported (FTY-242).
+   */
+  readonly switcherGlass: string;
 }
 
 export const lightPalette: ColorPalette = {
@@ -44,6 +50,7 @@ export const lightPalette: ColorPalette = {
   controlBackground: '#E4E4EA',
   tabActive: '#1C1C1E',
   tabInactive: '#8E8E93',
+  switcherGlass: 'rgba(255,255,255,0.7)',
 };
 
 export const darkPalette: ColorPalette = {
@@ -60,4 +67,5 @@ export const darkPalette: ColorPalette = {
   controlBackground: '#3A3A3C',
   tabActive: '#F2F2F7',
   tabInactive: '#8E8E93',
+  switcherGlass: 'rgba(28,28,30,0.55)',
 };
