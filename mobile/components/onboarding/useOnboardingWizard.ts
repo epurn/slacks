@@ -20,6 +20,8 @@ import {
   type PacePreset,
 } from '@/api/goals';
 import { putProfile, ProfileApiError } from '@/api/profile';
+import { isE2EMode } from '@/e2e/launchMode';
+import { useVisualReviewCore } from '@/e2e/visualReview';
 import {
   DEFAULT_PACE,
   detectTimezone,
@@ -39,6 +41,14 @@ import {
 import { useGoalDirectionController } from '@/state/goalDirection';
 import type { Session } from '@/state/session';
 import { toApiSession } from '@/state/session';
+
+import {
+  ONBOARDING_MEASUREMENTS_FORMULA_PRESET_NAME,
+  ONBOARDING_MEASUREMENTS_SEED,
+  ONBOARDING_TARGET_REVEAL_PRESET_NAME,
+  ONBOARDING_TARGET_REVEAL_SEED,
+  onboardingSeamInitialStep,
+} from './visualReviewOnboardingSteps';
 
 export interface UseOnboardingWizardParams {
   session: Session;
@@ -89,8 +99,18 @@ export function useOnboardingWizard({
 }: UseOnboardingWizardParams): OnboardingWizard {
   const goalDirectionController = useGoalDirectionController();
 
+  // E2E-only initial-state seam (FTY-266): when a visual-review onboarding
+  // preset is active — only under `isE2EMode()`, so this is dead in release
+  // builds even if the runtime state were somehow non-null — the wizard opens
+  // directly on that preset's step with its synthetic step data already in
+  // place. No taps are simulated. `null` for every other preset, the
+  // preset-free default, and every release build.
+  const visualReviewCore = useVisualReviewCore();
+  const onboardingSeamPreset = isE2EMode() ? visualReviewCore.presetName : null;
+  const seamInitialStep = onboardingSeamInitialStep(onboardingSeamPreset);
+
   // ── Step tracking ──────────────────────────────────────────────────────────
-  const [step, setStep] = useState<OnboardingStep>(1);
+  const [step, setStep] = useState<OnboardingStep>(() => seamInitialStep ?? 1);
 
   // ── Step 1 — Goal ──────────────────────────────────────────────────────────
   const [goalState, setGoalState] = useState<GoalStepState>(initialGoalStep);
@@ -99,13 +119,26 @@ export function useOnboardingWizard({
   const detectedUnits = useMemo(() => detectUnitsFn(), [detectUnitsFn]);
   const detectedTimezone = useMemo(() => detectTimezoneFn(), [detectTimezoneFn]);
   const [measurements, setMeasurements] = useState<MeasurementsStepState>(() =>
-    initialMeasurementsStep(detectedUnits, detectedTimezone),
+    onboardingSeamPreset === ONBOARDING_MEASUREMENTS_FORMULA_PRESET_NAME
+      ? ONBOARDING_MEASUREMENTS_SEED
+      : initialMeasurementsStep(detectedUnits, detectedTimezone),
   );
   const [measurementErrors, setMeasurementErrors] = useState<ProfileFormErrors>({});
 
   // ── Step 3 — Target reveal ─────────────────────────────────────────────────
-  const [reveal, setReveal] = useState<GoalTargetResponse | null>(null);
-  const [revealOpacity] = useState(() => new Animated.Value(0));
+  const [reveal, setReveal] = useState<GoalTargetResponse | null>(() =>
+    onboardingSeamPreset === ONBOARDING_TARGET_REVEAL_PRESET_NAME
+      ? ONBOARDING_TARGET_REVEAL_SEED
+      : null,
+  );
+  // Seeded already-settled (opacity 1, no animation) for the target-reveal
+  // preset so the screenshot never needs to wait out the reveal fade.
+  const [revealOpacity] = useState(
+    () =>
+      new Animated.Value(
+        onboardingSeamPreset === ONBOARDING_TARGET_REVEAL_PRESET_NAME ? 1 : 0,
+      ),
+  );
 
   // ── Saving / error state ──────────────────────────────────────────────────
   const [saving, setSaving] = useState(false);

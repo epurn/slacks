@@ -20,7 +20,8 @@
  * to logs or error messages — errors carry only the HTTP status and action.
  */
 
-import { ScrollView } from 'react-native';
+import { useCallback, useRef } from 'react';
+import { ScrollView, View, type LayoutChangeEvent } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
@@ -57,6 +58,20 @@ export function SettingsScreen({
   const c = useSettingsController(controllerProps);
   const { session } = c;
 
+  // E2E-only visual-review seam (FTY-267): the appearance control sits below the
+  // fold, so the `settings.appearance` preset scrolls straight to it on layout
+  // instead of needing a simulated scroll gesture. `visualReviewSubState` is
+  // always `null` outside E2E mode, so this scroll never fires in release/dev
+  // builds.
+  const scrollRef = useRef<ScrollView>(null);
+  const handlePreferencesLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      if (c.visualReviewSubState !== 'appearance') return;
+      scrollRef.current?.scrollTo({ y: e.nativeEvent.layout.y, animated: false });
+    },
+    [c.visualReviewSubState],
+  );
+
   if (!session) {
     return (
       <SignedOutState
@@ -79,6 +94,7 @@ export function SettingsScreen({
 
   return (
     <ScrollView
+      ref={scrollRef}
       style={{ flex: 1, backgroundColor: colors.surface }}
       // The native large-title header (configured on the /profile route) owns the
       // top inset: `automatic` insets content below the bar and drives the
@@ -93,7 +109,9 @@ export function SettingsScreen({
     >
       <YouSection c={c} colors={colors} />
       <BodySection c={c} colors={colors} />
-      <PreferencesSection c={c} colors={colors} />
+      <View onLayout={handlePreferencesLayout}>
+        <PreferencesSection c={c} colors={colors} />
+      </View>
       <AccountSection
         session={session}
         onSignOut={() => void c.handleSignOut()}

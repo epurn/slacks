@@ -22,6 +22,12 @@
 # settled, so a data-starved or wrong-screen launch fails here rather than going
 # green on the always-mounted shell. `takeScreenshot` captures the settled frame.
 #
+# The settings.goal_edit / settings.body_edit / settings.appearance presets near
+# the end (FTY-267) are registered from the settings lane, not this file — they
+# prove the per-screen E2E-only initial-state seam: each opens Settings with its
+# sub-state already active (the goal/body editor open, or scrolled to
+# Preferences) with no simulated tap or scroll.
+#
 # Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
 # directory-level Maestro runs launch the installed app under test reliably.
 appId: com.fatty
@@ -59,6 +65,20 @@ appId: com.fatty
     id: today-screen
 - takeScreenshot: today-empty-light
 
+# weight.sheet (light): the weight-log sheet's sub-state (FTY-265) — a
+# screen-owned (mobile-weight) E2E-only initial-state seam opens the sheet on
+# mount, not a scripted "+ Log weight" tap. Registered from
+# components/TrendsScreen.tsx through the FTY-247 registration API, not this
+# shared registry/manifest.
+- openLink: "fatty://__visual-review?preset=weight.sheet&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:weight.sheet"
+    timeout: 20000
+- assertVisible:
+    id: weight-log-sheet
+- takeScreenshot: weight-sheet-light
+
 # Signed-out reseed guard (FTY-247): the signed-out preset must NOT be sticky.
 # Open today.signed_out — the E2E session store hydrates a null session, so the
 # auth gate reaches the sign-in surface and the settled marker appears.
@@ -84,22 +104,94 @@ appId: com.fatty
     id: today-screen
 - takeScreenshot: today-populated-after-signed-out-light
 
+# settings.goal_edit (FTY-267): the E2E-only initial-state seam opens Settings
+# with the goal editor already active — no simulated tap on the Goal row.
+- openLink: "fatty://__visual-review?preset=settings.goal_edit&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:settings.goal_edit"
+    timeout: 20000
+- assertVisible:
+    id: goal-edit-card
+- takeScreenshot: settings-goal-edit-light
+
+# settings.body_edit (FTY-267): same seam, the weight editor is open.
+- openLink: "fatty://__visual-review?preset=settings.body_edit&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:settings.body_edit"
+    timeout: 20000
+- assertVisible:
+    id: body-metric-edit-card
+- takeScreenshot: settings-body-edit-light
+
+# settings.appearance (FTY-267): the seam scrolls straight to the Preferences
+# section so the Appearance control is on screen with no manual scroll gesture.
+# Assert the segmented control itself is visible/interactable — not just the
+# label — so a collapsed or off-screen control fails here.
+- openLink: "fatty://__visual-review?preset=settings.appearance&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:settings.appearance"
+    timeout: 20000
+- assertVisible:
+    id: "appearance-segmented-control"
+- takeScreenshot: settings-appearance-light
+
+# today.confirm_parsed (FTY-262, light): a Today-owned sub-state preset — no
+# route param opens the parsed-confirmation sheet, so Today's own E2E-only
+# initial-state seam (useLabelProposal) opens it on mount instead. Proves the
+# per-screen seam join contract: registered through registerVisualReviewPreset
+# from Today's own code, reached here exactly like any in-scope preset. The
+# confirm sheet's modal sets accessibilityViewIsModal, so `today-screen`
+# underneath is (correctly) unreachable while it is presented — assert the
+# sheet's own content instead of the screen behind it.
+- openLink: "fatty://__visual-review?preset=today.confirm_parsed&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.confirm_parsed"
+    timeout: 20000
+- assertVisible:
+    text: "Granola bar"
+- assertVisible:
+    id: "visual-review-settled:today.confirm_parsed"
+- takeScreenshot: today-confirm-parsed-light
+
 # correction.detail (light): the correction lane's seam (FTY-263) — the
 # correction sheet opens directly over a synthetic resolved entry via the
 # E2E-only initial-state seam, never a scripted tap, registered through this
-# same registration API from components/correction/visualReviewSeam.ts.
+# same registration API from components/correction/visualReviewSeam.ts. Its
+# `visual-review-settled:correction.detail` marker is rendered INSIDE the
+# correction sheet's modal subtree (CorrectionSheet), so it is reachable while
+# the sheet is presented even though the medium detent leaves `today-screen`
+# undimmed behind it. The marker only appears after the sheet + synthetic item
+# have rendered.
 - openLink: "fatty://__visual-review?preset=correction.detail&theme=light"
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:correction.detail"
     timeout: 20000
 - assertVisible:
-    id: today-screen
+    text: ".*Oatmeal.*"
+- takeScreenshot: correction-detail-light
+
+# correction.typeahead (light): the Change-match panel opens directly at the
+# large, DIMMED detent, with its candidate list already loaded from the shared
+# source-candidates fixture — not the blank state a naive initial-mode-only seam
+# would leave it in. This is the expanded-detent case that failed on PR #230:
+# the shared navigator-level overlay marker was unreachable behind the dimmed
+# native presentation. The marker now lives INSIDE the sheet's modal subtree and
+# only appears once `candidatesLoading === false` with the candidate list
+# painted, so this waits on the in-modal marker itself — no animation-wait
+# fallback.
+- openLink: "fatty://__visual-review?preset=correction.typeahead&theme=light"
 - extendedWaitUntil:
     visible:
-      text: ".*Oatmeal.*"
-    timeout: 10000
-- takeScreenshot: correction-detail-light
+      id: "visual-review-settled:correction.typeahead"
+    timeout: 20000
+- assertVisible:
+    id: "visual-review-settled:correction.typeahead"
+- takeScreenshot: correction-typeahead-light
 
 # trends.adherence_retry (light): the adherence-strip retry state (FTY-264),
 # registered from the Trends lane through the FTY-247 API — a range-read error
@@ -115,3 +207,79 @@ appId: com.fatty
 - assertVisible:
     text: "Try again"
 - takeScreenshot: trends-adherence-retry-light
+
+# capture.barcode_granted (light): the barcode-scanner sub-state (FTY-268),
+# registered from the Today/capture lane through the FTY-247 API. Opened via the
+# story's E2E-only initial-state seam — the scanner is already up when the
+# preset activates, no scripted "Scan barcode" tap — with the granted camera
+# permission the E2E harness already mocks for every build (FTY-194).
+- openLink: "fatty://__visual-review?preset=capture.barcode_granted&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:capture.barcode_granted"
+    timeout: 20000
+- assertVisible:
+    id: barcode-reticle
+- takeScreenshot: capture-barcode-granted-light
+
+# capture.label_guidance (light): the label-capture framing-guidance sub-state
+# (FTY-268), opened via the same initial-state seam — no scripted "Capture
+# label" tap.
+- openLink: "fatty://__visual-review?preset=capture.label_guidance&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:capture.label_guidance"
+    timeout: 20000
+- assertVisible:
+    text: "Fit the nutrition label inside the frame"
+- takeScreenshot: capture-label-guidance-light
+
+# capture.confirm_parsed (light): the confirm-parsed-values sheet (FTY-268),
+# seeded through the real label-proposal read (a registered fixture, no live
+# upload, no camera) — no scripted capture taps.
+- openLink: "fatty://__visual-review?preset=capture.confirm_parsed&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:capture.confirm_parsed"
+    timeout: 20000
+- assertVisible:
+    text: "Granola bar"
+- assertVisible:
+    text: "Not yet counted"
+- takeScreenshot: capture-confirm-parsed-light
+
+# onboarding.goal (FTY-266, light): an onboarding-owned sub-state preset — the
+# wizard is component-local `step` state and never shown by default (the E2E
+# harness marks onboarding complete at boot), so this preset both skips that
+# seed and opens the wizard on step 1 via its own E2E-only initial-state seam.
+# Proves the per-screen seam join contract from onboarding's own lane.
+- openLink: "fatty://__visual-review?preset=onboarding.goal&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:onboarding.goal"
+    timeout: 20000
+- assertVisible:
+    text: "What's your goal?"
+- takeScreenshot: onboarding-goal-light
+
+# onboarding.measurements_formula (FTY-266, light): the wizard opens directly
+# on step 2 with a prefilled form and a metabolic-formula variant selected.
+- openLink: "fatty://__visual-review?preset=onboarding.measurements_formula&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:onboarding.measurements_formula"
+    timeout: 20000
+- assertVisible:
+    text: "Your body metrics"
+- takeScreenshot: onboarding-measurements-formula-light
+
+# onboarding.target_reveal (FTY-266, light): the wizard opens directly on step
+# 3 with a synthetic, already-settled target reveal (no fade to wait out).
+- openLink: "fatty://__visual-review?preset=onboarding.target_reveal&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:onboarding.target_reveal"
+    timeout: 20000
+- assertVisible:
+    id: reveal-hero
+- takeScreenshot: onboarding-target-reveal-light

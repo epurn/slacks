@@ -54,6 +54,20 @@ export function WeightEntryInput({
   const [weightText, setWeightText] = useState(
     initialValue != null ? String(initialValue) : "",
   );
+  // A seed value that resolves after this component has already mounted (the
+  // last-weight fetch is still in flight, e.g. the FTY-265 visual-review seam
+  // opens this sheet before Trends' own weight-entries read settles) fills the
+  // field once, the next time `initialValue` changes — but only while the field
+  // is still pristine, so it never clobbers what the user has typed. This is
+  // React's "adjust state when a prop changes" pattern (a render-time update,
+  // not an effect), which avoids the extra committed render an effect would add.
+  const [lastSeenInitialValue, setLastSeenInitialValue] = useState(initialValue);
+  if (initialValue !== lastSeenInitialValue) {
+    setLastSeenInitialValue(initialValue);
+    if (initialValue != null && weightText === "") {
+      setWeightText(String(initialValue));
+    }
+  }
   const unitLabel = weightUnitLabel(unitsPreference);
   const parsed = parseWeightInput(weightText);
   const canSubmit = parsed !== null && !submitting;

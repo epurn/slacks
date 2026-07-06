@@ -48,6 +48,13 @@ export type SheetTarget = {
    * seam). Never set by a real tap — only the visual-review seam supplies it.
    */
   initialMode?: SheetMode;
+  /**
+   * E2E-only: the `visual-review-settled:<preset>` testID the correction sheet
+   * renders inside its modal subtree once the mode settles (FTY-263). Set only
+   * by the visual-review seam alongside `initialMode`; `undefined` for every
+   * real tap.
+   */
+  settledMarkerTestID?: string;
 };
 
 /**
@@ -82,8 +89,13 @@ export function useCorrectionSheet({
   // sheet stays put — the timeline does not navigate away — honouring "calm by
   // default": a correction happens in a slide-up sheet, not a screen push.
   const openItemSheet = useCallback(
-    (item: DerivedItem, logPhrase: string, initialMode?: SheetMode) => {
-      setSheetTarget({ item, logPhrase, initialMode });
+    (
+      item: DerivedItem,
+      logPhrase: string,
+      initialMode?: SheetMode,
+      settledMarkerTestID?: string,
+    ) => {
+      setSheetTarget({ item, logPhrase, initialMode, settledMarkerTestID });
       setSheetVisible(true);
     },
     [],

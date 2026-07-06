@@ -2,10 +2,17 @@
 # sheet's `detail` / `typeahead` / `confirm_apply` sub-states directly over a
 # synthetic resolved "Oatmeal" entry via the E2E-only initial-state seam
 # (components/correction/visualReviewSeam.ts), never a scripted tap on a
-# rendered row. Complements the shared `visual-review-smoke.yaml` (which only
-# proves `correction.detail`, the one preset that leaves the timeline
-# undimmed/interactive behind the sheet) with the two presets that open at the
-# large, dimmed detent.
+# rendered row. Complements the shared `visual-review-smoke.yaml` (which proves
+# `correction.detail` and `correction.typeahead`) by also covering
+# `correction.confirm_apply`.
+#
+# Each preset waits on its `visual-review-settled:<preset>` marker, which
+# CorrectionSheet renders INSIDE the sheet's modal subtree once that mode's async
+# state has settled — reachable while the sheet is presented (the marker
+# screenshot automation consumes). No `waitForAnimationToEnd` fallback: on the
+# tested platform (Android, where NativeSheet falls back to an assistive-tech-
+# reachable Modal — see NativeSheet.tsx and docs/verification/FTY-263) the in-
+# modal marker is a real, load-bearing assertion.
 #
 # Each preset is registered through FTY-247's registration API from
 # correction-owned code — no shared registry/route/theme/marker edits.
@@ -44,32 +51,38 @@ appId: com.fatty
 # candidate list already loaded from the shared source-candidates fixture —
 # not the blank "no alternatives" state a naive initial-mode-only seam would
 # leave it in. This preset opens the sheet at its large, DIMMED detent
-# (change-match narrows to large-only, see useCorrectionSheet's `expanded`);
-# that dimmed native presentation makes every base-layer/sheet-content
-# accessibility query (the settled marker, plain text) come back not-found on
-# this simulator even though the content is genuinely rendered correctly (see
-# docs/verification/FTY-263 for the on-device screenshot proof) — a query
-# limitation of this exact presentation style, not a rendering gap. So this
-# waits for the native sheet's presentation animation to finish instead of
-# asserting on content; `correction.detail`'s undimmed presentation is what the
-# shared smoke flow already proves the marker + content against.
+# (change-match narrows to large-only, see useCorrectionSheet's `expanded`).
+# The settled marker now lives INSIDE the correction sheet's modal subtree
+# (CorrectionSheet's `settledMarkerTestID`), so it is reachable while the sheet
+# is presented even at that dimmed detent — the case that failed on PR #230,
+# where the navigator-level overlay marker was occluded behind the presentation.
+# The marker appears only once `candidatesLoading === false` with the candidate
+# list painted, so waiting on it captures the loaded sub-state — no
+# animation-wait fallback.
 - launchApp:
     clearState: false
 - openLink: "fatty://__visual-review?preset=correction.typeahead&theme=light"
-- waitForAnimationToEnd:
-    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:correction.typeahead"
+    timeout: 20000
+- assertVisible:
+    id: "visual-review-settled:correction.typeahead"
 - takeScreenshot: correction-typeahead-light
 
 # correction.confirm_apply (light): the advanced override panel opens
 # directly with the item's current calories pre-filled — a value ready to
 # confirm/apply, not a blank input. Same large/dimmed presentation as
-# `typeahead` above, so this also waits for the presentation to settle rather
-# than asserting on content.
+# `typeahead` above; its in-modal marker appears only once the override panel is
+# up with its pre-seeded draft, so this waits on that marker too — no
+# animation-wait fallback.
 - launchApp:
     clearState: false
 - openLink: "fatty://__visual-review?preset=correction.confirm_apply&theme=light"
-- waitForAnimationToEnd:
-    timeout: 15000
-- waitForAnimationToEnd:
-    timeout: 5000
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:correction.confirm_apply"
+    timeout: 20000
+- assertVisible:
+    id: "visual-review-settled:correction.confirm_apply"
 - takeScreenshot: correction-confirm-apply-light

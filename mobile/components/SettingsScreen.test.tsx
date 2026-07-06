@@ -13,12 +13,16 @@
  */
 
 import React from "react";
-import { AccessibilityInfo } from "react-native";
+import { AccessibilityInfo, ScrollView } from "react-native";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ThemeProvider } from "@/theme";
 import { SettingsScreen } from "./SettingsScreen";
+import {
+  activateVisualReviewPreset,
+  __deactivateVisualReview,
+} from "@/e2e/visualReview/session";
 import type { TargetReadModel } from "@/api/dailySummary";
 import { GoalsApiError, type GoalTargetResponse } from "@/api/goals";
 import type { ProfileDTO } from "@/api/profile";
@@ -1183,5 +1187,172 @@ describe("Data & About stubs", () => {
     expect(deleteRow.props.accessibilityRole).toBeUndefined();
     expect(deleteRow.props.accessibilityHint).toBeUndefined();
     expect(deleteRow.props.onPress).toBeUndefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests: visual-review seam — Settings edit sub-states (FTY-267)
+//
+// Each sub-state opens via the E2E-only initial-state seam (activating the
+// registered preset), never a simulated tap, mirroring how the real deep-link
+// route would seed it. The inertness test is the acceptance-criterion proof
+// that the seam does nothing in a release/non-E2E build.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Visual-review seam — Settings edit sub-states (FTY-267)", () => {
+  const gThis = globalThis as Record<string, unknown>;
+  const ORIGINAL_DEV = gThis["__DEV__"] as boolean;
+  const ORIGINAL_E2E_ENV = process.env.EXPO_PUBLIC_FATTY_E2E;
+
+  function enterE2EMode(): void {
+    gThis["__DEV__"] = true;
+    process.env["EXPO_PUBLIC_FATTY_E2E"] = "true";
+  }
+
+  // The controller subscribes to the shared visual-review core store
+  // (`useVisualReviewCore`), so a tree left mounted across tests would keep
+  // receiving updates from a later test's `activateVisualReviewPreset` /
+  // `__deactivateVisualReview` call outside that later test's `act()`. Unmount
+  // after every test to keep each one's subscription scoped to itself.
+  let mounted: ReactTestRenderer | null = null;
+
+  function renderMounted(
+    ...args: Parameters<typeof renderSettings>
+  ): ReactTestRenderer {
+    const tree = renderSettings(...args);
+    mounted = tree;
+    return tree;
+  }
+
+  afterEach(() => {
+    if (mounted) {
+      const tree = mounted;
+      act(() => tree.unmount());
+      mounted = null;
+    }
+    act(() => {
+      __deactivateVisualReview();
+    });
+    gThis["__DEV__"] = ORIGINAL_DEV;
+    if (ORIGINAL_E2E_ENV === undefined) {
+      delete process.env["EXPO_PUBLIC_FATTY_E2E"];
+    } else {
+      process.env["EXPO_PUBLIC_FATTY_E2E"] = ORIGINAL_E2E_ENV;
+    }
+  });
+
+  it("settings.goal_edit opens the goal editor via the seam, seeded from the loaded goal", async () => {
+    enterE2EMode();
+    activateVisualReviewPreset("settings.goal_edit", null);
+
+    const tree = renderMounted({
+      getActiveGoalFn: jest
+        .fn()
+        .mockResolvedValue({ direction: "gain", pace: "gentle" }),
+    });
+    await act(async () => {});
+
+    // The edit card is present without pressing "Goal" — the seam, not a tap.
+    expect(
+      tree.root.findAll((n) => n.props.testID === "goal-edit-card").length,
+    ).toBeGreaterThan(0);
+    // Seeded from the loaded goal, not the 'loss' / 'steady' defaults.
+    const directionControl = tree.root.findAll(
+      (n) =>
+        n.props.testID === "goal-direction-segmented-control" &&
+        Array.isArray(n.props.values),
+    )[0];
+    expect(directionControl.props.selectedIndex).toBe(
+      (directionControl.props.values as string[]).indexOf("Gain"),
+    );
+    const paceControl = tree.root.findAll(
+      (n) =>
+        n.props.testID === "goal-pace-segmented-control" &&
+        Array.isArray(n.props.values),
+    )[0];
+    expect(paceControl.props.selectedIndex).toBe(
+      (paceControl.props.values as string[]).indexOf("Gentle"),
+    );
+  });
+
+  it("settings.body_edit opens the weight editor via the seam", async () => {
+    enterE2EMode();
+    activateVisualReviewPreset("settings.body_edit", null);
+
+    const tree = renderMounted();
+    await act(async () => {});
+
+    expect(
+      tree.root.findAll((n) => n.props.testID === "body-metric-edit-card").length,
+    ).toBeGreaterThan(0);
+    expect(textContent(tree)).toContain("New weight (kg)");
+  });
+
+  it("settings.appearance scrolls to the Preferences section via the seam", async () => {
+    enterE2EMode();
+    activateVisualReviewPreset("settings.appearance", null);
+
+    const scrollToSpy = jest
+      .spyOn(ScrollView.prototype, "scrollTo")
+      .mockImplementation(() => {});
+    const tree = renderMounted();
+    await act(async () => {});
+
+    const preferencesWrapper = tree.root.findAll(
+      (n) => typeof n.props.onLayout === "function",
+    )[0];
+    act(() => {
+      preferencesWrapper.props.onLayout({
+        nativeEvent: { layout: { x: 0, y: 512, width: 320, height: 200 } },
+      });
+    });
+
+    expect(scrollToSpy).toHaveBeenCalledWith({ y: 512, animated: false });
+    scrollToSpy.mockRestore();
+  });
+
+  it("is inert with no active preset: no edit card opens and Preferences layout never scrolls (release-build proof)", async () => {
+    enterE2EMode();
+    // No activateVisualReviewPreset call — nothing is active.
+
+    const scrollToSpy = jest
+      .spyOn(ScrollView.prototype, "scrollTo")
+      .mockImplementation(() => {});
+    const tree = renderMounted();
+    await act(async () => {});
+
+    expect(
+      tree.root.findAll((n) => n.props.testID === "goal-edit-card"),
+    ).toHaveLength(0);
+    expect(
+      tree.root.findAll((n) => n.props.testID === "body-metric-edit-card"),
+    ).toHaveLength(0);
+
+    const preferencesWrapper = tree.root.findAll(
+      (n) => typeof n.props.onLayout === "function",
+    )[0];
+    act(() => {
+      preferencesWrapper.props.onLayout({
+        nativeEvent: { layout: { x: 0, y: 512, width: 320, height: 200 } },
+      });
+    });
+    expect(scrollToSpy).not.toHaveBeenCalled();
+    scrollToSpy.mockRestore();
+  });
+
+  it("is inert outside E2E mode even with a matching preset active (release-build proof)", async () => {
+    // __DEV__ stays at its real (non-E2E-forced) value here — do not call
+    // enterE2EMode(). Activation itself carries no E2E gate, so this proves the
+    // controller's own isE2EMode() check (via useSettingsVisualReviewSubState)
+    // is load-bearing.
+    gThis["__DEV__"] = false;
+    activateVisualReviewPreset("settings.goal_edit", null);
+
+    const tree = renderMounted();
+    await act(async () => {});
+
+    expect(
+      tree.root.findAll((n) => n.props.testID === "goal-edit-card"),
+    ).toHaveLength(0);
   });
 });

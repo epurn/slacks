@@ -83,6 +83,18 @@ export interface CorrectionSheetBaseProps {
    * from the visual-review seam, which is itself gated behind `isE2EMode()`.
    */
   e2eInitialMode?: SheetMode;
+  /**
+   * E2E-only (FTY-263): the `visual-review-settled:<preset>` testID to render as
+   * an invisible marker INSIDE this sheet's modal subtree, once the requested
+   * mode's async state has settled. A presented native sheet occludes the
+   * navigator-level `VisualReviewSettleOverlay` from the accessibility tree —
+   * worst at the expanded, dimmed detent (the `change-match`/`override` case that
+   * failed on PR #230) — so the marker screenshot automation waits on must live
+   * in the sheet itself. Supplied only under `isE2EMode()` for the active
+   * `correction.*` preset; `undefined` for every real open and release build, so
+   * this never renders outside the visual-review harness.
+   */
+  settledMarkerTestID?: string;
 }
 
 /**
@@ -138,6 +150,7 @@ export function CorrectionSheet({
   reResolve = reResolveItemApi,
   saveFood = saveFoodApi,
   e2eInitialMode,
+  settledMarkerTestID,
 }: CorrectionSheetProps) {
   const { colors } = useTheme();
 
@@ -167,6 +180,24 @@ export function CorrectionSheet({
   const unit = food?.unit ?? null;
   const kcal = food?.calories ?? null;
   const canSaveFood = food !== null && food.calories !== null && !!logPhrase;
+
+  // FTY-263 in-modal settled marker. It appears only once the requested mode's
+  // async state has settled — the exact per-mode gate the visual-review contract
+  // requires so screenshot automation captures the loaded sub-state, never a
+  // mid-load frame:
+  //   - change-match (typeahead): the candidate read finished with a painted list;
+  //   - override (confirm_apply): the override panel is up with its pre-seeded draft;
+  //   - normal (detail) / clarify: the sheet + synthetic item have rendered.
+  // Gated by `settledMarkerTestID` being set, which only happens under
+  // `isE2EMode()` for the active `correction.*` preset — so this is inert for
+  // every real open and dead in release builds.
+  const markerModeSettled =
+    mode === "change-match"
+      ? !sheet.candidatesLoading && sheet.candidates.length > 0
+      : mode === "override"
+        ? sheet.overrideDraft.trim() !== ""
+        : true;
+  const showSettledMarker = settledMarkerTestID != null && markerModeSettled;
 
   return (
     <NativeSheet
@@ -332,6 +363,21 @@ export function CorrectionSheet({
           )}
         </ScrollView>
       </Animated.View>
+
+      {/* FTY-263: in-modal settled marker. Rendered as a sibling of the animated
+          body (never under its pulse opacity) but still inside the native
+          sheet's presented subtree, so Maestro/XCUITest can reach it while the
+          sheet is up — even at the expanded, dimmed detent. Invisible,
+          non-interactive; only mounts under the visual-review seam. */}
+      {showSettledMarker ? (
+        <View
+          testID={settledMarkerTestID}
+          accessible
+          accessibilityLabel={settledMarkerTestID}
+          pointerEvents="none"
+          style={styles.settledMarker}
+        />
+      ) : null}
     </NativeSheet>
   );
 }
@@ -391,5 +437,15 @@ const styles = StyleSheet.create({
   leverChevron: {
     fontSize: typeScale.title3,
     fontWeight: "300",
+  },
+  // FTY-263 settled marker: a small, transparent, non-interactive element the
+  // accessibility tree exposes while the sheet is presented. Absolute so it
+  // never shifts layout; `pointerEvents: 'none'` means it never intercepts touches.
+  settledMarker: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: 4,
+    height: 4,
   },
 });

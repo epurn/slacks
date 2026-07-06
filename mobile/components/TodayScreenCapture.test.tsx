@@ -7,7 +7,17 @@ import {
   type LogEventDTO,
 } from "@/api/logEvents";
 import { mockReduceMotion } from "@/testUtils/reduceMotion";
+import { activateVisualReviewPreset } from "@/e2e/visualReview";
+import { QUIET_MS } from "@/e2e/visualReview/VisualReviewSettleOverlay";
+import { __deactivateVisualReview } from "@/e2e/visualReview/session";
 
+import {
+  CAPTURE_BARCODE_GRANTED_PRESET,
+  CAPTURE_CONFIRM_PARSED_EVENT,
+  CAPTURE_CONFIRM_PARSED_PRESET,
+  CAPTURE_CONFIRM_PARSED_PROPOSAL,
+  CAPTURE_LABEL_GUIDANCE_PRESET,
+} from "./today/captureVisualReview";
 import {
   INACTIVE,
   SESSION,
@@ -510,6 +520,140 @@ describe("TodayScreen confirm-parsed-values sheet", () => {
     await uploadLabel(tree);
 
     // No confirm sheet is presented for a null proposal.
+    expect(hasA11yLabel(tree, "Looks right, add it")).toBe(false);
+  });
+});
+
+describe("TodayScreen visual-review capture seam (FTY-268)", () => {
+  const gThis = globalThis as Record<string, unknown>;
+  const ORIGINAL_DEV = gThis["__DEV__"] as boolean;
+  const ORIGINAL_E2E_ENV = process.env.EXPO_PUBLIC_FATTY_E2E;
+
+  function setE2E(on: boolean): void {
+    gThis["__DEV__"] = on;
+    if (on) {
+      process.env["EXPO_PUBLIC_FATTY_E2E"] = "true";
+    } else {
+      delete process.env["EXPO_PUBLIC_FATTY_E2E"];
+    }
+  }
+
+  async function settle(): Promise<void> {
+    // Real timers: waits out the settle overlay's network-quiet window
+    // (QUIET_MS) rather than juggling fake timers against TodayScreen's own
+    // polling/outbox timers, which this suite doesn't otherwise touch.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, QUIET_MS + 50));
+    });
+  }
+
+  afterEach(() => {
+    act(() => {
+      __deactivateVisualReview();
+    });
+    gThis["__DEV__"] = ORIGINAL_DEV;
+    if (ORIGINAL_E2E_ENV === undefined) {
+      delete process.env["EXPO_PUBLIC_FATTY_E2E"];
+    } else {
+      process.env["EXPO_PUBLIC_FATTY_E2E"] = ORIGINAL_E2E_ENV;
+    }
+  });
+
+  it("opens the barcode scanner via the initial-state seam — no 'Scan barcode' tap — and settles", async () => {
+    setE2E(true);
+    activateVisualReviewPreset(CAPTURE_BARCODE_GRANTED_PRESET, null);
+    const load = jest.fn().mockResolvedValue([]);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
+    await act(async () => {});
+
+    // Already open — the scanner was never pressed.
+    expect(hasA11yLabel(tree, "Close scanner")).toBe(true);
+    expect(hasA11yLabel(tree, "Camera scanner active")).toBe(true);
+
+    await settle();
+    expect(
+      hasA11yLabel(tree, `visual-review-settled:${CAPTURE_BARCODE_GRANTED_PRESET}`),
+    ).toBe(true);
+  });
+
+  it("opens label capture on the framing guidance via the initial-state seam — no 'Capture label' tap — and settles", async () => {
+    setE2E(true);
+    activateVisualReviewPreset(CAPTURE_LABEL_GUIDANCE_PRESET, null);
+    const load = jest.fn().mockResolvedValue([]);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
+    await act(async () => {});
+
+    expect(hasA11yLabel(tree, "Close scanner")).toBe(true);
+    expect(
+      hasA11yLabel(tree, "Fit the nutrition label inside the frame"),
+    ).toBe(true);
+
+    await settle();
+    expect(
+      hasA11yLabel(tree, `visual-review-settled:${CAPTURE_LABEL_GUIDANCE_PRESET}`),
+    ).toBe(true);
+  });
+
+  it("opens the confirm-parsed-values sheet seeded through the real label-proposal read — no capture taps — and settles", async () => {
+    setE2E(true);
+    activateVisualReviewPreset(CAPTURE_CONFIRM_PARSED_PRESET, null);
+    const load = jest.fn().mockResolvedValue([]);
+    const getLabelProposal = jest
+      .fn()
+      .mockResolvedValue(CAPTURE_CONFIRM_PARSED_PROPOSAL);
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        useActive={INACTIVE}
+        getLabelProposal={getLabelProposal}
+      />,
+    );
+    await act(async () => {});
+
+    // Driven through the same real proposal-read path a live upload takes.
+    expect(getLabelProposal).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+      CAPTURE_CONFIRM_PARSED_EVENT.id,
+    );
+    const text = textContent(tree);
+    expect(text).toContain("Granola bar");
+    expect(text).toContain("Not yet counted");
+    expect(hasA11yLabel(tree, "Looks right, add it")).toBe(true);
+
+    await settle();
+    expect(
+      hasA11yLabel(tree, `visual-review-settled:${CAPTURE_CONFIRM_PARSED_PRESET}`),
+    ).toBe(true);
+  });
+
+  it("is inert outside E2E mode: an active preset opens no capture surface (release build path)", async () => {
+    setE2E(false);
+    activateVisualReviewPreset(CAPTURE_BARCODE_GRANTED_PRESET, null);
+    const load = jest.fn().mockResolvedValue([]);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
+    await act(async () => {});
+
+    // Default capture behaviour, unchanged: nothing opens on its own.
+    expect(hasA11yLabel(tree, "Close scanner")).toBe(false);
+    expect(hasA11yLabel(tree, "Looks right, add it")).toBe(false);
+  });
+
+  it("is inert with no active preset: default capture behaviour is unchanged", async () => {
+    setE2E(true);
+    const load = jest.fn().mockResolvedValue([]);
+    const tree = mount(
+      <TodayScreen session={SESSION} load={load} useActive={INACTIVE} />,
+    );
+    await act(async () => {});
+
+    expect(hasA11yLabel(tree, "Close scanner")).toBe(false);
     expect(hasA11yLabel(tree, "Looks right, add it")).toBe(false);
   });
 });

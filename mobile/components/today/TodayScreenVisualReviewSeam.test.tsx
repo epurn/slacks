@@ -85,6 +85,10 @@ describe("Correction sheet visual-review seam (FTY-263)", () => {
 
     expect(hasA11yLabel(tree, "Increase amount")).toBe(true);
     expect(hasA11yLabel(tree, "Decrease amount")).toBe(true);
+    // The settled marker is rendered inside the correction sheet's modal subtree
+    // once the sheet + synthetic item have rendered (FTY-263) — the marker
+    // screenshot automation waits on, reachable while the sheet is presented.
+    expect(hasA11yLabel(tree, "visual-review-settled:correction.detail")).toBe(true);
   });
 
   it("opens correction.typeahead directly in change-match mode with candidates already loaded — no tap", async () => {
@@ -120,6 +124,10 @@ describe("Correction sheet visual-review seam (FTY-263)", () => {
     expect(
       hasA11yLabel(tree, "Select Chicken, grilled, USDA, 165 kcal per 100g"),
     ).toBe(true);
+    // The in-modal settled marker appears only once candidatesLoading === false
+    // with the candidate list painted — the expanded, dimmed-detent case that
+    // failed on PR #230, now reachable from inside the sheet's modal subtree.
+    expect(hasA11yLabel(tree, "visual-review-settled:correction.typeahead")).toBe(true);
   });
 
   it("opens correction.confirm_apply directly in override mode with the current value pre-filled — no tap", async () => {
@@ -135,6 +143,9 @@ describe("Correction sheet visual-review seam (FTY-263)", () => {
     // Pre-filled with the synthetic oatmeal entry's current calories (140) —
     // "ready to confirm/apply", not a blank input the user must fill first.
     expect(inputValue(tree, "Calories value")).toBe("140");
+    // The in-modal settled marker appears only once the override panel is up
+    // with its pre-seeded draft — reachable inside the sheet's modal subtree.
+    expect(hasA11yLabel(tree, "visual-review-settled:correction.confirm_apply")).toBe(true);
   });
 
   it("is inert outside E2E mode: no sheet auto-opens even with a preset forced active", async () => {
@@ -152,6 +163,8 @@ describe("Correction sheet visual-review seam (FTY-263)", () => {
 
     expect(hasA11yLabel(tree, "Increase amount")).toBe(false);
     expect(hasA11yLabel(tree, "Calories value")).toBe(false);
+    // No sheet, so no in-modal marker either — the seam is fully inert.
+    expect(hasA11yLabel(tree, "visual-review-settled:correction.detail")).toBe(false);
   });
 
   it("leaves default correction behaviour unchanged when no preset is active", async () => {

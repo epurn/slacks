@@ -11,6 +11,7 @@ import {
 } from "@/api/weightEntries";
 import { DailySummaryApiError } from "@/api/dailySummary";
 import type { DailySummaryDTO, TargetReadModel } from "@/api/dailySummary";
+import { useVisualReviewCore } from "@/e2e/visualReview/hooks";
 import { SessionProvider, type Session, type SessionRecord } from "@/state/session";
 import type { SessionStore } from "@/state/sessionStore";
 import { GoalDirectionProvider } from "@/state/goalDirection";
@@ -23,6 +24,20 @@ import {
 } from "@/state/trends";
 import { formatDate } from "@/state/weightEntries";
 import { ThemeProvider, lightPalette, darkPalette, typeScale } from "@/theme";
+
+// The visual-review `weight.sheet` seam (FTY-265) tests below stub just
+// `useVisualReviewCore` so they can control the "active preset" TrendsScreen
+// reads without touching the real singleton registry/session — a shared,
+// stateful module many *other* tests in this file mount against and never
+// explicitly unmount, so driving the real activate/deactivate would notify
+// those long-lived trees' store subscriptions outside `act()`. Other hooks
+// pass through their real implementation.
+jest.mock("@/e2e/visualReview/hooks", () => ({
+  ...jest.requireActual("@/e2e/visualReview/hooks"),
+  useVisualReviewCore: jest.fn(
+    jest.requireActual("@/e2e/visualReview/hooks").useVisualReviewCore,
+  ),
+}));
 
 // TrendsScreen now uses ScreenHeader → AppIcon (expo-symbols); stub the native
 // module so tests run without a native runtime.
@@ -638,6 +653,106 @@ describe("TrendsScreen — log weight sheet", () => {
     const [, weight, date] = createEntry.mock.calls[0] as [unknown, number, string];
     expect(weight).toBe(70);
     expect(date).toBe("2026-06-27");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Visual-review `weight.sheet` seam (FTY-265): an E2E-only initial-state seam
+// reaches the weight-log sheet's open sub-state without a simulated tap, and is
+// proven inert outside E2E mode.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("TrendsScreen — visual-review weight.sheet seam (FTY-265)", () => {
+  const gThis = globalThis as Record<string, unknown>;
+  const ORIGINAL_DEV = gThis["__DEV__"] as boolean;
+  const ORIGINAL_E2E_ENV = process.env.EXPO_PUBLIC_FATTY_E2E;
+
+  function setE2E(on: boolean): void {
+    gThis["__DEV__"] = on;
+    if (on) {
+      process.env["EXPO_PUBLIC_FATTY_E2E"] = "true";
+    } else {
+      delete process.env["EXPO_PUBLIC_FATTY_E2E"];
+    }
+  }
+
+  // Stubs the active-preset snapshot TrendsScreen reads via `useVisualReviewCore()`
+  // — never the real singleton registry/session (shared, stateful module-level
+  // state many other tests in this file mount against and never explicitly
+  // unmount). Driving the *real* activate/deactivate here would notify those
+  // long-lived, never-unmounted trees' store subscriptions outside `act()`.
+  function mockActivePreset(presetName: string | null): void {
+    (useVisualReviewCore as jest.Mock).mockReturnValue({
+      presetName,
+      route: presetName ? "/trends" : null,
+      settledPath: presetName ? "/trends" : null,
+      theme: null,
+      signedOut: false,
+      revision: 1,
+    });
+  }
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    gThis["__DEV__"] = ORIGINAL_DEV;
+    if (ORIGINAL_E2E_ENV === undefined) {
+      delete process.env["EXPO_PUBLIC_FATTY_E2E"];
+    } else {
+      process.env["EXPO_PUBLIC_FATTY_E2E"] = ORIGINAL_E2E_ENV;
+    }
+  });
+
+  it("opens the weight-log sheet on mount when weight.sheet is the active preset in E2E mode", async () => {
+    setE2E(true);
+    mockActivePreset("weight.sheet");
+
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
+        now={NOW}
+      />,
+    );
+
+    // No "+ Log weight" press — the sheet is open purely from the initial-state
+    // seam reflecting the already-active preset.
+    await waitForSheetSettled(tree);
+    expect(tree.root.findAll((n) => n.props.testID === "weight-log-sheet").length).toBeGreaterThan(0);
+  });
+
+  it("stays closed on mount outside E2E mode, even with weight.sheet marked active (release inertness)", async () => {
+    setE2E(false);
+    mockActivePreset("weight.sheet");
+
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+
+    expect(tree.root.findAll((n) => n.props.testID === "weight-log-sheet")).toHaveLength(0);
+  });
+
+  it("stays closed on mount in E2E mode when no preset (or a different preset) is active", async () => {
+    setE2E(true);
+    mockActivePreset(null);
+
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([])}
+        getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
+        now={NOW}
+      />,
+    );
+    await act(async () => {});
+
+    expect(tree.root.findAll((n) => n.props.testID === "weight-log-sheet")).toHaveLength(0);
   });
 });
 

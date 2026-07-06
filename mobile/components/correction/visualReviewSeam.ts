@@ -77,6 +77,13 @@ export interface CorrectionVisualReviewSeam {
   readonly item: DerivedItem;
   readonly logPhrase: string;
   readonly mode: SheetMode;
+  /**
+   * The `visual-review-settled:<preset>` testID the sheet renders inside its
+   * modal subtree once the mode's async state settles (see CorrectionSheet's
+   * `settledMarkerTestID`). This is the marker screenshot automation waits on —
+   * the navigator-level overlay is occluded behind the presented sheet.
+   */
+  readonly settledMarkerTestID: string;
 }
 
 /**
@@ -91,5 +98,11 @@ export function useCorrectionVisualReviewSeam(): CorrectionVisualReviewSeam | nu
   const presetName = core.presetName;
   const mode = presetName ? PRESET_MODES[presetName] : undefined;
   if (!presetName || !mode) return null;
-  return { presetName, item: E2E_CORRECTION_ITEM, logPhrase: E2E_CORRECTION_RAW_TEXT, mode };
+  return {
+    presetName,
+    item: E2E_CORRECTION_ITEM,
+    logPhrase: E2E_CORRECTION_RAW_TEXT,
+    mode,
+    settledMarkerTestID: `visual-review-settled:${presetName}`,
+  };
 }

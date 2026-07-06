@@ -48,6 +48,7 @@ import { SignInRequired } from "@/components/today/SignInRequired";
 import { TodayComposer } from "@/components/today/TodayComposer";
 import { TodaySheetHost } from "@/components/today/TodaySheetHost";
 import { useTodayData } from "@/components/today/useTodayData";
+import { VisualReviewSettleOverlay } from "@/e2e/visualReview";
 import { generateIdempotencyKey, type OutboxStore } from "@/state/outbox";
 import { fileOutboxStore } from "@/state/outboxStore";
 import { POLL_INTERVAL_MS } from "@/state/polling";
@@ -179,6 +180,7 @@ export function TodayScreen({
     setLabelCaptureOpen,
     labelProposal,
     labelProposalVisible,
+    labelProposalSettledMarker,
     sheetTarget,
     sheetVisible,
     inputRef,
@@ -264,6 +266,14 @@ export function TodayScreen({
           onClose={() => setScannerOpen(false)}
           onManualEntry={handleManualEntry}
         />
+        {/* Visual-review settled marker (FTY-268): the scanner is a full-screen
+            native Modal, which on iOS is a separate presented context from the
+            screen behind it, so the shared root-level marker (app/_layout.tsx)
+            is not reliably reachable while this is up top. Mounting the same
+            component here (unmodified, just imported) exposes the marker in the
+            presented context that's actually visible; it self-gates to
+            isE2EMode() and renders nothing in every other build/state. */}
+        <VisualReviewSettleOverlay />
       </Modal>
 
       <Modal
@@ -286,6 +296,8 @@ export function TodayScreen({
             takePhoto={labelTakePhoto}
           />
         )}
+        {/* Same rationale as the scanner Modal above. */}
+        <VisualReviewSettleOverlay />
       </Modal>
 
       <ScrollView
@@ -397,6 +409,7 @@ export function TodayScreen({
         saveFood={saveFood}
         labelProposal={labelProposal}
         labelProposalVisible={labelProposalVisible}
+        labelProposalSettledMarker={labelProposalSettledMarker}
         onProposalDismissed={handleProposalDismissed}
         onProposalConfirmed={handleProposalConfirmed}
         confirmLabelProposal={confirmLabelProposal}

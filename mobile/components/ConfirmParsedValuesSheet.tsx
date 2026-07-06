@@ -44,6 +44,7 @@ import {
 import { AppIcon } from "@/components/ui/AppIcon";
 import { provenancePresentation } from "@/components/ui/ProvenanceIcon";
 import { ThemedNumber } from "@/components/ui/ThemedNumber";
+import { VisualReviewSettleOverlay } from "@/e2e/visualReview";
 import type { ApiSession } from "@/state/session";
 import { formatValue } from "@/state/derivedItems";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
@@ -73,6 +74,8 @@ export interface ConfirmParsedValuesSheetProps {
   onConfirmed: (item: DerivedFoodItemDTO) => void;
   /** Injectable confirm action for tests (FTY-196). */
   confirm?: typeof confirmLabelProposalApi;
+  /** Visual-review settled-marker testID (FTY-262); `undefined` outside that preset — see render site. */
+  testMarker?: string;
 }
 
 function messageForError(error: unknown): string {
@@ -102,6 +105,7 @@ export function ConfirmParsedValuesSheet({
   onClose,
   onConfirmed,
   confirm = confirmLabelProposalApi,
+  testMarker,
 }: ConfirmParsedValuesSheetProps) {
   const { colors } = useTheme();
 
@@ -234,6 +238,7 @@ export function ConfirmParsedValuesSheet({
       accessibilityViewIsModal
     >
       <View style={styles.overlay}>
+        <VisualReviewSettleOverlay />{/* FTY-268: re-mounted here so the settled marker lives in this native Modal's own presented context (the root marker in app/_layout.tsx isn't reachable while the sheet is up); self-gates to isE2EMode(), renders nothing otherwise. */}
         <Pressable
           style={StyleSheet.absoluteFill}
           onPress={onClose}
@@ -242,6 +247,10 @@ export function ConfirmParsedValuesSheet({
           accessibilityRole={"button" as AccessibilityRole}
         />
 
+        {/* FTY-262: accessibilityViewIsModal hides the shared settle overlay while this modal is up. */}
+        {testMarker ? (
+          <View testID={testMarker} accessible accessibilityLabel={testMarker} pointerEvents="none" style={styles.settledMarker} />
+        ) : null}
         <View style={[styles.sheet, { backgroundColor: colors.surfaceRaised }]}>
           {/* Decorative grabber (non-draggable; hidden from assistive tech) */}
           <View
@@ -560,6 +569,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     backgroundColor: "rgba(0,0,0,0.35)",
   },
+  settledMarker: { position: "absolute", top: 0, left: 0, width: 4, height: 4 },
   sheet: {
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
