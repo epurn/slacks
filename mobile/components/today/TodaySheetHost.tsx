@@ -113,6 +113,8 @@ export function TodaySheetHost({
             listCandidates={listCandidates}
             reResolve={reResolve}
             saveFood={saveFood}
+            e2eInitialMode={sheetTarget.initialMode}
+            settledMarkerTestID={sheetTarget.settledMarkerTestID}
           />
         )
       ) : null}

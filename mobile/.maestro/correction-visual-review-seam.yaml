@@ -1,0 +1,88 @@
+# FTY-263: Correction sheet visual-review seam — opens each of the correction
+# sheet's `detail` / `typeahead` / `confirm_apply` sub-states directly over a
+# synthetic resolved "Oatmeal" entry via the E2E-only initial-state seam
+# (components/correction/visualReviewSeam.ts), never a scripted tap on a
+# rendered row. Complements the shared `visual-review-smoke.yaml` (which proves
+# `correction.detail` and `correction.typeahead`) by also covering
+# `correction.confirm_apply`.
+#
+# Each preset waits on its `visual-review-settled:<preset>` marker, which
+# CorrectionSheet renders INSIDE the sheet's modal subtree once that mode's async
+# state has settled — reachable while the sheet is presented (the marker
+# screenshot automation consumes). No `waitForAnimationToEnd` fallback: on the
+# tested platform (Android, where NativeSheet falls back to an assistive-tech-
+# reachable Modal — see NativeSheet.tsx and docs/verification/FTY-263) the in-
+# modal marker is a real, load-bearing assertion.
+#
+# Each preset is registered through FTY-247's registration API from
+# correction-owned code — no shared registry/route/theme/marker edits.
+#
+# Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
+# directory-level Maestro runs launch the installed app under test reliably.
+appId: com.fatty
+---
+# Each preset below relaunches the app first rather than switching straight
+# from the previous preset. A native sheet is a real presented UIViewController
+# (react-native-screens' formSheet, see NativeSheet.tsx); activating a new
+# preset while one is still on-screen races its native dismissal against the
+# next preset's sheet presentation, and UIKit can drop the second `present`
+# call while a dismissal is in flight. That race needs two consecutive
+# sheet-opening presets in one running session — unreachable in real usage,
+# where nothing ever opens a second preset while the first's sheet is up — so
+# relaunching between captures sidesteps it rather than adding product code to
+# chase a harness-only interaction.
+
+# correction.detail (light): the quick-fix mode — Portion stepper, Change
+# match lever, Advanced override rows, all populated from the synthetic entry.
+- launchApp:
+    clearState: false
+- openLink: "fatty://__visual-review?preset=correction.detail&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:correction.detail"
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      text: ".*Oatmeal.*"
+    timeout: 10000
+- takeScreenshot: correction-detail-light
+
+# correction.typeahead (light): the Change-match panel opens directly, with its
+# candidate list already loaded from the shared source-candidates fixture —
+# not the blank "no alternatives" state a naive initial-mode-only seam would
+# leave it in. This preset opens the sheet at its large, DIMMED detent
+# (change-match narrows to large-only, see useCorrectionSheet's `expanded`).
+# The settled marker now lives INSIDE the correction sheet's modal subtree
+# (CorrectionSheet's `settledMarkerTestID`), so it is reachable while the sheet
+# is presented even at that dimmed detent — the case that failed on PR #230,
+# where the navigator-level overlay marker was occluded behind the presentation.
+# The marker appears only once `candidatesLoading === false` with the candidate
+# list painted, so waiting on it captures the loaded sub-state — no
+# animation-wait fallback.
+- launchApp:
+    clearState: false
+- openLink: "fatty://__visual-review?preset=correction.typeahead&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:correction.typeahead"
+    timeout: 20000
+- assertVisible:
+    id: "visual-review-settled:correction.typeahead"
+- takeScreenshot: correction-typeahead-light
+
+# correction.confirm_apply (light): the advanced override panel opens
+# directly with the item's current calories pre-filled — a value ready to
+# confirm/apply, not a blank input. Same large/dimmed presentation as
+# `typeahead` above; its in-modal marker appears only once the override panel is
+# up with its pre-seeded draft, so this waits on that marker too — no
+# animation-wait fallback.
+- launchApp:
+    clearState: false
+- openLink: "fatty://__visual-review?preset=correction.confirm_apply&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:correction.confirm_apply"
+    timeout: 20000
+- assertVisible:
+    id: "visual-review-settled:correction.confirm_apply"
+- takeScreenshot: correction-confirm-apply-light

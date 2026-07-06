@@ -10,7 +10,7 @@
  * is unchanged.
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   listSourceCandidates as listSourceCandidatesApi,
@@ -36,6 +36,11 @@ import type { SaveFoodStatus } from "./SaveFoodRow";
 
 export type SheetMode = "normal" | "change-match" | "override" | "clarify";
 
+/** The override draft the "confirm_apply" seam pre-fills: the item's current calories. */
+function seamOverrideDraft(item: DerivedItem): string {
+  return item.item_type === "food" ? formatValue(item.calories) : "";
+}
+
 export interface UseCorrectionSheetArgs {
   initialItem: DerivedItem;
   visible: boolean;
@@ -48,6 +53,12 @@ export interface UseCorrectionSheetArgs {
   listCandidates: typeof listSourceCandidatesApi;
   reResolve: typeof reResolveItemApi;
   saveFood: typeof saveFoodApi;
+  /**
+   * E2E-only: opens the sheet directly into this mode instead of "normal"
+   * (FTY-263 visual-review seam). `undefined` for every real caller, so
+   * default behaviour is unchanged outside the visual-review harness.
+   */
+  initialMode?: SheetMode;
 }
 
 export function useCorrectionSheet({
@@ -62,6 +73,7 @@ export function useCorrectionSheet({
   listCandidates,
   reResolve,
   saveFood,
+  initialMode,
 }: UseCorrectionSheetArgs) {
   // Beat 2 — correction saved. A brief confirmation pulse + success haptic fires
   // once per *successful* commit (amount step, re-resolve, value override), never
@@ -81,14 +93,16 @@ export function useCorrectionSheet({
     setItem(initialItem);
   }
 
-  // Sheet opens in clarify-mode when needs_clarification, otherwise normal.
-  const [mode, setMode] = useState<SheetMode>(needsClarification ? "clarify" : "normal");
+  // Sheet opens in clarify-mode when needs_clarification, in the seam's
+  // requested mode when present (FTY-263), otherwise normal.
+  const defaultMode = initialMode ?? (needsClarification ? "clarify" : "normal");
+  const [mode, setMode] = useState<SheetMode>(defaultMode);
 
   // Sync mode when needsClarification prop changes or sheet re-opens.
   const [syncedNeedsClarification, setSyncedNeedsClarification] = useState(needsClarification);
   if (needsClarification !== syncedNeedsClarification) {
     setSyncedNeedsClarification(needsClarification);
-    setMode(needsClarification ? "clarify" : "normal");
+    setMode(defaultMode);
   }
 
   // The Change-match or advanced-override panel wants the large detent. Narrowing
@@ -116,7 +130,13 @@ export function useCorrectionSheet({
 
   // ─── Override (advanced) state ──────────────────────────────────────────────
   const [overrideField, setOverrideField] = useState<string>("calories");
-  const [overrideDraft, setOverrideDraft] = useState("");
+  // The seam's "confirm_apply" preset opens straight into override mode with the
+  // item's current calories pre-filled — a value ready to confirm/apply, not a
+  // blank input (FTY-263). Every real caller has no `initialMode`, so this stays
+  // "" as before.
+  const [overrideDraft, setOverrideDraft] = useState(
+    initialMode === "override" ? seamOverrideDraft(initialItem) : "",
+  );
   const [overrideSaving, setOverrideSaving] = useState(false);
   const [overrideError, setOverrideError] = useState<string | null>(null);
 
@@ -135,13 +155,13 @@ export function useCorrectionSheet({
   if (visible !== prevVisible) {
     setPrevVisible(visible);
     if (visible) {
-      setMode(needsClarification ? "clarify" : "normal");
+      setMode(defaultMode);
       setAmountError(null);
       setCandidates([]);
       setCandidatesError(null);
       setMatchQuery("");
       setReResolveError(null);
-      setOverrideDraft("");
+      setOverrideDraft(defaultMode === "override" ? seamOverrideDraft(item) : "");
       setOverrideError(null);
       setClarifyText("");
       setSaveFoodStatus("idle");
@@ -216,6 +236,19 @@ export function useCorrectionSheet({
     setReResolveError(null);
     void loadCandidates();
   }, [loadCandidates]);
+
+  // Seam-only: the "typeahead" preset (FTY-263) opens straight into change-match
+  // mode without going through `openChangeMatch`, so the candidate list would
+  // otherwise sit empty. Fires once per mounted sheet instance — `initialMode` is
+  // fixed for the hook's lifetime (set once by the caller's props), never toggled
+  // by user interaction — so this can never re-fire mid-session. Deferred to a
+  // microtask (not called synchronously in the effect body) so `loadCandidates`'s
+  // own setState calls never run in the same commit as this effect.
+  useEffect(() => {
+    if (initialMode !== "change-match") return;
+    queueMicrotask(() => void loadCandidates());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleCandidateSearch = useCallback(
     (query: string) => {

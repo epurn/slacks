@@ -157,6 +157,42 @@ appId: com.fatty
     id: "visual-review-settled:today.confirm_parsed"
 - takeScreenshot: today-confirm-parsed-light
 
+# correction.detail (light): the correction lane's seam (FTY-263) — the
+# correction sheet opens directly over a synthetic resolved entry via the
+# E2E-only initial-state seam, never a scripted tap, registered through this
+# same registration API from components/correction/visualReviewSeam.ts. Its
+# `visual-review-settled:correction.detail` marker is rendered INSIDE the
+# correction sheet's modal subtree (CorrectionSheet), so it is reachable while
+# the sheet is presented even though the medium detent leaves `today-screen`
+# undimmed behind it. The marker only appears after the sheet + synthetic item
+# have rendered.
+- openLink: "fatty://__visual-review?preset=correction.detail&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:correction.detail"
+    timeout: 20000
+- assertVisible:
+    text: ".*Oatmeal.*"
+- takeScreenshot: correction-detail-light
+
+# correction.typeahead (light): the Change-match panel opens directly at the
+# large, DIMMED detent, with its candidate list already loaded from the shared
+# source-candidates fixture — not the blank state a naive initial-mode-only seam
+# would leave it in. This is the expanded-detent case that failed on PR #230:
+# the shared navigator-level overlay marker was unreachable behind the dimmed
+# native presentation. The marker now lives INSIDE the sheet's modal subtree and
+# only appears once `candidatesLoading === false` with the candidate list
+# painted, so this waits on the in-modal marker itself — no animation-wait
+# fallback.
+- openLink: "fatty://__visual-review?preset=correction.typeahead&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:correction.typeahead"
+    timeout: 20000
+- assertVisible:
+    id: "visual-review-settled:correction.typeahead"
+- takeScreenshot: correction-typeahead-light
+
 # trends.adherence_retry (light): the adherence-strip retry state (FTY-264),
 # registered from the Trends lane through the FTY-247 API — a range-read error
 # fixture, no scripted taps. Reachable purely through the deep link + fixture,
