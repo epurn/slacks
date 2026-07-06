@@ -18,12 +18,3 @@ export function lightHaptic(): void {
   // stub: add expo-haptics
 }
 
-/** Selection-changed feedback — used for chip selection, quick-picks. */
-export function selectionHaptic(): void {
-  // stub: add expo-haptics
-}
-
-/** Success haptic — used when target is reached or correction is saved. */
-export function successHaptic(): void {
-  // stub: add expo-haptics
-}

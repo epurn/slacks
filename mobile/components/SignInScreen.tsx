@@ -41,8 +41,8 @@ import { radius, spacing, typeScale, useTheme } from "@/theme";
 export type AuthMode = "signin" | "create";
 
 /** Password length bounds, mirroring the identity-and-profile contract. */
-export const PASSWORD_MIN = 8;
-export const PASSWORD_MAX = 128;
+const PASSWORD_MIN = 8;
+const PASSWORD_MAX = 128;
 
 /**
  * A deliberately permissive email shape check: a single `@` with non-empty,
@@ -53,14 +53,14 @@ export const PASSWORD_MAX = 128;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Validate the email shape; returns an inline message or `null` when valid. */
-export function emailError(email: string): string | null {
+function emailError(email: string): string | null {
   return EMAIL_RE.test(email.trim())
     ? null
     : "Enter a valid email address.";
 }
 
 /** Validate the password length; returns an inline message or `null`. */
-export function passwordError(password: string): string | null {
+function passwordError(password: string): string | null {
   if (password.length < PASSWORD_MIN || password.length > PASSWORD_MAX) {
     return `Use a password of ${PASSWORD_MIN} to ${PASSWORD_MAX} characters.`;
   }

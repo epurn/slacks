@@ -84,7 +84,7 @@ import {
 import { ScreenStack, ScreenStackItem } from "react-native-screens";
 
 /** Detent stops, either explicit height fractions or a compact fit-to-content sheet. */
-export type SheetDetents = number[] | "fitToContents";
+type SheetDetents = number[] | "fitToContents";
 
 export interface NativeSheetProps {
   /** Present the sheet when true; unmounts (native dismiss) when false. */

@@ -107,7 +107,7 @@ export function generateIdempotencyKey(): string {
 }
 
 /** A queued entry the server accepted on this drain, with its server event. */
-export interface AcceptedEntry {
+interface AcceptedEntry {
   readonly entry: OutboxEntry;
   readonly event: LogEventDTO;
 }

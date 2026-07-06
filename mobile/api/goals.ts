@@ -49,7 +49,7 @@ export interface ActiveGoal {
 }
 
 /** Persisted goal representation returned by the goal endpoint. */
-export interface GoalDTO {
+interface GoalDTO {
   readonly id: string;
   readonly user_id: string;
   readonly start_weight_kg: number;
@@ -60,7 +60,7 @@ export interface GoalDTO {
 }
 
 /** Revealed target info returned alongside the created goal (FTY-106). */
-export interface RevealedTarget {
+interface RevealedTarget {
   readonly calories: number;
   readonly rmr_kcal: number;
   readonly tdee_kcal: number;

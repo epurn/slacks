@@ -61,7 +61,7 @@ export interface LogEventEntryDTO {
  * affordance only. Options are display candidates, never an enum — free text is
  * always an allowed answer (see `docs/contracts/log-events.md`).
  */
-export interface ClarificationQuestionDTO {
+interface ClarificationQuestionDTO {
   readonly id: string;
   readonly text: string;
   readonly options: readonly string[];

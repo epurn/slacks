@@ -51,4 +51,3 @@ export type TypeScaleKey = keyof typeof typeScale;
  * Tight tracking gives a confident, premium feel.
  */
 export const displayTracking = -0.5;
-export const titleTracking = -0.3;

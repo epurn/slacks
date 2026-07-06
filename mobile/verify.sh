@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Mobile verification hook run by root `make verify` via
 # scripts/package-verify.sh. Installs the locked dependency set, then runs the
-# TypeScript typecheck, ESLint, the accent-as-text a11y guard, the fontSize
-# type-scale guard, and Jest tests, exiting non-zero on the first failure. See
+# TypeScript typecheck, ESLint (with the sonarjs code-smell rules), the
+# accent-as-text a11y guard, the fontSize type-scale guard, the knip dead-code +
+# dependency gate, and Jest tests, exiting non-zero on the first failure. See
 # docs/architecture/repo-layout.md.
 set -euo pipefail
 
@@ -24,5 +25,10 @@ npm run check:accent-text
 # literal beyond the tracked baseline — reference a theme/typography.ts
 # typeScale token instead.
 npm run check:font-size
+
+# Dead-code + dependency hygiene gate (FTY-232): knip fails on unused files,
+# unused exports/types, and unlisted/unused dependencies. Runs after lint so the
+# static gates share the fast unit loop; see knip.jsonc for entry-point config.
+npm run check:dead-code
 
 npm test

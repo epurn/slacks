@@ -12,7 +12,7 @@ import { useTheme, radius, spacing, typeScale } from '@/theme';
  */
 export const CHIP_HIT_SLOP = { top: 8, bottom: 8 } as const;
 
-export interface ChipProps {
+interface ChipProps {
   /** Visible chip text. Used as the accessibility label unless one is given. */
   label: string;
   onPress: () => void;

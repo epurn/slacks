@@ -31,7 +31,7 @@ import type { ApiSession } from "@/api/client";
  * the finalized-state filter) until the user confirms it via the confirm-parsed
  * -values sheet (FTY-197), which flips it to `resolved`.
  */
-export type DerivedItemStatus = "unresolved" | "resolved" | "proposed";
+type DerivedItemStatus = "unresolved" | "resolved" | "proposed";
 
 /** Discriminator for the two derived-item kinds. */
 export type DerivedItemType = "food" | "exercise";

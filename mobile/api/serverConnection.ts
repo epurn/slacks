@@ -23,14 +23,14 @@
  */
 
 /** A validated, normalized server base URL. */
-export interface ValidServerUrl {
+interface ValidServerUrl {
   readonly ok: true;
   /** Canonical base URL: lowercased scheme/host, no trailing slash, no query. */
   readonly url: string;
 }
 
 /** A rejected input, with a gentle, user-facing reason. */
-export interface InvalidServerUrl {
+interface InvalidServerUrl {
   readonly ok: false;
   readonly reason: string;
 }
