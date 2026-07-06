@@ -74,6 +74,8 @@ export interface ConfirmParsedValuesSheetProps {
   onConfirmed: (item: DerivedFoodItemDTO) => void;
   /** Injectable confirm action for tests (FTY-196). */
   confirm?: typeof confirmLabelProposalApi;
+  /** Visual-review settled-marker testID (FTY-262); `undefined` outside that preset — see render site. */
+  testMarker?: string;
 }
 
 function messageForError(error: unknown): string {
@@ -103,6 +105,7 @@ export function ConfirmParsedValuesSheet({
   onClose,
   onConfirmed,
   confirm = confirmLabelProposalApi,
+  testMarker,
 }: ConfirmParsedValuesSheetProps) {
   const { colors } = useTheme();
 
@@ -251,6 +254,10 @@ export function ConfirmParsedValuesSheet({
           accessibilityRole={"button" as AccessibilityRole}
         />
 
+        {/* FTY-262: accessibilityViewIsModal hides the shared settle overlay while this modal is up. */}
+        {testMarker ? (
+          <View testID={testMarker} accessible accessibilityLabel={testMarker} pointerEvents="none" style={styles.settledMarker} />
+        ) : null}
         <View style={[styles.sheet, { backgroundColor: colors.surfaceRaised }]}>
           {/* Decorative grabber (non-draggable; hidden from assistive tech) */}
           <View
@@ -569,6 +576,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     backgroundColor: "rgba(0,0,0,0.35)",
   },
+  settledMarker: { position: "absolute", top: 0, left: 0, width: 4, height: 4 },
   sheet: {
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,

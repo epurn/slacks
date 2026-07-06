@@ -180,6 +180,7 @@ export function TodayScreen({
     setLabelCaptureOpen,
     labelProposal,
     labelProposalVisible,
+    labelProposalSettledMarker,
     sheetTarget,
     sheetVisible,
     inputRef,
@@ -408,6 +409,7 @@ export function TodayScreen({
         saveFood={saveFood}
         labelProposal={labelProposal}
         labelProposalVisible={labelProposalVisible}
+        labelProposalSettledMarker={labelProposalSettledMarker}
         onProposalDismissed={handleProposalDismissed}
         onProposalConfirmed={handleProposalConfirmed}
         confirmLabelProposal={confirmLabelProposal}
