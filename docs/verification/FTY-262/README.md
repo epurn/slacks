@@ -34,6 +34,16 @@ FTY-247 ships, extended in this story with the `today.confirm_parsed` step.
   subtree instead, so screenshot automation waits on it exactly like every other
   preset. Any future Modal-based sub-state seam (FTY-263..268) will need the same
   pattern if its sheet also sets `accessibilityViewIsModal`.
+- The marker honours FTY-247's **network-quiet settle contract**, not merely the
+  modal mounting: `useConfirmParsedSettledMarker` (in
+  `components/today/visualReviewConfirmParsed.ts`) reuses the shared `QUIET_MS`
+  window and fetch-tick channel, so the marker only appears once the Today
+  data-load behind the sheet has gone quiet. That is why the committed
+  `today-confirm-parsed-light.png` captures a fully-settled frame — the parsed
+  "Granola bar" card over a loaded, empty Today — with **no dev "Refreshing…"
+  overlay** and no mid-load state. (An earlier revision exposed the marker the
+  instant the modal rendered, which let the screenshot catch a transient
+  "Refreshing…" frame; gating on network-quiet is the fix.)
 - `assertVisible: id: today-screen` — the assertion the other Today presets use
   — is intentionally **not** used for this preset: the underlying Today screen is
   correctly unreachable to accessibility while the modal is up, so the flow

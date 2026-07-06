@@ -21,6 +21,7 @@ import {
   __deactivateVisualReview,
 } from "@/e2e/visualReview/session";
 import { getVisualReviewPreset } from "@/e2e/visualReview";
+import { QUIET_MS } from "@/e2e/visualReview/VisualReviewSettleOverlay";
 
 import { CONFIRM_PARSED_PRESET_NAME } from "./visualReviewConfirmParsed";
 import {
@@ -117,14 +118,22 @@ describe("today.confirm_parsed visual-review preset", () => {
     expect(textContent(tree)).toContain("Granola bar");
     expect(hasA11yLabel(tree, "Looks right, add it")).toBe(true);
 
-    // The settled marker renders inside the sheet's own modal (FTY-262): the
-    // modal's accessibilityViewIsModal makes the shared navigator-level
-    // VisualReviewSettleOverlay unreachable while it is presented, so
-    // screenshot automation waits on this local marker instead, under the
-    // exact same `visual-review-settled:<preset>` convention.
-    expect(
-      hasA11yLabel(tree, `visual-review-settled:${CONFIRM_PARSED_PRESET_NAME}`),
-    ).toBe(true);
+    const marker = `visual-review-settled:${CONFIRM_PARSED_PRESET_NAME}`;
+
+    // FTY-262 fix: the settled marker respects FTY-247's network-quiet settle
+    // contract — it is NOT emitted on the mid-load frame (the sheet merely
+    // mounting), so screenshot automation cannot capture a mid-load/"Refreshing…"
+    // frame. It stays absent until the QUIET_MS window elapses.
+    expect(hasA11yLabel(tree, marker)).toBe(false);
+
+    // Once the network goes quiet the sheet exposes the marker inside its own
+    // modal (accessibilityViewIsModal hides the shared navigator-level
+    // VisualReviewSettleOverlay while it is presented), under the exact same
+    // `visual-review-settled:<preset>` convention Maestro waits on.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, QUIET_MS + 50));
+    });
+    expect(hasA11yLabel(tree, marker)).toBe(true);
   });
 
   it("is inert outside isE2EMode() even if the runtime preset were somehow already active", async () => {

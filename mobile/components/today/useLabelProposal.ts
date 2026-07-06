@@ -18,6 +18,7 @@ import { sortByNewest } from "@/state/today";
 import {
   CONFIRM_PARSED_ITEM,
   CONFIRM_PARSED_PRESET_NAME,
+  useConfirmParsedSettledMarker,
 } from "./visualReviewConfirmParsed";
 
 /**
@@ -72,17 +73,20 @@ export function useLabelProposal({
   );
 
   // The settled-marker testID for the confirm-parsed preset (FTY-262), or `null`
-  // when it is not the active preset. The shared `VisualReviewSettleOverlay`
-  // (FTY-247) renders its marker in the navigator's own window, but the confirm
-  // sheet is a `<Modal accessibilityViewIsModal>` — iOS accessibility restricts
-  // the reachable tree to the modal's own subtree while one is presented, so the
+  // when it is not the active preset OR the sub-state has not gone network-quiet
+  // yet. The shared `VisualReviewSettleOverlay` (FTY-247) renders its marker in
+  // the navigator's own window, but the confirm sheet is a
+  // `<Modal accessibilityViewIsModal>` — iOS accessibility restricts the
+  // reachable tree to the modal's own subtree while one is presented, so the
   // shared marker is unreachable to Maestro for the whole time this sub-state is
-  // up. The sheet renders this marker itself, inside its own modal, using the
-  // exact same `visual-review-settled:<preset>` convention so screenshot
-  // automation waits on it identically to every other preset.
-  const labelProposalSettledMarker = confirmParsedPresetActive
-    ? `visual-review-settled:${CONFIRM_PARSED_PRESET_NAME}`
-    : null;
+  // up. The sheet renders this marker itself, inside its own modal, under the
+  // exact same `visual-review-settled:<preset>` convention AND the same
+  // network-quiet settle gate (see `useConfirmParsedSettledMarker`), so
+  // screenshot automation waits for the loaded, settled frame — not the mid-load
+  // one — identically to every other preset.
+  const labelProposalSettledMarker = useConfirmParsedSettledMarker(
+    confirmParsedPresetActive,
+  );
 
   // Label capture upload (FTY-064 + FTY-196/197). The backend created and
   // extracted the event in-request; add the returned event to the timeline, then

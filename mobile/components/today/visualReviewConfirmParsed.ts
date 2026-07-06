@@ -18,12 +18,20 @@
  * All fixture data is synthetic — no real user, body, or nutrition data.
  */
 
+import { useEffect, useState } from "react";
+
 import type { DailySummaryDTO } from "@/api/dailySummary";
 import type { DerivedFoodItemDTO } from "@/api/derivedItems";
 import {
   registerVisualReviewPreset,
   type VisualReviewFetchContext,
 } from "@/e2e/visualReview";
+// The FTY-247 network-quiet settle window + fetch-tick channel, reused (never
+// forked) so this Today-owned marker settles on exactly the same contract as the
+// shared VisualReviewSettleOverlay. Imported directly from their modules — these
+// are read-only imports; the shared registry/manifest are not touched.
+import { useVisualReviewFetchTick } from "@/e2e/visualReview/hooks";
+import { QUIET_MS } from "@/e2e/visualReview/VisualReviewSettleOverlay";
 
 /** The deep-link preset name: `fatty://__visual-review?preset=today.confirm_parsed`. */
 export const CONFIRM_PARSED_PRESET_NAME = "today.confirm_parsed";
@@ -98,3 +106,47 @@ registerVisualReviewPreset({
     { match: get("/daily-summary"), body: CONFIRM_PARSED_SUMMARY },
   ],
 });
+
+/**
+ * The `visual-review-settled:today.confirm_parsed` testID to render inside the
+ * confirm sheet's own modal, or `null` until it settles / when the preset is not
+ * active (FTY-262).
+ *
+ * The marker is gated on FTY-247's **network-quiet settle contract**, not on the
+ * modal simply mounting: it appears only once `QUIET_MS` has elapsed with no new
+ * mock request (each request bumps the shared fetch tick and restarts the
+ * window). This is the same condition {@link VisualReviewSettleOverlay} applies,
+ * reused rather than forked, so screenshot automation captures the loaded,
+ * data-settled sub-state — never the Today data-load / dev "Refreshing…" frame
+ * the earlier immediate marker let through.
+ *
+ * The route half of that contract ("the target screen is on top") is satisfied
+ * structurally, not by `usePathname()`: this marker lives *inside* the confirm
+ * sheet, which `useLabelProposal` only opens while the Today screen (`route: "/",
+ * settledPath: "/"`) is mounted — there is no navigation away from it while the
+ * sub-state is up, so it is inherently on the settled path. Keeping the gate to
+ * the network-quiet timer also keeps it router-free, so it never perturbs the
+ * default Today render or its tests.
+ *
+ * `active` is the caller's `isE2EMode() && preset === today.confirm_parsed`
+ * guard; when it is false the effect installs no timer and this returns `null`,
+ * so the hook is inert on every real launch and in release builds.
+ */
+export function useConfirmParsedSettledMarker(active: boolean): string | null {
+  const fetchTick = useVisualReviewFetchTick();
+  const [settled, setSettled] = useState(false);
+
+  useEffect(() => {
+    if (!active) return;
+    // Arm (and, on each new mock request, re-arm) the network-quiet window. The
+    // marker only becomes visible when this fires with no newer request having
+    // cleared the timer — mirroring VisualReviewSettleOverlay's first-appearance
+    // gate. setState happens only in the async callback, never synchronously.
+    const timer = setTimeout(() => setSettled(true), QUIET_MS);
+    return () => clearTimeout(timer);
+  }, [active, fetchTick]);
+
+  return active && settled
+    ? `visual-review-settled:${CONFIRM_PARSED_PRESET_NAME}`
+    : null;
+}
