@@ -172,6 +172,46 @@ appId: com.fatty
     text: "Try again"
 - takeScreenshot: trends-adherence-retry-light
 
+# capture.barcode_granted (light): the barcode-scanner sub-state (FTY-268),
+# registered from the Today/capture lane through the FTY-247 API. Opened via the
+# story's E2E-only initial-state seam — the scanner is already up when the
+# preset activates, no scripted "Scan barcode" tap — with the granted camera
+# permission the E2E harness already mocks for every build (FTY-194).
+- openLink: "fatty://__visual-review?preset=capture.barcode_granted&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:capture.barcode_granted"
+    timeout: 20000
+- assertVisible:
+    id: barcode-reticle
+- takeScreenshot: capture-barcode-granted-light
+
+# capture.label_guidance (light): the label-capture framing-guidance sub-state
+# (FTY-268), opened via the same initial-state seam — no scripted "Capture
+# label" tap.
+- openLink: "fatty://__visual-review?preset=capture.label_guidance&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:capture.label_guidance"
+    timeout: 20000
+- assertVisible:
+    text: "Fit the nutrition label inside the frame"
+- takeScreenshot: capture-label-guidance-light
+
+# capture.confirm_parsed (light): the confirm-parsed-values sheet (FTY-268),
+# seeded through the real label-proposal read (a registered fixture, no live
+# upload, no camera) — no scripted capture taps.
+- openLink: "fatty://__visual-review?preset=capture.confirm_parsed&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:capture.confirm_parsed"
+    timeout: 20000
+- assertVisible:
+    text: "Granola bar"
+- assertVisible:
+    text: "Not yet counted"
+- takeScreenshot: capture-confirm-parsed-light
+
 # onboarding.goal (FTY-266, light): an onboarding-owned sub-state preset — the
 # wizard is component-local `step` state and never shown by default (the E2E
 # harness marks onboarding complete at boot), so this preset both skips that

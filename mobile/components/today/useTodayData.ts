@@ -33,6 +33,13 @@ import {
 import { useSubmitLog, type SubmitLogBridge } from "@/state/useSubmitLog";
 
 import {
+  CAPTURE_BARCODE_GRANTED_PRESET,
+  CAPTURE_CONFIRM_PARSED_EVENT,
+  CAPTURE_CONFIRM_PARSED_PRESET,
+  CAPTURE_LABEL_GUIDANCE_PRESET,
+  useActiveCaptureVisualReviewPreset,
+} from "./captureVisualReview";
+import {
   BARCODE_MANUAL_ENTRY_SEED,
   mergeServerItems,
   messageFor,
@@ -105,8 +112,17 @@ export function useTodayData({
   const [phase, setPhase] = useState<Phase>("loading");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const [scannerOpen, setScannerOpen] = useState(false);
-  const [labelCaptureOpen, setLabelCaptureOpen] = useState(false);
+  // Visual-review capture seam (FTY-268): reads only under isE2EMode() (see
+  // captureVisualReview.ts) and is inert — always null — outside it, so a
+  // release build's initial scannerOpen/labelCaptureOpen are always false,
+  // unchanged from before this seam existed.
+  const activeCapturePreset = useActiveCaptureVisualReviewPreset();
+  const [scannerOpen, setScannerOpen] = useState(
+    () => activeCapturePreset === CAPTURE_BARCODE_GRANTED_PRESET,
+  );
+  const [labelCaptureOpen, setLabelCaptureOpen] = useState(
+    () => activeCapturePreset === CAPTURE_LABEL_GUIDANCE_PRESET,
+  );
   // Saved food selected from the typeahead bar (FTY-053). When set, pressing
   // "Add" creates the log event AND immediately adds a synthetic resolved item
   // with the saved food's nutrition, skipping the estimator wait.
@@ -405,6 +421,22 @@ export function useTodayData({
     setSummaryError,
     setLabelCaptureOpen,
   });
+
+  // Visual-review capture seam (FTY-268), `capture.confirm_parsed`: drives the
+  // existing label-upload proposal flow with a synthetic already-uploaded
+  // event so the real `getLabelProposal` call is answered by the preset's
+  // registered fixture (captureVisualReview.ts) — the same path a real label
+  // upload takes, minus the camera. `seededRef` keeps this to a single fire
+  // per mount even though `apiSession` starts `null` and re-runs the effect
+  // once the E2E session hydrates. No-op whenever the preset isn't active.
+  const confirmParsedSeededRef = useRef(false);
+  useEffect(() => {
+    if (activeCapturePreset !== CAPTURE_CONFIRM_PARSED_PRESET) return;
+    if (confirmParsedSeededRef.current) return;
+    if (!apiSession) return;
+    confirmParsedSeededRef.current = true;
+    handleLabelUploaded(CAPTURE_CONFIRM_PARSED_EVENT);
+  }, [activeCapturePreset, apiSession, handleLabelUploaded]);
 
   // The single correction/detail sheet (FTY-148/149): correction on a tapped
   // item, clarify-mode on a needs_clarification entry, and the edit reconcile.

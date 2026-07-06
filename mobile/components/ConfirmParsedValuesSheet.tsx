@@ -44,6 +44,7 @@ import {
 import { AppIcon } from "@/components/ui/AppIcon";
 import { provenancePresentation } from "@/components/ui/ProvenanceIcon";
 import { ThemedNumber } from "@/components/ui/ThemedNumber";
+import { VisualReviewSettleOverlay } from "@/e2e/visualReview";
 import type { ApiSession } from "@/state/session";
 import { formatValue } from "@/state/derivedItems";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
@@ -237,6 +238,7 @@ export function ConfirmParsedValuesSheet({
       accessibilityViewIsModal
     >
       <View style={styles.overlay}>
+        <VisualReviewSettleOverlay />{/* FTY-268: re-mounted here so the settled marker lives in this native Modal's own presented context (the root marker in app/_layout.tsx isn't reachable while the sheet is up); self-gates to isE2EMode(), renders nothing otherwise. */}
         <Pressable
           style={StyleSheet.absoluteFill}
           onPress={onClose}
