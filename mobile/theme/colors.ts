@@ -26,7 +26,8 @@ export interface ColorPalette {
   readonly controlBackground: string;
   /** Active segment icon / label tint in the floating switcher. */
   readonly tabActive: string;
-  /** Inactive segment icon / label tint in the floating switcher. */
+  /** Inactive segment icon / label tint in the floating switcher — meets WCAG
+   *  AA on the pill's glass/surface so inactive labels stay legible. */
   readonly tabInactive: string;
   /**
    * Translucent fill behind the floating switcher's blur material — the
@@ -49,7 +50,10 @@ export const lightPalette: ColorPalette = {
   separator: '#E5E5EA',
   controlBackground: '#E4E4EA',
   tabActive: '#1C1C1E',
-  tabInactive: '#8E8E93',
+  // Meets WCAG AA (≥4.5:1) on the pill's light glass/surface — #8E8E93 sat
+  // below AA on the near-white switcher glass, so inactive labels were hard to
+  // read (FTY-242 review). Shares the AA-verified secondary text tint.
+  tabInactive: '#636366',
   switcherGlass: 'rgba(255,255,255,0.7)',
 };
 
