@@ -1,6 +1,6 @@
 import { act, type ReactTestRenderer } from "react-test-renderer";
 
-import DayScreen from "./day";
+import DayScreen from "../../app/day";
 import type { ItemSourceDTO } from "@/api/derivedItems";
 import type { LogEventEntryDTO } from "@/api/logEvents";
 import { mockReduceMotion } from "@/testUtils/reduceMotion";
@@ -13,7 +13,7 @@ import {
   mount,
   summary,
   textContent,
-} from "@/components/today/todayTestUtils";
+} from "./todayTestUtils";
 
 // expo-symbols is a native module — stub SymbolView so the provenance / status
 // SF Symbols render and expose their name + a11y label (same pattern as the
