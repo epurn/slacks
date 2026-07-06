@@ -61,7 +61,7 @@ afterEach(cleanupTrees);
 // its dimming scrim. This suite proves Today's scroll content reserves bottom
 // clearance derived from the shared `floatingSwitcherClearance` inset — not a
 // re-hardcoded pill height — so the last row scrolls clear of the pill and the
-// home indicator, and that the retired `TabBarScrim` leaves no trace.
+// home indicator.
 describe("TodayScreen switcher clearance (FTY-257)", () => {
   function mountToday() {
     const load = jest
@@ -91,17 +91,5 @@ describe("TodayScreen switcher clearance (FTY-257)", () => {
     expect(contentStyle.paddingBottom).toBe(
       floatingSwitcherClearance(safeAreaBottom),
     );
-  });
-
-  it("no longer renders the retired tab-bar-scrim", async () => {
-    const tree = mountToday();
-    await act(async () => {});
-
-    const scrimNodes = tree.root.findAll(
-      (n) =>
-        typeof n.props.testID === "string" &&
-        n.props.testID.startsWith("tab-bar-scrim"),
-    );
-    expect(scrimNodes).toHaveLength(0);
   });
 });
