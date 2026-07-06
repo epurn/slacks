@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Stack,
   useRootNavigationState,
@@ -208,40 +208,43 @@ export default function RootLayout() {
   return (
     <AppearanceProvider>
       <ConnectionProvider store={e2e ? e2eConnectionStore : undefined}>
-        <SessionProvider store={e2e ? e2eSessionStore : undefined}>
-          <GoalDirectionProvider>
-            <SafeAreaProvider>
-              <ThemedStatusBar />
-              <NavigatorHost />
-            </SafeAreaProvider>
-          </GoalDirectionProvider>
-        </SessionProvider>
+        <SafeAreaProvider>
+          <NavigatorHost e2e={e2e} />
+        </SafeAreaProvider>
       </ConnectionProvider>
     </AppearanceProvider>
   );
 }
 
 /**
- * The auth gate + navigator, keyed on the visual-review revision (FTY-247).
+ * The session + goal-direction context, auth gate, and navigator — keyed on the
+ * visual-review revision (FTY-247).
  *
  * Activating a visual-review preset (E2E only) bumps the revision, remounting
  * this subtree so the target screen mounts fresh with the preset's seeded
  * fixtures in place instead of showing stale data from a screen mounted before
- * activation. The `VisualReviewDriver` then navigates to the preset's route and
- * the `VisualReviewSettleOverlay` exposes the screenshot marker once the screen
- * has settled. In release / normal use the revision is a constant `0`, so the
- * key never changes and this behaves exactly like a plain `<AuthGate/> +
- * <Stack/>`; the driver and overlay render nothing.
+ * activation. Crucially the `SessionProvider` remounts too, re-hydrating from
+ * the (E2E) store for the newly-active preset: a signed-out preset loads a null
+ * session, every other preset reseeds the synthetic one. That is what makes the
+ * signed-out preset non-sticky — switching back to a signed-in preset reseeds
+ * the session at runtime instead of leaving it cleared. The
+ * `VisualReviewSettleOverlay` exposes the screenshot marker once the screen has
+ * settled. In release / normal use the revision is a constant `0`, so the key
+ * never changes and this behaves exactly like a plain provider + `<AuthGate/> +
+ * <Stack/>`; the overlay renders nothing.
  */
-function NavigatorHost() {
+function NavigatorHost({ e2e }: { e2e: boolean }) {
   const revision = useVisualReviewRevision();
   return (
-    <Fragment key={revision}>
-      <AuthGate />
-      <Stack screenOptions={{ headerShown: false }} />
-      {/* Rendered after the navigator so its settled marker sits on top of the
-          screen (not occluded), where screenshot automation can find it. */}
-      <VisualReviewSettleOverlay />
-    </Fragment>
+    <SessionProvider key={revision} store={e2e ? e2eSessionStore : undefined}>
+      <GoalDirectionProvider>
+        <ThemedStatusBar />
+        <AuthGate />
+        <Stack screenOptions={{ headerShown: false }} />
+        {/* Rendered after the navigator so its settled marker sits on top of the
+            screen (not occluded), where screenshot automation can find it. */}
+        <VisualReviewSettleOverlay />
+      </GoalDirectionProvider>
+    </SessionProvider>
   );
 }

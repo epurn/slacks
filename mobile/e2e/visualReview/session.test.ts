@@ -12,6 +12,7 @@ import {
   __deactivateVisualReview,
   getVisualReviewCore,
   getVisualReviewFetchTick,
+  isActiveVisualReviewPresetSignedOut,
   recordVisualReviewServed,
   resolveVisualReviewFetch,
 } from './session';
@@ -76,6 +77,32 @@ describe('activateVisualReviewPreset', () => {
     // A theme change is a real change → bump.
     expect(activateVisualReviewPreset('demo.populated', 'light').changed).toBe(true);
     expect(getVisualReviewCore().revision).toBe(first + 1);
+  });
+});
+
+describe('isActiveVisualReviewPresetSignedOut', () => {
+  it('is false when no preset is active', () => {
+    expect(isActiveVisualReviewPresetSignedOut()).toBe(false);
+  });
+
+  it('is false for an active preset that is not signed out', () => {
+    activateVisualReviewPreset('demo.populated', null);
+    expect(isActiveVisualReviewPresetSignedOut()).toBe(false);
+  });
+
+  it('is true only while a signed-out preset is active, and clears on switch', () => {
+    registerVisualReviewPreset({
+      name: 'demo.signed_out',
+      route: '/',
+      settledPath: '/signin',
+      signedOut: true,
+    });
+    activateVisualReviewPreset('demo.signed_out', null);
+    expect(isActiveVisualReviewPresetSignedOut()).toBe(true);
+
+    // Switching back to a signed-in preset clears the signed-out state.
+    activateVisualReviewPreset('demo.populated', null);
+    expect(isActiveVisualReviewPresetSignedOut()).toBe(false);
   });
 });
 

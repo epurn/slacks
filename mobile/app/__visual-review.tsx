@@ -36,7 +36,6 @@ import {
   getVisualReviewPreset,
   parseVisualReviewParams,
 } from '@/e2e/visualReview';
-import { useSessionController } from '@/state/session';
 
 export default function VisualReviewRoute(): React.ReactElement {
   const rawParams = useLocalSearchParams<{
@@ -45,7 +44,6 @@ export default function VisualReviewRoute(): React.ReactElement {
   }>();
   const { preset: presetName, theme } = parseVisualReviewParams(rawParams);
   const router = useRouter();
-  const { signOut } = useSessionController();
 
   const e2e = isE2EMode();
   const preset =
@@ -59,12 +57,14 @@ export default function VisualReviewRoute(): React.ReactElement {
     // post-remount pass — the seeded fixtures are in place, so navigate now.
     if (changed) return;
     if (preset.signedOut) {
-      // Clear the synthetic session; the auth gate then routes to sign-in.
-      void signOut();
+      // The remount re-hydrated the session store to a null session for this
+      // preset (see e2eSessionStore.load), so the auth gate already routes to
+      // sign-in. Nothing to navigate here — and, unlike an imperative signOut,
+      // this leaves no sticky state, so a later signed-in preset reseeds cleanly.
       return;
     }
     router.replace(preset.route as Href);
-  }, [e2e, presetName, preset, theme, router, signOut]);
+  }, [e2e, presetName, preset, theme, router]);
 
   // Release / non-E2E build: inert. No seeding, no navigation.
   if (!e2e) {

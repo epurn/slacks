@@ -58,3 +58,28 @@ appId: com.fatty
 - assertVisible:
     id: today-screen
 - takeScreenshot: today-empty-light
+
+# Signed-out reseed guard (FTY-247): the signed-out preset must NOT be sticky.
+# Open today.signed_out — the E2E session store hydrates a null session, so the
+# auth gate reaches the sign-in surface and the settled marker appears.
+- openLink: "fatty://__visual-review?preset=today.signed_out&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.signed_out"
+    timeout: 20000
+- assertVisible:
+    id: auth-mode-segmented-control
+- takeScreenshot: today-signed-out-light
+
+# Switch back to a signed-in preset AFTER the signed-out one. This is the
+# load-bearing regression assertion: activation remounts the SessionProvider,
+# which reseeds the synthetic session from the now-active preset, so Today opens
+# directly at runtime instead of staying on the cleared/signed-out session.
+- openLink: "fatty://__visual-review?preset=today.populated&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.populated"
+    timeout: 20000
+- assertVisible:
+    id: today-screen
+- takeScreenshot: today-populated-after-signed-out-light

@@ -65,8 +65,12 @@ registerVisualReviewPreset({
   ],
 });
 
-// today.signed_out — clears the synthetic session so the auth gate renders the
-// signed-out sign-in surface. No fixtures: the sign-in screen needs no backend.
+// today.signed_out — the E2E session store hydrates a null session while this
+// preset is active (see e2eSessionStore.load), so the auth gate renders the
+// signed-out sign-in surface. Because the session is a pure function of the
+// active preset (not an imperative sign-out), switching back to a signed-in
+// preset reseeds the synthetic session at runtime — the state is not sticky. No
+// fixtures: the sign-in screen needs no backend.
 registerVisualReviewPreset({
   name: 'today.signed_out',
   route: '/',

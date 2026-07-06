@@ -94,6 +94,14 @@ import { searchSavedFoods } from '@/api/savedFoods';
 import { listSourceCandidates, reResolveItem } from '@/api/corrections';
 // eslint-disable-next-line import/first
 import { AccessibilityInfo } from 'react-native';
+// Registers the in-scope preset manifest so the store can reflect a real preset.
+// eslint-disable-next-line import/first
+import './visualReview/presets';
+// eslint-disable-next-line import/first
+import {
+  activateVisualReviewPreset,
+  __deactivateVisualReview,
+} from './visualReview/session';
 
 // jest-expo sets __DEV__ = true globally. Use globalThis so TypeScript is happy
 // without needing @types/node (which the project excludes from "types").
@@ -299,6 +307,38 @@ describe('e2eSessionStore', () => {
     await e2eSessionStore.clear();
     const after = await e2eSessionStore.load();
     expect(after).toEqual(E2E_SESSION);
+  });
+});
+
+// ─── e2eSessionStore × visual-review presets (FTY-247) ───────────────────────
+//
+// The session the store hydrates is a pure function of the active visual-review
+// preset, so switching presets reseeds the session at runtime (the root layout
+// remounts the SessionProvider on each activation). This is the regression guard
+// for the signed-out preset being non-sticky: after activating `today.signed_out`
+// a later signed-in preset must reload the synthetic session, not stay cleared.
+describe('e2eSessionStore reflects the active visual-review preset', () => {
+  afterEach(() => {
+    __deactivateVisualReview();
+  });
+
+  it('loads a null session while the signed-out preset is active', async () => {
+    expect(activateVisualReviewPreset('today.signed_out', null).ok).toBe(true);
+    expect(await e2eSessionStore.load()).toBeNull();
+  });
+
+  it('reseeds the synthetic session when switching back to a signed-in preset', async () => {
+    activateVisualReviewPreset('today.signed_out', null);
+    expect(await e2eSessionStore.load()).toBeNull();
+
+    // Runtime switch to a signed-in preset — order-independent, no rebuild.
+    expect(activateVisualReviewPreset('today.populated', null).ok).toBe(true);
+    expect(await e2eSessionStore.load()).toEqual(E2E_SESSION);
+  });
+
+  it('keeps the synthetic session for a signed-in preset', async () => {
+    activateVisualReviewPreset('trends.populated', null);
+    expect(await e2eSessionStore.load()).toEqual(E2E_SESSION);
   });
 });
 

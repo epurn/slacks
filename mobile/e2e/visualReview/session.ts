@@ -83,6 +83,20 @@ export function getVisualReviewCore(): VisualReviewCoreSnapshot {
   return coreSnapshot;
 }
 
+/**
+ * True when the active preset requests the signed-out surface. The E2E session
+ * store reads this so the session it hydrates is a pure function of the active
+ * preset: a signed-out preset loads a `null` session, every other preset loads
+ * the synthetic one. Because the root layout remounts the `SessionProvider` on
+ * each activation (keyed on the revision), switching *from* the signed-out
+ * preset back to a signed-in preset reseeds the session at runtime — no rebuild
+ * and no order dependence. Defaults to `false` when no preset is active, so the
+ * normal E2E flows always boot signed in.
+ */
+export function isActiveVisualReviewPresetSignedOut(): boolean {
+  return activePreset?.signedOut ?? false;
+}
+
 // ─── Fetch tick (high-frequency: bumped on every mock request while active) ──
 
 let fetchTick = 0;

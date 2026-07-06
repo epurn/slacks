@@ -60,7 +60,7 @@ and shared session control — no screen-owned code:
 | ------------------ | ----------------------------------------------------------- | ----------- |
 | `today.populated`  | Today with a resolved multi-item day and a counting hero    | any         |
 | `today.empty`      | Today's calm empty-day invite (no entries, full budget)     | any         |
-| `today.signed_out` | The signed-out sign-in surface (session cleared)            | any         |
+| `today.signed_out` | The signed-out sign-in surface (null session, non-sticky)   | any         |
 | `trends.populated` | Trends with populated weight + adherence cards              | any         |
 | `trends.empty`     | Trends with empty weight + adherence cards                  | any         |
 | `weight.populated` | Trends weight card with a synthetic series                  | any         |
@@ -69,6 +69,13 @@ and shared session control — no screen-owned code:
 
 All fixtures are the synthetic constants the E2E flows already use — no real
 users, bodies, or logs.
+
+Presets switch at runtime with no rebuild and in any order: activating a preset
+remounts the session/navigator subtree and re-seeds from the active preset's
+fixtures. In particular the session is a pure function of the active preset —
+`today.signed_out` hydrates a null session, every other preset hydrates the
+synthetic one — so opening a signed-in preset after `today.signed_out` reseeds
+the session cleanly rather than leaving it signed out.
 
 ### Deferred sub-state presets
 

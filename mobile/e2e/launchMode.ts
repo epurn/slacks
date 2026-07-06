@@ -78,6 +78,7 @@ import {
   E2E_BARCODE_SUMMARY,
 } from './barcodeFixtures';
 import {
+  isActiveVisualReviewPresetSignedOut,
   recordVisualReviewServed,
   resolveVisualReviewFetch,
 } from './visualReview/session';
@@ -112,11 +113,18 @@ export function isE2EReduceMotionMode(): boolean {
  * In-memory session store pre-seeded with the E2E synthetic session.
  * Injected into SessionProvider in place of the real SecureStore when E2E mode
  * is active. No data is written to the device keychain.
+ *
+ * `load()` reflects the active visual-review preset (FTY-247): a preset that
+ * requests the signed-out surface hydrates a `null` session, every other preset
+ * (and the default, preset-free E2E boot) hydrates the synthetic one. The root
+ * layout remounts the SessionProvider on each preset activation, so this makes
+ * the signed-out state non-sticky — switching back to a signed-in preset
+ * reseeds the session at runtime with no rebuild and no order dependence.
  */
 export const e2eSessionStore: SessionStore = {
   async save() {},
   async load() {
-    return E2E_SESSION;
+    return isActiveVisualReviewPresetSignedOut() ? null : E2E_SESSION;
   },
   async clear() {},
 };
