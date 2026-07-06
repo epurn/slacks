@@ -34,7 +34,14 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AppIcon, ScreenHeader, SegmentedControl, Skeleton, ThemedNumber } from "@/components/ui";
+import {
+  AppIcon,
+  ScreenHeader,
+  SegmentedControl,
+  Skeleton,
+  ThemedNumber,
+  floatingSwitcherClearance,
+} from "@/components/ui";
 
 import {
   WeightApiError,
@@ -334,7 +341,10 @@ export function TrendsScreen({
         contentContainerStyle={[
           styles.content,
           {
-            paddingBottom: insets.bottom + 80 + spacing.xl,
+            // Reserve at least the floating switcher's own footprint (FTY-242)
+            // so the last card scrolls clear of the pill and the home indicator,
+            // not a hand-derived tab-bar-era height (FTY-258).
+            paddingBottom: floatingSwitcherClearance(insets.bottom),
           },
         ]}
       >
