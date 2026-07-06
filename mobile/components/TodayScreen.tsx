@@ -33,7 +33,11 @@ import {
   saveFood as saveFoodApi,
   searchSavedFoods as searchSavedFoodsApi,
 } from "@/api/savedFoods";
-import { AppIcon, ScreenHeader, TabBarScrim } from "@/components/ui";
+import {
+  AppIcon,
+  ScreenHeader,
+  floatingSwitcherClearance,
+} from "@/components/ui";
 import { BarcodeScannerScreen } from "@/components/BarcodeScannerScreen";
 import { ConnectionBanner } from "@/components/ConnectionBanner";
 import { DailySummary } from "@/components/DailySummary";
@@ -289,11 +293,11 @@ export function TodayScreen({
         style={[styles.screen, { backgroundColor: colors.surface }]}
         contentContainerStyle={[
           styles.content,
-          // +96 (not +24) so the last entry clears the floating, absolutely-
-          // positioned tab bar that now overlays the scroll content; mirrors
-          // the placeholder tabs' insets.bottom + 80 reservation with extra
-          // breathing room for a scrollable list.
-          { paddingBottom: insets.bottom + 96 },
+          // The floating switcher (FTY-242) is absolutely positioned and
+          // overlays the scroll content, so the last entry needs clearance
+          // beyond the safe area for its whole footprint. Sourced from the
+          // shared inset so Today can't drift from the pill's real geometry.
+          { paddingBottom: floatingSwitcherClearance(insets.bottom) },
         ]}
         keyboardShouldPersistTaps="handled"
         refreshControl={
@@ -379,14 +383,6 @@ export function TodayScreen({
           onRetry={() => void refresh()}
         />
       </ScrollView>
-
-      {/* FTY-185: the dimming fade that occludes scrolled timeline content as it
-          slides beneath the floating, blurred tab bar. The native blur alone
-          doesn't guarantee content is illegible through the tab labels, so this
-          app-drawn gradient fades the last rows into the surface. Its height
-          matches the reserved bottom clearance above so the fade spans exactly
-          the zone content scrolls through before it reaches the bar. */}
-      <TabBarScrim height={insets.bottom + 96} />
 
       <TodaySheetHost
         apiSession={apiSession}

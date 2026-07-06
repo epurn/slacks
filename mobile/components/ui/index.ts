@@ -12,6 +12,5 @@ export { ScreenHeader } from './ScreenHeader';
 // barrel consumer, so they stay de-exported here and are imported directly.
 export { FloatingSwitcher, floatingSwitcherClearance } from './FloatingSwitcher';
 export type { FloatingSwitcherSegment } from './FloatingSwitcher';
-export { TabBarScrim } from './TabBarScrim';
 export { SegmentedControl } from './SegmentedControl';
 export type { SegmentedControlOption } from './SegmentedControl';
