@@ -77,6 +77,11 @@ import {
   E2E_BARCODE_ENTRY,
   E2E_BARCODE_SUMMARY,
 } from './barcodeFixtures';
+import {
+  isActiveVisualReviewPresetSignedOut,
+  recordVisualReviewServed,
+  resolveVisualReviewFetch,
+} from './visualReview/session';
 
 /**
  * True only in a DEV build that was compiled with EXPO_PUBLIC_FATTY_E2E=true.
@@ -108,11 +113,18 @@ export function isE2EReduceMotionMode(): boolean {
  * In-memory session store pre-seeded with the E2E synthetic session.
  * Injected into SessionProvider in place of the real SecureStore when E2E mode
  * is active. No data is written to the device keychain.
+ *
+ * `load()` reflects the active visual-review preset (FTY-247): a preset that
+ * requests the signed-out surface hydrates a `null` session, every other preset
+ * (and the default, preset-free E2E boot) hydrates the synthetic one. The root
+ * layout remounts the SessionProvider on each preset activation, so this makes
+ * the signed-out state non-sticky — switching back to a signed-in preset
+ * reseeds the session at runtime with no rebuild and no order dependence.
  */
 export const e2eSessionStore: SessionStore = {
   async save() {},
   async load() {
-    return E2E_SESSION;
+    return isActiveVisualReviewPresetSignedOut() ? null : E2E_SESSION;
   },
   async clear() {},
 };
@@ -262,6 +274,15 @@ export function createE2EMockFetch(): typeof fetch {
     ).toUpperCase();
 
     const pathEnd = url.split('?')[0];
+
+    // Visual-review preset overrides (FTY-247). When a preset is active it seeds
+    // the endpoints for its named state before the default flows below, and
+    // every request bumps the settle tracker so the marker can wait for the
+    // screen to go network-quiet. Both are no-ops when no preset is active, so
+    // the normal E2E flows are untouched.
+    recordVisualReviewServed();
+    const visualReviewResponse = resolveVisualReviewFetch({ url, method, pathEnd });
+    if (visualReviewResponse) return visualReviewResponse;
 
     // /log-events/by-date — the item-forward day feed (FTY-198): each event with
     // its derived items. This is the read the entry-resolve beat (FTY-181) needs,

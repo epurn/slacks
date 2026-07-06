@@ -22,6 +22,7 @@ import {
 
 import { fileAppSettingsStore, type AppSettingsStore } from '@/state/appSettings';
 import { ThemeProvider, type ColorSchemeOverride } from '@/theme';
+import { useVisualReviewTheme } from '@/e2e/visualReview/hooks';
 
 interface AppearanceControllerValue {
   /** Switch the live theme. Persisting the choice is the caller's responsibility. */
@@ -60,9 +61,15 @@ export function AppearanceProvider({
     setOverride(v);
   }, []);
 
+  // In an active visual-review preset (E2E only) the deep link's `theme` param
+  // forces Light/Dark and wins over the persisted preference; `null` otherwise,
+  // so release builds and normal use follow the stored Light/Dark/System choice.
+  const visualReviewTheme = useVisualReviewTheme();
+  const effectiveOverride: ColorSchemeOverride = visualReviewTheme ?? override;
+
   return (
     <AppearanceControllerContext.Provider value={{ setAppearance }}>
-      <ThemeProvider override={override}>{children}</ThemeProvider>
+      <ThemeProvider override={effectiveOverride}>{children}</ThemeProvider>
     </AppearanceControllerContext.Provider>
   );
 }

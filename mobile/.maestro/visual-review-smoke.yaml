@@ -1,0 +1,85 @@
+# FTY-247 visual-review smoke flow: open named presets by deep link and wait for
+# their settled markers — the reusable launcher future screen audits (FTY-235..241)
+# and command-centre screenshot tooling consume instead of hand-writing temporary
+# Maestro YAML.
+#
+# The app under test is the same E2E debug binary the other flows use
+# (EXPO_PUBLIC_FATTY_E2E=true, see verify-e2e.sh). This flow adds no fixtures of
+# its own: each preset seeds its synthetic state through the shared visual-review
+# registry (e2e/visualReview/), forces a theme, navigates to its screen, and — once
+# the screen has loaded and gone network-quiet — exposes the marker
+# `visual-review-settled:<preset>`.
+#
+# Entry point contract (documented in e2e/visualReview/README.md):
+#   fatty://__visual-review?preset=<name>&theme=light|dark
+#
+# It proves at least the three Acceptance-Criteria smoke presets:
+#   - today.populated in light mode,
+#   - trends.populated in dark mode,
+#   - today.empty (an empty-state preset).
+# Each `extendedWaitUntil` on the preset's settled marker is the load-bearing
+# assertion: the marker only appears after navigation, data load, and theme have
+# settled, so a data-starved or wrong-screen launch fails here rather than going
+# green on the always-mounted shell. `takeScreenshot` captures the settled frame.
+#
+# Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
+# directory-level Maestro runs launch the installed app under test reliably.
+appId: com.fatty
+---
+- launchApp:
+    clearState: false
+
+# today.populated (light): a resolved multi-item day + a counting hero.
+- openLink: "fatty://__visual-review?preset=today.populated&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.populated"
+    timeout: 20000
+- assertVisible:
+    id: today-screen
+- takeScreenshot: today-populated-light
+
+# trends.populated (dark): the weight + adherence cards with synthetic data.
+- openLink: "fatty://__visual-review?preset=trends.populated&theme=dark"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:trends.populated"
+    timeout: 20000
+- assertVisible:
+    id: trends-screen
+- takeScreenshot: trends-populated-dark
+
+# today.empty (light): the calm empty-day invite, no entries, full budget.
+- openLink: "fatty://__visual-review?preset=today.empty&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.empty"
+    timeout: 20000
+- assertVisible:
+    id: today-screen
+- takeScreenshot: today-empty-light
+
+# Signed-out reseed guard (FTY-247): the signed-out preset must NOT be sticky.
+# Open today.signed_out — the E2E session store hydrates a null session, so the
+# auth gate reaches the sign-in surface and the settled marker appears.
+- openLink: "fatty://__visual-review?preset=today.signed_out&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.signed_out"
+    timeout: 20000
+- assertVisible:
+    id: auth-mode-segmented-control
+- takeScreenshot: today-signed-out-light
+
+# Switch back to a signed-in preset AFTER the signed-out one. This is the
+# load-bearing regression assertion: activation remounts the SessionProvider,
+# which reseeds the synthetic session from the now-active preset, so Today opens
+# directly at runtime instead of staying on the cleared/signed-out session.
+- openLink: "fatty://__visual-review?preset=today.populated&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.populated"
+    timeout: 20000
+- assertVisible:
+    id: today-screen
+- takeScreenshot: today-populated-after-signed-out-light
