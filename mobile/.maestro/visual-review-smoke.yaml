@@ -117,3 +117,39 @@ appId: com.fatty
 - assertVisible:
     text: "Try again"
 - takeScreenshot: trends-adherence-retry-light
+
+# onboarding.goal (FTY-266, light): an onboarding-owned sub-state preset — the
+# wizard is component-local `step` state and never shown by default (the E2E
+# harness marks onboarding complete at boot), so this preset both skips that
+# seed and opens the wizard on step 1 via its own E2E-only initial-state seam.
+# Proves the per-screen seam join contract from onboarding's own lane.
+- openLink: "fatty://__visual-review?preset=onboarding.goal&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:onboarding.goal"
+    timeout: 20000
+- assertVisible:
+    text: "What's your goal?"
+- takeScreenshot: onboarding-goal-light
+
+# onboarding.measurements_formula (FTY-266, light): the wizard opens directly
+# on step 2 with a prefilled form and a metabolic-formula variant selected.
+- openLink: "fatty://__visual-review?preset=onboarding.measurements_formula&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:onboarding.measurements_formula"
+    timeout: 20000
+- assertVisible:
+    text: "Your body metrics"
+- takeScreenshot: onboarding-measurements-formula-light
+
+# onboarding.target_reveal (FTY-266, light): the wizard opens directly on step
+# 3 with a synthetic, already-settled target reveal (no fade to wait out).
+- openLink: "fatty://__visual-review?preset=onboarding.target_reveal&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:onboarding.target_reveal"
+    timeout: 20000
+- assertVisible:
+    id: reveal-hero
+- takeScreenshot: onboarding-target-reveal-light
