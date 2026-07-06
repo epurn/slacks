@@ -121,3 +121,37 @@ appId: com.fatty
 - assertVisible:
     text: "Appearance"
 - takeScreenshot: settings-appearance-light
+
+# today.confirm_parsed (FTY-262, light): a Today-owned sub-state preset — no
+# route param opens the parsed-confirmation sheet, so Today's own E2E-only
+# initial-state seam (useLabelProposal) opens it on mount instead. Proves the
+# per-screen seam join contract: registered through registerVisualReviewPreset
+# from Today's own code, reached here exactly like any in-scope preset. The
+# confirm sheet's modal sets accessibilityViewIsModal, so `today-screen`
+# underneath is (correctly) unreachable while it is presented — assert the
+# sheet's own content instead of the screen behind it.
+- openLink: "fatty://__visual-review?preset=today.confirm_parsed&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.confirm_parsed"
+    timeout: 20000
+- assertVisible:
+    text: "Granola bar"
+- assertVisible:
+    id: "visual-review-settled:today.confirm_parsed"
+- takeScreenshot: today-confirm-parsed-light
+
+# trends.adherence_retry (light): the adherence-strip retry state (FTY-264),
+# registered from the Trends lane through the FTY-247 API — a range-read error
+# fixture, no scripted taps. Reachable purely through the deep link + fixture,
+# same as every other preset above.
+- openLink: "fatty://__visual-review?preset=trends.adherence_retry&theme=light"
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:trends.adherence_retry"
+    timeout: 20000
+- assertVisible:
+    id: trends-screen
+- assertVisible:
+    text: "Try again"
+- takeScreenshot: trends-adherence-retry-light
