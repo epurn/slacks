@@ -58,6 +58,7 @@ import type { ColorSchemeOverride } from '@/theme';
 
 import { settingsFormulaCopy } from './copy';
 import { goalSummaryDetail } from '../settingsGoalSummary';
+import { useSettingsVisualReviewSubState } from './visualReviewPresets';
 
 export type BodyMetric = 'weight' | 'height' | 'birthYear' | 'formula';
 export type MacroOverrideKey = 'protein_g' | 'carbs_g' | 'fat_g';
@@ -121,6 +122,11 @@ export function useSettingsController({
     setGoalDirection: setKnownGoalDirection,
   } = useGoalDirectionController();
 
+  // E2E-only visual-review seam (FTY-267): which sub-state, if any, this mount
+  // should open at the start of a visual-review launch. Always `null` outside
+  // E2E mode, so release/dev-non-E2E behaviour is unchanged.
+  const visualReviewSubState = useSettingsVisualReviewSubState();
+
   // Data state
   const [profile, setProfile] = useState<ProfileDTO | null>(null);
   const [target, setTarget] = useState<TargetReadModel | null>(null);
@@ -134,14 +140,19 @@ export function useSettingsController({
   const [appearance, setAppearance] = useState<ColorSchemeOverride>('system');
   const [cadence, setCadence] = useState<WeighInCadence>(DEFAULT_CADENCE);
 
-  // Edit states
-  const [editingGoal, setEditingGoal] = useState(false);
+  // Edit states. `editingGoal` / `editingBodyMetric` start already open when the
+  // visual-review seam requests that sub-state (FTY-267) — the same E2E-only
+  // initial state a `body_edit` / `goal_edit` preset activation seeds, instead of
+  // only being reachable via `openGoalEdit` / `openBodyEdit`'s press callbacks.
+  const [editingGoal, setEditingGoal] = useState(
+    () => visualReviewSubState === 'goal_edit',
+  );
   const [editDirection, setEditDirection] = useState<GoalDirection>('loss');
   const [editPace, setEditPace] = useState<PacePreset>('steady');
   const [goalSaving, setGoalSaving] = useState(false);
 
   const [editingBodyMetric, setEditingBodyMetric] = useState<BodyMetric | null>(
-    null,
+    () => (visualReviewSubState === 'body_edit' ? 'weight' : null),
   );
   const [bodyEditValue, setBodyEditValue] = useState('');
   // Imperial height is captured as feet (bodyEditValue) + inches (this) so the
@@ -200,6 +211,14 @@ export function useSettingsController({
         }
         setAppearance(app);
         setCadence(cad ?? DEFAULT_CADENCE);
+        // The visual-review seam opened the goal editor before this load
+        // resolved (so it renders on the very first frame); once the real goal
+        // arrives, seed the editor's fields from it the same way `openGoalEdit`
+        // would, rather than leaving it on the `loss` / `steady` defaults.
+        if (visualReviewSubState === 'goal_edit') {
+          setEditDirection(goal?.direction ?? 'loss');
+          setEditPace(goal?.pace ?? 'steady');
+        }
       })
       .catch(() => {
         if (!active) return;
@@ -219,6 +238,7 @@ export function useSettingsController({
     getActiveGoalFn,
     settingsStore,
     cadenceStore,
+    visualReviewSubState,
   ]);
 
   // ── Mini reveal animation ─────────────────────────────────────────────────
@@ -645,6 +665,8 @@ export function useSettingsController({
     // shared feedback
     actionError,
     hasStandaloneActionError,
+    // visual-review seam (FTY-267)
+    visualReviewSubState,
   };
 }
 
