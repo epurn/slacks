@@ -38,6 +38,22 @@ estimator / contracts / backend-core / security-privacy lane:
 
 ## Version
 
+10 (FTY-279, contract only) makes a **user-stated nutrition fact evidence, not a
+clarification trigger**. A recognizable food item carrying a concrete user-supplied
+detail — a portion/count (FTY-167/275), a `brand` identity (FTY-062), **or an
+explicit nutrition fact the user stated** (`stated_calories` / `stated_*` macros,
+`parse-candidates.md` v6) — resolves or estimates instead of asking a second quantity
+question about the **same** item. A stated calorie total resolves the item
+**directly** from `user_text` evidence (`evidence-retrieval.md`), counting the
+calories immediately (`basis = as_logged`, not scaled); missing macros are estimated
+with `field_provenance = estimated` or left `unknown`/`null`, never invented as
+user-supplied zeroes. Clarification stays a **rare last resort** — reserved for a
+component with **no usable identity/detail at all**, or **self-contradictory /
+implausible** stated facts — not for a detail that merely was not the field the
+pipeline expected. No schema/migration/serving-math change in this story; the
+estimator work is the **downstream FTY-280 follow-up** and the FTY-278/FTY-275
+baseline ships until then. See **User-Stated Resolution (FTY-279)** below.
+
 1 (FTY-044). The source system id `usda_fdc` is recorded on run evidence and on each
 cached product / evidence row.
 
@@ -160,8 +176,11 @@ URL. With no key the source is disabled and food candidates are left `unresolved
 ### Candidate input
 
 A parsed food candidate's `name`, `unit`, `amount`, and `quantity_text`
-(`parse-candidates.md`). The LLM never supplies nutrition facts; only the food
-**name** (sanitized, normalized) is sent to FDC — never the user's profile, weight,
+(`parse-candidates.md`). A candidate may also carry user-stated nutrition facts in
+its `stated_*` fields (FTY-279) — those feed the `user_text` evidence path
+(`evidence-retrieval.md`), **not** this FDC lookup. Into the FDC request itself the
+parser supplies **no** nutrition facts; only the food **name** (sanitized,
+normalized) is sent to FDC — never the stated facts, the user's profile, weight,
 history, or any other personal context.
 
 ## Outputs
@@ -271,6 +290,8 @@ FDC facts (per 100 g): 130 kcal / 2.0 g protein / 28 g carbs / 0.2 g fat
 | Condition | Pipeline signal | Persisted | Event transition |
 | --- | --- | --- | --- |
 | All food candidates resolve | _(completes)_ | food items `resolved` + `products` + `evidence_sources` | `processing → completed` |
+| Recognizable item with a **valid user-stated nutrition fact** (FTY-279) | _(resolves from `user_text`)_ | food item `resolved` (`user_text`, `as_logged`) + `evidence_sources` (`user_text:<hash>`, no `product_id`); missing macros estimated or `null` | `processing → completed` |
+| User-stated facts **self-contradictory / implausible** (FTY-279) | `NeedsClarification` | clarification question | `processing → needs_clarification` |
 | No confident source match, generic food **without** usable amount | `NeedsClarification` | clarification question | `processing → needs_clarification` |
 | No confident source match, **detail-rich** generic food (FTY-167) | _(deferred → model-prior)_ | via official step (`model_prior`) | per the official step |
 | Unresolvable quantity | `NeedsClarification` | clarification question | `processing → needs_clarification` |
@@ -346,6 +367,7 @@ loaded the event scoped to the job's `user_id`; see `estimation-jobs.md`).
 | --- | --- |
 | No FDC match / no energy value | `needs_clarification` (`unknown_food`); nothing costed. |
 | Quantity not resolvable to grams | `needs_clarification` (`unresolvable_quantity`). |
+| User-stated facts self-contradictory / implausible (FTY-279) | `needs_clarification`; nothing costed for that item (a usable, valid stated fact resolves instead — never re-asked). |
 | Timeout / connection error / 5xx | `StepError` (`fdc_transient_error`); retried within the bound. |
 | 4xx / non-JSON / oversized / policy violation | Terminal `failed` (`fdc_response_error`); nothing persisted. |
 | No FDC key configured | Food left `unresolved`; event still completes. |
@@ -356,6 +378,103 @@ See the worked example above. The serving math, FDC mapping, SSRF policy, migrat
 rollback, and end-to-end resolution (with a stubbed FDC source) are covered by
 `tests/test_food_serving.py`, `tests/test_fdc_client.py`, `tests/test_hardened_fetch.py`,
 `tests/test_food_migration.py`, and `tests/test_food_resolution.py`.
+
+## User-Stated Resolution (FTY-279)
+
+A recognizable food item whose entry carries an **explicit nutrition fact the user
+stated** — a calorie total ("… 580 cals …"), a macro ("30g protein"), or both,
+extracted by the parser into the `stated_*` fields (`parse-candidates.md` v6) —
+resolves from that **user-provided evidence** (`user_text`, rank 1) rather than being
+sent back for a quantity clarification. This is the estimation-pipeline consumer of
+the `user_text` tier (`evidence-retrieval.md` → **User-Stated Nutrition Evidence**).
+
+### Direct resolution from a stated total
+
+For a recognizable item with a user-stated calorie total, the step resolves the item
+**directly**, and `user_text` outranks USDA/OFF/official/model-prior for the stated
+field(s):
+
+1. **Validate** the stated facts — finite, non-negative, under the **as-logged abuse
+   cap** (the label path's `MAX_ENERGY_KCAL`-style bound, **not** the per-100g
+   plausibility bound, which needs a mass the user did not give), and internally
+   consistent (the Atwater cross-check, `evidence-retrieval.md`). A
+   negative/non-finite/absurd or self-contradictory claim does **not** resolve — it
+   routes to `needs_clarification` (fail closed), never committing an impossible total.
+2. **Record** a `resolved` `derived_food_items` row whose `calories` is the stated
+   total, plus a user-owned `evidence_sources` row: `source_type = user_text`,
+   `source_ref = user_text:<content_hash>`, an immutable `basis = as_logged` facts
+   snapshot, and `field_provenance` marking `calories` `user_stated`. Because the facts
+   are `as_logged`, the serving math does **not** scale them — the stated total is the
+   consumed-quantity total. No global `products` cache row is written (per-entry facts;
+   `product_id` is `NULL`).
+3. **Fill missing macros honestly.** A macro the user did not state is **estimated**
+   from the item identity in the fixed order defined by `evidence-retrieval.md`
+   (**Estimating a missing field**) — source-backed lookup on a sanitized item-identity
+   query first, then comparable-source aggregation as rough reference evidence (source
+   refs + compatibility + plausibility/outlier filtering), then a pure model prior —
+   recorded `field_provenance = estimated` with the reason in `assumptions`; or left
+   **unknown/`null`** when no credible estimate survives — **never** silently stored as a
+   user-supplied `0`. An unknown macro (`null`) stays distinct from a real `0 g` at
+   item detail/provenance (`daily-summary.md`).
+
+The consulted source system `user_text` is recorded on the run `source_refs`.
+
+### The no-second-follow-up rule (clarification boundary)
+
+Once the user supplies a **usable concrete detail** for a recognizable item — a
+portion/count (FTY-167/275), a `brand` identity (FTY-062), or a stated nutrition fact
+(this story) — Fatty **estimates or counts with provenance** and must **not** ask a
+second follow-up for that same item merely because the detail was not the exact field
+the pipeline hoped for. A stated calorie total is a usable detail even when the user
+adds "idk the breakdown": the item resolves as a `user_text` calorie item, and the
+missing macros are estimated or left unknown — not re-asked as "How much did you have?".
+
+`needs_clarification` is a **rare last resort**, not a routine step in the logging
+flow. For a recognizable item it is reserved for genuinely indeterminate or unsafe
+inputs:
+
+- an entry **component with no usable identity/detail at all** (bare "milk", "some
+  crackers" — no portion, no count, no brand, no stated nutrition), per the FTY-167/275
+  amountless boundary; or
+- **self-contradictory / implausible** stated facts (negative/non-finite values, an
+  as-logged total over the abuse cap, or macros whose Atwater-implied energy grossly
+  exceeds a co-stated calorie total).
+
+This is a **product expectation, not a hard quota**: across representative everyday
+logs Fatty should estimate or resolve **far more often than it asks**, and future
+eval/regression sets should hold a **low clarification rate** on such logs — without
+encoding a numeric percentage in code (ADR 0003; `parse-candidates.md`, Calibrated
+clarify decision). Item-scoped partial resolution for a *mixed* log (some components
+stated, one genuinely amountless) is tracked by FTY-278, not changed here.
+
+### Worked example (the Sobeys wrap)
+
+```
+entry: "Sobeys fresh to go buffalo chicken lime wrap (580 cals idk the breakdown)"
+  parse: one food candidate, name "… buffalo chicken lime wrap", brand "Sobeys",
+         stated_calories 580, stated_protein_g/carbs_g/fat_g null
+  validate: 580 finite, ≥ 0, under the as-logged abuse cap → trusted
+  → resolved derived_food_items row: calories 580 (as_logged); macros null (unknown)
+    [or estimated from identity, field_provenance=estimated]
+  → evidence_sources: source_type=user_text, source_ref=user_text:<hash>,
+    facts{basis:as_logged, calories:580, protein_g:null, carbs_g:null, fat_g:null},
+    field_provenance{calories:user_stated, protein_g:unknown, …}
+  → run.source_refs += "user_text"; event: processing → completed
+  # NOT needs_clarification, and NOT a second "How much did you have?" — a usable
+  #   stated detail (the calorie total) was given.
+```
+
+### Security / Privacy
+
+- **No raw diary text persisted.** The `evidence_sources` row stores the extracted,
+  validated facts + `user_text:<content_hash>` + timestamp only — never the raw phrase
+  (per `data-retention.md`; `evidence-retrieval.md` → Privacy and Retention).
+- **Untrusted-until-validated.** The parser extracts the stated numbers; the food step
+  validates plausibility and internal consistency before any of it backs a persisted
+  number, and no instruction embedded in the entry text is executed.
+- **Ownership.** The `derived_food_items` and `evidence_sources` rows carry `user_id`
+  at the persistence boundary and cascade on user/event deletion, exactly as the USDA
+  path (**Authorization** above).
 
 ## Barcode Source (Open Food Facts) — FTY-060
 
@@ -741,6 +860,19 @@ The backend exposes four health-check endpoints, all returning structured JSON w
   user correct values — including a deterministic servings rescale — through the edit
   endpoint. This does not redefine the resolution math above; the estimator sets the
   snapshots at creation. See `corrections.md`.
+- **FTY-279 (contract only; no code, no migration in this story).** Adds
+  **User-Stated Resolution**: a recognizable item carrying a user-stated nutrition
+  fact (`parse-candidates.md` v6 `stated_*` fields) resolves from `user_text`
+  evidence (`evidence-retrieval.md`) — calories counted `as_logged`, missing macros
+  estimated (`field_provenance = estimated`) or `null`, never re-asked — and the
+  clarification boundary is refined so a usable stated detail is **never** a second
+  follow-up. A **deliberate pre-v1 refinement**: no schema, migration, or
+  serving-math change (`evidence_sources.source_type` / `source_ref` / `basis` are
+  strings, the `assumptions` column already carries per-field reasons, and the
+  derived-item macro columns are already nullable). The estimator implementation
+  (parser extraction + `user_text` step + validation) is the **downstream FTY-280
+  follow-up**; the FTY-278/FTY-275 baseline ships until then. See **User-Stated
+  Resolution (FTY-279)**.
 - **FTY-278 (contract only; no code, no migration in this story).** Redefines the
   clarification boundary from whole-event to **item-scoped** for a mixed food log,
   routing it to the new `partially_resolved` status (`log-events.md` v6): costable

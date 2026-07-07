@@ -73,6 +73,19 @@ FTY-275/FTY-223 baseline holds (a mixed log routes to an event-level
 `needs_clarification` with nothing committed and counts as one whole uncounted
 entry).
 
+6 (FTY-279, contract only) states how a **calorie-only user-stated item** counts. A
+recognizable item the user gave a calorie total for resolves as a `user_text`
+`as_logged` item (`food-resolution.md`, `evidence-retrieval.md`) with **known
+calories but unknown (`null`) macros**. Its **calories count** in `intake.calories`
+like any resolved item; each **unknown (`null`) macro contributes no grams** to the
+day's macro total (a `null` macro is skipped, **not** summed as `0`), so a day's
+macro sums reflect only the macros actually known. The item stays distinguishable at
+the item detail / provenance level: its `source` descriptor is `user_text` and a
+`null` macro field is surfaced as unknown rather than `0`. Additive: no new
+persistence and no migration — the same computed read over existing (already-nullable)
+macro columns; the `user_text` source system is `evidence-retrieval.md`'s, and it is
+**numerically inert until the FTY-280 estimator follow-up** first writes such an item.
+
 ## Inputs
 
 ### HTTP request
@@ -146,7 +159,11 @@ read path.)
 
 - `date` — the requested calendar day (echoed back).
 - `intake` — summed calories (kcal) and macros (grams) from finalized food items
-  for the day. Zeroed when no finalized food items exist.
+  for the day. Zeroed when no finalized food items exist. A finalized item with a
+  **known calorie value but an unknown (`null`) macro** (a calorie-only `user_text`
+  item, FTY-279) contributes its **calories** to `intake.calories` and contributes
+  **no grams** to that unknown macro's sum — a `null` macro is **skipped**, never
+  summed as `0`, so a macro total reflects only the macros actually known that day.
 - `has_intake` — boolean, `true` iff the day has **at least one finalized food
   item**. Because `intake` is zeroed both for an unlogged day and for a day whose
   only logged food is genuinely zero-kcal, the zero alone cannot distinguish the
@@ -230,7 +247,11 @@ this contract):
   filter.
 - `unresolved` items (NULL calories / NULL active_calories) are excluded — this is
   what keeps a partial event's amountless component out of `intake` while its
-  resolved siblings count.
+  resolved siblings count. The `current_value IS NOT NULL` clause gates on the item's
+  **headline** value (a food item's `calories`); a **calorie-only `user_text` item**
+  (FTY-279) has non-null calories and is therefore **included**, and its unknown
+  (`null`) macros do not exclude it — they are simply skipped from the macro sums
+  (above), never treated as `0`.
 - **`proposed` items are excluded by construction (FTY-196).** A legible
   nutrition-label parse lands as an uncounted **`proposed`** food item on a
   `completed` event (`label-upload.md` → Confirmation gate); because the predicate
@@ -308,9 +329,9 @@ exercise items (burn comes from MET tables, not an evidence row).
 
 | Field | Meaning |
 | --- | --- |
-| `source_type` | The `evidence-retrieval.md` hierarchy enum on the item's `evidence_sources` row: `trusted_nutrition_database`, `product_database`, `official_source`, `user_label`, `model_prior`. A `model_prior` value is the client's signal to render the "≈ rough estimate · make it exact" treatment (ux-design §4a). |
-| `label` | A human, display-ready string mapped deterministically from `source_type` / `ref`: `trusted_nutrition_database` → "USDA", `product_database` → "Open Food Facts", `user_label` → "Label scan", `official_source` → the URL host, `model_prior` → "Rough estimate". |
-| `ref` | The stable `source_ref` (`usda_fdc:<id>`, `open_food_facts:<barcode>`, `official_source:<url>`, `user_label:<hash>`, `model_prior`) for the sheet's deeper provenance line. For an `official_source` item this is the **URL only** (no headers, body, or query secrets). |
+| `source_type` | The `evidence-retrieval.md` hierarchy enum on the item's `evidence_sources` row: `trusted_nutrition_database`, `product_database`, `official_source`, `user_label`, `user_text` (FTY-279), `reference_source`, `model_prior`. A `model_prior` value is the client's signal to render the "≈ rough estimate · make it exact" treatment (ux-design §4a); a `user_text` item's headline (its calories) is a **user-stated** value, and any macro estimated to fill a gap carries `field_provenance = estimated` for the detail sheet. |
+| `label` | A human, display-ready string mapped deterministically from `source_type` / `ref`: `trusted_nutrition_database` → "USDA", `product_database` → "Open Food Facts", `user_label` → "Label scan", `user_text` → "You logged" (FTY-279), `official_source` → the URL host, `reference_source` → the page host, `model_prior` → "Rough estimate". |
+| `ref` | The stable `source_ref` (`usda_fdc:<id>`, `open_food_facts:<barcode>`, `official_source:<url>`, `user_label:<hash>`, `user_text:<hash>` (FTY-279), `reference_source:<url>`, `model_prior`) for the sheet's deeper provenance line. For an `official_source` / `reference_source` item this is the **URL only** (no headers, body, or query secrets); for a `user_text` item it is the hash of the extracted facts, **never the raw diary phrase**. |
 
 The descriptor is **derived at read time** from the existing `evidence_sources` row
 — no new persisted provenance column, no de-normalization, and only the owner's own
@@ -426,6 +447,16 @@ curl -s ':8000/api/users/<uid>/daily-summary/range?from=2025-01-01&to=2026-06-01
   intended consumer is FTY-188 Trends adherence. FTY-278 re-bases the counting unit
   from the whole event to the unresolved component (below) without changing the
   field or its baseline value.
+- **FTY-279 (contract only; no migration).** States that a calorie-only `user_text`
+  item counts its calories in `intake.calories` while each unknown (`null`) macro is
+  **skipped** from the macro sums (not summed as `0`), and adds the `user_text` value
+  (label "You logged") to the per-item `source` descriptor enum/mapping. A **pure
+  computed read** over existing rows — the macro columns are already nullable
+  (FTY-044/FTY-051) and `evidence_sources.source_type` is a string, so there is no new
+  table, no new column, and no DTO shape change. Backward-compatible and **numerically
+  inert until the FTY-280 estimator follow-up** writes the first such item. (This entry
+  also completes the descriptor enum's `reference_source` value, per FTY-166's
+  provenance read-model.)
 - **FTY-278 (contract only; no migration).** Relaxes the finalized-state filter's
   event-status clause to `IN ('completed', 'partially_resolved')` and re-bases
   `uncounted_entries` onto the unresolved **component** (one per open item-scoped

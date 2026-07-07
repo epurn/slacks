@@ -26,14 +26,14 @@
     "docs/contracts/evidence-retrieval.md": {
       "kind": "source",
       "lane": "docs",
-      "lines": 808,
-      "reason": "Existing over-threshold first-party source document at FTY-200 baseline."
+      "lines": 1030,
+      "reason": "Existing over-threshold first-party source document at FTY-200 baseline; +207 in FTY-279 (contract only) documenting user-stated nutrition text as first-class rank-1 `user_text` evidence — the source system + `user_text:<content_hash>` reference (raw phrase never stored), the `as_logged` fact basis (no per-100g lie), the optional per-field `field_provenance` map and unknown-vs-zero (nullable) macros, the fallback-rule precedence for stated fields, the missing-field estimation order (source-backed lookup → comparable-source aggregation as rough reference evidence with source refs + compatibility + plausibility/outlier filtering → model prior), bounded/plausibility validation, the worked Sobeys-wrap example, and the migration note. +15 in the FTY-279 review round contracting the FTY-158/FTY-159 cold-pass path for the missing-field model-prior step: an uncertain estimate uses N independent self-consistency passes scored against the calibrated operating point (never a one-shot confidence guess), and because a missing macro on an already-resolved `user_text` item is an optional estimate, pass disagreement leaves the field rough/unknown rather than triggering a second clarification about a detail the user already supplied."
     },
     "docs/contracts/food-resolution.md": {
       "kind": "source",
       "lane": "docs",
-      "lines": 754,
-      "reason": "FTY-278 (contract only) routes a mixed food log to the new first-class `partially_resolved` event status: crosses the 750-line source threshold documenting the item-scoped partial routing (mixed → `processing → partially_resolved` carrying committed `resolved` siblings; no-costable → event-level `needs_clarification`) across the version note, routing tables, and migration note."
+      "lines": 886,
+      "reason": "FTY-278 (contract only) routes a mixed food log to the new first-class `partially_resolved` event status: crosses the 750-line source threshold documenting the item-scoped partial routing (mixed → `processing → partially_resolved` carrying committed `resolved` siblings; no-costable → event-level `needs_clarification`) across the version note, routing tables, and migration note. +129 in FTY-279 (contract only) adding the **User-Stated Resolution** section: direct resolution of a user-stated calorie total from `user_text` `as_logged` evidence (calories counted immediately, missing macros estimated via the source-backed-lookup → comparable-source-aggregation → model-prior order or left `null`), the no-second-follow-up clarification boundary (clarify only for a component with no usable detail or self-contradictory/implausible facts), the Sobeys-wrap worked example, and the version/routing/errors/migration notes. +3 in the FTY-279 review round narrowing the FDC **Candidate input** note: a candidate may now carry user-stated `stated_*` nutrition facts (routed to the `user_text` evidence path), while the FDC request itself still receives only the sanitized food name — reconciling the old \"LLM never supplies nutrition facts\" line with the new parser/evidence contract."
     },
     "docs/contracts/log-events.md": {
       "kind": "source",

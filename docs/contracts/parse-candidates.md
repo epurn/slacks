@@ -37,6 +37,23 @@ estimator / contracts / backend-core lane:
 
 ## Version
 
+6 (FTY-279, contract only): the parser may **extract explicit nutrition facts the
+user stated** in the entry text into new optional, bounded `ParsedCandidate` fields
+— `stated_calories`, `stated_protein_g`, `stated_carbs_g`, `stated_fat_g`. A
+recognizable item carrying a user-stated calorie total ("… 580 cals …") or a macro
+("30g protein") therefore resolves as user-provided (`user_text`) evidence instead
+of being sent back for a quantity clarification. The parser still **invents
+nothing**: an unstated field is `null`, the fields are **untrusted evidence** the
+resolution step validates, bounds, and owns (`evidence-retrieval.md` →
+**User-Stated Nutrition Evidence — FTY-279**; `food-resolution.md`), and a stated
+nutrition fact is a **detail signal** that — like a stated portion (FTY-275) —
+defers a source-miss to estimation rather than clarification. This version settles
+the **schema/routing contract only**; the estimator/parser code (and any additive
+persistence) are the **downstream FTY-280 implementation follow-up**, and the
+FTY-278/FTY-275 baseline ships until it lands. The stated fields need **no new parse
+persistence column** — like `brand`, they are consumed at resolution time, and the
+`derived_food_items` energy/macro columns are already nullable (FTY-044/FTY-051).
+
 5 (FTY-278, contract only): defines the **item-scoped** clarification carrier for
 a mixed food log. A clarification question may now name the **specific unresolved
 component** it is about via a nullable `derived_food_item_id` reference on
@@ -108,8 +125,22 @@ object — smuggled keys are rejected, not ignored):
 
 `ParsedCandidate`: `type` (`food` \| `exercise`), `name` (1–200 chars),
 `quantity_text` (raw portion phrase, ≤ 120), optional `unit` (≤ 32) and `amount`
-(≥ 0), optional `barcode` (digits, ≤ 14; FTY-060) and `brand` (≤ 120; FTY-062).
-**No energy** — calories/macros are resolved downstream (FTY-043/044).
+(≥ 0), optional `barcode` (digits, ≤ 14; FTY-060) and `brand` (≤ 120; FTY-062), and
+the optional **user-stated nutrition** fields `stated_calories`, `stated_protein_g`,
+`stated_carbs_g`, `stated_fat_g` (FTY-279). The parser **does not invent** energy —
+calories/macros are resolved downstream (FTY-043/044) — but it **may extract a
+nutrition fact the user explicitly wrote** into these fields (see **User-stated
+nutrition facts** below); an unstated field is `null`.
+
+The `stated_*` fields (FTY-279, `extra="forbid"` unchanged) each hold a finite number
+`≥ 0` or `null`, bounded by the schema's abuse cap (a value above the cap, negative,
+or non-finite is a schema-invalid reply and fails closed). They are **as-logged
+totals for that item** (not per-100g/per-serving), captured verbatim from the user's
+wording — the parser is still untrusted and invents nothing; the food step validates
+plausibility, applies the as-logged abuse cap and internal-consistency (Atwater)
+check, and **owns every persisted number** (`evidence-retrieval.md`). They add no
+`derived_*` persistence column of their own (consumed at resolution time, like
+`brand`).
 
 `brand` (additive, FTY-062) names a **specific** restaurant / manufacturer /
 packaged-product brand when the item is a *named* product (`"Big Mac"` →
@@ -349,15 +380,18 @@ such a reply to clarification, the step checks each extracted item for a **deter
 detail signal** (`app/estimator/detail_signals.py`):
 
 - **food** — a positive structured `amount` (a count or a measured quantity), a
-  numeric **range** in `quantity_text` (`5-10`), or a **stated worded portion**
+  numeric **range** in `quantity_text` (`5-10`), a **stated worded portion**
   (FTY-275) in `quantity_text`: a household / cooking measure (`cup`, `tsp`, `tbsp`,
   `fl oz`, `pint`, `quart`, `gallon` and their spellings), a colloquial / approximate
   measure word (`splash`, `drizzle`, `dash`, `pinch`, `handful`, `glug`), or an
-  indefinite-article measure (`a`/`an` = one). Each means the user *stated* a portion
-  in words, so a generic source-miss defers to the model-prior estimate rather than
-  re-asking — see `food-resolution.md` (**Official-Source Resolution**, v8). A bare
-  identity with **no** stated portion (`milk`, `some milk`, `some crackers`) carries no
-  food detail;
+  indefinite-article measure (`a`/`an` = one); **or a stated nutrition fact**
+  (FTY-279 — a `stated_calories` total or a `stated_*` macro the user wrote). Each
+  means the user *stated* a usable detail, so a generic source-miss defers to
+  estimation (or, for a stated nutrition fact, resolves directly from that
+  `user_text` evidence) rather than re-asking — see `food-resolution.md`
+  (**User-Stated Resolution (FTY-279)** (its no-second-follow-up rule), and **Official-Source
+  Resolution**, v8). A bare identity with **no** stated portion **and no** stated
+  nutrition fact (`milk`, `some milk`, `some crackers`) carries no food detail;
 - **exercise** — an explicit duration, a **distance**, a **step count**, or a **game
   count**.
 
@@ -382,11 +416,49 @@ and the assumption is recorded only when the event is accepted. This changes rou
 and the count only — the parse step still carries **no** energy/macro value;
 calories/macros remain the calculator layers' responsibility (FTY-043/044/062).
 
+### User-stated nutrition facts (FTY-279)
+
+When the user writes an explicit nutrition fact — a calorie total (`580 cals`,
+`580 calories`, e.g. "Sobeys buffalo chicken lime wrap (580 cals idk the
+breakdown)"), a macro (`30g protein`), or both — the parser extracts it into the
+`stated_*` fields on that item's candidate rather than dropping it. Common calorie
+and macro phrasings (`cal`/`cals`/`calories`/`kcal`; `30g protein`, `30 g protein`)
+all resolve to the same `stated_*` field. The rule refines "No energy": the parser still **invents no
+number**, but it is allowed to **read what the user stated** and carry it as
+untrusted evidence.
+
+- **Extract, don't invent.** A `stated_*` field is filled **only** from a value the
+  user actually wrote for that item; an unstated field is `null`. The model must not
+  synthesize a calorie/macro number the user did not give (that is the resolution
+  layers' job, with their own provenance), and it never copies a value from one item
+  onto another.
+- **As-logged.** `stated_*` values are the totals for the exact item as logged, not
+  per-100g/per-serving. The honest basis and per-field provenance are fixed in
+  `evidence-retrieval.md` (`as_logged`, `field_provenance`); the parser only carries
+  the raw stated numbers.
+- **Bounded & untrusted.** Each field is finite, `≥ 0`, and schema-capped; an
+  out-of-range/negative/non-finite value makes the reply schema-invalid and fails
+  closed. Extracted facts back a persisted number only after the food step's
+  plausibility validation (as-logged abuse cap + Atwater internal-consistency);
+  a self-contradictory claim clarifies rather than committing (`food-resolution.md`).
+- **Prompt-injection safe.** The stated numbers are stored as data through
+  parameterized inserts and never interpreted; an instruction embedded in the entry
+  text is never executed (as for every `ParsedCandidate` field).
+
+A stated nutrition fact is a **detail signal** (above): a recognizable item that
+carries one is estimated/resolved, **not** re-asked for an amount — see the
+no-second-follow-up rule in `food-resolution.md`.
+
 ## Validation
 
 - Every provider reply is validated against `ParseResult` before any of it is
   used; schema-invalid output is rejected (`StepFailed("schema_validation_failed")`)
   and **never persisted** — the step fails closed.
+- **User-stated nutrition fields (FTY-279)** validate as finite, non-negative, and
+  within the schema abuse cap; an out-of-range/negative/non-finite `stated_*` value
+  is schema-invalid and fails closed. Extraction is trusted only as **untrusted
+  evidence**: the food step applies the as-logged abuse cap and internal-consistency
+  check before any of it backs a persisted number (`evidence-retrieval.md`).
 - Closed vocabularies (`disposition`, `CandidateType`) and `extra="forbid"` mean a
   reply cannot smuggle fields or free-form instructions.
 - Provider-raised clarification output must carry specific question text and
@@ -491,6 +563,18 @@ event.raw_text = "crackers and peanut butter"        # count genuinely indetermi
   omits them validates unchanged (they default to `null`), and they are stored as data
   only. `brand` drives official-source routing (`food-resolution.md`); it adds no
   persistence column of its own (it is consumed at resolution time).
+- **FTY-279 (contract only; no code, no migration in this story).** Adds the optional,
+  bounded `stated_calories` / `stated_protein_g` / `stated_carbs_g` / `stated_fat_g`
+  `ParsedCandidate` fields (a **deliberate pre-v1 refinement** of "No energy": the
+  parser may now extract a nutrition fact the user explicitly stated, as untrusted
+  evidence). Additive and backward-compatible: a reply that omits them validates
+  unchanged (default `null`), they are stored as data only and never interpreted, and
+  they add **no** `derived_*` persistence column (consumed at resolution time, like
+  `brand`). They drive `user_text` resolution and the no-second-follow-up rule
+  (`food-resolution.md`), back user-provided evidence (`evidence-retrieval.md` →
+  **User-Stated Nutrition Evidence**), and let a calorie-only item count in
+  `daily-summary.md`. The estimator/parser implementation is the downstream FTY-280
+  follow-up; the FTY-278/FTY-275 baseline ships until it lands.
 - **FTY-278 (contract only; no code, no migration in this story).** Adds the
   nullable `clarification_questions.derived_food_item_id` reference — an
   **internal** producer→estimator link, **not** surfaced in the clarification read

@@ -175,6 +175,21 @@ value override is `true`. Computed at read time from the append-only audit trail
 never drifts and needs no backfill. This flag is exposed per item on the
 Today/daily read-model — see `daily-summary.md`.
 
+> **User-stated-at-log-time nutrition is evidence, not an edit (FTY-279).** When a
+> user states a nutrition fact **in the original log text** ("… 580 cals …"), that
+> value is captured as **source provenance** — an `evidence_sources` row with
+> `source_type = user_text` and `field_provenance` marking the stated field
+> `user_stated` (`evidence-retrieval.md`, `food-resolution.md`) — **not** as a
+> `user_edit` correction. Such an item has **no** `user_edit` row from that stated
+> fact and therefore reads `is_edited == false`: its honesty comes from the
+> `user_text` source, exactly as a USDA or label item's does. A **later** manual
+> override of that item's value (through the edit endpoint) is still a `user_edit`
+> correction and makes `is_edited` `true` as usual. The `user_text` value joins the
+> `SourceType` provenance enum (`backend/app/enums.py`) additively — a string column,
+> no migration, no backfill — and surfaces via the `source` descriptor
+> (`daily-summary.md`); it adds no `CorrectionSource` value, because a stated fact at
+> log time is not a correction.
+
 > **Re-match is a third, distinct lever (FTY-093).** The "Change match" operation
 > re-resolves an item to a *different real source* (see
 > `evidence-retrieval.md` → **Item Re-match — FTY-093**). It is **not** a value override:
@@ -262,6 +277,13 @@ value override, and the source-descriptor mapping).
   discriminator, with a check constraint enforcing exactly one reference. The 0.1
   rounding for energy/macros and 3-dp for servings, and the `100000` sanity bounds,
   are documented v1 choices.
+- **FTY-279 (contract only; no migration).** A nutrition fact the user states in the
+  original log text is captured as **evidence provenance** (`SourceType = user_text`,
+  `field_provenance`; `evidence-retrieval.md` / `food-resolution.md`), **not** as a
+  `user_edit` correction — so such an item reads `is_edited == false` and a later
+  manual override is still a `user_edit`. Additive: the `user_text` value joins the
+  string `SourceType` enum with **no migration and no backfill**, and **no**
+  `CorrectionSource` value is added (a stated-at-log-time fact is not a correction).
 - **FTY-092 (no migration).** Adding the `amount_adjust` `CorrectionSource` value is
   additive over the existing string `source` column — no schema migration, no
   backfill. FTY-051 tagged quantity-rescale rows `user_edit`; FTY-092 retags them

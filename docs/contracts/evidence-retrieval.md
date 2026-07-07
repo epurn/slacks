@@ -58,8 +58,17 @@ Adapter — FTY-079 / FTY-164**.
 
 1 (FTY-045). The source-system identifiers are stable strings recorded on each
 evidence record and on the estimation run `source_refs`: `usda_fdc`,
-`open_food_facts`, `official_source`, `user_label`, `reference_source` (FTY-166),
-`model_prior`.
+`open_food_facts`, `official_source`, `user_label`, `user_text` (FTY-279),
+`reference_source` (FTY-166), `model_prior`.
+
+FTY-279 makes **explicit nutrition facts stated in the log entry text** first-class
+user-provided evidence: the rank-1 user-provided tier gains the `user_text`
+source system (a calorie total and/or macros the user typed, recorded `as_logged`
+with a `user_text:<content_hash>` reference over the extracted facts — never the raw
+phrase), the normalized-fact schema gains the `as_logged` basis and per-field
+provenance so a user-stated number and an estimated/unknown one stay honestly
+distinct, and the fallback rule makes a user-stated fact outrank external lookup for
+the exact field the user gave. See **User-Stated Nutrition Evidence — FTY-279**.
 
 FTY-079 implements the `official_source` **search** boundary (the pluggable
 search-provider adapter) without changing this contract; see **Search Provider
@@ -95,6 +104,7 @@ configured v1 provider sits:
 | Rank | `source_type` | Source system | Applies to |
 | --- | --- | --- | --- |
 | 1 | `user_label` | user-provided | nutrition-label image (OCR) or manually entered label facts; user-confirmed barcode/package facts |
+| 1 | `user_text` | user-provided | explicit nutrition facts stated in the log entry text — a calorie total and/or macros, recorded `as_logged` (FTY-279) |
 | 2 | `official_source` | search + hardened fetch | official restaurant / manufacturer / product page |
 | 3 | `product_database` | `open_food_facts` | barcoded and packaged food products |
 | 4 | `trusted_nutrition_database` | `usda_fdc` | generic foods and common serving references |
@@ -104,8 +114,15 @@ configured v1 provider sits:
 Ingredient-based recipe calculation and similar-dish reference estimates
 (system-overview ranks 6–7) are deferred; this contract reserves room for them
 without defining their records yet. A source type is **applicable** only when an
-input of that kind exists (e.g. `user_label` requires a label/barcode;
+input of that kind exists (e.g. `user_label` requires a label/barcode; `user_text`
+(FTY-279) requires an explicit nutrition fact in the entry text;
 `official_source` requires a named restaurant/manufacturer item).
+
+The two rank-1 tiers are both **user-provided** and apply to different inputs; for
+the same item each backs only the **fields it carries** — a stated calorie total
+(`user_text`) and a scanned label (`user_label`) do not compete, and a missing
+field on either falls to a lower tier with its own provenance (**Field
+provenance**, **Fallback Rule**).
 
 ## Fallback Rule
 
@@ -126,6 +143,17 @@ A `model_prior` result is recorded as an evidence record with
 surfaced to clients and the entry remains editable. This is a contract-level
 restatement of the architecture `Lookup Rule`; adapters must not weaken it.
 
+**User-stated facts and the fallback rule (FTY-279).** A nutrition fact the user
+stated in the entry text (`user_text`) is the **highest-preference** source for
+the exact field(s) they gave — it outranks every external lookup for those fields
+(the user's own "580 cals" wins over a database guess for that item's calories).
+This does **not** weaken the rule for **missing** fields: a field the user did not
+state may still be estimated from `model_prior` (or filled from a reference/official
+lookup), recorded on the **same** item with its own `field_provenance = estimated`
+and the model-prior reason in `assumptions` — never presented as a user-provided
+fact. A missing field may also be left `unknown`/`null` when no credible estimate is
+produced. See **User-Stated Nutrition Evidence — FTY-279**.
+
 ## Evidence Source Record
 
 An **evidence source record** is the provenance for one resolved item: which
@@ -145,12 +173,13 @@ from. Records are split so global source facts never carry user-specific data:
 | Field | Type | Notes |
 | --- | --- | --- |
 | `source_type` | enum | One of the **Source Hierarchy** values. |
-| `source_ref` | string | Stable reference, e.g. `usda_fdc:<fdcId>`, `open_food_facts:<barcode>`, `official_source:<url>`, `reference_source:<url>` (FTY-166), `user_label:<content_hash>` (FTY-061; the SHA-256 of the label image, which a saved `log_attachments` row shares), `model_prior`. |
+| `source_ref` | string | Stable reference, e.g. `usda_fdc:<fdcId>`, `open_food_facts:<barcode>`, `official_source:<url>`, `reference_source:<url>` (FTY-166), `user_label:<content_hash>` (FTY-061; the SHA-256 of the label image, which a saved `log_attachments` row shares), `user_text:<content_hash>` (FTY-279; the SHA-256 of the **extracted, normalized facts** — never the raw diary phrase), `model_prior`. |
 | `content_hash` | string | Hash of the extracted facts / fetched content the snapshot came from. |
-| `fetched_at` | timestamptz | When the source was queried/extracted. |
+| `fetched_at` | timestamptz | When the source was queried/extracted (for `user_text`, when the facts were extracted at log time). |
 | `facts` | normalized nutrition facts | Immutable snapshot (see below). |
 | `status` | lookup status | The outcome that produced this record (see **Provider Capability / Status**). |
-| `assumptions` | string[] | Any documented assumptions (density, default serving, model-prior reason). |
+| `field_provenance` | map | _(FTY-279, optional)_ Per-field provenance when a record's fields have **heterogeneous** origins (user-stated calories + estimated/unknown macros): maps each of `calories` / `protein_g` / `carbs_g` / `fat_g` to `user_stated`, `estimated`, or `unknown`. Absent → every present fact field shares this record's `source_type`. |
+| `assumptions` | string[] | Any documented assumptions (density, default serving, model-prior reason, per-field estimate reason). |
 
 `source_ref` for a fetched `official_source` or `reference_source` records the
 URL only (no headers, body, or query secrets). Object-level ownership and
@@ -165,11 +194,11 @@ Storage is canonical units only — **kcal and grams** — per the contracts
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `basis` | enum | yes | `per_100g`, `per_100ml`, or `per_serving` — what the facts are expressed against. |
+| `basis` | enum | yes | `per_100g`, `per_100ml`, `per_serving`, or `as_logged` (FTY-279) — what the facts are expressed against. `as_logged` facts are the **totals for the exact logged item** and are **not** scaled by the serving math. |
 | `calories` | number (kcal) | yes | Energy for the basis quantity. A fact set with no energy value is **not** a usable match. |
-| `protein_g` | number (g) | no (default 0) | Protein for the basis quantity. |
-| `carbs_g` | number (g) | no (default 0) | Carbohydrate for the basis quantity. |
-| `fat_g` | number (g) | no (default 0) | Total fat for the basis quantity. |
+| `protein_g` | number (g) \| null | no (default 0) | Protein for the basis quantity. |
+| `carbs_g` | number (g) \| null | no (default 0) | Carbohydrate for the basis quantity. |
+| `fat_g` | number (g) \| null | no (default 0) | Total fat for the basis quantity. |
 | `default_serving_g` | number (g) | no | Serving size in grams when the source supplies one (count-unit serving math). |
 | `serving_label` | string | no | Human label for a serving (e.g. "1 cup"), display only. |
 | `source_ref` | string | yes | The originating `source_ref`. |
@@ -177,7 +206,157 @@ Storage is canonical units only — **kcal and grams** — per the contracts
 Density and unit conventions (e.g. 1 ml ≈ 1 g) are documented assumptions
 recorded in `assumptions` and defined per implementation (`food-resolution.md`).
 Nutrition math (scaling facts to a logged quantity) is **out of scope** here and
-owned by the resolution step.
+owned by the resolution step. An `as_logged` fact set (FTY-279) is **already** the
+consumed-quantity total, so the resolution step stores it directly without scaling.
+
+**Unknown vs. zero macros (FTY-279).** The `default 0` for a missing macro is the
+convention for a **trusted-database / label / official / reference** fact set,
+where an absent nutrient is genuinely ~0 for the item. For an **`as_logged`
+user-stated** record a macro the user did **not** state and the estimator did
+**not** estimate is `null` (**unknown**) — never silently `0`. An unknown macro
+(`null`) is **not** the same as a real zero macro (`0 g`) and must stay
+distinguishable at the item detail / provenance level (`daily-summary.md`); a
+`null` macro contributes **no** grams to a daily macro total rather than counting
+as `0`. `calories` stays required for a usable match on every basis, including
+`as_logged`.
+
+## User-Stated Nutrition Evidence — FTY-279
+
+When a user states explicit nutrition facts in a log entry — a calorie total
+("…580 cals…"), or a macro fact ("30g protein") — those facts are **first-class
+user-provided evidence**, the same rank-1 tier as a scanned or manually entered
+label. The LLM is allowed to **read the text and extract what the user actually
+said**; the safety boundary is **not** "ignore nutrition in raw text." The boundary
+is: a persisted number must be backed by explicit evidence/provenance, validated for
+plausibility, and honest about which fields the user supplied versus which were
+estimated or left unknown.
+
+### Source system and reference
+
+- **Source system id / `source_type`:** `user_text` (rank 1, the user-provided
+  tier). Distinct from `user_label` so a client can tell a number the user **typed
+  into a log** from one **scanned off a label**.
+- **`source_ref`:** `user_text:<content_hash>` — the SHA-256 of the **extracted,
+  normalized facts**, never the raw diary phrase. The raw text is never stored in the
+  source ref, the evidence record, `assumptions`, logs, or provider traces
+  (**Privacy and Retention**).
+
+### `as_logged` basis (no per-100g lie)
+
+A user-stated total is expressed **as logged**: it is the value for the exact item
+the user logged, not a per-reference-quantity fact. Such facts carry `basis =
+as_logged` and are **not** scaled by the serving math. A stated `580 cals` is
+recorded `basis = as_logged, calories = 580` — it **must not** be recorded as
+`per_100g` / `per_serving` (e.g. `580 kcal per 100g`) unless the user also stated a
+real mass/serving basis to anchor it. This keeps an as-logged number from being
+silently reinterpreted as a density.
+
+### Field provenance (explicit vs. estimated vs. unknown)
+
+A user-stated item routinely has **mixed** provenance — the user gave calories but
+not macros. Each nutrition field carries its own provenance via the record's
+`field_provenance` map:
+
+- **user-stated fields** are evidence-backed user-provided facts (`user_stated`);
+- **missing fields may be estimated** — source-backed lookup first, then
+  comparable-source aggregation (rough reference evidence), then the model prior —
+  **when a usable identity exists** (`estimated`), with the estimate's
+  assumptions/provenance recorded — never presented as a user-provided fact (see
+  **Estimating a missing field** below);
+- **missing fields may instead remain unknown/`null`** (`unknown`) when no credible
+  estimate is produced;
+- an **unknown** macro (`null`) is **not** the same as a **zero** macro (`0 g`) — the
+  two are stored and surfaced differently (**Normalized Nutrition Fact Schema**;
+  `daily-summary.md`).
+
+For the fields the user stated, `user_text` **outranks** any external lookup
+(evidence-first, **Fallback Rule**); missing fields fall to a lower tier with their
+own provenance.
+
+### Estimating a missing field (source-backed lookup → comparable-source aggregation → model prior)
+
+A field the user did not state (a missing macro on a `user_text` calorie item, or any
+other absent field) is filled in a **fixed preference order**, so a real number is
+never invented while better evidence is still reachable:
+
+1. **Source-backed lookup first.** When a **sanitized item-identity query** exists
+   (`sanitize_query`, item identity only — **Search Request / Response Boundary**), a
+   single confident match from the source tiers (official / product / trusted-database /
+   reference) fills the field before any model prior is consulted. This is the same
+   evidence-before-`model_prior` guarantee as the **Fallback Rule**, applied per missing
+   field: `field_provenance = estimated` with the source's `source_ref` recorded.
+2. **Comparable-source aggregation — rough reference evidence.** When no single source
+   confidently resolves the field but several comparable references exist, the estimator
+   may derive a **rough reference estimate** by aggregating the comparable facts. This
+   aggregate is explicitly **reference-grade, not an authoritative source fact**: it
+   ranks **below** a single-source match and **above** a pure model prior, and it is
+   bounded by three guardrails so it can never become provenance-free averaging:
+   - **Source refs, always.** The aggregate names **every** contributing source
+     (`source_ref` list in `assumptions`) — it is never a single anonymous blended
+     number. A client can see it was averaged from N named references.
+   - **Compatibility checks.** Only facts for a **comparable item on a comparable
+     basis** are aggregated — normalized to the same canonical basis (per-100g) and
+     restricted to the same food identity/kind. An incompatible-basis or unrelated-item
+     fact is **excluded**, never blended in.
+   - **Plausibility / outlier filtering.** Contributing values must pass the same
+     plausibility bound used for source facts (FTY-115/132, canonical per-100g space);
+     values outside the bound, or that are statistical **outliers** relative to the
+     sample, are **dropped before** aggregation, so one bad reference cannot skew the
+     result. If too few comparable, plausible references survive, the aggregate is **not
+     produced** — the field falls through to step 3 rather than averaging noise.
+   The result is recorded `field_provenance = estimated` with the aggregation method and
+   the contributing `source_ref` list in `assumptions` — never presented as a
+   user-stated or single-source fact.
+3. **Model prior last — cold-pass, never a one-shot guess.** Only when neither a
+   source-backed lookup nor a plausible comparable-source aggregate is available does the
+   field fall to a pure `model_prior` estimate (`field_provenance = estimated`, the reason
+   in `assumptions`), or remain **unknown/`null`** when no credible estimate is produced.
+   An **uncertain** missing-field model-prior estimate is produced through the same
+   **cold-pass self-consistency** path the parse step uses (FTY-158/FTY-159;
+   `app/estimator/self_consistency.py`, `parse-candidates.md`): the field is drawn over
+   **N independent passes** and its **sampling agreement** — not a single verbalized
+   confidence number — is scored against the **FTY-159 calibrated operating point**
+   (`app/estimator/clarify_policy.py`), so a lone over-confident sample can never finalize
+   a fabricated number. Because a missing macro on an **already-resolved `user_text`
+   item** is an **optional** estimate — not the resolve-vs-ask decision — its cold-pass
+   fails closed **toward the field, not toward asking**: when the passes **disagree**
+   (agreement below the calibrated operating point) the field is left **rough or
+   `unknown`/`null`**, and this disagreement **never triggers a second clarification
+   question about a detail the user already supplied** (the item is already resolved from
+   user evidence; see `food-resolution.md`, no-second-follow-up). This inverts the parse
+   step's fail-closed-toward-asking precisely because the item's identity and stated facts
+   are already committed.
+
+The recipe (ingredient-sum) and similar-dish sources reserved in the **Source
+Hierarchy** are the future authoritative form of this reference tier; comparable-source
+aggregation is the interim rough-reference evidence with the guardrails above, not a
+licence to average provenance-free.
+
+### Validation (bounded, plausibility-checked, fail-closed)
+
+User-stated facts are **untrusted until validated** and cannot back a resolved item
+until they pass deterministic checks:
+
+- every stated value must be **finite and non-negative**; a negative,
+  `NaN`/`Infinity`, or absurd value is rejected;
+- an **as-logged calorie total** is bounded by a single-entry abuse cap (the
+  label path's `MAX_ENERGY_KCAL`-style bound), **not** the per-100g plausibility
+  bound (which needs a mass the user did not give);
+- stated facts are checked for **internal consistency** — e.g. an Atwater
+  cross-check (≈ 4/4/9 kcal per g protein/carb/fat) whose macro-implied energy grossly
+  exceeds a co-stated calorie total is **self-contradictory**;
+- a self-contradictory, implausible, or adversarial claim **fails closed** — it
+  routes to clarification rather than committing a number the user could not have
+  meant. Supplying a usable stated fact is never itself a reason to re-ask (see
+  `food-resolution.md`, **User-Stated Resolution (FTY-279)** (its no-second-follow-up rule)).
+
+### Security / untrusted input
+
+The LLM may read the entry text and extract facts, but **no provider instruction
+embedded in that text is executable**, and the extracted facts are validated by
+trusted backend code before they back any persisted number (the parse
+untrusted-output boundary, `parse-candidates.md`). Only the extracted, bounded fact
+fields are trusted; the raw phrase is never persisted or interpreted.
 
 ## Provider Capability / Status
 
@@ -286,9 +465,16 @@ body, or response body.
   finalized as a calorie source on its own.
 - Search results and fetched content are untrusted input, not facts; they become
   facts only through schema-validated extraction.
+- **User-stated facts (FTY-279) are untrusted until validated**: a value is trusted
+  only after it passes the finite/non-negative, as-logged abuse-cap, and
+  internal-consistency checks above; a self-contradictory or implausible claim fails
+  closed to clarification. The LLM extracts the stated facts; it never invents them,
+  and no instruction embedded in the raw text is executed.
 - The `model_prior` fallback is gated by the **Fallback Rule**; an adapter that
   finalizes a named/barcoded/label/generic item from model prior while an
-  applicable source lookup was available violates this contract.
+  applicable source lookup was available violates this contract. Filling a **missing**
+  field of a user-stated item from `model_prior` (with `field_provenance = estimated`)
+  is permitted and is **not** such a violation.
 
 ## Authorization
 
@@ -308,6 +494,13 @@ body, or response body.
   content hash; never raw pages, payloads, or OCR by default. Nutrition-label
   images follow `docs/security/data-retention.md` (retain only while needed for
   extraction unless the user explicitly saves the attachment).
+- **No raw diary text in a `user_text` record (FTY-279).** The raw phrase the user
+  typed is **never** stored in the `source_ref`, evidence record, `assumptions`,
+  logs, or provider traces. Only the extracted, bounded, validated facts are
+  persisted; the `source_ref` is `user_text:<content_hash>` over those facts, so the
+  provenance is auditable without retaining the sensitive sentence. (The raw entry
+  text lives only on the owning `log_events` row per `docs/security/data-retention.md`,
+  not copied into the evidence layer.)
 - **Source status retained and surfaced.** Each entry keeps its `source_type`,
   `source_ref`, lookup `status`, and assumptions so the user can see how it was
   estimated and edit it; `model_prior` entries record why the fallback was used.
@@ -358,6 +551,20 @@ generic food with no configured source and no label:
   trusted_nutrition_database  usda_fdc → unavailable (no API key)
   → Fallback Rule allows model_prior; evidence record source_type=model_prior,
     assumptions=["usda_fdc unavailable"], surfaced to client as a model-prior estimate
+```
+
+```
+user-stated calorie total: "Sobeys fresh to go buffalo chicken lime wrap (580 cals idk the breakdown)"
+  parser extracts identity ("... buffalo chicken lime wrap", brand "Sobeys")
+    + a stated calorie total (580)                      # user_text evidence, not a guess
+  validate: 580 finite, ≥ 0, under the as-logged abuse cap → trusted
+  → evidence record: source_type=user_text, source_ref=user_text:<content_hash>,
+    facts { basis: as_logged, calories: 580, protein_g: null, carbs_g: null, fat_g: null },
+    field_provenance { calories: user_stated, protein_g: unknown, carbs_g: unknown, fat_g: unknown }
+  # macros unknown (null), NOT zero — the estimator MAY instead estimate them from the
+  #   identity with field_provenance=estimated + a recorded assumption, or leave them null
+  → run.source_refs += "user_text"; single resolved item, calories counted immediately
+  # NOT needs_clarification: a usable stated detail was given (food-resolution.md)
 ```
 
 ## Search Provider Adapter — FTY-079 / FTY-164
@@ -755,6 +962,21 @@ cross-user / unknown / unauthenticated fail-closed.
   contract or re-deciding the source hierarchy or fallback semantics.
 - Recipe (ingredient-sum) and similar-dish reference sources remain deferred;
   this contract leaves the hierarchy slots reserved for them.
+- **FTY-279 (contract only; no schema, no code in this story).** Adds the `user_text`
+  rank-1 user-provided source system (explicit nutrition stated in the entry text),
+  the `as_logged` fact basis, the optional `field_provenance` map, and nullable
+  (unknown ≠ zero) macros. It is a **deliberate pre-v1 redesign**, not a shim: the
+  parser may now carry user-stated nutrition as evidence (`parse-candidates.md`), the
+  food step resolves a stated calorie total instead of re-asking
+  (`food-resolution.md`), and the daily summary counts a calorie-only item without
+  inventing macro grams (`daily-summary.md`). No migration in this story:
+  `evidence_sources.source_type` / `source_ref` are strings, `basis` is a string,
+  the `assumptions` column (FTY-062) carries per-field estimate reasons, and the
+  derived-item macro columns are already nullable; the `field_provenance` persistence
+  shape and the estimator/parser code are the **downstream FTY-280 implementation**.
+  Clients gain the `user_text` value in the provenance read-model (`SourceType`) and
+  `daily-summary.md`. The existing source hierarchy, lookup-status vocabulary, and
+  serving math are otherwise unchanged.
 - FTY-088 adds a **diagnostics-only** LLM-provider descriptor to
   `GET /healthz/sources` (`id = claude_code`, `source_type = llm_provider`,
   `kinds = [estimation]`). It is additive and surfaces operator/health state only:
