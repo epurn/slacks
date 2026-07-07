@@ -29,6 +29,18 @@
       "lines": 808,
       "reason": "Existing over-threshold first-party source document at FTY-200 baseline."
     },
+    "docs/contracts/food-resolution.md": {
+      "kind": "source",
+      "lane": "docs",
+      "lines": 754,
+      "reason": "FTY-278 (contract only) routes a mixed food log to the new first-class `partially_resolved` event status: crosses the 750-line source threshold documenting the item-scoped partial routing (mixed → `processing → partially_resolved` carrying committed `resolved` siblings; no-costable → event-level `needs_clarification`) across the version note, routing tables, and migration note."
+    },
+    "docs/contracts/log-events.md": {
+      "kind": "source",
+      "lane": "docs",
+      "lines": 774,
+      "reason": "FTY-278 (contract only) adds the first-class `partially_resolved` event status and its `processing → partially_resolved` / `partially_resolved → processing` transitions as the item-scoped partial state: crosses the 750-line source threshold documenting the status/transitions, the day-listing and clarification read/answer gating over both clarifying states, and the sibling-preserving answer flow."
+    },
     "mobile/components/SettingsScreen.test.tsx": {
       "kind": "test",
       "lane": "mobile",

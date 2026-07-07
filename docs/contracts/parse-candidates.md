@@ -319,8 +319,9 @@ item-scoped contract, a mixed entry is not all-or-nothing: the step commits the
 entry's **costable** components as `resolved` items (via the downstream food
 step, `food-resolution.md`) and raises a clarification only for the component(s)
 that are genuinely amountless, each question carrying its
-`derived_food_item_id`. Such a `needs_clarification` event therefore carries
-committed `resolved` siblings alongside its open item-scoped questions — the
+`derived_food_item_id`. Such a `partially_resolved` event (`log-events.md` v6)
+therefore carries committed `resolved` siblings alongside its open item-scoped
+questions — the
 whole event's derived-item set (resolved siblings + the `unresolved` component)
 and its question rows are committed atomically as one set. A re-estimate rebuilds
 that set atomically each round, so a resolved sibling is represented exactly once

@@ -36,20 +36,23 @@ estimator / backend-core / contracts lane:
 ## Version
 
 3 (FTY-278, contract only): the answer-triggered re-estimate under **item-scoped
-partial resolution**. A `needs_clarification` event may now carry committed
-`resolved` derived items (the costable siblings of a mixed log —
-`food-resolution.md` v9, `log-events.md` v6); answering an **item-scoped**
-question re-estimates the same event and must **preserve those siblings** without
-re-costing, duplicating, or double-counting them. The v2 job/run mechanics
-(re-open the terminal job, cumulative attempts, commit-first enqueue, redelivery
-idempotency) are **unchanged**; this version adds one rule on the pipeline's
+partial resolution**. The new first-class `partially_resolved` event status
+(`log-events.md` v6) carries committed `resolved` derived items (the costable
+siblings of a mixed log — `food-resolution.md` v9); answering an **item-scoped**
+question re-estimates the same event (`partially_resolved → processing`) and must
+**preserve those siblings** without re-costing, duplicating, or double-counting
+them. The v2 job/run mechanics (re-open the terminal job, cumulative attempts,
+commit-first enqueue, redelivery idempotency) are **unchanged** — the pipeline's
+"needs clarification" outcome keeps its `needs_clarification` run/job status and
+just drives the event to `partially_resolved` instead of `needs_clarification`
+when it commits costable siblings; this version adds one rule on the pipeline's
 terminal write — the event's derived-item **set is rebuilt atomically** each round
 so each component (resolved or still-unresolved) is represented exactly once. No
 schema change (`estimation_jobs` / `estimation_runs` untouched). This settles the
 mechanics only; the estimator implementation is the **downstream FTY-278
-follow-up**, and until it lands a `needs_clarification` event carries no committed
-siblings (the FTY-275 baseline) so the re-estimate is the v2 event-level
-round-trip unchanged. See
+follow-up**, and until it lands a mixed log routes to an event-level
+`needs_clarification` with no committed siblings (the FTY-275 baseline) so the
+re-estimate is the v2 event-level round-trip unchanged. See
 [Answer-triggered re-estimate](#answer-triggered-re-estimate-fty-171).
 
 2 (FTY-171): the **answer-triggered re-estimate**. The clarification answer
@@ -143,10 +146,18 @@ The worker reuses the FTY-030 `LEGAL_TRANSITIONS` map (it does not redefine it):
 | --- | --- | --- | --- |
 | (claimed) | `running` | `running` | `pending → processing` |
 | completed | `completed` | `succeeded` | `processing → completed` |
-| needs clarification | `needs_clarification` | `needs_clarification` | `processing → needs_clarification` |
+| needs clarification, **no** component costed | `needs_clarification` | `needs_clarification` | `processing → needs_clarification` |
+| needs clarification, **≥1 sibling committed** (item-scoped, FTY-278) | `needs_clarification` | `needs_clarification` | `processing → partially_resolved` |
 | failed (retryable), retries remain | `failed` | `running` | _(stays `processing`)_ |
 | failed (retryable), bound reached | `failed` | `failed` | `processing → failed` |
 | failed (deterministic, `StepFailed`) | `failed` | `failed` | `processing → failed` (immediate, no retry) |
+
+The **run/job status is `needs_clarification` for both clarification outcomes** —
+it is the worker-terminal, awaiting-answer status, re-opened only by the
+clarification resolve. FTY-278 adds no run/job status: whether the event lands
+`needs_clarification` (nothing costed) or `partially_resolved` (costable siblings
+committed) is decided at the **event** transition, and the resolve re-opens the
+`needs_clarification` job identically in either case.
 
 ### Answer-triggered re-estimate (FTY-171)
 
@@ -159,10 +170,12 @@ in the one transaction that persists the `clarification_answers` row:
   fresh bounded retry budget. `attempts` stays **cumulative** — run `attempt`
   numbers keep increasing monotonically, so the run history remains one honest,
   ordered audit trail across rounds.
-- **Event transition:** the resolve drives `needs_clarification → processing`
-  (the transition already legal in the FTY-030 map) *before* publishing, so the
-  worker finds an already-`processing` event with a non-terminal job and simply
-  runs the pipeline — the claim rule is unchanged.
+- **Event transition:** the resolve drives the event to `processing`
+  (`needs_clarification → processing` for an event-level question,
+  `partially_resolved → processing` for an item-scoped one — both legal in the
+  FTY-030 map) *before* publishing, so the worker finds an already-`processing`
+  event with a non-terminal job and simply runs the pipeline — the claim rule is
+  unchanged.
 - **Enqueue:** a fresh task is published with the same `EstimationJobPayload`
   (ids only), commit-first like create.
 - **Structured answers in the pipeline:** the worker loads every answered
@@ -180,7 +193,8 @@ in the one transaction that persists the `clarification_answers` row:
   neither re-opens nor re-enqueues.
 - **Resolved siblings preserved, never double-counted (FTY-278, contract only):**
   when the event carries committed `resolved` siblings from an earlier round
-  (the item-scoped partial state — `log-events.md` v6, `food-resolution.md` v9),
+  (the `partially_resolved` item-scoped partial state — `log-events.md` v6,
+  `food-resolution.md` v9),
   the re-estimate **rebuilds the event's derived-item set atomically** in the
   terminal transaction rather than appending to it: each component — a resolved
   sibling or the newly-answered one — is represented exactly once, so a sibling
@@ -258,7 +272,7 @@ in the one transaction that persists the `clarification_answers` row:
 | Transient step failure (`StepError`), retries remain | Run `failed`; job stays `running`; task retried with backoff. |
 | Transient step failure (`StepError`), bound reached | Run + job + event `failed`. |
 | Deterministic step failure (`StepFailed`) | Run + job + event `failed` immediately (no retry). |
-| Ambiguous input (`NeedsClarification`) | Run + job + event `needs_clarification` (terminal for the worker; only the clarification resolve re-opens it — v2). |
+| Ambiguous input (`NeedsClarification`) | Run + job `needs_clarification`; event `needs_clarification` (nothing costed) or `partially_resolved` (costable siblings committed — FTY-278). Terminal for the worker; only the clarification resolve re-opens it — v2/v3. |
 
 ## Examples
 
@@ -296,7 +310,7 @@ POST /api/users/{uid}/log-events  →  201 pending event
   [Answer-triggered re-estimate](#answer-triggered-re-estimate-fty-171).
 - **v3 (FTY-278, contract only; no migration).** Adds the sibling-preserving,
   set-rebuild rule for the answer-triggered re-estimate so a mixed log's costable
-  components can be committed on a `needs_clarification` event and preserved across
+  components can be committed on a `partially_resolved` event and preserved across
   clarification rounds without duplication or double-counting. The v1/v2 claim →
   run → transition, idempotency, ownership, and retry contracts are unchanged, and
   `estimation_jobs` / `estimation_runs` are untouched (the item↔question link is

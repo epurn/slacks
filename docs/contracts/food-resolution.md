@@ -76,19 +76,22 @@ also gains common serving/portion nouns (`slice`, `sandwich`, `handful`, `ring`,
 the USDA/OFF/label/official paths and their plausibility gate are unchanged.
 
 9 (FTY-278, contract only) **makes a genuinely amountless component's clarification
-item-scoped** instead of whole-entry-terminal. Today (v8 and earlier) the food step
-is all-or-nothing: if any candidate cannot be costed — an amountless generic food,
-an unknown food, or an unresolvable quantity — the **whole event** goes
+item-scoped** instead of whole-entry-terminal, routing a mixed log to the new
+first-class **`partially_resolved`** event status. Today (v8 and earlier) the food
+step is all-or-nothing: if any candidate cannot be costed — an amountless generic
+food, an unknown food, or an unresolvable quantity — the **whole event** goes
 `needs_clarification` with *nothing costed*, even when the entry's other components
 resolved cleanly ("chicken breast 150g and some milk"). FTY-278 settles the target:
-the food step **commits the costable components as `resolved` items** (with their
-evidence/`products` rows) in the same terminal transaction as the `processing →
-needs_clarification` transition, and raises an **item-scoped** clarification naming
+when at least one component costs and at least one is amountless, the food step
+**commits the costable components as `resolved` items** (with their
+evidence/`products` rows) in the same terminal transaction as a `processing →
+partially_resolved` transition, and raises an **item-scoped** clarification naming
 only the amountless component (the `derived_food_item_id` carrier is
-`parse-candidates.md` v5). This decides routing/counting semantics only (no
+`parse-candidates.md` v5); an entry with *no* costable component still routes to
+event-level `needs_clarification`. This decides routing/counting semantics only (no
 `food_step.py`/serving-math/DTO/schema/migration change); the estimator work is a
-**downstream follow-up** (`daily-summary.md`, `log-events.md` v6,
-`estimation-jobs.md` v3), and the **v8 baseline** ships until then.
+**downstream follow-up** (`log-events.md` v6, `estimation-jobs.md` v3,
+`daily-summary.md`), and the **v8 baseline** ships until then.
 
 8 (FTY-275) **widens the deterministic serving math to standard household volume
 measures** and sharpens the clarification boundary to *any stated portion*. A parsed
@@ -279,7 +282,7 @@ FDC facts (per 100 g): 130 kcal / 2.0 g protein / 28 g carbs / 0.2 g fat
 A `needs_clarification` outcome records a fixed, sanitized question for the later
 answer flow. Resolved items, their evidence rows, and the cached products are
 committed in the **same transaction** as the terminal status — `completed` today,
-and, under the FTY-278 item-scoped contract, `needs_clarification` too (see
+and, under the FTY-278 item-scoped contract, `partially_resolved` too (see
 **Item-scoped partial resolution (FTY-278)** below).
 
 ### Item-scoped partial resolution (FTY-278, contract only)
@@ -291,8 +294,8 @@ about:
 | Entry shape | Costable components | Amountless / un-costable component | Event outcome (target) |
 | --- | --- | --- | --- |
 | All components costable | resolved + evidence + products | — | `processing → completed` (unchanged) |
-| **Mixed** (≥1 costable, ≥1 amountless) | committed `resolved`, **counted** | keeps `unresolved`, owns an **item-scoped** question (`derived_food_item_id`) | `processing → needs_clarification`, carrying the committed siblings |
-| No component costable | — | one or more item-scoped questions | `processing → needs_clarification`, nothing committed |
+| **Mixed** (≥1 costable, ≥1 amountless) | committed `resolved`, **counted** | keeps `unresolved`, owns an **item-scoped** question (`derived_food_item_id`) | `processing → partially_resolved`, carrying the committed siblings |
+| No component costable | — | one or more event-level questions | `processing → needs_clarification`, nothing committed |
 
 - Only a component with **no stated portion** raises a question (the v8 boundary is
   unchanged — a stated/worded/approximate portion still estimates); the question
@@ -739,8 +742,9 @@ The backend exposes four health-check endpoints, all returning structured JSON w
   endpoint. This does not redefine the resolution math above; the estimator sets the
   snapshots at creation. See `corrections.md`.
 - **FTY-278 (contract only; no code, no migration in this story).** Redefines the
-  clarification boundary from whole-event to **item-scoped** for a mixed food log:
-  costable components commit as `resolved` and count while a specific amountless
+  clarification boundary from whole-event to **item-scoped** for a mixed food log,
+  routing it to the new `partially_resolved` status (`log-events.md` v6): costable
+  components commit as `resolved` and count while a specific amountless
   component owns the question. Every source path, the serving math, plausibility
   gate, and `evidence_sources`/`products` shapes are **unchanged** — only the
   *routing* changes. The `derived_food_item_id` question link and its
