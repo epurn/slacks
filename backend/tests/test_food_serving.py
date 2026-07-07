@@ -31,6 +31,24 @@ from app.estimator.food_serving import (
         # Volume units use the 1 ml ≈ 1 g assumption.
         ("ml", 250.0, "", None, 250.0),
         ("l", 1.0, "", None, 1000.0),
+        # Household / cooking measures (FTY-275) convert at their standard volume.
+        ("cup", 1.0 / 3.0, "1/3 cup", None, 80.0),  # 240 ml cup → ~80 g
+        ("cup", 1.0, "1 cup", None, 240.0),
+        ("cups", 2.0, "2 cups", None, 480.0),
+        ("tsp", 1.0, "a tsp", None, 5.0),
+        ("teaspoon", 1.0, "", None, 5.0),
+        ("tbsp", 2.0, "2 tbsp", None, 30.0),
+        ("tablespoons", 2.0, "", None, 30.0),
+        ("fl oz", 1.0, "", None, 30.0),  # explicit fluid ounce is volume
+        ("floz", 1.0, "", None, 30.0),
+        ("pint", 1.0, "", None, 473.0),
+        ("quart", 1.0, "", None, 946.0),
+        ("gallon", 1.0, "", None, 3785.0),
+        # Bare "oz" stays a MASS unit (28.35 g), not a fluid ounce.
+        ("oz", 1.0, "", None, 28.35),
+        # Household units also resolve from the quantity-text fallback.
+        (None, None, "1 cup of rice", None, 240.0),
+        (None, None, "2 tbsp olive oil", None, 30.0),
         # Count units multiply by the source default serving size.
         (None, 2.0, "two", 50.0, 100.0),
         ("servings", 1.5, "", 80.0, 120.0),
@@ -78,6 +96,10 @@ def test_resolve_grams_resolvable_cases(
         ("handful", 1.0, "one handful", None),
         # A genuinely unknown unit with no fallback measure in the text.
         ("zorblax", 1.0, "one zorblax", 100.0),
+        # Bare single-letter "t"/"T" are deliberately excluded (ambiguous); the
+        # normalized unit lower-cases "T" to "t", and neither resolves.
+        ("t", 1.0, "1 t", None),
+        ("T", 1.0, "1 T", None),
     ],
 )
 def test_resolve_grams_unresolvable_returns_none(

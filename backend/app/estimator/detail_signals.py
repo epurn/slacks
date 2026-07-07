@@ -184,18 +184,104 @@ def game_count(unit: str | None, amount: float | None, quantity_text: str) -> fl
 
 # ---------------------------------------------------------------------------
 # Detail predicate for food candidates.
+#
+# A stated portion — numeric, a numeric range, a household measure, a colloquial
+# measure word, or an indefinite article standing for one — means the user *stated*
+# a portion (FTY-275), so a generic source-miss defers to a model-prior estimate
+# rather than re-asking for an amount the user already gave (in words). Only a
+# genuinely amountless component ("some milk", bare "milk", "some crackers") still
+# clarifies. This predicate is a defensive routing net; the primary mechanism is the
+# parse resolving a costable amount+unit (:mod:`app.estimator.parse_prompt`).
 # ---------------------------------------------------------------------------
+
+#: Lower-case word tokeniser for scanning a quantity phrase for stated-portion words.
+_WORD_RE: Final[re.Pattern[str]] = re.compile(r"[a-z]+")
+
+#: Household / cooking volume tokens that state a portion (FTY-275). Mirrors the
+#: household measures :func:`app.estimator.food_serving.resolve_grams` now costs; a
+#: phrase carrying one ("1/3 cup", "a tsp", "2 tbsp", "1 fl oz") is a stated portion
+#: even when the model left the structured ``amount`` empty. ``fl oz`` tokenises to
+#: ``fl``/``oz``, so ``fl`` alone flags a fluid measure (bare ``oz`` stays mass).
+_HOUSEHOLD_UNIT_WORDS: Final[frozenset[str]] = frozenset(
+    {
+        "cup",
+        "cups",
+        "tsp",
+        "teaspoon",
+        "teaspoons",
+        "tbsp",
+        "tbs",
+        "tablespoon",
+        "tablespoons",
+        "fl",
+        "floz",
+        "pint",
+        "pints",
+        "pt",
+        "quart",
+        "quarts",
+        "qt",
+        "gallon",
+        "gallons",
+        "gal",
+    }
+)
+
+#: Colloquial / approximate measure words that state a (rough) portion (FTY-275): "a
+#: splash of milk", "a drizzle of oil", "a handful of nuts", "a dash of salt". Their
+#: presence means the user stated a portion — the estimate-first policy estimates it
+#: (the model resolves the phrase to a concrete amount+unit), never re-clarifies.
+_COLLOQUIAL_MEASURE_WORDS: Final[frozenset[str]] = frozenset(
+    {
+        "splash",
+        "splashes",
+        "drizzle",
+        "drizzles",
+        "dash",
+        "dashes",
+        "pinch",
+        "pinches",
+        "handful",
+        "handfuls",
+        "glug",
+        "glugs",
+    }
+)
+
+#: An indefinite article standing for a single portion ("a"/"an" = 1): "a splash of
+#: milk", "an apple". A bare identity ("milk", "some milk", "some crackers") has no
+#: leading standalone indefinite article, so it is not treated as a stated portion.
+_INDEFINITE_MEASURE_RE: Final[re.Pattern[str]] = re.compile(r"\b(?:an?)\s+\S", re.IGNORECASE)
 
 
 def has_food_detail(amount: float | None, quantity_text: str) -> bool:
     """Whether a food candidate carries enough amount detail to estimate.
 
-    ``True`` when the model supplied a positive structured ``amount`` (a count
-    or a measured quantity) or ``quantity_text`` states a numeric range (which
-    resolves to a midpoint). A bare identity with no amount ("some crackers")
+    ``True`` when the model supplied a positive structured ``amount`` (a count or a
+    measured quantity), ``quantity_text`` states a numeric range (which resolves to a
+    midpoint), or ``quantity_text`` carries a stated worded portion — a household
+    measure, a colloquial measure word, or an indefinite-article measure (FTY-275). A
+    bare identity with no stated portion ("some crackers", "some milk", bare "milk")
     returns ``False`` so it still routes to clarification.
     """
 
     if amount is not None and amount > 0:
         return True
-    return parse_range_midpoint(quantity_text) is not None
+    text = quantity_text or ""
+    if parse_range_midpoint(text) is not None:
+        return True
+    return _states_worded_portion(text)
+
+
+def _states_worded_portion(quantity_text: str) -> bool:
+    """Whether ``quantity_text`` states a household / colloquial / indefinite portion.
+
+    Pure and total: a household unit token, a colloquial measure word, or a leading
+    indefinite article ("a"/"an" + a following word) each mean the user stated a
+    portion in words. A bare identity with none of these returns ``False``.
+    """
+
+    words = frozenset(_WORD_RE.findall(quantity_text.lower()))
+    if words & _HOUSEHOLD_UNIT_WORDS or words & _COLLOQUIAL_MEASURE_WORDS:
+        return True
+    return _INDEFINITE_MEASURE_RE.search(quantity_text) is not None

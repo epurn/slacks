@@ -118,6 +118,20 @@ def test_game_count_misses(text: str) -> None:
         (None, "some crackers", False),  # no amount signal
         (None, "", False),
         (0.0, "", False),  # non-positive amount is not detail
+        # Stated worded/household/indefinite portions count as detail (FTY-275),
+        # even when the structured amount is empty.
+        (None, "1/3 cup", True),  # household measure
+        (None, "a tsp of maple syrup", True),  # household + indefinite article
+        (None, "2 tbsp", True),
+        (None, "1 fl oz", True),  # "fl oz" tokenises to "fl"/"oz"; "fl" flags it
+        (None, "a splash of milk", True),  # colloquial measure
+        (None, "a drizzle of oil", True),
+        (None, "a handful of nuts", True),
+        (None, "an apple", True),  # indefinite article standing for one
+        # Boundary preserved: a genuinely amountless component still clarifies.
+        (None, "some milk", False),
+        (None, "milk", False),
+        (None, "a", False),  # bare article with no following portion word
     ],
 )
 def test_has_food_detail(amount: float | None, text: str, expected: bool) -> None:

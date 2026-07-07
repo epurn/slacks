@@ -75,6 +75,25 @@ also gains common serving/portion nouns (`slice`, `sandwich`, `handful`, `ring`,
 `finger`, …). No schema, migration, or serving-math change beyond the count vocabulary;
 the USDA/OFF/label/official paths and their plausibility gate are unchanged.
 
+8 (FTY-275) **widens the deterministic serving math to standard household volume
+measures** and sharpens the clarification boundary to *any stated portion*. A parsed
+household-measure portion — `cup`, `tsp`, `tbsp`, `fl oz`, `pint`, `quart`, `gallon`
+and their common spellings — now converts to grams at its standard millilitre volume
+under the existing `1 ml ≈ 1 g` v1 assumption (tsp 5 ml, tbsp 15 ml, fl oz 30 ml, cup
+240 ml, pint 473 ml, quart 946 ml, gallon 3785 ml — settled FDA nutrition-labeling /
+US-customary measures, not guesses), so a perfectly-parsed "1/3 cup" or "a tsp" costs
+deterministically instead of failing `resolve_grams` and stopping at
+`unresolvable_quantity`. Bare `oz` stays a **mass** unit (28.35 g) and bare
+single-letter `t`/`T` are deliberately unrecognised (ambiguous). In parallel, the
+detail-signal net (`has_food_detail`) treats a `quantity_text` carrying a stated
+household unit, a colloquial measure word (`splash`/`drizzle`/`dash`/`pinch`/
+`handful`/`glug`), or an indefinite-article measure (`a`/`an` = 1) as detail present,
+so a generic source-miss defers to the model-prior estimate rather than clarifying —
+never re-asking for an amount the user already stated in words. Only a component with
+**no** stated portion ("some milk", bare "milk") still clarifies. No schema,
+migration, DTO, or new prompt-string change; the LLM still supplies no calories/macros
+and the deterministic serving math owns every number.
+
 7 (FTY-166) inserts the **reference-source tier** between the official source and
 the model prior inside the FTY-062 step: a branded item official sources miss — and
 a detail-rich generic item, which has no brand page — is searched for **public
@@ -163,7 +182,13 @@ treated 1 ml ≈ 1 g); otherwise unknown.
 quantity to grams, v1-simple per the story scope:
 
 1. structured `amount` + **mass** unit (mg/g/kg/oz/lb) → grams directly;
-2. structured `amount` + **volume** unit (ml/l, 1 ml ≈ 1 g) → grams;
+2. structured `amount` + **volume** unit (ml/l, 1 ml ≈ 1 g) → grams. The volume
+   vocabulary includes the standard **household / cooking measures** (FTY-275) —
+   `cup` (240 ml), `tsp` (5 ml), `tbsp` (15 ml), `fl oz` (30 ml), `pint` (473 ml),
+   `quart` (946 ml), `gallon` (3785 ml), and their common spellings — each converted
+   at its standard millilitre volume under the same `1 ml ≈ 1 g` assumption, so a
+   stated "1/3 cup" or "a tsp" costs at that portion. Bare `oz` stays **mass**
+   (28.35 g); bare single-letter `t`/`T` are unrecognised;
 3. structured `amount` + **count** unit (or no unit) → `amount × default_serving_g`
    when the source supplies a default serving size. The count vocabulary includes the
    common serving/portion nouns a casual log uses — `slice`, `sandwich`, `handful`,

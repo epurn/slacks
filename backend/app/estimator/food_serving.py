@@ -5,7 +5,8 @@ Pure functions, no I/O, no LLM: a candidate's quantity (the parse step's
 canonical calories and macros out. This module owns two deterministic rules:
 
 1. **quantity → grams** (:func:`resolve_grams`) — the v1-simple resolution the story
-   scopes: an explicit mass (grams), a volume (millilitres, treated 1 ml ≈ 1 g),
+   scopes: an explicit mass (grams), a volume (millilitres or a standard household
+   measure — cup/tsp/tbsp/fl oz/… — all treated 1 ml ≈ 1 g, FTY-275),
    or a *count* multiplied by the source's default serving size. A quantity that
    cannot be resolved to grams confidently returns ``None`` so the caller routes to
    ``needs_clarification`` rather than guessing.
@@ -48,6 +49,25 @@ _MASS_UNIT_GRAMS: Final[dict[str, float]] = {
 #: Grams per recognised **volume** unit, under the documented v1 assumption that
 #: 1 millilitre of a generic food weighs ~1 gram (water density). Refining this per
 #: food density is out of scope for v1.
+#:
+#: The **household / cooking measures** (FTY-275) — ``cup``, ``tsp``, ``tbsp``,
+#: ``fl oz``, ``pint``, ``quart``, ``gallon`` and their common spellings — are settled
+#: standard measures, not guesses, so a stated household portion ("1/3 cup", "a tsp",
+#: "2 tbsp") costs deterministically at that portion instead of stopping at
+#: clarification. Each grams value is its standard millilitre volume under the same
+#: 1 ml ≈ 1 g assumption (so a cup of milk vs a cup of flour is *not* density-corrected
+#: here — the documented v1 simplification). Values are documented tunables:
+#:   tsp   5 ml   — FDA nutrition-labeling household measure (21 CFR 101.9)
+#:   tbsp  15 ml  — FDA 21 CFR 101.9
+#:   fl oz 30 ml  — FDA 21 CFR 101.9
+#:   cup   240 ml — FDA labeling cup (US customary 236.6 ml; documented tunable)
+#:   pint  473 ml — US customary
+#:   quart 946 ml — US customary
+#:   gallon 3785 ml — US customary
+#: Bare single-letter forms (``t`` / ``T``) are deliberately **excluded** (ambiguous,
+#: and ``T`` / ``t`` collide once lower-cased) — spell them out. Bare ``oz`` stays a
+#: **mass** unit (see ``_MASS_UNIT_GRAMS``, matched first); only the explicit
+#: fluid-ounce spellings are volume.
 _VOLUME_UNIT_GRAMS: Final[dict[str, float]] = {
     "ml": 1.0,
     "milliliter": 1.0,
@@ -60,6 +80,29 @@ _VOLUME_UNIT_GRAMS: Final[dict[str, float]] = {
     "litre": 1000.0,
     "liters": 1000.0,
     "litres": 1000.0,
+    # Household / cooking measures (FTY-275) — grams == standard ml at 1 ml ≈ 1 g.
+    "tsp": 5.0,
+    "teaspoon": 5.0,
+    "teaspoons": 5.0,
+    "tbsp": 15.0,
+    "tbs": 15.0,
+    "tablespoon": 15.0,
+    "tablespoons": 15.0,
+    "fl oz": 30.0,
+    "floz": 30.0,
+    "fluid ounce": 30.0,
+    "fluid ounces": 30.0,
+    "cup": 240.0,
+    "cups": 240.0,
+    "pint": 473.0,
+    "pints": 473.0,
+    "pt": 473.0,
+    "quart": 946.0,
+    "quarts": 946.0,
+    "qt": 946.0,
+    "gallon": 3785.0,
+    "gallons": 3785.0,
+    "gal": 3785.0,
 }
 
 #: Unit phrases that denote a **count of servings** rather than a measured amount.

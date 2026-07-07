@@ -29,10 +29,13 @@ from app.estimator.pipeline import AnsweredClarification
 #: Estimate-first framing (FTY-155): when the user names a food/exercise but
 #: leaves a quantity unspecified, the model infers the typical portion implied by
 #: the structure given (counts, container words, named/branded standard servings)
-#: and extracts that as the candidate with a real confidence. needs_clarification
-#: is reserved for input that is genuinely indeterminate — no count, no portion
-#: word, no standard serving cue, or the item itself is ambiguous. The security
-#: framing (untrusted DATA, no fabricated calories/brands/barcodes) is unchanged.
+#: and extracts that as the candidate with a real confidence. A *stated* portion —
+#: including a worded/approximate/household measure ("1/3 cup", "a splash of milk",
+#: "about a tsp") or an indefinite article ("a"/"an" = 1) — is resolved to a concrete
+#: amount+unit and estimated, never re-clarified (FTY-275). needs_clarification is
+#: reserved for input that is genuinely indeterminate — no count, no portion word, no
+#: standard serving cue, or the item itself is ambiguous. The security framing
+#: (untrusted DATA, no fabricated calories/brands/barcodes) is unchanged.
 _PROMPT_TEMPLATE = """\
 You are a nutrition log parser. Extract the food and exercise items from the \
 user's log entry below into the required structured schema.
@@ -59,6 +62,16 @@ components whose quantity is contextually implied (e.g. ~1 tbsp peanut butter \
 per 2-3 crackers, a drizzle of dressing on a salad). Extract the inferred amount \
 and report a confidence that honestly reflects how typical the estimate is — do \
 not floor confidence just because a number was inferred rather than stated.
+- Resolve a STATED portion into a concrete amount and a standard unit you can \
+cost — grams, millilitres, a household measure (tsp, tbsp, cup, fl oz), or a count. \
+This includes: a numeric household measure ("1/3 cup" → amount 0.333, unit "cup"; \
+"2 tbsp" → amount 2, unit "tbsp"); a colloquial or approximate measure ("a splash \
+of milk", "about a tsp of syrup", "a drizzle of oil", "a handful of nuts") — resolve \
+the phrase to a natural concrete amount+unit for that food (a splash of milk ≈ a \
+small volume in ml; a handful of nuts ≈ a small mass in g); and an indefinite \
+article standing for one ("a"/"an" = amount 1). Leave amount empty ONLY when no \
+portion is stated at all ("some milk", bare "milk"); never re-ask for an amount the \
+user already stated, even when they stated it in words.
 - Clarify only when genuinely indeterminate: set disposition \
 "needs_clarification" only when a food or exercise is named but there is no \
 structural basis to infer an amount — no explicit count, no portion word, no \
