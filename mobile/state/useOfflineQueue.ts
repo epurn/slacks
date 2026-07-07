@@ -99,9 +99,10 @@ export function useOfflineQueue(args: {
   const [entries, setEntries] = useState<readonly OutboxEntry[]>(EMPTY);
   const [reachability, setReachability] = useState<ReachabilityState>("online");
 
+  const key = owner ? outboxOwnerKey(owner) : null;
+
   const mountedRef = useRef(true);
   const draining = useRef(false);
-  const prevOwnerKey = useRef<string | null>(null);
   // The owner the hook is currently bound to, updated synchronously by the load
   // effect. An in-flight drain closes over the owner it *started* for and polls
   // this ref to notice a sign-out/switch that happened mid-pass — the single
@@ -124,6 +125,21 @@ export function useOfflineQueue(args: {
       mountedRef.current = false;
     };
   }, []);
+
+  // Drop the previous owner's *rendered* queue the instant the owner changes,
+  // synchronously during render — before any committed render can expose owner
+  // A's raw entries to owner B (or to the signed-out surface). This is React's
+  // supported "adjust state when a prop changes" pattern: the setState calls
+  // re-render in place, so children never observe the stale value. The drain's
+  // synchronous authority (`entriesRef`) is reset alongside this in the load
+  // effect below — a ref must not be mutated during render. The durable file is
+  // intentionally left intact so the same owner reloads its backlog (FTY-277).
+  const [renderedOwnerKey, setRenderedOwnerKey] = useState<string | null>(key);
+  if (renderedOwnerKey !== key) {
+    setRenderedOwnerKey(key);
+    setEntries(EMPTY);
+    setReachability("online");
+  }
 
   // Update the queue everywhere at once: the synchronous ref (read by the
   // callbacks) and the rendered state. Keeping these in lockstep is what stops a
@@ -224,22 +240,19 @@ export function useOfflineQueue(args: {
   // transition rather than effect-cleanup so unmount (navigation) never touches
   // the queue.
   useEffect(() => {
-    const key = owner ? outboxOwnerKey(owner) : null;
+    const nextKey = owner ? outboxOwnerKey(owner) : null;
+    // On a real owner transition, reset the drain's synchronous authority
+    // (`entriesRef`, read by the async drain/enqueue callbacks) to match the
+    // rendered view already cleared during render — so a drain can never act on
+    // the previous owner's entries under the new session. This is done here,
+    // not during render, because a ref must not be mutated mid-render.
+    if (activeOwnerKey.current !== nextKey) commitEntries(EMPTY);
     // Publish the new owner synchronously (before the async load resolves) so an
     // in-flight drain started for the previous owner sees the change and aborts.
-    activeOwnerKey.current = key;
-    const previous = prevOwnerKey.current;
-    if (previous !== null && previous !== key) {
-      // A different owner (or sign-out): drop the previous owner's entries from
-      // memory so they are never rendered while signed out and never drained
-      // under the new owner. We do NOT delete the previous owner's durable file
-      // — that is the retention change this story makes. The privacy guarantee
-      // is that the raw text is gone from React state and the drain loop, not
-      // that it is erased from disk.
-      commitEntries(EMPTY);
-      setReachability("online");
-    }
-    prevOwnerKey.current = key;
+    // We do NOT delete the previous owner's durable file — that is the retention
+    // change this story makes. The privacy guarantee is that the raw text is gone
+    // from React state and the drain loop, not that it is erased from disk.
+    activeOwnerKey.current = nextKey;
 
     if (!owner) return;
     let active = true;

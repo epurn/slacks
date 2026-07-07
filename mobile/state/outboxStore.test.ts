@@ -117,6 +117,31 @@ describe("fileOutboxStore", () => {
     expect(mockFs.size).toBe(1);
   });
 
+  it("keeps path-case-distinct servers on separate queues for the same user id (FTY-277)", async () => {
+    // A self-hosted Fatty can live under a base path, and paths are
+    // case-sensitive: https://host/Fatty and https://host/fatty are two distinct
+    // servers. The owner key lowercases only scheme + host, so these must not
+    // collapse onto one file even though the user id is identical.
+    const upper: OutboxOwner = {
+      serverUrl: "https://self.example.test/Fatty",
+      userId: USER_A,
+    };
+    const lower: OutboxOwner = {
+      serverUrl: "https://self.example.test/fatty",
+      userId: USER_A,
+    };
+    await fileOutboxStore.save(upper, [entry({ idempotencyKey: "upper-path" })]);
+    await fileOutboxStore.save(lower, [entry({ idempotencyKey: "lower-path" })]);
+
+    expect((await fileOutboxStore.load(upper)).map((e) => e.idempotencyKey)).toEqual([
+      "upper-path",
+    ]);
+    expect((await fileOutboxStore.load(lower)).map((e) => e.idempotencyKey)).toEqual([
+      "lower-path",
+    ]);
+    expect(mockFs.size).toBe(2);
+  });
+
   it("drops entries owned by a different user (defence in depth)", async () => {
     // Hand-write a file containing a foreign-owned entry under OWNER_A's file.
     await fileOutboxStore.save(OWNER_A, [

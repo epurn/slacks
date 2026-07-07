@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
 import { useOfflineQueue, type OfflineQueue } from "./useOfflineQueue";
@@ -96,11 +96,16 @@ function renderQueue(opts: {
 }) {
   let latest!: OfflineQueue;
   let setOwner!: (owner: OutboxOwner | null) => void;
+  // One record per *committed* render (captured in an effect, so uncommitted
+  // setState-in-render passes are excluded): the owner the render carried and the
+  // entry ids it exposed. This is how a test proves the surface a consumer like
+  // Today actually sees never leaks the previous owner's entries mid-switch.
+  const commits: { ownerKey: string | null; ids: string[] }[] = [];
 
   function Host(props: { initialOwner: OutboxOwner | null }) {
     const [owner, setId] = useState(props.initialOwner);
     setOwner = setId;
-    latest = useOfflineQueue({
+    const queue = useOfflineQueue({
       owner,
       store: opts.store,
       submit:
@@ -109,6 +114,12 @@ function renderQueue(opts: {
           throw new Error("submit not expected in this test");
         }),
       onAccepted: opts.onAccepted ?? (() => {}),
+    });
+    latest = queue;
+    const committedOwnerKey = owner ? outboxOwnerKey(owner) : null;
+    const committedIds = queue.entries.map((e) => e.idempotencyKey);
+    useEffect(() => {
+      commits.push({ ownerKey: committedOwnerKey, ids: committedIds });
     });
     return null;
   }
@@ -122,6 +133,7 @@ function renderQueue(opts: {
     get current() {
       return latest;
     },
+    commits,
     setOwner: (owner: OutboxOwner | null) =>
       act(() => {
         setOwner(owner);
@@ -204,6 +216,32 @@ describe("useOfflineQueue — owner isolation (FTY-277)", () => {
     expect(harness.current.entries.map((e) => e.idempotencyKey)).toEqual(["key-b"]);
     expect(cleared).toEqual([]);
     expect(data.get(outboxOwnerKey(OWNER_A))).toHaveLength(1);
+  });
+
+  it("never exposes A's entries in a committed render during a direct A → B switch", async () => {
+    // Regression: a synchronous owner switch used to commit one render with the
+    // new owner B but the *previous* owner A's entries still in state, clearing
+    // them only in a follow-up passive effect. Today consumes those entries as
+    // raw-text offline rows, so that intermediate render leaked A's queue under
+    // B. The in-memory view must drop synchronously with the owner change.
+    const { store } = makeStore({
+      ...seed(OWNER_A, [entry()]),
+      ...seed(OWNER_B, [entry({ userId: USER_B, idempotencyKey: "key-b" })]),
+    });
+    const harness = renderQueue({ initialOwner: OWNER_A, store });
+    await flush();
+
+    harness.setOwner(OWNER_B);
+    await flush();
+
+    // Every committed render that carried owner B must show only B's backlog (or
+    // the empty reset) — A's "key-a" must never appear under B's owner key.
+    const bKey = outboxOwnerKey(OWNER_B);
+    const bCommits = harness.commits.filter((c) => c.ownerKey === bKey);
+    expect(bCommits.length).toBeGreaterThan(0);
+    for (const c of bCommits) {
+      expect(c.ids).not.toContain("key-a");
+    }
   });
 
   it("never drains the previous user's entries after a switch", async () => {

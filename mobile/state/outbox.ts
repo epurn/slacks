@@ -77,11 +77,23 @@ export interface OutboxOwner {
 
 /**
  * Normalize a server URL for owner comparison: trim, drop trailing slashes, and
- * lowercase, so cosmetically-different spellings of the same server resolve to
- * one owner while genuinely different servers stay distinct.
+ * lowercase **only the scheme + authority** (host[:port]), so cosmetically
+ * different spellings of the same server resolve to one owner while genuinely
+ * different servers stay distinct.
+ *
+ * The path is deliberately case-*sensitive*: a self-hosted Fatty can live under
+ * a base path, so `https://host/Fatty` and `https://host/fatty` are two distinct
+ * servers whose queues must not share storage. Lowercasing the whole URL would
+ * collapse them onto one owner key, so only the case-insensitive scheme +
+ * authority is folded; the path (and anything after it) keeps its original case.
  */
 function normalizeServerUrl(serverUrl: string): string {
-  return serverUrl.trim().replace(/\/+$/, "").toLowerCase();
+  const trimmed = serverUrl.trim().replace(/\/+$/, "");
+  // `scheme://authority` then an optional path. Scheme + authority are
+  // case-insensitive per RFC 3986; the path is not.
+  const match = /^([a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^/?#]*)(.*)$/.exec(trimmed);
+  if (!match) return trimmed.toLowerCase();
+  return `${match[1].toLowerCase()}${match[2]}`;
 }
 
 /**
