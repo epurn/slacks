@@ -14,6 +14,16 @@
 # reachable Modal — see NativeSheet.tsx and docs/verification/FTY-263) the in-
 # modal marker is a real, load-bearing assertion.
 #
+# iOS marker scope (FTY-272): `correction.detail` opens at NativeSheet's
+# medium, undimmed detent, where the marker stays reachable on iOS too, so its
+# wait below runs on both platforms. `correction.typeahead` and
+# `correction.confirm_apply` open at the large, DIMMED detent, where iOS's
+# native presentation does not expose the in-modal subtree to the
+# accessibility tree at all (ratified in docs/verification/FTY-263/README.md)
+# — so their marker wait is Android-only. iOS still opens both presets and
+# screenshots them, confirming the sheet itself rendered instead of waiting on
+# the unreachable marker.
+#
 # Each preset is registered through FTY-247's registration API from
 # correction-owned code — no shared registry/route/theme/marker edits.
 #
@@ -54,38 +64,73 @@ appId: com.fatty
 # leave it in. This preset opens the sheet at its large, DIMMED detent
 # (change-match narrows to large-only, see useCorrectionSheet's `expanded`).
 # The settled marker now lives INSIDE the correction sheet's modal subtree
-# (CorrectionSheet's `settledMarkerTestID`), so it is reachable while the sheet
-# is presented even at that dimmed detent — the case that failed on PR #230,
-# where the navigator-level overlay marker was occluded behind the presentation.
-# The marker appears only once `candidatesLoading === false` with the candidate
-# list painted, so waiting on it captures the loaded sub-state — no
-# animation-wait fallback.
+# (CorrectionSheet's `settledMarkerTestID`), reachable while the sheet is
+# presented at that dimmed detent on Android — the case that failed on PR #230,
+# where the navigator-level overlay marker was occluded behind the
+# presentation. The marker appears only once `candidatesLoading === false` with
+# the candidate list painted, so waiting on it on Android captures the loaded
+# sub-state — no animation-wait fallback there.
+#
+# iOS (FTY-272): this dimmed native detent is exactly where iOS's presentation
+# stops exposing in-modal content to the accessibility tree at all (see the
+# module header above and docs/verification/FTY-263/README.md), so the marker
+# wait is Android-only; iOS opens the same preset and screenshots it after
+# confirming the sheet itself is up.
 - launchApp:
     clearState: false
 - openLink: "fatty://__visual-review?preset=correction.typeahead&theme=light"
 - runFlow: common/accept-open-in-fatty.yaml
-- extendedWaitUntil:
-    visible:
-      id: "visual-review-settled:correction.typeahead"
-    timeout: 20000
-- assertVisible:
-    id: "visual-review-settled:correction.typeahead"
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "visual-review-settled:correction.typeahead"
+          timeout: 20000
+      - assertVisible:
+          id: "visual-review-settled:correction.typeahead"
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - extendedWaitUntil:
+          visible:
+            text: ".*Oatmeal.*"
+          timeout: 10000
 - takeScreenshot: correction-typeahead-light
 
 # correction.confirm_apply (light): the advanced override panel opens
 # directly with the item's current calories pre-filled — a value ready to
 # confirm/apply, not a blank input. Same large/dimmed presentation as
 # `typeahead` above; its in-modal marker appears only once the override panel is
-# up with its pre-seeded draft, so this waits on that marker too — no
-# animation-wait fallback.
+# up with its pre-seeded draft, so this waits on that marker on Android too —
+# no animation-wait fallback there.
+#
+# iOS (FTY-272): same dimmed native detent, same unreachable in-modal marker
+# (see the module header above and docs/verification/FTY-263/README.md) — the
+# marker wait is Android-only; iOS opens the preset and screenshots it after
+# confirming the sheet itself is up.
 - launchApp:
     clearState: false
 - openLink: "fatty://__visual-review?preset=correction.confirm_apply&theme=light"
 - runFlow: common/accept-open-in-fatty.yaml
-- extendedWaitUntil:
-    visible:
-      id: "visual-review-settled:correction.confirm_apply"
-    timeout: 20000
-- assertVisible:
-    id: "visual-review-settled:correction.confirm_apply"
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "visual-review-settled:correction.confirm_apply"
+          timeout: 20000
+      - assertVisible:
+          id: "visual-review-settled:correction.confirm_apply"
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - extendedWaitUntil:
+          visible:
+            text: ".*Oatmeal.*"
+          timeout: 10000
 - takeScreenshot: correction-confirm-apply-light

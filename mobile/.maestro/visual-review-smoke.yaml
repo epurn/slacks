@@ -200,16 +200,37 @@ appId: com.fatty
 # the shared navigator-level overlay marker was unreachable behind the dimmed
 # native presentation. The marker now lives INSIDE the sheet's modal subtree and
 # only appears once `candidatesLoading === false` with the candidate list
-# painted, so this waits on the in-modal marker itself — no animation-wait
-# fallback.
+# painted, so this is the load-bearing wait on Android, where NativeSheet's
+# `Modal` fallback keeps the in-modal subtree reachable — no animation-wait
+# fallback there.
+#
+# iOS (FTY-272): the same large/dimmed native detent that makes this the
+# expanded-detent case above also keeps its in-modal marker out of the iOS
+# accessibility tree entirely — a ratified platform limit, not a regression
+# (see docs/verification/FTY-263/README.md and this repo's
+# e2e/visualReview/README.md "iOS marker-assertion scope"). So the marker wait
+# is Android-only; iOS instead confirms the sheet itself is up (its own outer
+# label, reachable on both platforms) before capturing the same evidence
+# screenshot — the preset still opens and is still proven non-blank on iOS,
+# just not through the unreachable in-modal marker.
 - openLink: "fatty://__visual-review?preset=correction.typeahead&theme=light"
 - runFlow: common/accept-open-in-fatty.yaml
-- extendedWaitUntil:
-    visible:
-      id: "visual-review-settled:correction.typeahead"
-    timeout: 20000
-- assertVisible:
-    id: "visual-review-settled:correction.typeahead"
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "visual-review-settled:correction.typeahead"
+          timeout: 20000
+      - assertVisible:
+          id: "visual-review-settled:correction.typeahead"
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - assertVisible:
+          text: ".*Oatmeal.*"
 - takeScreenshot: correction-typeahead-light
 
 # trends.adherence_retry (light): the adherence-strip retry state (FTY-264),

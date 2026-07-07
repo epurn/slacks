@@ -105,6 +105,36 @@ navigator-reachable preset name), so there is one marker source of truth for
 both the non-modal and the modal case — extending the convention here never
 means redefining it per screen.
 
+### iOS marker-assertion scope (FTY-263 / FTY-272)
+
+Rendering the marker inside a modal's own subtree (above) is necessary but not
+always sufficient: a **native, non-`Modal`-based** presentation can still keep
+its own content out of the accessibility tree on one platform even though the
+marker is correctly mounted. This is exactly what happens with `NativeSheet`
+(`../../components/NativeSheet.tsx`), which the correction sheet
+(`correction.detail` / `correction.typeahead` / `correction.confirm_apply`)
+presents through:
+
+- On **Android**, `NativeSheet` falls back to a `Modal`, whose content stays
+  reachable to Maestro/XCUITest at any detent — the marker wait is real and
+  load-bearing for all three correction presets there.
+- On **iOS**, the real UIKit detent sheet exposes its content to the
+  accessibility tree at the medium, undimmed detent (`correction.detail`) but
+  **not** at the large, dimmed detent (`correction.typeahead` /
+  `correction.confirm_apply`) — a live `maestro hierarchy` dump while either of
+  those two is up shows only the sheet's own outer label, none of its
+  in-modal content, marker included. Ratified in
+  [`docs/verification/FTY-263/README.md`](../../../docs/verification/FTY-263/README.md).
+
+So the committed flows (`../../.maestro/visual-review-smoke.yaml`,
+`../../.maestro/correction-visual-review-seam.yaml`) scope the marker wait for
+`correction.typeahead` / `correction.confirm_apply` to Android only
+(`when: platform: Android`); on iOS they still open both presets and capture a
+screenshot after confirming the sheet itself rendered, they just don't wait on
+the unreachable marker. This is a documented platform split, not a deleted or
+silently-skipped assertion — see each flow's inline comments for the per-preset
+detail.
+
 ## Preset manifest (in-scope, FTY-247)
 
 These presets are reachable purely through public navigation, shared fixtures,
