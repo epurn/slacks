@@ -38,8 +38,8 @@
     "docs/contracts/log-events.md": {
       "kind": "source",
       "lane": "docs",
-      "lines": 774,
-      "reason": "FTY-278 (contract only) adds the first-class `partially_resolved` event status and its `processing → partially_resolved` / `partially_resolved → processing` transitions as the item-scoped partial state: crosses the 750-line source threshold documenting the status/transitions, the day-listing and clarification read/answer gating over both clarifying states, and the sibling-preserving answer flow."
+      "lines": 791,
+      "reason": "FTY-278 (contract only) adds the first-class `partially_resolved` event status and its `processing → partially_resolved` / `partially_resolved → processing` transitions as the item-scoped partial state: crosses the 750-line source threshold documenting the status/transitions, the day-listing and clarification read/answer gating over both clarifying states, the FTY-170-unchanged read/answer shape (the item↔question link stays an internal, non-surfaced `derived_food_item_id`), and the sibling-preserving answer flow that re-costs only the open component and leaves resolved siblings untouched."
     },
     "mobile/components/SettingsScreen.test.tsx": {
       "kind": "test",

@@ -62,19 +62,22 @@ settles four contract points and cross-links the affected contracts:
    event-level, nothing-committed case.
 2. **Question → component reference** — each item-scoped clarification question
    names the specific unresolved component by a stable `derived_food_item_id`
-   reference (see `parse-candidates.md`), never by echoing the raw diary phrase;
-   the clarification read surfaces that reference as `item_id` so the client
-   associates the question with the resolved/unresolved item rows it already
-   renders.
+   reference (see `parse-candidates.md`), never by echoing the raw diary phrase.
+   That reference is an **internal** producer→estimator link (which component the
+   answer-triggered re-estimate re-costs); it is **not** surfaced in the API. The
+   **FTY-170 clarification read/answer shape is unchanged** — the read still
+   serves `{ id, text, options }`, and the human context is the question `text`,
+   which names the component by its sanitized food `name`.
 3. **Partial read exposure** — the day-listing read returns a partial event's
    committed `resolved` items (its event-status gate relaxes from `completed`-only
    to `completed` **or** `partially_resolved`); the open question remains
    discoverable through the status-gated clarification read.
-4. **Answer flow** — answering an item-scoped question re-estimates the **same**
-   event (`partially_resolved → processing`), preserves the already-resolved
-   siblings, and completes the entry when the last component resolves, with no
-   double-counting or duplicate item rows (the job/run mechanics are
-   `estimation-jobs.md` v3).
+4. **Answer flow** — answering an item-scoped question re-estimates **only that
+   open component** on the **same** event (`partially_resolved → processing`),
+   leaves the already-resolved siblings **untouched** (never re-costing,
+   re-creating, or replacing them), and completes the entry when the last
+   component resolves, with no double-counting or duplicate item rows (the
+   job/run mechanics are `estimation-jobs.md` v3).
 
 **This version is a contract decision only; it edits no product code.** The
 downstream estimator/backend implementation is a required follow-up split (called
@@ -268,7 +271,8 @@ fallback. Non-finalized item rows — including the **unresolved component** tha
 owns an item-scoped question — remain persisted with their own `status`
 (`unresolved` / `proposed`) and nullable values but are **not** included in this
 read; that component is instead discoverable through the status-gated
-clarification read (its question carries the component's `item_id`), so the
+clarification read (its open question names the component in the question
+`text`), so the
 `items` array stays "finalized costed detail only" and never surfaces an
 uncosted placeholder row. (Under the FTY-275 baseline a mixed log routes to an
 event-level `needs_clarification` with no committed items, so it returns
@@ -342,9 +346,13 @@ The response carries a `needs_clarification` or `partially_resolved` event's
 **unanswered** questions, ordered by `position` (the read is **status-gated** —
 see below). Each
 question carries its persisted row's stable `id` (the key an answer submission
-references), the specific question `text`, an `options` array of candidate
-quick-pick values, and — for an **item-scoped** question (FTY-278) — an `item_id`
-naming the specific unresolved derived component the question is about:
+references), the specific question `text`, and an `options` array of candidate
+quick-pick values — the **unchanged FTY-170 shape**. An **item-scoped** question
+(FTY-278) is **not** a new read field: it is an ordinary question whose `text`
+names the specific unresolved component (by its sanitized food `name`), while
+the producer-side item link stays internal
+(`clarification_questions.derived_food_item_id`, `parse-candidates.md`) and is
+**never surfaced in this read**:
 
 ```json
 {
@@ -352,21 +360,22 @@ naming the specific unresolved derived component the question is about:
     {
       "id": "b9c1…",
       "text": "How much milk?",
-      "options": ["a splash", "1/2 cup", "1 cup"],
-      "item_id": "e4a2…"
+      "options": ["a splash", "1/2 cup", "1 cup"]
     }
   ]
 }
 ```
 
-- **`item_id` is the target unresolved component (FTY-278).** The
-  `derived_food_items.id` of the persisted `unresolved` component this question
-  clarifies (see `parse-candidates.md`), so a client attaches the question to the
-  exact item row it already renders — scoped to that component, not the whole
-  entry. It is `null` for an **event-level** question (parse-time ambiguity not
-  tied to one component — including every question under the FTY-275 baseline,
-  where no component is individually costed). It never contains the raw diary
-  phrase; the human context is the referenced component's own sanitized `name`.
+- **An item-scoped question reuses the FTY-170 read shape unchanged (FTY-278).**
+  It carries **no extra field** — the client renders `text` + `options` exactly
+  as for any other question. The specific `unresolved` component it clarifies is
+  identified **server-side** by the internal
+  `clarification_questions.derived_food_item_id` link (`parse-candidates.md`,
+  which the answer-triggered re-estimate uses to re-cost only that component) and
+  named to the user through the question `text` (the component's sanitized food
+  `name`). The read never surfaces that link and the `text` never contains the
+  raw diary phrase. Under the FTY-275 baseline no question is item-scoped, so
+  every question is event-level with no component link.
 
 - **Options are display candidates, never an enum.** They exist so the client
   can render one-tap chips; the server never validates an answer against
@@ -469,19 +478,19 @@ rows replacing the unanswered ones); otherwise the event completes and starts
 counting.
 
 **Item-scoped resolution preserves the resolved siblings (FTY-278).** When the
-answered question is item-scoped (it carries an `item_id`, so the event is
-`partially_resolved`), the answer supplies the missing portion for **that one
-component**; the re-estimate must not re-ask for, re-cost, or duplicate the
-components already resolved in an earlier round. The re-estimate rebuilds the
-event's derived items **as a set** within its terminal transaction — resolved
-siblings are represented exactly once and their committed values are unchanged,
-and only the newly-answered component is advanced from `unresolved` to `resolved`
-(or, if the enriched input is still indeterminate, the event stays
-`partially_resolved` with a fresh item-scoped question while the siblings stay
-resolved). Because `intake` sums the event's `resolved` items and the event's
-item set is replaced atomically per round, a component resolved in an earlier
-round can never be **double-counted** or spawn a **duplicate** row (the job/run
-mechanics are `estimation-jobs.md` v3; the counting rule is `daily-summary.md`).
+answered question is item-scoped (the event is `partially_resolved`), the answer
+supplies the missing portion for **that one component**; the re-estimate re-costs
+**only that open component** and must not re-ask for, re-cost, re-create, or
+duplicate the siblings already resolved in an earlier round. The already-`resolved`
+siblings are **left untouched** — their rows, committed values, and evidence stay
+exactly as first committed; only the newly-answered component's own row is
+advanced **in place** from `unresolved` to `resolved` (or, if the enriched input
+is still indeterminate, the event stays `partially_resolved` with a fresh
+item-scoped question while the siblings stay resolved untouched). Because `intake`
+sums the event's `resolved` items and the siblings are never re-created, a
+component resolved in an earlier round can never be **double-counted** or spawn a
+**duplicate** row (the job/run mechanics are `estimation-jobs.md` v3; the counting
+rule is `daily-summary.md`).
 When the final unresolved component resolves, the event reaches `completed` with
 the full costed set. **Baseline:** until the FTY-278 implementation lands, a mixed
 log routes to an event-level `needs_clarification` carrying no committed siblings,
@@ -528,9 +537,14 @@ idempotency anchor: at most one answer per question), `log_event_id` and
 `user_id` (UUID FKs, `ON DELETE CASCADE`, indexed — ownership at the
 persistence boundary), `answer_text` (text, not null), `created_at` /
 `updated_at` (timestamptz). Retention follows the owning question, event, and
-account via the cascades. Answered questions and their answers are **kept** when a fresh round replaces the unanswered
-rows (they carry the details the re-estimate consumes), and they survive the derived-item **rebuild** because an item-scoped
-question's `derived_food_item_id` is `ON DELETE SET NULL` (`parse-candidates.md` v5), not `CASCADE`: replacing its target row **detaches** the answered question rather than cascade-deleting it or its `question_id` answer anchor.
+account via the cascades. Answered questions and their answers are **kept** when a
+fresh round replaces the unanswered rows — they carry the accumulated details the
+re-estimate consumes. Because an item-scoped question's `derived_food_item_id` is
+`ON DELETE SET NULL` (`parse-candidates.md` v5), not `CASCADE`, an answered
+question is never cascade-deleted with its `question_id` answer anchor: the
+answered component's row is advanced **in place** (not deleted), and were a
+referenced derived-item row ever removed the link is simply nulled — detaching the
+question rather than destroying the accumulated detail.
 
 **A resolve is a re-estimate, not an edit.** The answer supplies a missing
 detail and the estimator recomputes the entry from the enriched input; the
@@ -753,8 +767,10 @@ curl -sX POST :8000/api/users/<uid>/log-events/<event_id>/clarification/answers 
 - **FTY-278 (contract only; additive, pre-v1, no shim).** Adds the first-class
   `partially_resolved` event status and its two transitions
   (`processing → partially_resolved`, `partially_resolved → processing`) as the
-  item-scoped partial state, adds the clarification read's `item_id`
-  target-component field, relaxes the day-listing read's event-status gate to
+  item-scoped partial state, keeps the **FTY-170 clarification read/answer shape
+  unchanged** (the item↔question link stays the internal, producer-side
+  `clarification_questions.derived_food_item_id`, `parse-candidates.md` v5 — never
+  surfaced in the read), relaxes the day-listing read's event-status gate to
   include `partially_resolved`, and specifies the sibling-preserving answer
   re-estimate. The new status is a value in the existing string `status` column,
   so it needs **no schema migration**. **No code, no migration, and no read/DTO
@@ -765,9 +781,10 @@ curl -sX POST :8000/api/users/<uid>/log-events/<event_id>/clarification/answers 
   question to its `unresolved` component via the additive, nullable
   `derived_food_items.id` reference on `clarification_questions`
   (`parse-candidates.md` v5 — an additive, reversible migration owned by that
-  story); (b) the backend read/answer story that serves `item_id`, relaxes the
-  day-listing and daily-summary reads, and implements the sibling-preserving
-  re-estimate (`estimation-jobs.md` v3, `daily-summary.md`); and, once the reads
+  story); (b) the backend read/answer story that relaxes the day-listing and
+  daily-summary reads and implements the sibling-preserving re-estimate
+  (`estimation-jobs.md` v3, `daily-summary.md`), leaving the FTY-170
+  clarification read/answer shape unchanged; and, once the reads
   expose partial state, an optional mobile presentation story (no visual redesign
   is specified here). Until that split lands, the shipped behaviour is the
   FTY-275 baseline: an amountless component routes the whole event to an

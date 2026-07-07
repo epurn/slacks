@@ -157,22 +157,28 @@ clarification quick-pick options (additive; no prior user data is required):
   `derived_food_items.id`, `ON DELETE SET NULL`, indexed — the specific unresolved
   component an item-scoped question is about; `NULL` for an event-level question;
   added by the FTY-278 implementation follow-up's additive migration), `position`
-  (int, stable order), `created_at`/`updated_at`. The reference is `SET NULL` (not
-  `CASCADE`) on purpose: the answer-triggered re-estimate **rebuilds** the event's
-  derived-item set each round (`estimation-jobs.md` v3, `log-events.md` v6), so the
-  `derived_food_items` row an answered item-scoped question pointed at is routinely
-  replaced. `SET NULL` **detaches** the answered question from the replaced row
-  rather than deleting it, so the answered question and its `clarification_answers`
-  anchor — which `ON DELETE CASCADE` on `question_id` would otherwise cascade away —
-  are preserved as the accumulated detail the next round consumes. The link matters
-  only while a question is **open** (it surfaces `item_id` to the reader); once
-  answered, nulling it on replacement is correct, and the question stays
-  component-identified by its sanitized `name` in `question_text`. Question
+  (int, stable order), `created_at`/`updated_at`. The reference is an **internal**
+  producer→estimator link — **never surfaced in the clarification read** — and is
+  `SET NULL` (not `CASCADE`) on purpose: the answer-triggered re-estimate re-costs
+  **only the open component** and leaves the already-`resolved` siblings untouched
+  (`estimation-jobs.md` v3, `log-events.md` v6). The answered component's own row is
+  advanced **in place** from `unresolved` to `resolved` rather than deleted, so the
+  link is not exercised in the normal flow; but were a referenced
+  `derived_food_items` row ever removed (e.g. an event-level re-estimate or
+  correction), `SET NULL` **detaches** the answered question rather than
+  cascade-deleting it — preserving the answered question and its
+  `clarification_answers` anchor (which `ON DELETE CASCADE` on `question_id` would
+  otherwise cascade away) as the accumulated detail the next round consumes. The
+  link is component identity **for the estimator only**; the reader never sees it,
+  and the question stays component-identified to the user by its sanitized `name` in
+  `question_text`. Question
   ownership/retention still cascades from the owning event and user (`log_event_id`,
   `user_id`). The stored `question_text` +
-  `options` are what the clarification read serves (`log-events.md`), and
-  `derived_food_item_id` is surfaced there as the question's `item_id`, so the
-  producer (this step) and the reader share one shape field-for-field. Questions
+  `options` are what the clarification read serves (`log-events.md`) — the
+  **unchanged FTY-170 read shape**; `derived_food_item_id` is **not** part of that
+  read shape (it stays internal to the producer/estimator), so the producer (this
+  step) and the reader continue to share the FTY-170 `question_text` + `options`
+  fields field-for-field. Questions
   the backend synthesises deterministically — the plausibility gate's targeted
   question — carry 2–5 quick-pick options. An item-scoped question names its
   component through `derived_food_item_id` and the component's own sanitized
@@ -322,9 +328,10 @@ that are genuinely amountless, each question carrying its
 `derived_food_item_id`. Such a `partially_resolved` event (`log-events.md` v6)
 therefore carries committed `resolved` siblings alongside its open item-scoped
 questions — the
-whole event's derived-item set (resolved siblings + the `unresolved` component)
-and its question rows are committed atomically as one set. A re-estimate rebuilds
-that set atomically each round, so a resolved sibling is represented exactly once
+event's derived-item set (resolved siblings + the `unresolved` component)
+and its question rows are committed atomically in the terminal transaction. A
+re-estimate re-costs **only the open component** and leaves the already-`resolved`
+siblings untouched, so a resolved sibling is represented exactly once
 and never duplicated or double-counted, and the fresh round's questions replace
 only the **unanswered** ones (`estimation-jobs.md` v3, `daily-summary.md`). This
 paragraph is the target contract; the estimator work to persist siblings and
@@ -485,8 +492,10 @@ event.raw_text = "crackers and peanut butter"        # count genuinely indetermi
   only. `brand` drives official-source routing (`food-resolution.md`); it adds no
   persistence column of its own (it is consumed at resolution time).
 - **FTY-278 (contract only; no code, no migration in this story).** Adds the
-  nullable `clarification_questions.derived_food_item_id` reference (surfaced as
-  `item_id` in the clarification read) so a question can be item-scoped. The
+  nullable `clarification_questions.derived_food_item_id` reference — an
+  **internal** producer→estimator link, **not** surfaced in the clarification read
+  (the FTY-170 read/answer shape is unchanged) — so a question can be item-scoped.
+  The
   column and its migration are **additive and reversible** (existing questions
   default it to `NULL` and remain valid event-level questions; no backfill), but
   they are **owned by the downstream FTY-278 implementation follow-up**, not this
