@@ -127,6 +127,25 @@ the same `runFlow: common/accept-open-in-fatty.yaml` step right after — that i
 dialog-free launch recipe FTY-235..241 and other iOS evidence tooling should
 reuse instead of a manual `tapOn: Open`.
 
+### iOS marker-assertion scope for the correction native-sheet presets (FTY-272)
+
+`correction.typeahead` and `correction.confirm_apply` open the correction sheet
+at its large, dimmed native detent, where iOS's presentation does not expose
+the sheet's in-modal content — including its `visual-review-settled:<preset>`
+marker — to the accessibility tree at all (ratified in
+[`../docs/verification/FTY-263/README.md`](../docs/verification/FTY-263/README.md);
+see also [`../e2e/visualReview/README.md`](../e2e/visualReview/README.md#ios-marker-assertion-scope-fty-263--fty-272)).
+Android's `NativeSheet` fallback (a real `Modal`) keeps that content reachable
+at any detent, so the marker wait for those two presets in
+`visual-review-smoke.yaml` and `correction-visual-review-seam.yaml` is scoped
+to Android only (`when: platform: Android`); their iOS branch instead confirms
+the sheet itself rendered before capturing the same evidence screenshot. Every
+other preset in both flows — including `correction.detail`, whose medium,
+undimmed detent keeps its marker reachable on iOS too — still asserts its
+marker on both platforms, unchanged. This keeps the retained Android
+`mobile-e2e` suite's marker coverage exactly as FTY-263 shipped it while
+letting an iOS run of the same committed flows complete end to end.
+
 ## E2E launch mode (deterministic boot)
 
 When the app is launched from the E2E binary it enters a gated launch mode:

@@ -59,6 +59,21 @@ So the marker assertions live in the Android-run flows:
 - `mobile/.maestro/correction-visual-review-seam.yaml` opens all three sub-states
   and waits on each in-modal marker — including `correction.confirm_apply`.
 
+**Update (FTY-272):** `correction.detail` opens at the sheet's medium, undimmed
+detent, where the marker stays reachable on iOS too, so both committed flows
+still wait on it on both platforms. `correction.typeahead` and
+`correction.confirm_apply` open at the large, dimmed detent described below,
+where the whole in-modal subtree — marker included — is unreachable on iOS. A
+committed iOS smoke run repeatably failed the marker assertion for those two
+presets even though the sheet rendered correctly (the gap this section already
+predicted). Both flows now scope that marker wait to Android only
+(`when: platform: Android`) for `correction.typeahead` /
+`correction.confirm_apply`; their iOS branch still opens the same preset and
+screenshots it, after confirming the sheet itself rendered, so iOS visual
+coverage is not lost — only the unreachable in-modal assertion is dropped on
+iOS. See `mobile/e2e/visualReview/README.md`'s "iOS marker-assertion scope"
+section and `docs/verification/FTY-272/README.md`.
+
 On this Mac's iOS simulator the sheet renders correctly (the screenshots above are
 that render) but the native detent presentation collapses the sheet's content
 subtree out of the accessibility hierarchy — a live `maestro hierarchy` dump while
