@@ -1,35 +1,62 @@
 /**
- * Durable, per-user on-device persistence for the offline outbox (FTY-104),
- * backed by the Expo SDK 56 File/Paths API (the same approach as
- * `cadenceAdapter.ts`).
+ * Durable, owner-scoped on-device persistence for the offline outbox (FTY-104,
+ * re-scoped in FTY-277), backed by the Expo SDK 56 File/Paths API (the same
+ * approach as `cadenceAdapter.ts`).
  *
- * Each signed-in user gets their own file in the document directory (safe from
- * system eviction, unlike the cache directory). Scoping the file by user id is
- * what keeps one user's queued raw text from ever leaking to another user of the
- * device, and what lets sign-out delete exactly that user's queue.
+ * Each {@link OutboxOwner} — the normalized server URL **and** the user id — gets
+ * its own file in the document directory (safe from system eviction, unlike the
+ * cache directory). Scoping the file by server + user is what keeps one owner's
+ * queued raw text from ever leaking to another user of the device, or to the same
+ * `userId` on a *different* self-hosted server.
+ *
+ * Retention (FTY-277): the file is **not** deleted on sign-out. It is removed
+ * only when the queue drains empty (`save(owner, [])`) or by an explicit
+ * `clear(owner)` purge, so a queued capture survives sign-out and is recovered
+ * when the same owner signs back in.
  *
  * Privacy: the file holds `raw_text`, which is sensitive personal data. It is
  * stored on-device only, never logged, and never transmitted anywhere except the
- * authenticated FTY-096 create endpoint when the entry drains. Read/parse
- * failures fail closed to an empty queue rather than throwing.
+ * authenticated FTY-096 create endpoint when the entry drains. It stores no
+ * bearer token or credential. Read/parse failures fail closed to an empty queue
+ * rather than throwing.
  */
 
 import { File, Paths } from "expo-file-system";
 
-import type { OutboxEntry, OutboxStore } from "@/state/outbox";
+import {
+  outboxOwnerKey,
+  type OutboxEntry,
+  type OutboxOwner,
+  type OutboxStore,
+} from "@/state/outbox";
 
 /**
- * Per-user file name. The user id is a server-issued UUID, but it is sanitised
- * defensively (only `[A-Za-z0-9_-]`) so it can never escape the document
- * directory or collide across users.
+ * Deterministic 32-bit FNV-1a hash (hex) of the full owner key. It disambiguates
+ * the file name so two owners whose readable portions sanitise to the same string
+ * (e.g. the same `userId` on two different servers) can never share a file.
  */
-function outboxFileName(userId: string): string {
-  const safe = userId.replace(/[^A-Za-z0-9_-]/g, "_");
-  return `fatty-outbox-${safe}.json`;
+function fnv1a(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-function outboxFile(userId: string): File {
-  return new File(Paths.document, outboxFileName(userId));
+/**
+ * Per-owner file name: a readable, sanitised user-id prefix (only `[A-Za-z0-9_-]`,
+ * so it can never escape the document directory) plus a hash of the full
+ * server+user owner key. Distinct owners always map to distinct files; the same
+ * owner always maps to the same file. No token or credential is encoded.
+ */
+function outboxFileName(owner: OutboxOwner): string {
+  const readable = owner.userId.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 40);
+  return `fatty-outbox-${readable}-${fnv1a(outboxOwnerKey(owner))}.json`;
+}
+
+function outboxFile(owner: OutboxOwner): File {
+  return new File(Paths.document, outboxFileName(owner));
 }
 
 function isOutboxEntry(value: unknown): value is OutboxEntry {
@@ -49,16 +76,17 @@ function isOutboxEntry(value: unknown): value is OutboxEntry {
 
 /** The on-device outbox store. */
 export const fileOutboxStore: OutboxStore = {
-  async load(userId: string): Promise<readonly OutboxEntry[]> {
+  async load(owner: OutboxOwner): Promise<readonly OutboxEntry[]> {
     try {
-      const file = outboxFile(userId);
+      const file = outboxFile(owner);
       if (!file.exists) return [];
       const raw = await file.text();
       const parsed: unknown = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
-      // Keep only well-formed entries owned by this user (defence in depth).
+      // Keep only well-formed entries owned by this user (defence in depth): the
+      // file is already server+user scoped, and this drops any foreign entry.
       return parsed.filter(
-        (e): e is OutboxEntry => isOutboxEntry(e) && e.userId === userId,
+        (e): e is OutboxEntry => isOutboxEntry(e) && e.userId === owner.userId,
       );
     } catch {
       // Corrupt/unreadable store fails closed to an empty queue.
@@ -66,19 +94,20 @@ export const fileOutboxStore: OutboxStore = {
     }
   },
 
-  async save(userId: string, entries: readonly OutboxEntry[]): Promise<void> {
-    const file = outboxFile(userId);
+  async save(owner: OutboxOwner, entries: readonly OutboxEntry[]): Promise<void> {
+    const file = outboxFile(owner);
     if (entries.length === 0) {
       // Nothing to keep — remove the file rather than leaving an empty array on
-      // disk, so a drained/cleared queue leaves no sensitive-data residue.
+      // disk, so a drained queue leaves no sensitive-data residue.
       if (file.exists) file.delete();
       return;
     }
     file.write(JSON.stringify(entries));
   },
 
-  async clear(userId: string): Promise<void> {
-    const file = outboxFile(userId);
+  async clear(owner: OutboxOwner): Promise<void> {
+    // Explicit destructive purge only — never called on a normal sign-out.
+    const file = outboxFile(owner);
     if (file.exists) file.delete();
   },
 };

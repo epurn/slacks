@@ -181,7 +181,11 @@ export function useSubmitLog({
 
   const { reachability, entries: offlineEntries, enqueue, drainNow } =
     useOfflineQueue({
-      userId: session?.userId ?? null,
+      // Owner = the bound server URL + user id, so a queue is scoped to the
+      // self-hosted server it was captured against, not just the user (FTY-277).
+      owner: session
+        ? { serverUrl: session.baseUrl, userId: session.userId }
+        : null,
       submit: queueSubmit,
       store: outboxStore,
       onAccepted: handleAccepted,

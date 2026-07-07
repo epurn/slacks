@@ -2,11 +2,24 @@ import { useState } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
 import { useOfflineQueue, type OfflineQueue } from "./useOfflineQueue";
-import type { OutboxEntry, OutboxStore } from "./outbox";
+import {
+  outboxOwnerKey,
+  type OutboxEntry,
+  type OutboxOwner,
+  type OutboxStore,
+} from "./outbox";
 import type { LogEventDTO } from "@/api/logEvents";
 
 const USER_A = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 const USER_B = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+const SERVER_1 = "https://one.example.test";
+const SERVER_2 = "https://two.example.test";
+
+// Owner = server URL + user id (FTY-277). OWNER_A and OWNER_A2 are the *same*
+// user id on two different self-hosted servers — two distinct owners.
+const OWNER_A: OutboxOwner = { serverUrl: SERVER_1, userId: USER_A };
+const OWNER_B: OutboxOwner = { serverUrl: SERVER_1, userId: USER_B };
+const OWNER_A2: OutboxOwner = { serverUrl: SERVER_2, userId: USER_A };
 
 function entry(overrides: Partial<OutboxEntry> = {}): OutboxEntry {
   return {
@@ -30,21 +43,34 @@ function serverEvent(id: string): LogEventDTO {
   };
 }
 
-/** A controllable in-memory store, recording its calls. */
+/**
+ * A controllable in-memory store keyed by the full owner key (server + user),
+ * recording its calls. `save([])` removes the record, mirroring the real store's
+ * residue cleanup.
+ */
 function makeStore(initial: Record<string, readonly OutboxEntry[]> = {}) {
   const data = new Map<string, readonly OutboxEntry[]>(Object.entries(initial));
   const cleared: string[] = [];
   const store: OutboxStore = {
-    load: jest.fn(async (userId: string) => data.get(userId) ?? []),
-    save: jest.fn(async (userId: string, entries: readonly OutboxEntry[]) => {
-      data.set(userId, entries);
+    load: jest.fn(async (owner: OutboxOwner) => data.get(outboxOwnerKey(owner)) ?? []),
+    save: jest.fn(async (owner: OutboxOwner, entries: readonly OutboxEntry[]) => {
+      if (entries.length === 0) data.delete(outboxOwnerKey(owner));
+      else data.set(outboxOwnerKey(owner), entries);
     }),
-    clear: jest.fn(async (userId: string) => {
-      cleared.push(userId);
-      data.delete(userId);
+    clear: jest.fn(async (owner: OutboxOwner) => {
+      cleared.push(outboxOwnerKey(owner));
+      data.delete(outboxOwnerKey(owner));
     }),
   };
   return { store, cleared, data };
+}
+
+/** Seed a store record under an owner's key. */
+function seed(
+  owner: OutboxOwner,
+  entries: readonly OutboxEntry[],
+): Record<string, readonly OutboxEntry[]> {
+  return { [outboxOwnerKey(owner)]: entries };
 }
 
 // Every tree created in a test, torn down in afterEach so a prior test's still-
@@ -60,22 +86,22 @@ afterEach(() => {
 
 /**
  * Renders the hook in a throwaway host component and exposes its latest return
- * value, plus a setter to drive a user transition (A → null → B).
+ * value, plus a setter to drive an owner transition (A → null → A/B).
  */
 function renderQueue(opts: {
-  initialUserId: string | null;
+  initialOwner: OutboxOwner | null;
   store: OutboxStore;
   submit?: (entry: OutboxEntry) => Promise<LogEventDTO>;
   onAccepted?: (entry: OutboxEntry, event: LogEventDTO) => void;
 }) {
   let latest!: OfflineQueue;
-  let setUserId!: (id: string | null) => void;
+  let setOwner!: (owner: OutboxOwner | null) => void;
 
-  function Host(props: { initialUserId: string | null }) {
-    const [userId, setId] = useState(props.initialUserId);
-    setUserId = setId;
+  function Host(props: { initialOwner: OutboxOwner | null }) {
+    const [owner, setId] = useState(props.initialOwner);
+    setOwner = setId;
     latest = useOfflineQueue({
-      userId,
+      owner,
       store: opts.store,
       submit:
         opts.submit ??
@@ -89,16 +115,16 @@ function renderQueue(opts: {
 
   let tree!: ReactTestRenderer;
   act(() => {
-    tree = create(<Host initialUserId={opts.initialUserId} />);
+    tree = create(<Host initialOwner={opts.initialOwner} />);
   });
   liveTrees.push(tree);
   return {
     get current() {
       return latest;
     },
-    setUserId: (id: string | null) =>
+    setOwner: (owner: OutboxOwner | null) =>
       act(() => {
-        setUserId(id);
+        setOwner(owner);
       }),
     unmount: () =>
       act(() => {
@@ -118,65 +144,146 @@ async function flush() {
   });
 }
 
-describe("useOfflineQueue user transitions", () => {
-  it("clears the previous user's in-memory entries on a switch to a user with no stored backlog", async () => {
-    // User A has a queued entry persisted; user B has nothing stored.
-    const { store, cleared } = makeStore({ [USER_A]: [entry()] });
-    const harness = renderQueue({ initialUserId: USER_A, store });
+describe("useOfflineQueue — sign-out persistence (FTY-277)", () => {
+  it("keeps the durable queue on sign-out and reloads it when the same owner returns", async () => {
+    // This covers both a manual Settings sign-out and an FTY-274 authenticated
+    // 401 clear: both funnel through the session dropping to null, which the
+    // hook sees as owner → null.
+    const { store, cleared, data } = makeStore(seed(OWNER_A, [entry()]));
+    const harness = renderQueue({ initialOwner: OWNER_A, store });
     await flush();
-
     expect(harness.current.entries).toHaveLength(1);
     expect(harness.current.reachability).toBe("offline");
 
-    // Switch directly to user B (whose store.load resolves to []).
-    harness.setUserId(USER_B);
+    // Sign out: the queue is hidden (memory cleared, calm online surface) but the
+    // durable file is NOT deleted — no store.clear, the record is still on disk.
+    harness.setOwner(null);
     await flush();
-
-    // A's queue is purged from disk, and — the fix — also evicted from memory,
-    // so B never sees A's captures and the drain can't submit them under B.
-    expect(cleared).toContain(USER_A);
     expect(harness.current.entries).toEqual([]);
     expect(harness.current.reachability).toBe("online");
+    expect(cleared).toEqual([]);
+    expect(data.get(outboxOwnerKey(OWNER_A))).toHaveLength(1);
+
+    // The same owner signs back in: their backlog reloads and drains as before.
+    harness.setOwner(OWNER_A);
+    await flush();
+    expect(harness.current.entries.map((e) => e.idempotencyKey)).toEqual(["key-a"]);
+    expect(harness.current.reachability).toBe("offline");
+  });
+
+  it("does not expose or drain the previous owner's entries while signed out", async () => {
+    const submit = jest.fn();
+    const { store } = makeStore(seed(OWNER_A, [entry()]));
+    const harness = renderQueue({ initialOwner: OWNER_A, store, submit });
+    await flush();
+
+    harness.setOwner(null);
+    await flush();
+
+    // The signed-out surface is empty/online and a drain finds no work.
+    expect(harness.current.entries).toEqual([]);
+    act(() => harness.current.drainNow());
+    await flush();
+    expect(submit).not.toHaveBeenCalled();
+  });
+});
+
+describe("useOfflineQueue — owner isolation (FTY-277)", () => {
+  it("switching to a different user shows only their backlog and never clears the previous owner's file", async () => {
+    const { store, cleared, data } = makeStore({
+      ...seed(OWNER_A, [entry()]),
+      ...seed(OWNER_B, [entry({ userId: USER_B, idempotencyKey: "key-b" })]),
+    });
+    const harness = renderQueue({ initialOwner: OWNER_A, store });
+    await flush();
+
+    harness.setOwner(OWNER_B);
+    await flush();
+
+    // B sees only B's backlog; A's memory was evicted and A's file is untouched.
+    expect(harness.current.entries.map((e) => e.idempotencyKey)).toEqual(["key-b"]);
+    expect(cleared).toEqual([]);
+    expect(data.get(outboxOwnerKey(OWNER_A))).toHaveLength(1);
   });
 
   it("never drains the previous user's entries after a switch", async () => {
     const submit = jest.fn();
-    const { store } = makeStore({ [USER_A]: [entry()] });
-    const harness = renderQueue({ initialUserId: USER_A, store, submit });
+    const { store } = makeStore(seed(OWNER_A, [entry()]));
+    const harness = renderQueue({ initialOwner: OWNER_A, store, submit });
     await flush();
 
-    harness.setUserId(USER_B);
+    harness.setOwner(OWNER_B);
     await flush();
 
-    // drainNow must find no work for B — A's entry is gone from memory.
     act(() => harness.current.drainNow());
     await flush();
     expect(submit).not.toHaveBeenCalled();
   });
 
-  it("loads the new user's own stored backlog after a switch", async () => {
-    const { store } = makeStore({
-      [USER_A]: [entry()],
-      [USER_B]: [entry({ userId: USER_B, idempotencyKey: "key-b" })],
-    });
-    const harness = renderQueue({ initialUserId: USER_A, store });
+  it("does not share a queue between the same user id on two different servers", async () => {
+    const submit = jest.fn();
+    // Only server 1 has a backlog for this user id; server 2 has nothing.
+    const { store, cleared, data } = makeStore(seed(OWNER_A, [entry()]));
+    const harness = renderQueue({ initialOwner: OWNER_A, store, submit });
     await flush();
-
-    harness.setUserId(USER_B);
-    await flush();
-
     expect(harness.current.entries).toHaveLength(1);
-    expect(harness.current.entries[0]?.idempotencyKey).toBe("key-b");
-    expect(harness.current.reachability).toBe("offline");
+
+    // Sign in to a *different* server with the SAME user id.
+    harness.setOwner(OWNER_A2);
+    await flush();
+
+    // Server 2 sees no backlog, server 1's file is not cleared or drained.
+    expect(harness.current.entries).toEqual([]);
+    act(() => harness.current.drainNow());
+    await flush();
+    expect(submit).not.toHaveBeenCalled();
+    expect(cleared).toEqual([]);
+    expect(data.get(outboxOwnerKey(OWNER_A))).toHaveLength(1);
+  });
+
+  it("reloads A's backlog after switching A → B → A", async () => {
+    const { store } = makeStore({
+      ...seed(OWNER_A, [entry({ idempotencyKey: "a1" })]),
+      ...seed(OWNER_B, [entry({ userId: USER_B, idempotencyKey: "b1" })]),
+    });
+    const harness = renderQueue({ initialOwner: OWNER_A, store });
+    await flush();
+
+    harness.setOwner(OWNER_B);
+    await flush();
+    expect(harness.current.entries.map((e) => e.idempotencyKey)).toEqual(["b1"]);
+
+    harness.setOwner(OWNER_A);
+    await flush();
+    expect(harness.current.entries.map((e) => e.idempotencyKey)).toEqual(["a1"]);
   });
 
   it("does not clear the durable queue on unmount (navigation away)", async () => {
-    const { store, cleared } = makeStore({ [USER_A]: [entry()] });
-    const harness = renderQueue({ initialUserId: USER_A, store });
+    const { store, cleared } = makeStore(seed(OWNER_A, [entry()]));
+    const harness = renderQueue({ initialOwner: OWNER_A, store });
     await flush();
 
     harness.unmount();
-    expect(cleared).not.toContain(USER_A);
+    expect(cleared).toEqual([]);
+  });
+});
+
+describe("useOfflineQueue — drain cleanup", () => {
+  it("removes the durable record once a drain empties the queue", async () => {
+    const submit = jest.fn(async () => serverEvent("key-a"));
+    const { store, data } = makeStore(seed(OWNER_A, [entry()]));
+    const harness = renderQueue({ initialOwner: OWNER_A, store, submit });
+    await flush();
+    expect(data.get(outboxOwnerKey(OWNER_A))).toHaveLength(1);
+
+    act(() => harness.current.drainNow());
+    await flush();
+
+    // The only entry was accepted → the queue empties and its file is removed,
+    // leaving no residue (save(owner, []) deletes the record).
+    expect(harness.current.entries).toEqual([]);
+    expect(harness.current.reachability).toBe("online");
+    expect(data.get(outboxOwnerKey(OWNER_A))).toBeUndefined();
   });
 });
 
@@ -191,8 +298,8 @@ describe("useOfflineQueue enqueue/drain race", () => {
           resolveSubmit = resolve;
         }),
     );
-    const { store, data } = makeStore({ [USER_A]: [entry()] });
-    const harness = renderQueue({ initialUserId: USER_A, store, submit });
+    const { store, data } = makeStore(seed(OWNER_A, [entry()]));
+    const harness = renderQueue({ initialOwner: OWNER_A, store, submit });
     await flush();
 
     // Drain starts and blocks on the in-flight submit for key-a.
@@ -220,7 +327,7 @@ describe("useOfflineQueue enqueue/drain race", () => {
     expect(harness.current.entries.map((e) => e.idempotencyKey)).toEqual([
       "key-b",
     ]);
-    expect((data.get(USER_A) ?? []).map((e) => e.idempotencyKey)).toEqual([
+    expect((data.get(outboxOwnerKey(OWNER_A)) ?? []).map((e) => e.idempotencyKey)).toEqual([
       "key-b",
     ]);
   });

@@ -41,13 +41,16 @@ function memoryStore(initial: Record<string, OutboxEntry[]> = {}): {
   const data = new Map<string, OutboxEntry[]>(
     Object.entries(initial).map(([k, v]) => [k, [...v]]),
   );
+  // These tests exercise a single server, so keying the fake by `owner.userId`
+  // keeps the `data.get(SESSION.userId)` assertions readable (FTY-277 owner is
+  // server+user; cross-server isolation is covered in outboxStore.test.ts).
   const store: OutboxStore = {
-    load: async (userId) => data.get(userId) ?? [],
-    save: async (userId, entries) => {
-      data.set(userId, [...entries]);
+    load: async (owner) => data.get(owner.userId) ?? [],
+    save: async (owner, entries) => {
+      data.set(owner.userId, [...entries]);
     },
-    clear: async (userId) => {
-      data.delete(userId);
+    clear: async (owner) => {
+      data.delete(owner.userId);
     },
   };
   return { store, data };

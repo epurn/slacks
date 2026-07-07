@@ -20,13 +20,24 @@ This project uses the following as design references:
 - Do not store raw fetched pages, raw OCR, raw prompts, or attachments longer than needed unless there is a product reason.
 - Store source facts separately from user-specific habits.
 - Keep personal memories inspectable, editable, and deletable.
-- On-device persistence of sensitive personal data must be scoped to the
-  signed-in user and cleared on sign-out. *(v1: the FTY-104 offline outbox stores
-  queued raw log text on-device in a per-user file while the device is offline.
-  It holds only the signed-in user's own captures, is never written to logs or
-  analytics, drains over the same authenticated/TLS log-events endpoint, and is
-  purged for that user on sign-out so a queued entry never leaks to another user
-  of the device.)*
+- On-device persistence of sensitive personal data must be scoped to its owner so
+  it never leaks across users. Where the data can safely be discarded on sign-out
+  it should be; where discarding it would destroy user value, it may instead be
+  retained under strict owner isolation — hidden while signed out and readable only
+  when the same owner returns. *(v1: the FTY-104 offline outbox stores queued raw
+  log text on-device while the device is offline. **Retention revised in FTY-277**:
+  because deleting the queue on sign-out would silently lose a capture the user
+  entered, the queue now *survives* sign-out (manual or an FTY-274 authenticated
+  `401` clear) instead of being purged. The compensating control is strict owner
+  scoping: the file is keyed by the normalized server URL **and** user id (so the
+  same user id on two self-hosted servers never shares a queue), the raw text is
+  removed from app state and never rendered while signed out, and it can be loaded
+  or drained only after the same owner signs in again — never under a different
+  user or server, and never by a drain loop created under another owner. It is
+  never written to logs or analytics, stores no bearer token or credential, drains
+  over the same authenticated/TLS log-events endpoint, fails closed to an empty
+  queue if the file is corrupt, and its local record is removed once it drains
+  empty or by an explicit destructive purge.)*
 - On-device persistence of a *credential* must use the OS keychain/keystore, be
   written atomically, never be logged, and be cleared on sign-out. *(v1: the
   FTY-090 mobile session store persists the signed-in user's bearer token — the

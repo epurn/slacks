@@ -30,16 +30,23 @@ Retention defaults should minimize stored personal data while preserving user va
   account deletion. Retained until the owning goal is edited/replaced or the user/
   account is deleted. Target numbers are never logged (diagnostics use user/goal
   ids).
-- Offline outbox (on-device, FTY-104): raw log text captured while the device is
-  offline is queued in a per-user file on the device (not on the server) until it
-  drains to the log-events create endpoint on reconnect. It holds the signed-in
-  user's own `raw_text` plus a client `idempotency_key`, capture timestamp, and
-  local sync state — sensitive personal data, never logged or sent to analytics.
-  It is scoped to the signed-in user and **cleared from on-device storage on
-  sign-out**, so a queued entry never persists for or leaks to another user of
-  the device. A drained entry becomes a normal `log_events` row and follows the
-  server-side retention above; the on-device copy adds no server retention
-  surface.
+- Offline outbox (on-device, FTY-104; retention revised FTY-277): raw log text
+  captured while the device is offline is queued in an owner-scoped file on the
+  device (not on the server) until it drains to the log-events create endpoint on
+  reconnect. The file is scoped to the **owner** — the normalized server URL *and*
+  the user id — so the same user id on two different self-hosted servers has two
+  separate queues that never share storage. It holds the owner's own `raw_text`
+  plus a client `idempotency_key`, capture timestamp, and local sync state —
+  sensitive personal data, never logged or sent to analytics, and it stores no
+  bearer token or credential. **Sign-out no longer deletes the queue** (FTY-277):
+  it is preserved on-device so a queued capture is not lost, and is *hidden* while
+  signed out (removed from app state, never rendered) and can be loaded or drained
+  only after the *same* server+user owner signs in again — never under another
+  user or server. It is removed only when the queue drains empty (leaving no
+  residue) or by an explicit, user-initiated destructive purge. Signing out still
+  deletes the session credential from the keychain. A drained entry becomes a
+  normal `log_events` row and follows the server-side retention above; the
+  on-device copy adds no server retention surface.
 - Appearance preference (on-device, FTY-102): the Light / Dark / System display
   choice is stored in a small per-device file (`fatty-app-settings.json`) via
   expo-file-system. It is a non-sensitive UI preference — no body data, no

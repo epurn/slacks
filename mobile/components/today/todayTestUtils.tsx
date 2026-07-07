@@ -206,13 +206,15 @@ export function memoryStore(initial: Record<string, OutboxEntry[]> = {}): {
   const data = new Map<string, OutboxEntry[]>(
     Object.entries(initial).map(([k, v]) => [k, [...v]]),
   );
+  // Keyed by `owner.userId` (these Today tests use a single server); the FTY-277
+  // owner is server+user, and cross-server scoping is covered in outboxStore.test.
   const store: OutboxStore = {
-    load: async (userId) => data.get(userId) ?? [],
-    save: async (userId, entries) => {
-      data.set(userId, [...entries]);
+    load: async (owner) => data.get(owner.userId) ?? [],
+    save: async (owner, entries) => {
+      data.set(owner.userId, [...entries]);
     },
-    clear: async (userId) => {
-      data.delete(userId);
+    clear: async (owner) => {
+      data.delete(owner.userId);
     },
   };
   return { store, data };
