@@ -8,6 +8,7 @@
  * site (Settings units/appearance/cadence/goal, Trends range) relies on.
  */
 
+import { StyleSheet, View } from "react-native";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
 import { SegmentedControl } from "./SegmentedControl";
@@ -76,6 +77,37 @@ it("defaults selectedIndex to 0 when the value is not among the options", () => 
   // segment rather than a -1 native index.
   const tree = render("kelvin" as Units, jest.fn());
   expect(findControl(tree).props.selectedIndex).toBe(0);
+});
+
+// ─── Caller style forwarding contract (FTY-271) ──────────────────────────────
+
+it("forwards the caller style to the outer wrapper, not the inner control", () => {
+  // A row/inline caller sizes the layout box with `flex: 1`. That must land on
+  // the outer wrapper `<View>` (the box being sized) — not the native control,
+  // where it would collapse the no-flex wrapper to zero width (FTY-271).
+  let tree!: ReactTestRenderer;
+  act(() => {
+    tree = create(
+      <SegmentedControl<Units>
+        testID="units"
+        accessibilityLabel="Units preference"
+        options={OPTIONS}
+        selected="metric"
+        onSelect={jest.fn()}
+        style={{ flex: 1 }}
+      />,
+    );
+  });
+
+  // findAll is pre-order, so the outermost wrapper View comes first.
+  const wrapper = tree.root.findAllByType(View)[0];
+  expect(StyleSheet.flatten(wrapper.props.style)).toMatchObject({ flex: 1 });
+
+  // The native control keeps only its own control style (the 44pt floor) — the
+  // caller's layout style must not have leaked onto it.
+  const controlStyle = StyleSheet.flatten(findControl(tree).props.style);
+  expect(controlStyle).toMatchObject({ minHeight: 44 });
+  expect(controlStyle).not.toHaveProperty("flex");
 });
 
 // ─── Per-option description caption (FTY-222, additive) ──────────────────────

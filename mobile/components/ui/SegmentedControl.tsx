@@ -66,7 +66,13 @@ export function SegmentedControl<T extends string>({
   const caption = options[selectedIndex]?.description;
 
   return (
-    <View>
+    // The caller `style` sizes the outer layout box (row `flex`, width caps),
+    // not the native control. The wrapper is a column with the default
+    // `alignItems: 'stretch'`, so the control below fills the caller-sized
+    // width; the caption stays anchored beneath it inside the same box. Applying
+    // a caller's `flex`/width to the inner control instead would collapse the
+    // no-flex wrapper to zero width (FTY-271).
+    <View style={style}>
       <RNSegmentedControl
         testID={testID}
         accessibilityLabel={accessibilityLabel}
@@ -79,7 +85,7 @@ export function SegmentedControl<T extends string>({
             onSelect(option.value);
           }
         }}
-        style={[styles.control, style]}
+        style={styles.control}
       />
       {caption != null && caption !== '' && (
         <Text
