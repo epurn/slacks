@@ -511,9 +511,9 @@ idempotency anchor: at most one answer per question), `log_event_id` and
 `user_id` (UUID FKs, `ON DELETE CASCADE`, indexed — ownership at the
 persistence boundary), `answer_text` (text, not null), `created_at` /
 `updated_at` (timestamptz). Retention follows the owning question, event, and
-account via the cascades. Answered questions and their answers are **kept**
-when a fresh round replaces the unanswered rows — they carry the accumulated
-details the re-estimate consumes.
+account via the cascades. Answered questions and their answers are **kept** when a fresh round replaces the unanswered
+rows (they carry the details the re-estimate consumes), and they survive the derived-item **rebuild** because an item-scoped
+question's `derived_food_item_id` is `ON DELETE SET NULL` (`parse-candidates.md` v5), not `CASCADE`: replacing its target row **detaches** the answered question rather than cascade-deleting it or its `question_id` answer anchor.
 
 **A resolve is a re-estimate, not an edit.** The answer supplies a missing
 detail and the estimator recomputes the entry from the enriched input; the

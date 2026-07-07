@@ -40,7 +40,7 @@ estimator / contracts / backend-core lane:
 5 (FTY-278, contract only): defines the **item-scoped** clarification carrier for
 a mixed food log. A clarification question may now name the **specific unresolved
 component** it is about via a nullable `derived_food_item_id` reference on
-`clarification_questions` (→ `derived_food_items.id`, `ON DELETE CASCADE`), so the
+`clarification_questions` (→ `derived_food_items.id`, `ON DELETE SET NULL`), so the
 estimator can commit an entry's costable components as `resolved` items while a
 single amountless component keeps its own question — the parse/food step no longer
 has to discard the whole entry's costing to ask one question. An **event-level**
@@ -154,10 +154,22 @@ clarification quick-pick options (additive; no prior user data is required):
   `question_text`, `options` (JSON array of strings, not null, default `[]` —
   the question's quick-pick candidates, stored exactly as schema-validated;
   added by FTY-172's `0017` migration), `derived_food_item_id` (**nullable** FK →
-  `derived_food_items.id`, `ON DELETE CASCADE`, indexed — the specific unresolved
+  `derived_food_items.id`, `ON DELETE SET NULL`, indexed — the specific unresolved
   component an item-scoped question is about; `NULL` for an event-level question;
   added by the FTY-278 implementation follow-up's additive migration), `position`
-  (int, stable order), `created_at`/`updated_at`. The stored `question_text` +
+  (int, stable order), `created_at`/`updated_at`. The reference is `SET NULL` (not
+  `CASCADE`) on purpose: the answer-triggered re-estimate **rebuilds** the event's
+  derived-item set each round (`estimation-jobs.md` v3, `log-events.md` v6), so the
+  `derived_food_items` row an answered item-scoped question pointed at is routinely
+  replaced. `SET NULL` **detaches** the answered question from the replaced row
+  rather than deleting it, so the answered question and its `clarification_answers`
+  anchor — which `ON DELETE CASCADE` on `question_id` would otherwise cascade away —
+  are preserved as the accumulated detail the next round consumes. The link matters
+  only while a question is **open** (it surfaces `item_id` to the reader); once
+  answered, nulling it on replacement is correct, and the question stays
+  component-identified by its sanitized `name` in `question_text`. Question
+  ownership/retention still cascades from the owning event and user (`log_event_id`,
+  `user_id`). The stored `question_text` +
   `options` are what the clarification read serves (`log-events.md`), and
   `derived_food_item_id` is surfaced there as the question's `item_id`, so the
   producer (this step) and the reader share one shape field-for-field. Questions

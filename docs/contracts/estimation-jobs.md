@@ -191,7 +191,12 @@ in the one transaction that persists the `clarification_answers` row:
   component now `resolved` or, if still indeterminate, keeping its own
   item-scoped question) is what commits with the round's terminal status. When
   the last unresolved component resolves the event reaches `completed` with the
-  full costed set. This is the target contract; the sibling-persisting estimator
+  full costed set. Because an item-scoped question's `derived_food_item_id` is
+  `ON DELETE SET NULL` (`parse-candidates.md` v5), replacing the derived-item row an
+  already-answered question pointed at **detaches** that question (nulls its link)
+  rather than cascade-deleting it, so the atomic rebuild preserves each answered
+  question and its unique `question_id` answer anchor while still replacing the row
+  set. This is the target contract; the sibling-persisting estimator
   work is the downstream FTY-278 follow-up. Under the FTY-275 baseline the event
   carries no committed siblings, so this reduces to the v2 event-level rebuild.
 
