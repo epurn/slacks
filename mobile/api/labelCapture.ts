@@ -13,7 +13,7 @@
  * never image bytes, file paths, URIs, or extracted content. Nothing is logged.
  */
 
-import { ApiError } from "@/api/client";
+import { ApiError, notifyUnauthorized } from "@/api/client";
 import type { ApiSession } from "@/api/client";
 import type { LogEventDTO } from "@/api/logEvents";
 
@@ -104,6 +104,12 @@ export async function uploadLabelImage(
   });
 
   if (!response.ok) {
+    // This multipart path bypasses request(), so it must clear the session on a
+    // 401 itself: a dead token here should route back to sign-in just like the
+    // JSON funnel. Fire before throwing so the caller's catch/finally still runs.
+    if (response.status === 401) {
+      notifyUnauthorized();
+    }
     // Map documented statuses to plain, nonjudgmental messages.
     // Never echo image bytes, file paths, or extracted content.
     const message =

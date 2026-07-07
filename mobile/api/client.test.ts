@@ -1,5 +1,18 @@
-import { ApiError, authHeaders, request, userScopedUrl } from "./client";
+import {
+  ApiError,
+  authHeaders,
+  notifyUnauthorized,
+  request,
+  setUnauthorizedHandler,
+  userScopedUrl,
+} from "./client";
 import type { ApiSession } from "./client";
+
+// The unauthorized handler is a module-level singleton; restore the safe no-op
+// after each test so cross-test leakage can't fire a stale handler.
+afterEach(() => {
+  setUnauthorizedHandler(null);
+});
 
 const SESSION: ApiSession = {
   baseUrl: "https://api.example.test",
@@ -192,5 +205,119 @@ describe("request", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("invokes the unauthorized handler on a 401, then throws the caller's error unchanged", async () => {
+    const handler = jest.fn();
+    setUnauthorizedHandler(handler);
+    const fetchMock = jest.fn().mockResolvedValue(errorResponse(401));
+
+    await expect(
+      request<unknown>("https://api.example.test/ep", {
+        method: "GET",
+        headers: {},
+        action: "load data",
+        onError,
+        fetchImpl: fetchMock,
+      }),
+    ).rejects.toMatchObject({
+      name: "ThingApiError",
+      status: 401,
+      message: "Session expired.",
+    });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([403, 429, 500, 503])(
+    "does not invoke the unauthorized handler on a non-401 error (%i)",
+    async (status) => {
+      const handler = jest.fn();
+      setUnauthorizedHandler(handler);
+      const fetchMock = jest.fn().mockResolvedValue(errorResponse(status));
+
+      await expect(
+        request<unknown>("https://api.example.test/ep", {
+          method: "GET",
+          headers: {},
+          action: "load data",
+          onError,
+          fetchImpl: fetchMock,
+        }),
+      ).rejects.toMatchObject({ status });
+      expect(handler).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not invoke the handler on a 2xx response", async () => {
+    const handler = jest.fn();
+    setUnauthorizedHandler(handler);
+    const fetchMock = jest.fn().mockResolvedValue(okResponse({ value: 1 }));
+
+    await request<{ value: number }>("https://api.example.test/ep", {
+      method: "GET",
+      headers: {},
+      action: "get",
+      onError,
+      fetchImpl: fetchMock,
+    });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke the handler when fetch rejects (network-layer failure)", async () => {
+    const handler = jest.fn();
+    setUnauthorizedHandler(handler);
+    const fetchMock = jest.fn().mockRejectedValue(new TypeError("Network request failed"));
+
+    await expect(
+      request<unknown>("https://api.example.test/ep", {
+        method: "GET",
+        headers: {},
+        action: "load data",
+        onError,
+        fetchImpl: fetchMock,
+      }),
+    ).rejects.toBeInstanceOf(TypeError);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("does not throw on a 401 when no handler is registered (safe default no-op)", async () => {
+    // No setUnauthorizedHandler call: the default no-op must not throw.
+    const fetchMock = jest.fn().mockResolvedValue(errorResponse(401));
+
+    await expect(
+      request<unknown>("https://api.example.test/ep", {
+        method: "GET",
+        headers: {},
+        action: "load data",
+        onError,
+        fetchImpl: fetchMock,
+      }),
+    ).rejects.toMatchObject({ name: "ThingApiError", status: 401 });
+  });
+});
+
+describe("setUnauthorizedHandler / notifyUnauthorized", () => {
+  it("is a safe no-op with no handler registered", () => {
+    expect(() => notifyUnauthorized()).not.toThrow();
+  });
+
+  it("restores the no-op when passed null", () => {
+    const handler = jest.fn();
+    setUnauthorizedHandler(handler);
+    notifyUnauthorized();
+    setUnauthorizedHandler(null);
+    notifyUnauthorized();
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("is safe to invoke repeatedly (concurrent 401s do not throw)", () => {
+    const handler = jest.fn();
+    setUnauthorizedHandler(handler);
+    expect(() => {
+      notifyUnauthorized();
+      notifyUnauthorized();
+      notifyUnauthorized();
+    }).not.toThrow();
+    expect(handler).toHaveBeenCalledTimes(3);
   });
 });

@@ -20,8 +20,15 @@ import {
   LabelUploadTooLargeError,
   LabelUploadInvalidTypeError,
 } from "./labelCapture";
+import { setUnauthorizedHandler } from "./client";
 import type { LogEventDTO } from "./logEvents";
 import type { ApiSession } from "@/state/session";
+
+// The unauthorized handler is a module-level singleton; restore the safe no-op
+// after each test so a registered spy can't leak into another test.
+afterEach(() => {
+  setUnauthorizedHandler(null);
+});
 
 const SESSION: ApiSession = {
   baseUrl: "https://api.example.test",
@@ -179,6 +186,34 @@ describe("uploadLabelImage", () => {
     await expect(
       uploadLabelImage(SESSION, "file:///label.jpg", false, fetchMock),
     ).rejects.toMatchObject({ name: "LabelUploadApiError", status: 401 });
+  });
+
+  it("invokes the unauthorized handler on a 401 before throwing", async () => {
+    const handler = jest.fn();
+    setUnauthorizedHandler(handler);
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(makeBlobResponse(1000, "image/jpeg"))
+      .mockResolvedValueOnce(makeUploadResponse(null, 401));
+
+    await expect(
+      uploadLabelImage(SESSION, "file:///label.jpg", false, fetchMock),
+    ).rejects.toMatchObject({ name: "LabelUploadApiError", status: 401 });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not invoke the unauthorized handler on a non-401 error", async () => {
+    const handler = jest.fn();
+    setUnauthorizedHandler(handler);
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(makeBlobResponse(1000, "image/jpeg"))
+      .mockResolvedValueOnce(makeUploadResponse(null, 413));
+
+    await expect(
+      uploadLabelImage(SESSION, "file:///label.jpg", false, fetchMock),
+    ).rejects.toMatchObject({ name: "LabelUploadApiError", status: 413 });
+    expect(handler).not.toHaveBeenCalled();
   });
 
   it("maps a 413 response to an oversized message", async () => {

@@ -20,6 +20,16 @@ import {
 } from "./session";
 // eslint-disable-next-line import/first
 import type { SessionStore } from "./sessionStore";
+// eslint-disable-next-line import/first
+import { notifyUnauthorized, setUnauthorizedHandler } from "@/api/client";
+// eslint-disable-next-line import/first
+import { resolveAuthRedirect } from "./authRouting";
+
+// The unauthorized handler is a module-level singleton in api/client; restore
+// the safe no-op after each test so a torn-down provider can't leak a handler.
+afterEach(() => {
+  setUnauthorizedHandler(null);
+});
 
 const RECORD: SessionRecord = {
   serverUrl: "https://fatty.example.test",
@@ -180,6 +190,76 @@ describe("session controller", () => {
     } finally {
       spies.forEach((spy) => spy.mockRestore());
     }
+  });
+});
+
+describe("unauthorized-handler registration (FTY-274)", () => {
+  it("registers signOut so an authenticated 401 clears the session", async () => {
+    const store = fakeStore(RECORD);
+    await mount({ store, authClient: fakeAuth() });
+    expect(ctx().session).toEqual(RECORD);
+
+    // Simulate the api client seeing a 401 on an authenticated request.
+    await act(async () => {
+      notifyUnauthorized();
+    });
+
+    expect(store.clear).toHaveBeenCalledTimes(1);
+    expect(ctx().session).toBeNull();
+  });
+
+  it("drives the auth-redirect to the sign-in route once the 401 clears the session", async () => {
+    const store = fakeStore(RECORD);
+    await mount({ store, authClient: fakeAuth() });
+
+    await act(async () => {
+      notifyUnauthorized();
+    });
+
+    // With the session now null (and a server still connected), the existing
+    // pure routing decision sends the user to sign-in — no _layout.tsx change.
+    const target = resolveAuthRedirect({
+      connectionStatus: "ready",
+      connection: RECORD.serverUrl,
+      sessionStatus: "ready",
+      session: ctx().session,
+      onboardingStatus: "checking",
+      atConnect: false,
+      atSignin: false,
+      atOnboarding: false,
+    });
+    expect(ctx().session).toBeNull();
+    expect(target).toBe("/signin");
+  });
+
+  it("is safe to invoke repeatedly — concurrent 401s do not throw or re-clear a cleared session", async () => {
+    const store = fakeStore(RECORD);
+    await mount({ store, authClient: fakeAuth() });
+
+    await act(async () => {
+      notifyUnauthorized();
+      notifyUnauthorized();
+      notifyUnauthorized();
+    });
+
+    // Every call runs signOut (idempotent); the session ends null and nothing throws.
+    expect(store.clear).toHaveBeenCalledTimes(3);
+    expect(ctx().session).toBeNull();
+  });
+
+  it("unregisters the handler on unmount so a 401 no longer clears a session it no longer owns", async () => {
+    const store = fakeStore(RECORD);
+    const tree = await mount({ store, authClient: fakeAuth() });
+
+    await act(async () => {
+      tree.unmount();
+    });
+
+    // After unmount the handler is the safe no-op again: notifying does nothing.
+    await act(async () => {
+      notifyUnauthorized();
+    });
+    expect(store.clear).not.toHaveBeenCalled();
   });
 });
 

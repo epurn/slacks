@@ -28,6 +28,7 @@ import {
 } from "react";
 
 import { createAccount, signIn } from "@/api/auth";
+import { setUnauthorizedHandler } from "@/api/client";
 import type { ProfileSession } from "@/api/profile";
 import { secureSessionStore, type SessionStore } from "@/state/sessionStore";
 
@@ -157,6 +158,21 @@ export function SessionProvider({
     await store.clear();
     setSession(null);
   }, [store]);
+
+  // Register signOut as the api-client's unauthorized handler so an
+  // authenticated 401 (dead/rotated token) clears the session; the existing
+  // auth-redirect in app/_layout.tsx then routes back to sign-in. signOut is
+  // idempotent, so concurrent 401s calling it repeatedly are harmless. Restore
+  // the safe no-op on unmount so a torn-down provider never clears a session it
+  // no longer owns.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      void handleSignOut();
+    });
+    return () => {
+      setUnauthorizedHandler(null);
+    };
+  }, [handleSignOut]);
 
   const value = useMemo<SessionContextValue>(
     () => ({

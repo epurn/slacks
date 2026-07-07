@@ -35,7 +35,14 @@ This project uses the following as design references:
   The token never touches `AsyncStorage`, plain files, or logs; a missing, corrupt,
   or partial record fails closed to no session rather than a half-hydrated one; and
   the record is deleted on sign-out. The signature is never trusted client-side —
-  the server stays authoritative.)*
+  the server stays authoritative. An **authenticated `401`** (a dead or
+  key-rotation-invalidated token) also clears the record via the same sign-out
+  path — the api client fires a registered unauthorized handler (FTY-274,
+  `mobile/api/client.ts` → `mobile/state/session.tsx`) so an invalid token is
+  removed promptly instead of lingering until a manual keychain wipe, and the
+  auth-redirect routes the user back to sign-in. The pre-session auth path's
+  non-enumerating `401` is excluded — it is bad credentials, not a session
+  expiry.)*
 
 ## Encryption and Secrets
 
