@@ -102,6 +102,11 @@ export function useOfflineQueue(args: {
   const mountedRef = useRef(true);
   const draining = useRef(false);
   const prevOwnerKey = useRef<string | null>(null);
+  // The owner the hook is currently bound to, updated synchronously by the load
+  // effect. An in-flight drain closes over the owner it *started* for and polls
+  // this ref to notice a sign-out/switch that happened mid-pass — the single
+  // source of truth the drain guards on so it never touches the new owner.
+  const activeOwnerKey = useRef<string | null>(null);
   // `entriesRef` is the *synchronous* authority for the queue: the drain and
   // enqueue callbacks read and write it directly between awaits, so neither can
   // act on a stale snapshot. `entries` state only mirrors it for rendering.
@@ -134,10 +139,14 @@ export function useOfflineQueue(args: {
   // fully-merged queue (drain outcome + anything enqueued meanwhile).
   const saveChain = useRef<Promise<unknown>>(Promise.resolve());
   const persist = useCallback(
-    (o: OutboxOwner) => {
+    (o: OutboxOwner, snapshot?: readonly OutboxEntry[]) => {
+      // Default to the live ref so the last write reflects the fully-merged
+      // queue; an explicit `snapshot` is used when the durable outcome must be
+      // pinned to a *specific* owner (a drain aborted by an owner change, where
+      // `entriesRef` has already moved on to the new owner's queue).
       const run = saveChain.current
         .catch(() => {})
-        .then(() => store.save(o, entriesRef.current));
+        .then(() => store.save(o, snapshot ?? entriesRef.current));
       saveChain.current = run;
       return run;
     },
@@ -149,6 +158,14 @@ export function useOfflineQueue(args: {
     const current = entriesRef.current;
     if (!hasQueuedWork(current)) return;
 
+    // The owner this drain is bound to. If it changes mid-pass (sign-out or a
+    // switch), the drain must not submit the rest through the new session, nor
+    // fold this owner's entries back into hook state that now belongs to the new
+    // owner. `activeOwnerKey` is the live authority for the current owner.
+    const drainOwner = owner;
+    const drainOwnerKey = outboxOwnerKey(drainOwner);
+    const ownerChanged = () => activeOwnerKey.current !== drainOwnerKey;
+
     // Keys the drain starts from. Anything enqueued mid-drain has a fresh key
     // outside this set and is merged back in rather than overwritten.
     const snapshotKeys = new Set(current.map((e) => e.idempotencyKey));
@@ -158,10 +175,25 @@ export function useOfflineQueue(args: {
       const result = await drainOutbox({
         entries: current,
         submit: (entry) => submitRef.current(entry),
+        shouldStop: ownerChanged,
         onChange: (live) => {
+          // Once the owner has changed, hook state belongs to the new owner —
+          // never merge the prior owner's drain progress back into it.
+          if (ownerChanged()) return;
           commitEntries(mergeDrainResult(entriesRef.current, snapshotKeys, live));
         },
       });
+
+      if (ownerChanged()) {
+        // The owner signed out or switched while this drain was in flight.
+        // Persist the drain's own outcome to *its* owner's durable file (pinned
+        // explicitly — `entriesRef` now holds the new owner's queue), and leave
+        // the live UI, reachability, and feed untouched: the accepted entries
+        // belong to the previous owner's server, not the new session.
+        await persist(drainOwner, result.entries);
+        return;
+      }
+
       const merged = mergeDrainResult(
         entriesRef.current,
         snapshotKeys,
@@ -170,7 +202,7 @@ export function useOfflineQueue(args: {
       entriesRef.current = merged;
       // Always persist the durable outcome, even if the screen has unmounted —
       // the queue must survive. UI updates are gated on still being mounted.
-      await persist(owner);
+      await persist(drainOwner);
       // Read the live ref (not `merged`) for the final UI sync: a capture may
       // have landed during the await, and the ref already accounts for it.
       if (mountedRef.current) {
@@ -193,6 +225,9 @@ export function useOfflineQueue(args: {
   // the queue.
   useEffect(() => {
     const key = owner ? outboxOwnerKey(owner) : null;
+    // Publish the new owner synchronously (before the async load resolves) so an
+    // in-flight drain started for the previous owner sees the change and aborts.
+    activeOwnerKey.current = key;
     const previous = prevOwnerKey.current;
     if (previous !== null && previous !== key) {
       // A different owner (or sign-out): drop the previous owner's entries from

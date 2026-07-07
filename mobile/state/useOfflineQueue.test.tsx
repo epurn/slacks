@@ -258,6 +258,101 @@ describe("useOfflineQueue — owner isolation (FTY-277)", () => {
     expect(harness.current.entries.map((e) => e.idempotencyKey)).toEqual(["a1"]);
   });
 
+  it("aborts an in-flight drain when the owner switches, never submitting the previous user's remaining entries through the new session", async () => {
+    // A submit that blocks on the first entry so the drain is still in flight
+    // when the owner switches out from under it.
+    let resolveSubmit!: (event: LogEventDTO) => void;
+    const submitted: string[] = [];
+    const submit = jest.fn((e: OutboxEntry) => {
+      submitted.push(e.idempotencyKey);
+      return new Promise<LogEventDTO>((resolve) => {
+        resolveSubmit = resolve;
+      });
+    });
+    const { store, data } = makeStore(
+      seed(OWNER_A, [
+        entry({ idempotencyKey: "a1" }),
+        entry({ idempotencyKey: "a2" }),
+      ]),
+    );
+    const harness = renderQueue({ initialOwner: OWNER_A, store, submit });
+    await flush();
+
+    // A's drain starts and blocks submitting a1; a2 is still queued behind it.
+    act(() => harness.current.drainNow());
+    await flush();
+    expect(submitted).toEqual(["a1"]);
+
+    // Switch to a *different* user while a1's submit is still in flight.
+    harness.setOwner(OWNER_B);
+    await flush();
+
+    // a1's blocked submit now resolves. The drain must stop here: a2 is never
+    // submitted, so A's remaining capture can't be sent through B's session.
+    await act(async () => {
+      resolveSubmit(serverEvent("a1"));
+    });
+    await flush();
+    expect(submitted).toEqual(["a1"]);
+
+    // The hook shows B's (empty) surface, not A's entries.
+    expect(harness.current.entries).toEqual([]);
+
+    // A's durable queue keeps a2 for A's own next sign-in (the accepted a1 has
+    // left it); nothing leaked into a B record.
+    expect(
+      (data.get(outboxOwnerKey(OWNER_A)) ?? []).map((e) => e.idempotencyKey),
+    ).toEqual(["a2"]);
+    expect(data.get(outboxOwnerKey(OWNER_B))).toBeUndefined();
+
+    // Signing back in as A reloads exactly the preserved remainder.
+    harness.setOwner(OWNER_A);
+    await flush();
+    expect(harness.current.entries.map((e) => e.idempotencyKey)).toEqual(["a2"]);
+  });
+
+  it("aborts an in-flight drain on sign-out, preserving the owner's remaining entries without draining them", async () => {
+    let resolveSubmit!: (event: LogEventDTO) => void;
+    const submitted: string[] = [];
+    const submit = jest.fn((e: OutboxEntry) => {
+      submitted.push(e.idempotencyKey);
+      return new Promise<LogEventDTO>((resolve) => {
+        resolveSubmit = resolve;
+      });
+    });
+    const { store, cleared, data } = makeStore(
+      seed(OWNER_A, [
+        entry({ idempotencyKey: "a1" }),
+        entry({ idempotencyKey: "a2" }),
+      ]),
+    );
+    const harness = renderQueue({ initialOwner: OWNER_A, store, submit });
+    await flush();
+
+    act(() => harness.current.drainNow());
+    await flush();
+    expect(submitted).toEqual(["a1"]);
+
+    // Sign out (owner → null, as both a manual sign-out and an FTY-274 401 clear
+    // funnel through) while a1's submit is in flight.
+    harness.setOwner(null);
+    await flush();
+    await act(async () => {
+      resolveSubmit(serverEvent("a1"));
+    });
+    await flush();
+
+    // The remaining entry a2 is never submitted while signed out, the surface is
+    // empty/online, and the durable file is preserved (never cleared) with a2.
+    expect(submitted).toEqual(["a1"]);
+    expect(harness.current.entries).toEqual([]);
+    expect(harness.current.reachability).toBe("online");
+    expect(cleared).toEqual([]);
+    expect(
+      (data.get(outboxOwnerKey(OWNER_A)) ?? []).map((e) => e.idempotencyKey),
+    ).toEqual(["a2"]);
+  });
+
   it("does not clear the durable queue on unmount (navigation away)", async () => {
     const { store, cleared } = makeStore(seed(OWNER_A, [entry()]));
     const harness = renderQueue({ initialOwner: OWNER_A, store });

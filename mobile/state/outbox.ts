@@ -216,13 +216,20 @@ export function normalizeLoaded(
  * (`queued` → `submitting` → resolved) so a caller can reflect progress and
  * persist incrementally. It never receives `accepted` entries — those are
  * returned separately to hand off to the feed.
+ *
+ * `shouldStop`, if given, is polled before each entry is submitted; when it
+ * returns `true` the drain halts immediately and leaves the remaining entries
+ * `queued`. The React seam uses this to abort a drain whose owner signed out or
+ * switched mid-pass, so a prior owner's captures are never submitted through a
+ * new session (FTY-277).
  */
 export async function drainOutbox(opts: {
   readonly entries: readonly OutboxEntry[];
   readonly submit: OutboxSubmit;
   readonly onChange?: (entries: readonly OutboxEntry[]) => void;
+  readonly shouldStop?: () => boolean;
 }): Promise<DrainResult> {
-  const { entries, submit, onChange } = opts;
+  const { entries, submit, onChange, shouldStop } = opts;
   const working: OutboxEntry[] = entries.map((e) =>
     e.syncState === "submitting" ? { ...e, syncState: "queued" } : e,
   );
@@ -236,6 +243,14 @@ export async function drainOutbox(opts: {
     const entry = working[i];
     if (entry.syncState !== "queued") continue;
     if (stopDraining) continue;
+    // The owner signed out or switched while an earlier submit was in flight:
+    // stop before sending any further entry, leaving it `queued` for this
+    // owner's own next drain. Checked before the submit so no prior-owner entry
+    // is ever submitted through the new session.
+    if (shouldStop?.()) {
+      stopDraining = true;
+      continue;
+    }
 
     working[i] = { ...entry, syncState: "submitting" };
     onChange?.(visible());
