@@ -307,10 +307,25 @@ never invented while better evidence is still reachable:
    The result is recorded `field_provenance = estimated` with the aggregation method and
    the contributing `source_ref` list in `assumptions` — never presented as a
    user-stated or single-source fact.
-3. **Model prior last.** Only when neither a source-backed lookup nor a plausible
-   comparable-source aggregate is available does the field fall to a pure `model_prior`
-   estimate (`field_provenance = estimated`, the reason in `assumptions`), or remain
-   **unknown/`null`** when no credible estimate is produced.
+3. **Model prior last — cold-pass, never a one-shot guess.** Only when neither a
+   source-backed lookup nor a plausible comparable-source aggregate is available does the
+   field fall to a pure `model_prior` estimate (`field_provenance = estimated`, the reason
+   in `assumptions`), or remain **unknown/`null`** when no credible estimate is produced.
+   An **uncertain** missing-field model-prior estimate is produced through the same
+   **cold-pass self-consistency** path the parse step uses (FTY-158/FTY-159;
+   `app/estimator/self_consistency.py`, `parse-candidates.md`): the field is drawn over
+   **N independent passes** and its **sampling agreement** — not a single verbalized
+   confidence number — is scored against the **FTY-159 calibrated operating point**
+   (`app/estimator/clarify_policy.py`), so a lone over-confident sample can never finalize
+   a fabricated number. Because a missing macro on an **already-resolved `user_text`
+   item** is an **optional** estimate — not the resolve-vs-ask decision — its cold-pass
+   fails closed **toward the field, not toward asking**: when the passes **disagree**
+   (agreement below the calibrated operating point) the field is left **rough or
+   `unknown`/`null`**, and this disagreement **never triggers a second clarification
+   question about a detail the user already supplied** (the item is already resolved from
+   user evidence; see `food-resolution.md`, no-second-follow-up). This inverts the parse
+   step's fail-closed-toward-asking precisely because the item's identity and stated facts
+   are already committed.
 
 The recipe (ingredient-sum) and similar-dish sources reserved in the **Source
 Hierarchy** are the future authoritative form of this reference tier; comparable-source
