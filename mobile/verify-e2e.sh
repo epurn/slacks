@@ -220,7 +220,9 @@ if [ "$PLATFORM" = "android" ]; then
 
 elif [ "$PLATFORM" = "ios" ]; then
   # expo run:ios both installs AND launches the app, so any RCT_jsLocation
-  # re-point has to land before this command, not after.
+  # re-point has to land before this command, not after. Metro's port is
+  # carried by the separate expo start call plus this user default, not by
+  # run:ios (Expo 57 rejects --no-bundler with -p/--port).
   if [ -n "$E2E_UDID" ]; then
     echo "==> [verify-e2e] Repointing app at Metro (RCT_jsLocation=localhost:$METRO_PORT)..."
     xcrun simctl spawn "$E2E_UDID" defaults write com.fatty RCT_jsLocation "localhost:$METRO_PORT"
@@ -229,7 +231,7 @@ elif [ "$PLATFORM" = "ios" ]; then
   echo "==> [verify-e2e] Building iOS simulator binary..."
   # No --simulator flag: Expo 57's run:ios rejects it, and the simulator is
   # already the default target when --device is not passed.
-  ios_run_args=(--configuration Debug --no-bundler -p "$METRO_PORT")
+  ios_run_args=(--configuration Debug --no-bundler)
   if [ -n "$E2E_UDID" ]; then
     ios_run_args+=(-d "$E2E_UDID")
   fi
