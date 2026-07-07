@@ -57,6 +57,21 @@ logged but not yet counted toward `intake` because they await a user action) so 
 range consumer can tell a genuinely empty day from a day whose only entries are
 uncounted; additive, no migration, populated identically in the single-day and
 range reads.
+5 (FTY-278, contract only) makes the finalized-state filter and `uncounted_entries`
+account for the **item-scoped partial clarification** state (`log-events.md` v6,
+`food-resolution.md` v9): the new first-class `partially_resolved` event status
+carries committed `resolved` siblings, so the finalized filter's event-status
+clause relaxes from `completed`-only to `completed` **or** `partially_resolved`,
+and `uncounted_entries` counts the **unresolved component** awaiting details
+(one per open item-scoped question on a `partially_resolved` event) rather than
+the whole event, while the degenerate event-level `needs_clarification` case still
+counts one per event. No new persistence and no migration — the same computed read
+over existing rows. This version **settles the counting semantics only**; the
+estimator work that first commits siblings on a `partially_resolved` event is the
+downstream **FTY-278 implementation follow-up**, and until it lands the
+FTY-275/FTY-223 baseline holds (a mixed log routes to an event-level
+`needs_clarification` with nothing committed and counts as one whole uncounted
+entry).
 
 ## Inputs
 
@@ -138,25 +153,38 @@ read path.)
   two; this flag does. A range/series consumer (FTY-101 Trends adherence) excludes
   `has_intake: false` days from its logged-intake average and on/off-target
   denominator rather than counting every unlogged day as a real 0-kcal day.
-- `uncounted_entries` — integer, the count of the day's entries that are **logged
-  but not yet counted** toward `intake` because they await a user action. Precisely
-  the sum of two disjoint kinds attributed to the day:
-  - the user's **`needs_clarification`** log events (the estimator asked a question
-    and is waiting on the user — counted as events; such an event carries no
-    committed items), and
+- `uncounted_entries` — integer, the count of the day's **awaiting-details units**:
+  things the user logged that are not yet counted toward `intake` because they need
+  a user action. Precisely the sum of two disjoint kinds attributed to the day:
+  - the day's **open clarification units** — the components the estimator asked
+    about and is waiting on the user for. The **unit is the unresolved component**,
+    not the whole event (FTY-278): under the item-scoped partial contract a
+    `partially_resolved` event contributes **one per still-`unresolved` component
+    that owns an open item-scoped question** (its `resolved` siblings count in
+    `intake` instead, never here), and the degenerate **event-level**
+    `needs_clarification` case — where no component is individually costed —
+    contributes **one for the event**. Under the **FTY-275 baseline** every mixed
+    log is the event-level `needs_clarification` case (nothing committed), so this
+    is one per event — identical to the FTY-223 count; item-scoped per-component
+    counting on `partially_resolved` events arrives with the FTY-278 estimator
+    follow-up.
   - the user's **`proposed`** derived food items (FTY-196 — a costed-but-unconfirmed
     label parse, excluded from every finalized read by construction).
 
-  **Excluded** (never counted): finalized entries (already in `intake`); `pending`
-  and `processing` events (the estimator is still working — the client's loading
-  path, not "awaiting details"); and `failed` events (a distinct retry state). Day
-  attribution is the owning `LogEvent.created_at` in the profile timezone over
-  `[start, end)`, exactly matching how `intake` / `has_intake` attribute a day. A
-  day with no such entries reports `0`. This is what lets a range consumer (FTY-188
-  Trends adherence) honestly say "N entries awaiting details" rather than collapse
-  an uncounted-only day (`has_intake: false`, zeroed `intake`, non-zero
-  `uncounted_entries`) into "nothing logged" (`uncounted_entries: 0`). Present on
-  every day of the single-day and range reads.
+  **Excluded** (never counted): finalized items (already in `intake`), including a
+  partial event's `resolved` siblings; `pending` and `processing` events (the
+  estimator is still working — the client's loading path, not "awaiting details");
+  and `failed` events (a distinct retry state). A single partially-resolved entry
+  can therefore contribute to **both** `intake` (its resolved siblings) and
+  `uncounted_entries` (its unresolved component) at once — the two sets are disjoint
+  by item status, so nothing is double-counted. Day attribution is the owning
+  `LogEvent.created_at` in the profile timezone over `[start, end)`, exactly
+  matching how `intake` / `has_intake` attribute a day. A day with no such units
+  reports `0`. This is what lets a range consumer (FTY-188 Trends adherence)
+  honestly say "N entries awaiting details" rather than collapse an uncounted-only
+  day (`has_intake: false`, zeroed `intake`, non-zero `uncounted_entries`) into
+  "nothing logged" (`uncounted_entries: 0`). Present on every day of the single-day
+  and range reads.
 - `target` — the **target read-model** for the user's active goal on this day,
   **carried forward** within the goal's horizon (a `daily_targets` row is stored on
   goal-creation day but the daily target is effectively constant across the horizon
@@ -180,14 +208,29 @@ read path.)
 The exact predicate (documented for auditability — never relaxed without updating
 this contract):
 
-> `log_events.status == 'completed'`
+> `log_events.status IN ('completed', 'partially_resolved')`
 > AND `derived_{food,exercise}_items.status == 'resolved'`
 > AND `current_value IS NOT NULL`
 
-- Items on `pending` / `processing` / `failed` / `needs_clarification` events are
-  excluded: only `completed` events carry committed resolved items (FTY-043/FTY-044
-  commit items in the same transaction as the terminal `completed` status).
-- `unresolved` items (NULL calories / NULL active_calories) are excluded.
+- Items on `pending` / `processing` / `failed` events are excluded: a `pending` or
+  `processing` event has no committed terminal items (the estimator is still
+  working — the client's loading path), and a `failed` event never produced any.
+- **`partially_resolved` events are included (FTY-278).** Under the item-scoped
+  partial contract (`log-events.md` v6, `food-resolution.md` v9) a
+  `partially_resolved` event carries committed `resolved` siblings — a mixed
+  log's costable components — committed in the same terminal transaction as the
+  `processing → partially_resolved` transition, exactly as FTY-043/FTY-044 commit
+  a `completed` event's items. Those siblings are genuine costed nutrition and
+  count immediately; the event's still-`unresolved` component contributes to
+  `uncounted_entries` instead (below), so the two are disjoint and the entry is
+  never double-counted. The event-level `needs_clarification` case commits nothing
+  and is correctly excluded by this filter. **Baseline:** until the FTY-278
+  estimator follow-up lands, no `partially_resolved` event exists, so this clause
+  adds nothing to any total — the numbers are identical to the `completed`-only
+  filter.
+- `unresolved` items (NULL calories / NULL active_calories) are excluded — this is
+  what keeps a partial event's amountless component out of `intake` while its
+  resolved siblings count.
 - **`proposed` items are excluded by construction (FTY-196).** A legible
   nutrition-label parse lands as an uncounted **`proposed`** food item on a
   `completed` event (`label-upload.md` → Confirmation gate); because the predicate
@@ -195,9 +238,11 @@ this contract):
   and never inflates intake until the user confirms it (`proposed → resolved`). This
   filter is **not relaxed** for the gate — the exclusion is a property of the
   existing predicate, not new logic.
-- A test proves this exclusion: non-`completed` event items, `unresolved` items,
-  and `proposed` (unconfirmed label) items never inflate a total (single-day and
-  range).
+- A test proves this exclusion: items on `pending` / `processing` / `failed` /
+  `needs_clarification` events, `unresolved` items (including a partial event's
+  amountless component), and `proposed` (unconfirmed label) items never inflate a
+  total (single-day and range); a `partially_resolved` event's `resolved` siblings
+  do count.
 
 ## Day / timezone resolution
 
@@ -378,4 +423,21 @@ curl -s ':8000/api/users/<uid>/daily-summary/range?from=2025-01-01&to=2026-06-01
   no new table and **no migration** — both statuses already exist and `proposed` is
   persisted as a plain `VARCHAR` (application-only per `DerivedItemStatus`).
   Additive and backward-compatible: existing consumers ignore the new field; the
-  intended consumer is FTY-188 Trends adherence.
+  intended consumer is FTY-188 Trends adherence. FTY-278 re-bases the counting unit
+  from the whole event to the unresolved component (below) without changing the
+  field or its baseline value.
+- **FTY-278 (contract only; no migration).** Relaxes the finalized-state filter's
+  event-status clause to `IN ('completed', 'partially_resolved')` and re-bases
+  `uncounted_entries` onto the unresolved **component** (one per open item-scoped
+  question on a `partially_resolved` event, plus one per event-level
+  `needs_clarification` event) so a mixed log's resolved siblings count in `intake`
+  while its amountless component stays uncounted. Still a **pure computed read**
+  over existing rows — the `partially_resolved` status is a new value in the
+  existing string `status` column, so there is no new table, no new column, and no
+  DTO shape change (the item↔question link is `parse-candidates.md` v5's additive
+  `clarification_questions.derived_food_item_id`, owned by the FTY-278 estimator
+  follow-up). Backward-compatible and **numerically inert until that follow-up
+  lands**: no `partially_resolved` event exists today, so the relaxed filter adds
+  nothing to any total and `uncounted_entries` still counts one per event-level
+  `needs_clarification` event (the FTY-223 baseline). The consumer contract
+  (FTY-188 Trends) is unchanged.

@@ -37,6 +37,24 @@ estimator / contracts / backend-core lane:
 
 ## Version
 
+5 (FTY-278, contract only): defines the **item-scoped** clarification carrier for
+a mixed food log. A clarification question may now name the **specific unresolved
+component** it is about via a nullable `derived_food_item_id` reference on
+`clarification_questions` (→ `derived_food_items.id`, `ON DELETE SET NULL`), so the
+estimator can commit an entry's costable components as `resolved` items while a
+single amountless component keeps its own question — the parse/food step no longer
+has to discard the whole entry's costing to ask one question. An **event-level**
+question (parse-time ambiguity not tied to one component) leaves the reference
+`NULL`, so the existing shape is a strict superset and every current question is
+representable unchanged. This version **settles the schema/routing contract only**;
+the additive, reversible migration that adds the column and the estimator changes
+that populate it and persist resolved siblings are a **downstream implementation
+follow-up** (see Migration / Compatibility). Until then, the shipped behaviour is
+the **FTY-275 baseline**: a genuinely amountless component still routes the whole
+event to an event-level `needs_clarification` and persists no candidates. The
+answer flow, read shape, and counting semantics are `log-events.md` v6,
+`estimation-jobs.md` v3, and `daily-summary.md`.
+
 4 (FTY-172): the estimator now **produces** the FTY-170 clarification-with-options
 shape and records schema version `parse/v2`. Model-raised clarification output is
 treated as low-quality and fails closed unless each question has specific
@@ -135,12 +153,36 @@ clarification quick-pick options (additive; no prior user data is required):
   `log_event_id` (FK, cascade, indexed), `user_id` (FK, cascade, indexed),
   `question_text`, `options` (JSON array of strings, not null, default `[]` —
   the question's quick-pick candidates, stored exactly as schema-validated;
-  added by FTY-172's `0017` migration), `position` (int, stable
-  order), `created_at`/`updated_at`. The stored `question_text` + `options`
-  are what the clarification read serves (`log-events.md`), so the producer
-  (this step) and the reader share one shape field-for-field. Questions the
-  backend synthesises deterministically — the plausibility gate's targeted
-  question — carry 2–5 quick-pick options.
+  added by FTY-172's `0017` migration), `derived_food_item_id` (**nullable** FK →
+  `derived_food_items.id`, `ON DELETE SET NULL`, indexed — the specific unresolved
+  component an item-scoped question is about; `NULL` for an event-level question;
+  added by the FTY-278 implementation follow-up's additive migration), `position`
+  (int, stable order), `created_at`/`updated_at`. The reference is an **internal**
+  producer→estimator link — **never surfaced in the clarification read** — and is
+  `SET NULL` (not `CASCADE`) on purpose: the answer-triggered re-estimate re-costs
+  **only the open component** and leaves the already-`resolved` siblings untouched
+  (`estimation-jobs.md` v3, `log-events.md` v6). The answered component's own row is
+  advanced **in place** from `unresolved` to `resolved` rather than deleted, so the
+  link is not exercised in the normal flow; but were a referenced
+  `derived_food_items` row ever removed (e.g. an event-level re-estimate or
+  correction), `SET NULL` **detaches** the answered question rather than
+  cascade-deleting it — preserving the answered question and its
+  `clarification_answers` anchor (which `ON DELETE CASCADE` on `question_id` would
+  otherwise cascade away) as the accumulated detail the next round consumes. The
+  link is component identity **for the estimator only**; the reader never sees it,
+  and the question stays component-identified to the user by its sanitized `name` in
+  `question_text`. Question
+  ownership/retention still cascades from the owning event and user (`log_event_id`,
+  `user_id`). The stored `question_text` +
+  `options` are what the clarification read serves (`log-events.md`) — the
+  **unchanged FTY-170 read shape**; `derived_food_item_id` is **not** part of that
+  read shape (it stays internal to the producer/estimator), so the producer (this
+  step) and the reader continue to share the FTY-170 `question_text` + `options`
+  fields field-for-field. Questions
+  the backend synthesises deterministically — the plausibility gate's targeted
+  question — carry 2–5 quick-pick options. An item-scoped question names its
+  component through `derived_food_item_id` and the component's own sanitized
+  `name`, **never** by copying the raw diary phrase into `question_text`.
 
 ## Outputs / Routing
 
@@ -277,6 +319,25 @@ answered questions and their `clarification_answers` are preserved, since they
 carry the accumulated details the re-estimate consumes — so the clarification
 read (status-gated to `needs_clarification`; `log-events.md`) serves exactly
 the fresh round's open questions.
+
+**Item-scoped partial clarification (FTY-278, contract only).** Under the
+item-scoped contract, a mixed entry is not all-or-nothing: the step commits the
+entry's **costable** components as `resolved` items (via the downstream food
+step, `food-resolution.md`) and raises a clarification only for the component(s)
+that are genuinely amountless, each question carrying its
+`derived_food_item_id`. Such a `partially_resolved` event (`log-events.md` v6)
+therefore carries committed `resolved` siblings alongside its open item-scoped
+questions — the
+event's derived-item set (resolved siblings + the `unresolved` component)
+and its question rows are committed atomically in the terminal transaction. A
+re-estimate re-costs **only the open component** and leaves the already-`resolved`
+siblings untouched, so a resolved sibling is represented exactly once
+and never duplicated or double-counted, and the fresh round's questions replace
+only the **unanswered** ones (`estimation-jobs.md` v3, `daily-summary.md`). This
+paragraph is the target contract; the estimator work to persist siblings and
+populate `derived_food_item_id` is the FTY-278 implementation follow-up. The
+**FTY-275 baseline** — whole-event, event-level clarification with nothing
+committed — is what ships until then.
 
 ### Detail-signal routing override (FTY-167)
 
@@ -430,3 +491,17 @@ event.raw_text = "crackers and peanut butter"        # count genuinely indetermi
   omits them validates unchanged (they default to `null`), and they are stored as data
   only. `brand` drives official-source routing (`food-resolution.md`); it adds no
   persistence column of its own (it is consumed at resolution time).
+- **FTY-278 (contract only; no code, no migration in this story).** Adds the
+  nullable `clarification_questions.derived_food_item_id` reference — an
+  **internal** producer→estimator link, **not** surfaced in the clarification read
+  (the FTY-170 read/answer shape is unchanged) — so a question can be item-scoped.
+  The
+  column and its migration are **additive and reversible** (existing questions
+  default it to `NULL` and remain valid event-level questions; no backfill), but
+  they are **owned by the downstream FTY-278 implementation follow-up**, not this
+  spec — this version fixes the shape and routing so that story and the backend
+  read/answer story (`log-events.md` v6, `estimation-jobs.md` v3,
+  `daily-summary.md`) build to one agreed contract. No existing `ParseResult`
+  field, `ClarificationQuestion` shape, or column semantics change; the FTY-275
+  baseline (whole-event event-level clarification, nothing committed) ships until
+  the follow-up lands.
