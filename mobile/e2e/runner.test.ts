@@ -49,10 +49,12 @@ describe('verify-e2e runner contract', () => {
     );
     expect(script).not.toContain('npx expo run:android $BUILD_CACHE_FLAG --configuration');
     // No --simulator flag: Expo 57's run:ios rejects it, and the simulator is
-    // already the default target when --device is not passed.
-    expect(script).toContain(
-      'ios_run_args=(--configuration Debug --no-bundler -p "$METRO_PORT")',
-    );
+    // already the default target when --device is not passed. No -p/--port
+    // either: Expo 57 rejects combining a port with --no-bundler, and Metro's
+    // port is carried by expo start + RCT_jsLocation.
+    expect(script).toContain('ios_run_args=(--configuration Debug --no-bundler)');
+    expect(script).not.toContain('ios_run_args=(--configuration Debug --no-bundler -p');
+    expect(script).not.toContain('ios_run_args=(--configuration Debug --no-bundler --port');
     expect(script).toContain('npx expo run:ios $BUILD_CACHE_FLAG "${ios_run_args[@]}"');
     expect(script).not.toContain('run:ios $BUILD_CACHE_FLAG --configuration Debug --simulator');
     expect(script).toContain('E2E_MAESTRO_TIMEOUT_SECONDS:-720');
