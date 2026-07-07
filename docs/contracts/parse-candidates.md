@@ -287,8 +287,16 @@ real-world structure to estimate — "Had a handful (5-10) of deep fried onion r
 such a reply to clarification, the step checks each extracted item for a **deterministic
 detail signal** (`app/estimator/detail_signals.py`):
 
-- **food** — a positive structured `amount` (a count or a measured quantity), or a
-  numeric **range** in `quantity_text` (`5-10`);
+- **food** — a positive structured `amount` (a count or a measured quantity), a
+  numeric **range** in `quantity_text` (`5-10`), or a **stated worded portion**
+  (FTY-275) in `quantity_text`: a household / cooking measure (`cup`, `tsp`, `tbsp`,
+  `fl oz`, `pint`, `quart`, `gallon` and their spellings), a colloquial / approximate
+  measure word (`splash`, `drizzle`, `dash`, `pinch`, `handful`, `glug`), or an
+  indefinite-article measure (`a`/`an` = one). Each means the user *stated* a portion
+  in words, so a generic source-miss defers to the model-prior estimate rather than
+  re-asking — see `food-resolution.md` (**Official-Source Resolution**, v8). A bare
+  identity with **no** stated portion (`milk`, `some milk`, `some crackers`) carries no
+  food detail;
 - **exercise** — an explicit duration, a **distance**, a **step count**, or a **game
   count**.
 
