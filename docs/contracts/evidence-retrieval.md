@@ -306,7 +306,18 @@ never invented while better evidence is still reachable:
      produced** — the field falls through to step 3 rather than averaging noise.
    The result is recorded `field_provenance = estimated` with the aggregation method and
    the contributing `source_ref` list in `assumptions` — never presented as a
-   user-stated or single-source fact.
+   user-stated or single-source fact. **Implemented in FTY-281**
+   (`app/estimator/comparable_reference.py`, wired into `UserTextMacroEstimator`): after
+   the exact (identity + brand) reference lookup misses, a **brand-dropped** identity +
+   `nutrition facts` search surfaces comparable pages; each transcribed page is
+   compatibility-checked (food form/category **and** ingredient/flavor overlap against
+   the item identity) and canonicalised to per-100g (per-serving facts with no gram
+   basis, and implausible facts, are excluded), outliers are dropped in Atwater
+   macro-fraction space, and the survivors' **median** grams-per-kcal density per macro
+   is scaled to the stated calorie total. Fewer than `MIN_COMPARABLE_SOURCES` survivors,
+   or a material disagreement after outlier filtering, falls through to step 3. The tier
+   is recorded on the run `source_refs` as `comparable_reference`; the item's own
+   `source_type` stays `user_text` (only its missing macros are filled).
 3. **Model prior last — cold-pass, never a one-shot guess.** Only when neither a
    source-backed lookup nor a plausible comparable-source aggregate is available does the
    field fall to a pure `model_prior` estimate (`field_provenance = estimated`, the reason
@@ -992,6 +1003,19 @@ cross-user / unknown / unauthenticated fail-closed.
   per-100g values, get `basis = 'per_100g'`, and `field_provenance = NULL`; the
   migration is fully reversible. The source hierarchy, lookup-status vocabulary, and
   serving math are unchanged.
+- **FTY-281 (implements the comparable-source aggregation tier).** Lands
+  `app/estimator/comparable_reference.py` and wires it into `UserTextMacroEstimator`
+  (`user_text_step.py`) between the single-source reference lookup and the model-prior
+  cold-pass, exactly as **Estimating a missing field** step 2 reserved. It is **additive
+  and non-breaking**: no schema, migration, DTO, or client-`SourceType` change (the
+  aggregate fills a `user_text` item's missing macros with `field_provenance =
+  estimated`; the method + compatibility summary + contributing `reference_source:<url>`
+  refs live in the existing `assumptions` list, and the run gains a `comparable_reference`
+  entry in `source_refs`). It reuses the FTY-166 search adapter, searched-result hardened
+  fetch, `NamedFoodEstimate` extraction, `_to_per_100g` plausibility gate, and
+  `sanitize_query` chokepoint unchanged — only the query is **brand-relaxed** and the
+  aggregation (compatibility filtering, outlier rejection, median density) is a new
+  **deterministic** step. No live network in tests.
 - FTY-088 adds a **diagnostics-only** LLM-provider descriptor to
   `GET /healthz/sources` (`id = claude_code`, `source_type = llm_provider`,
   `kinds = [estimation]`). It is additive and surfaces operator/health state only:

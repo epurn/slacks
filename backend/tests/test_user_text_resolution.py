@@ -594,6 +594,247 @@ def test_prompt_injection_in_name_is_stored_as_data(client: TestClient, session:
     assert food.name == injected
 
 
+# --- comparable-reference aggregate fallback (FTY-281) ----------------------------
+
+
+class KeyedSearchProvider(FakeSearchProvider):
+    """A search fake returning one result for the *branded* query, another otherwise.
+
+    The exact reference lookup searches the item identity **with** the brand; the
+    comparable-aggregate tier searches the **brand-dropped** identity. Keying on the
+    brand token lets a test stub the exact lookup to miss while the comparable search
+    surfaces several compatible pages.
+    """
+
+    def __init__(
+        self,
+        *,
+        branded: SearchResult,
+        comparable: SearchResult,
+        brand: str = "sobeys",
+        available: bool = True,
+    ) -> None:
+        super().__init__(comparable, available=available)
+        self._branded = branded
+        self._comparable = comparable
+        self._brand = brand
+
+    def search(self, query: str) -> SearchResult:
+        self.queries.append(query)
+        return self._branded if self._brand in query.lower() else self._comparable
+
+
+def _comparable_result(count: int = 3) -> SearchResult:
+    return SearchResult(
+        status=SearchStatus.SUCCESS,
+        candidates=tuple(
+            SearchCandidate(url=f"https://ref{i}.example.com/wrap", title="wrap nutrition")
+            for i in range(count)
+        ),
+    )
+
+
+def _page(name: str, calories: float, protein: float, carbs: float, fat: float) -> dict[str, Any]:
+    """A fake reference-page extraction reply (per-100g facts + a product name)."""
+
+    return {
+        "disposition": "resolved",
+        "confidence": 0.9,
+        "facts": {
+            "product_name": name,
+            "basis": "per_100g",
+            "calories": calories,
+            "protein_g": protein,
+            "carbs_g": carbs,
+            "fat_g": fat,
+        },
+    }
+
+
+def test_missing_macros_filled_from_comparable_aggregate(
+    client: TestClient, session: Session
+) -> None:
+    # Exact (brand-exact) reference lookup misses; three compatible buffalo-chicken wrap
+    # pages found via the brand-dropped search fill the macros as a rough aggregate.
+    user_id, event_id = _seed_event(client, "aggregate@example.com", _SOBEYS_TEXT)
+    search = KeyedSearchProvider(
+        branded=SearchResult(status=SearchStatus.PARTIAL),
+        comparable=_comparable_result(3),
+    )
+    fetcher = RecordingFetcher(text=f"wrap page {_RAW_PAGE_SENTINEL}")
+    estimates: list[dict[str, Any] | LLMError] = [
+        _page("Buffalo Chicken Wrap", 100.0, 5.0, 12.0, 3.0),
+        _page("Grilled Buffalo Chicken Wrap", 200.0, 10.0, 24.0, 6.0),
+        _page("Buffalo Chicken Lime Wrap", 150.0, 7.5, 18.0, 4.5),
+    ]
+    estimator = _macro_estimator(search=search, estimates=estimates, reference_fetcher=fetcher)
+    pipeline = _pipeline(session, parsed_item=_stated_item(), macro_estimator=estimator)
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+    assert result.event_status is LogEventStatus.COMPLETED
+
+    food = _foods(session, event_id)[0]
+    # Consistent macro densities (0.05 / 0.12 / 0.03 g per kcal) scaled to 580 kcal.
+    assert food.calories == 580.0
+    assert food.protein_g == pytest.approx(29.0)
+    assert food.carbs_g == pytest.approx(69.6)
+    assert food.fat_g == pytest.approx(17.4)
+
+    evidence = _evidence(session, event_id)
+    assert evidence.field_provenance == {
+        "calories": "user_stated",
+        "protein_g": "estimated",
+        "carbs_g": "estimated",
+        "fat_g": "estimated",
+    }
+    assert evidence.assumptions is not None
+    # Labelled a rough comparable-reference aggregate, naming every contributing source.
+    assert any("comparable-reference aggregate" in a for a in evidence.assumptions)
+    assert sum("reference_source:" in a for a in evidence.assumptions) == 3
+    # No raw page text is ever retained.
+    assert _RAW_PAGE_SENTINEL not in str(evidence.assumptions)
+    assert fetcher.fetched == [f"https://ref{i}.example.com/wrap" for i in range(3)]
+
+    # Search queries carry item identity + nutrition intent only — the comparable query
+    # drops the brand, and no raw diary phrase ever egresses.
+    assert search.queries  # both tiers searched
+    comparable_queries = [q for q in search.queries if "sobeys" not in q.lower()]
+    assert comparable_queries
+    for query in comparable_queries:
+        assert "buffalo chicken lime wrap" in query
+        assert "nutrition" in query
+    assert all(_SOBEYS_RAW_PHRASE not in q for q in search.queries)
+
+
+def test_aggregate_never_overwrites_a_user_stated_macro(
+    client: TestClient, session: Session
+) -> None:
+    # The user states protein; the aggregate may only fill the missing carbs/fat and
+    # must leave the stated protein exactly as given.
+    user_id, event_id = _seed_event(client, "keepmacro@example.com", "wrap 580 cals 35g protein")
+    search = KeyedSearchProvider(
+        branded=SearchResult(status=SearchStatus.PARTIAL),
+        comparable=_comparable_result(3),
+    )
+    estimates: list[dict[str, Any] | LLMError] = [
+        _page("Buffalo Chicken Wrap", 100.0, 5.0, 12.0, 3.0),
+        _page("Grilled Buffalo Chicken Wrap", 200.0, 10.0, 24.0, 6.0),
+        _page("Buffalo Chicken Lime Wrap", 150.0, 7.5, 18.0, 4.5),
+    ]
+    estimator = _macro_estimator(search=search, estimates=estimates)
+    pipeline = _pipeline(
+        session,
+        parsed_item=_stated_item(stated_calories=580.0, stated_protein_g=35.0),
+        macro_estimator=estimator,
+    )
+
+    process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    food = _foods(session, event_id)[0]
+    assert food.protein_g == 35.0  # user-stated, untouched by the aggregate
+    assert food.carbs_g == pytest.approx(69.6)
+    assert food.fat_g == pytest.approx(17.4)
+    evidence = _evidence(session, event_id)
+    assert evidence.field_provenance == {
+        "calories": "user_stated",
+        "protein_g": "user_stated",
+        "carbs_g": "estimated",
+        "fat_g": "estimated",
+    }
+
+
+def test_incompatible_and_outlier_candidates_are_rejected(
+    client: TestClient, session: Session
+) -> None:
+    # A salad (wrong food form) and a protein-skewed outlier wrap are both excluded; the
+    # aggregate reflects only the three consistent, compatible wrap references.
+    user_id, event_id = _seed_event(client, "reject@example.com", _SOBEYS_TEXT)
+    search = KeyedSearchProvider(
+        branded=SearchResult(status=SearchStatus.PARTIAL),
+        comparable=_comparable_result(5),
+    )
+    estimates: list[dict[str, Any] | LLMError] = [
+        _page("Buffalo Chicken Wrap", 100.0, 5.0, 12.0, 3.0),
+        _page("Caesar Salad", 150.0, 9.0, 8.0, 11.0),  # wrong form → rejected
+        _page("Grilled Buffalo Chicken Wrap", 200.0, 10.0, 24.0, 6.0),
+        _page("Buffalo Chicken Wrap Deluxe", 100.0, 30.0, 5.0, 1.0),  # compatible outlier
+        _page("Buffalo Chicken Lime Wrap", 150.0, 7.5, 18.0, 4.5),
+    ]
+    estimator = _macro_estimator(search=search, estimates=estimates)
+    pipeline = _pipeline(session, parsed_item=_stated_item(), macro_estimator=estimator)
+
+    process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    food = _foods(session, event_id)[0]
+    assert food.protein_g == pytest.approx(29.0)  # not dragged toward the 30 g outlier
+    assert food.carbs_g == pytest.approx(69.6)
+    assert food.fat_g == pytest.approx(17.4)
+    evidence = _evidence(session, event_id)
+    assert evidence.assumptions is not None
+    assert any("outlier" in a for a in evidence.assumptions)
+    # Exactly the three consistent wraps contribute (salad + outlier excluded).
+    assert sum("reference_source:" in a for a in evidence.assumptions) == 3
+
+
+def test_too_few_comparables_leave_macros_unknown_without_a_second_question(
+    client: TestClient, session: Session
+) -> None:
+    # Only two compatible references survive (< the minimum) and no model-prior samples
+    # remain, so the macros are left unknown — the calories still count and NO second
+    # serving question is asked.
+    user_id, event_id = _seed_event(client, "toofew@example.com", _SOBEYS_TEXT)
+    search = KeyedSearchProvider(
+        branded=SearchResult(status=SearchStatus.PARTIAL),
+        comparable=_comparable_result(2),
+    )
+    estimates: list[dict[str, Any] | LLMError] = [
+        _page("Buffalo Chicken Wrap", 100.0, 5.0, 12.0, 3.0),
+        _page("Grilled Buffalo Chicken Wrap", 200.0, 10.0, 24.0, 6.0),
+    ]
+    estimator = _macro_estimator(search=search, estimates=estimates)
+    pipeline = _pipeline(session, parsed_item=_stated_item(), macro_estimator=estimator)
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+    assert result.event_status is LogEventStatus.COMPLETED
+
+    food = _foods(session, event_id)[0]
+    assert food.calories == 580.0
+    assert food.protein_g is None
+    assert food.carbs_g is None
+    assert food.fat_g is None
+    assert _questions(session, event_id) == []
+
+
+def test_exact_reference_wins_over_comparable_aggregate(
+    client: TestClient, session: Session
+) -> None:
+    # The exact (brand-exact) reference lookup resolves, so the comparable-aggregate tier
+    # is never consulted: no brand-dropped search is issued and the macros come from the
+    # single exact page, not an aggregate.
+    user_id, event_id = _seed_event(client, "exactwins@example.com", _SOBEYS_TEXT)
+    search = KeyedSearchProvider(
+        branded=_success_result("https://sobeys.example.com/wrap"),
+        comparable=_comparable_result(3),
+    )
+    estimates: list[dict[str, Any] | LLMError] = [
+        _page("Sobeys Buffalo Chicken Lime Wrap", 120.0, 6.0, 15.0, 4.0),
+    ]
+    estimator = _macro_estimator(search=search, estimates=estimates)
+    pipeline = _pipeline(session, parsed_item=_stated_item(), macro_estimator=estimator)
+
+    process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    food = _foods(session, event_id)[0]
+    # 120 kcal/100g scaled to 580 kcal → ×4.8333; protein 6 × 4.8333 ≈ 29.
+    assert food.protein_g == pytest.approx(29.0)
+    # Only the brand-exact query ran; the comparable tier was never reached.
+    assert all("sobeys" in q.lower() for q in search.queries)
+    evidence = _evidence(session, event_id)
+    assert evidence.assumptions is not None
+    assert any("reference_source" in a for a in evidence.assumptions)
+    assert not any("comparable-reference aggregate" in a for a in evidence.assumptions)
+
+
 # --- representative regression: clarification is sparse ---------------------------
 
 

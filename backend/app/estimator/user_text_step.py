@@ -28,10 +28,14 @@ For each claimed candidate the step:
    ``products`` cache row is written.
 3. **Fills missing macros honestly** (:class:`UserTextMacroEstimator`, optional):
    a macro the user did not state is estimated from the item identity in the fixed
-   order **source-backed reference lookup → model-prior cold-pass**, recorded
-   ``field_provenance = estimated`` with the source in ``assumptions``; or left
-   **unknown/``None``** when no credible estimate survives — **never** a silent
-   user-supplied ``0``. A stated macro is preserved exactly (``user_stated``). The
+   order **single-source reference lookup → comparable-reference aggregate (FTY-281)
+   → model-prior cold-pass**, recorded ``field_provenance = estimated`` with the
+   source in ``assumptions``; or left **unknown/``None``** when no credible estimate
+   survives — **never** a silent user-supplied ``0``. When the exact reference lookup
+   misses, several *compatible* public reference items (brand-dropped identity search,
+   compatibility-checked, outlier-filtered, median-aggregated —
+   :mod:`app.estimator.comparable_reference`) can fill the macros as **rough** evidence
+   before any model prior. A stated macro is preserved exactly (``user_stated``). The
    model-prior estimate is drawn through **N independent cold passes** and gated on
    sampling agreement (never a one-shot verbalized confidence); when the passes
    disagree the macro is left unknown rather than re-asking the user.
@@ -54,6 +58,14 @@ from typing import cast
 from app.estimator.clarify_policy import (
     BASIS_DOCUMENTED_TUNABLE,
     ClarifyPolicy,
+)
+from app.estimator.comparable_reference import (
+    COMPARABLE_REFERENCE_SOURCE,
+    ComparableAggregate,
+    ComparableCandidate,
+    aggregate,
+    build_missing_macro_fill,
+    compatibility,
 )
 from app.estimator.evidence_utils import _record_source_ref
 from app.estimator.food_serving import NutritionFacts
@@ -293,6 +305,13 @@ class UserTextMacroEstimator:
                 per_100g, calories, missing, source_ref, tier="reference_source"
             )
 
+        comparable = self._comparable_aggregate(context, candidate)
+        if comparable is not None:
+            values, assumptions = build_missing_macro_fill(comparable, calories, missing)
+            return _EstimatedMacros(
+                values=values, source_ref=COMPARABLE_REFERENCE_SOURCE, assumptions=assumptions
+            )
+
         cold = self._model_prior_composition(candidate)
         if cold is not None:
             return self._scale_missing(
@@ -368,6 +387,84 @@ class UserTextMacroEstimator:
             per_100g, _serving_g = canonical
             return per_100g, source_ref
         return None
+
+    def _comparable_aggregate(
+        self, context: EstimationContext, candidate: CandidateDraft
+    ) -> ComparableAggregate | None:
+        """Search relaxed identity for compatible references and median-aggregate them.
+
+        The FTY-281 tier between the single-source reference match and the model prior:
+        when the exact (identity + brand) reference lookup missed, search the
+        **brand-dropped** item identity plus the fixed nutrition intent for *comparable*
+        public reference pages, transcribe each page's facts + product name, keep only
+        the compatible, plausible ones (:func:`compatibility` + ``_to_per_100g``), and
+        median-aggregate the survivors dropping outliers (:func:`aggregate`). Returns
+        ``None`` when the tier is unavailable, nothing confident is found, too few
+        compatible sources survive, or they materially disagree. All egress flows
+        through the injected search + reference-fetch seams; the step opens no socket.
+        """
+
+        if not (self.search_provider.enabled and self.search_provider.available):
+            return None
+        if not self.reference_fetch_settings.is_available:
+            return None
+
+        # Relaxed query: drop the brand so *comparable* (not brand-exact) references
+        # surface — still item identity + the fixed nutrition intent only, no raw diary
+        # text or personal context (the search adapter's sanitize_query chokepoint
+        # applies as ever).
+        query = f"{candidate.name} {REFERENCE_SEARCH_INTENT}"
+        result = self.search_provider.search(query)
+        if result.status is not SearchStatus.SUCCESS:
+            return None
+
+        candidates: list[ComparableCandidate] = []
+        recorded = False
+        for search_candidate in result.candidates:
+            source_ref = f"{REFERENCE_SOURCE_TYPE}:{search_candidate.url}"
+            if len(source_ref) > MAX_SOURCE_REF_LEN:
+                continue
+            if not recorded:
+                _record_source_ref(context, COMPARABLE_REFERENCE_SOURCE)
+                recorded = True
+            found = self._comparable_from_url(candidate, search_candidate.url, source_ref)
+            if found is not None:
+                candidates.append(found)
+
+        return aggregate(candidates)
+
+    def _comparable_from_url(
+        self, candidate: CandidateDraft, url: str, source_ref: str
+    ) -> ComparableCandidate | None:
+        """Fetch + transcribe one reference URL into a compatible candidate, or ``None``.
+
+        ``None`` when the page fails to fetch/extract, its item is **not a comparable**
+        (wrong food form or no ingredient/flavor overlap — :func:`compatibility`), or its
+        facts are implausible / not canonicalisable to a positive-calorie per-100g basis.
+        """
+
+        text = self._fetch_reference(url)
+        if text is None:
+            return None
+        estimate = self._extract(text)
+        if estimate is None or estimate.facts is None:
+            return None
+        match = compatibility(candidate.name, estimate.facts.product_name)
+        if match is None:
+            return None
+        canonical = _to_per_100g(estimate.facts)
+        if canonical is None:
+            # Implausible facts, or a serving basis with no gram scaling path.
+            return None
+        per_100g, _serving_g = canonical
+        if per_100g.calories <= 0:
+            return None
+        return ComparableCandidate(
+            facts=per_100g,
+            source_ref=source_ref,
+            shared_terms=match.shared_terms,
+            form=match.form,
+        )
 
     def _model_prior_composition(self, candidate: CandidateDraft) -> NutritionFacts | None:
         """Estimate a per-100g composition from model prior via N cold passes.
