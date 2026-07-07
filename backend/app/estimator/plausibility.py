@@ -31,6 +31,7 @@ import re
 from dataclasses import dataclass
 from typing import Final
 
+from app.estimator.food_serving import HOUSEHOLD_VOLUME_UNIT_ML
 from app.schemas.parse import ParsedCandidate
 
 # ---------------------------------------------------------------------------
@@ -227,6 +228,12 @@ _MASS_UNIT_GRAMS: Final[dict[str, float]] = {
 }
 
 # Millilitre equivalents for volume units, used to convert to ml for the volume cap.
+# The household measures (cup/tsp/tbsp/fl oz/pint/quart/gallon) derive from the
+# single shared ``HOUSEHOLD_VOLUME_UNIT_ML`` table (FTY-276) that
+# ``app.estimator.food_serving`` also consumes for its grams conversions, so the
+# two can no longer silently diverge. This shifts the volume cap by <2% from the
+# previous exact US-customary values here — immaterial to this validator's coarse
+# volume cap (FTY-275 author note, 2026-07-07).
 _VOLUME_UNIT_ML: Final[dict[str, float]] = {
     "ml": 1.0,
     "milliliter": 1.0,
@@ -239,29 +246,29 @@ _VOLUME_UNIT_ML: Final[dict[str, float]] = {
     "litre": 1000.0,
     "liters": 1000.0,
     "litres": 1000.0,
-    "fl": 29.5735,
-    "floz": 29.5735,
-    "fl_oz": 29.5735,
-    "fluid_ounce": 29.5735,
-    "fluid_ounces": 29.5735,
-    "cup": 236.588,
-    "cups": 236.588,
-    "tbsp": 14.7868,
-    "tbs": 14.7868,
-    "tablespoon": 14.7868,
-    "tablespoons": 14.7868,
-    "tsp": 4.92892,
-    "teaspoon": 4.92892,
-    "teaspoons": 4.92892,
-    "pint": 473.176,
-    "pints": 473.176,
-    "pt": 473.176,
-    "quart": 946.353,
-    "quarts": 946.353,
-    "qt": 946.353,
-    "gallon": 3785.41,
-    "gallons": 3785.41,
-    "gal": 3785.41,
+    "fl": HOUSEHOLD_VOLUME_UNIT_ML["fl_oz"],
+    "floz": HOUSEHOLD_VOLUME_UNIT_ML["fl_oz"],
+    "fl_oz": HOUSEHOLD_VOLUME_UNIT_ML["fl_oz"],
+    "fluid_ounce": HOUSEHOLD_VOLUME_UNIT_ML["fl_oz"],
+    "fluid_ounces": HOUSEHOLD_VOLUME_UNIT_ML["fl_oz"],
+    "cup": HOUSEHOLD_VOLUME_UNIT_ML["cup"],
+    "cups": HOUSEHOLD_VOLUME_UNIT_ML["cup"],
+    "tbsp": HOUSEHOLD_VOLUME_UNIT_ML["tbsp"],
+    "tbs": HOUSEHOLD_VOLUME_UNIT_ML["tbsp"],
+    "tablespoon": HOUSEHOLD_VOLUME_UNIT_ML["tbsp"],
+    "tablespoons": HOUSEHOLD_VOLUME_UNIT_ML["tbsp"],
+    "tsp": HOUSEHOLD_VOLUME_UNIT_ML["tsp"],
+    "teaspoon": HOUSEHOLD_VOLUME_UNIT_ML["tsp"],
+    "teaspoons": HOUSEHOLD_VOLUME_UNIT_ML["tsp"],
+    "pint": HOUSEHOLD_VOLUME_UNIT_ML["pint"],
+    "pints": HOUSEHOLD_VOLUME_UNIT_ML["pint"],
+    "pt": HOUSEHOLD_VOLUME_UNIT_ML["pint"],
+    "quart": HOUSEHOLD_VOLUME_UNIT_ML["quart"],
+    "quarts": HOUSEHOLD_VOLUME_UNIT_ML["quart"],
+    "qt": HOUSEHOLD_VOLUME_UNIT_ML["quart"],
+    "gallon": HOUSEHOLD_VOLUME_UNIT_ML["gallon"],
+    "gallons": HOUSEHOLD_VOLUME_UNIT_ML["gallon"],
+    "gal": HOUSEHOLD_VOLUME_UNIT_ML["gallon"],
 }
 
 # Match a bounded explicit "<number> <mass|volume unit>" phrase in quantity_text.
