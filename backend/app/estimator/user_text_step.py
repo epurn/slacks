@@ -65,7 +65,9 @@ from app.estimator.comparable_reference import (
     ComparableCandidate,
     aggregate,
     build_missing_macro_fill,
+    cold_pass_identity,
     compatibility,
+    sanitized_identity,
 )
 from app.estimator.evidence_utils import _record_source_ref
 from app.estimator.food_serving import NutritionFacts
@@ -98,6 +100,7 @@ from app.estimator.pipeline import (
 )
 from app.estimator.reference_fetch import ReferenceFetchSettings, fetch_searched_result
 from app.estimator.search import SearchProvider, SearchStatus
+from app.estimator.search_sanitization import sanitize_query
 from app.llm.base import Provider
 from app.llm.errors import (
     LLMConfigurationError,
@@ -416,10 +419,13 @@ class UserTextMacroEstimator:
             return None
 
         # Relaxed query: drop the brand so *comparable* (not brand-exact) references
-        # surface — still item identity + the fixed nutrition intent only, no raw diary
-        # text or personal context (the search adapter's sanitize_query chokepoint
-        # applies as ever).
-        query = f"{candidate.name} {REFERENCE_SEARCH_INTENT}"
+        # surface — item identity + the fixed nutrition intent only, never a raw diary
+        # phrase or personal context. The brand-dropped identity is reduced to its bounded
+        # ``[a-z0-9]+`` identity tokens (:func:`sanitized_identity`) so punctuation and
+        # structural framing a prompt injection would smuggle through the parser-derived
+        # name cannot ride along, and the whole string is passed through the
+        # ``sanitize_query`` chokepoint (control-char strip + length bound) before egress.
+        query = sanitize_query(f"{sanitized_identity(candidate.name)} {REFERENCE_SEARCH_INTENT}")
         result = self.search_provider.search(query)
         if result.status is not SearchStatus.SUCCESS:
             return None
@@ -511,13 +517,18 @@ class UserTextMacroEstimator:
             ]
             return tuple(future.result() for future in futures)
 
-    def _extract_comparable(self, page_text: str) -> tuple[NutritionFacts, str | None] | None:
+    def _extract_comparable(self, page_text: str) -> tuple[NutritionFacts, str] | None:
         """Cold-pass transcription of one comparable page → ``(per-100g facts, product name)``.
 
         FTY-281 keeps a lone over-confident transcription out of the aggregate: the page is
-        transcribed over ``MACRO_ESTIMATE_NUM_SAMPLES`` passes and gated on the same
-        committed-macro-density agreement the model-prior fallback uses — ``None`` when too
-        few canonicalise to plausible per-100g facts or they disagree.
+        transcribed over ``MACRO_ESTIMATE_NUM_SAMPLES`` passes and both halves of the
+        transcription must agree before it becomes a comparable candidate — the committed
+        **macro density** (the same gate the model-prior fallback uses) *and* the LLM-derived
+        **product identity** that feeds the downstream compatibility check
+        (:func:`cold_pass_identity`). ``None`` when too few passes canonicalise to plausible
+        per-100g facts, the macro densities disagree, or the passes disagree on the product's
+        food form / share no content term — so a page whose passes name conflicting forms
+        cannot enter on the strength of a single compatible pass.
         """
 
         samples = self._draw_estimates(self._extract_prompt(page_text), "user-text-extract")
@@ -531,7 +542,10 @@ class UserTextMacroEstimator:
         compositions = [facts for facts, _ in pairs]
         if USER_TEXT_MACRO_ESTIMATE_POLICY.should_clarify(_macro_agreement(compositions)):
             return None
-        return _mean_composition(compositions), pairs[0][1]
+        product_name = cold_pass_identity([name for _, name in pairs])
+        if product_name is None:
+            return None
+        return _mean_composition(compositions), product_name
 
     @staticmethod
     def _composition(estimate: NamedFoodEstimate | None) -> NutritionFacts | None:

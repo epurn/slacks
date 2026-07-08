@@ -289,6 +289,47 @@ def compatibility(target_name: str, page_name: str | None) -> _Match | None:
     )
 
 
+def sanitized_identity(name: str) -> str:
+    """Reduce a parser-derived item name to its bounded identity tokens, in order.
+
+    The comparable-reference search must egress the item's *identity only* — the same
+    bounded, lower-cased ``[a-z0-9]+`` token vocabulary the deterministic compatibility
+    check reads — never the raw parser phrase. Punctuation and structural framing a
+    prompt injection would use to smuggle instructions past a naive concatenation
+    (quotes, colons, code fences, angle-bracket tags, newlines) carry no identity token
+    and are dropped; the caller still passes the result through the ``sanitize_query``
+    chokepoint (control-char strip + length bound) before egress.
+    """
+
+    return " ".join(_tokens(name))
+
+
+def cold_pass_identity(names: list[str | None]) -> str | None:
+    """The cold passes' agreed product identity, or ``None`` when they disagree on it.
+
+    A page enters the aggregate only when its cold-pass transcriptions agree on *what the
+    product is*, not merely on its macro density: every pass must name the product, no two
+    passes may name **conflicting food-form groups** (a wrap vs a salad vs a bowl), and the
+    passes must share at least one common **content term** (ingredient/flavor). Returns a
+    representative name for the downstream target-compatibility check when they agree, else
+    ``None`` — so a page whose transcriptions disagree on the product form can never enter
+    the aggregate on the strength of a single compatible pass.
+    """
+
+    present = [name for name in names if name and name.strip()]
+    if not present or len(present) < len(names):
+        return None
+    form_indices = {
+        index for name in present if (index := _form_group_index(_tokens(name))) is not None
+    }
+    if len(form_indices) > 1:
+        return None
+    shared = set.intersection(*(_content_terms(_tokens(name)) for name in present))
+    if not shared:
+        return None
+    return present[0]
+
+
 def _contributor_content_hash(facts: NutritionFacts) -> str:
     """A reproducible fingerprint of one reference's canonicalised per-100g facts.
 
