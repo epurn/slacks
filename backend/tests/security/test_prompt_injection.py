@@ -27,10 +27,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.estimator.label_step import LabelInput, LabelResolveStep
 from app.estimator.official_fetch import OfficialFetchSettings
-from app.estimator.official_step import (
-    REFERENCE_SOURCE_TYPE,
-    OfficialSourceResolveStep,
-)
+from app.estimator.official_step import OfficialSourceResolveStep
 from app.estimator.parse import ParseStep
 from app.estimator.pipeline import (
     CandidateDraft,
@@ -45,6 +42,7 @@ from app.estimator.search import (
     SearchResult,
     SearchStatus,
 )
+from app.estimator.searched_reference import REFERENCE_SOURCE_TYPE
 from app.estimator.self_consistency import SELF_CONSISTENCY_FIRST_WINDOW
 from app.llm.providers.fake import FakeProvider
 from app.schemas.nutrition_panel import NutritionPanel

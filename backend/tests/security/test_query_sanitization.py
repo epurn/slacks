@@ -21,7 +21,6 @@ from urllib.parse import parse_qs, urlsplit
 
 from pydantic import SecretStr
 
-from app.estimator.official_step import _identity_query
 from app.estimator.pipeline import CandidateDraft
 from app.estimator.search import (
     BraveSearchProvider,
@@ -29,6 +28,7 @@ from app.estimator.search import (
     SearXNGSearchProvider,
     sanitize_query,
 )
+from app.estimator.searched_reference import _identity_query
 from tests.security._harness import resolver_returning
 
 #: Markers that must never appear in an egressed search request.

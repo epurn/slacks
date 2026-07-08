@@ -76,7 +76,17 @@ from app.estimator.hardened_fetch import (
     FetchTransientError,
 )
 from app.estimator.identity_sanitizer import sanitized_identity
-from app.estimator.official_step import (
+from app.estimator.pipeline import (
+    CandidateDraft,
+    ClarificationDraft,
+    EstimationContext,
+    NeedsClarification,
+    ResolvedFoodItem,
+)
+from app.estimator.reference_fetch import ReferenceFetchSettings, fetch_searched_result
+from app.estimator.search import SearchProvider, SearchStatus
+from app.estimator.search_sanitization import sanitize_query
+from app.estimator.searched_reference import (
     _EXTRACT_PROMPT,
     _MODEL_PRIOR_PROMPT,
     _REFERENCE_PAGE_KIND,
@@ -90,17 +100,8 @@ from app.estimator.official_step import (
     FetchReference,
     _identity_query,
     _to_per_100g,
+    searched_reference_per_100g,
 )
-from app.estimator.pipeline import (
-    CandidateDraft,
-    ClarificationDraft,
-    EstimationContext,
-    NeedsClarification,
-    ResolvedFoodItem,
-)
-from app.estimator.reference_fetch import ReferenceFetchSettings, fetch_searched_result
-from app.estimator.search import SearchProvider, SearchStatus
-from app.estimator.search_sanitization import sanitize_query
 from app.llm.base import Provider
 from app.llm.errors import (
     LLMConfigurationError,
@@ -391,27 +392,20 @@ class UserTextMacroEstimator:
             # source-backed lookup.
             return None
         query = sanitize_query(f"{identity} {REFERENCE_SEARCH_INTENT}")
-        result = self.search_provider.search(query)
-        if result.status is not SearchStatus.SUCCESS:
+        found = searched_reference_per_100g(
+            provider=self.provider,
+            search_provider=self.search_provider,
+            fetch=self._fetch_reference,
+            query=query,
+            page_kind=_REFERENCE_PAGE_KIND,
+            source_type=REFERENCE_SOURCE_TYPE,
+            before_fetch=lambda _source_ref: _record_source_ref(context, REFERENCE_SOURCE),
+        )
+        if found is None:
             return None
-
-        recorded = False
-        for search_candidate in result.candidates:
-            source_ref = f"{REFERENCE_SOURCE_TYPE}:{search_candidate.url}"
-            if len(source_ref) > MAX_SOURCE_REF_LEN:
-                continue
-            if not recorded:
-                _record_source_ref(context, REFERENCE_SOURCE)
-                recorded = True
-            text = self._fetch_reference(search_candidate.url)
-            if text is None:
-                continue
-            # Single-source authoritative lookup: one transcription pass, plausibility-gated.
-            per_100g = self._composition(self._one_estimate(self._extract_prompt(text)))
-            if per_100g is None:
-                continue
-            return per_100g, source_ref
-        return None
+        if found.facts.calories <= 0:
+            return None
+        return found.facts, found.source_ref
 
     def _comparable_aggregate(
         self, context: EstimationContext, candidate: CandidateDraft

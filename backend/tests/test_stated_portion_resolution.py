@@ -37,12 +37,13 @@ from app.estimator.fdc import FDC_SOURCE, ProductFacts
 from app.estimator.food_serving import NutritionFacts
 from app.estimator.food_step import FoodResolver, FoodResolveStep
 from app.estimator.official_fetch import OfficialFetchSettings
-from app.estimator.official_step import MODEL_PRIOR_SOURCE_TYPE, OfficialSourceResolveStep
+from app.estimator.official_step import OfficialSourceResolveStep
 from app.estimator.parse import ParseStep
 from app.estimator.pipeline import Pipeline
 from app.estimator.processing import process_estimation
 from app.estimator.reference_fetch import ReferenceFetchSettings
 from app.estimator.search import OFFICIAL_SOURCE_TYPE, SearchCapability, SearchResult, SearchStatus
+from app.estimator.searched_reference import MODEL_PRIOR_SOURCE_TYPE
 from app.estimator.self_consistency import SELF_CONSISTENCY_FIRST_WINDOW
 from app.llm.errors import LLMError
 from app.llm.providers.fake import FakeProvider
