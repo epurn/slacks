@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 import pytest
 
+from app.estimator.pipeline import CandidateDraft, EstimationContext
+from app.estimator.reference_fetch import ReferenceFetchSettings
 from app.estimator.search import (
     OFFICIAL_SOURCE_TYPE,
     SearchCandidate,
@@ -16,9 +19,11 @@ from app.estimator.search import (
 from app.estimator.searched_reference import (
     _REFERENCE_PAGE_KIND,
     MAX_SOURCE_REF_LEN,
+    REFERENCE_SOURCE,
     REFERENCE_SOURCE_TYPE,
     searched_reference_per_100g,
 )
+from app.estimator.user_text_step import UserTextMacroEstimator
 from app.llm.providers.fake import FakeProvider
 
 
@@ -62,6 +67,18 @@ class RecordingFetcher:
     def __call__(self, url: str) -> str | None:
         self.fetched.append(url)
         return self._pages.get(url)
+
+
+class RecordingReferenceFetcher:
+    """Network-free two-argument reference fetch seam for user_text tests."""
+
+    def __init__(self, pages: dict[str, str]) -> None:
+        self._pages = pages
+        self.fetched: list[str] = []
+
+    def __call__(self, url: str, settings: ReferenceFetchSettings) -> str:
+        self.fetched.append(url)
+        return self._pages[url]
 
 
 def _estimate(
@@ -144,3 +161,60 @@ def test_primitive_skips_bad_candidates_and_returns_plausible_per_100g_facts() -
         f"{REFERENCE_SOURCE_TYPE}:{implausible}",
         f"{REFERENCE_SOURCE_TYPE}:{good}",
     ]
+
+
+def test_user_text_exact_reference_skips_zero_calorie_candidate_and_uses_later_page() -> None:
+    """user_text cannot scale missing macros from zero kcal, so it keeps scanning."""
+
+    zero = "https://example.com/zero"
+    good = "https://example.com/good"
+    search = FakeSearchProvider(
+        SearchResult(
+            status=SearchStatus.SUCCESS,
+            candidates=(
+                SearchCandidate(url=zero, title="zero calorie wrap"),
+                SearchCandidate(url=good, title="buffalo chicken wrap nutrition"),
+            ),
+        )
+    )
+    fetcher = RecordingReferenceFetcher({zero: "zero page", good: "good page"})
+    provider = FakeProvider(
+        responses=[
+            {
+                "disposition": "resolved",
+                "confidence": 0.9,
+                "facts": {
+                    "basis": "per_100g",
+                    "calories": 0.0,
+                    "protein_g": 0.0,
+                    "carbs_g": 0.0,
+                    "fat_g": 0.0,
+                },
+            },
+            _estimate(),
+        ]
+    )
+    estimator = UserTextMacroEstimator(
+        provider=provider,
+        search_provider=search,
+        reference_fetch_settings=ReferenceFetchSettings(),
+        reference_fetch_fn=fetcher,
+    )
+    context = EstimationContext(log_event_id=uuid.uuid4(), user_id=uuid.uuid4(), raw_text="")
+    candidate = CandidateDraft(
+        name="buffalo chicken lime wrap",
+        brand="Sobeys",
+        quantity_text="1",
+        stated_calories=580.0,
+    )
+
+    estimated = estimator.estimate(context, candidate, 580.0, ("protein_g", "carbs_g", "fat_g"))
+
+    assert estimated.source_ref == f"{REFERENCE_SOURCE_TYPE}:{good}"
+    assert estimated.values == {
+        "protein_g": 29.0,
+        "carbs_g": 87.0,
+        "fat_g": 14.5,
+    }
+    assert fetcher.fetched == [zero, good]
+    assert context.source_refs == [REFERENCE_SOURCE]

@@ -129,6 +129,9 @@ class SearchedReferenceFacts:
     assumptions: tuple[str, ...]
 
 
+AcceptSearchedReference = Callable[[SearchedReferenceFacts], bool]
+
+
 def searched_reference_per_100g(
     *,
     provider: Provider,
@@ -139,6 +142,7 @@ def searched_reference_per_100g(
     source_type: str,
     extract_prompt: str = _EXTRACT_PROMPT,
     before_fetch: BeforeFetch | None = None,
+    accept_result: AcceptSearchedReference | None = None,
 ) -> SearchedReferenceFacts | None:
     """Return the first confident, plausible searched-reference per-100g facts.
 
@@ -172,13 +176,16 @@ def searched_reference_per_100g(
         if canonical is None:
             continue
         per_100g, default_serving_g = canonical
-        return SearchedReferenceFacts(
+        found = SearchedReferenceFacts(
             facts=per_100g,
             source_ref=source_ref,
             hash_key=search_candidate.url,
             default_serving_g=default_serving_g,
             assumptions=tuple(estimate.assumptions),
         )
+        if accept_result is not None and not accept_result(found):
+            continue
+        return found
     return None
 
 

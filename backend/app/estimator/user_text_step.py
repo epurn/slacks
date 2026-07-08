@@ -400,10 +400,9 @@ class UserTextMacroEstimator:
             page_kind=_REFERENCE_PAGE_KIND,
             source_type=REFERENCE_SOURCE_TYPE,
             before_fetch=lambda _source_ref: _record_source_ref(context, REFERENCE_SOURCE),
+            accept_result=lambda found: found.facts.calories > 0,
         )
         if found is None:
-            return None
-        if found.facts.calories <= 0:
             return None
         return found.facts, found.source_ref
 
