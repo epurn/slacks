@@ -59,8 +59,8 @@ from app.estimator.fdc import (
 )
 from app.estimator.food_serving import NutritionFacts, resolve_grams, scale_facts
 from app.estimator.off import OFF_SOURCE, OFF_SOURCE_TYPE
-from app.estimator.official_step import MODEL_PRIOR_SOURCE, MODEL_PRIOR_SOURCE_TYPE
 from app.estimator.search import OFFICIAL_SOURCE, OFFICIAL_SOURCE_TYPE, sanitize_query
+from app.estimator.searched_reference import MODEL_PRIOR_SOURCE, MODEL_PRIOR_SOURCE_TYPE
 from app.models.corrections import Correction
 from app.models.derived import DerivedFoodItem
 from app.models.food_sources import EvidenceSource, Product
