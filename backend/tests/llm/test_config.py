@@ -110,6 +110,48 @@ def test_claude_code_ignores_a_supplied_key() -> None:
     assert settings.provider == "claude_code"
 
 
+def test_codex_loads_without_key_or_model() -> None:
+    settings = load_llm_settings({"FATTY_LLM_PROVIDER": "codex"})
+
+    assert settings.provider == "codex"
+    assert settings.api_key is None
+    assert settings.model == ""
+
+
+def test_codex_passes_model_through_when_supplied() -> None:
+    settings = load_llm_settings({"FATTY_LLM_PROVIDER": "codex", "FATTY_LLM_MODEL": "gpt-5-codex"})
+
+    assert settings.provider == "codex"
+    assert settings.model == "gpt-5-codex"
+
+
+def test_codex_accepts_optional_api_key_as_secret() -> None:
+    settings = load_llm_settings(
+        {
+            "FATTY_LLM_PROVIDER": "codex",
+            "FATTY_LLM_API_KEY": "codex-secret-key",
+        }
+    )
+
+    assert settings.provider == "codex"
+    assert settings.api_key is not None
+    assert settings.api_key.get_secret_value() == "codex-secret-key"
+    assert "codex-secret-key" not in repr(settings)
+    assert "codex-secret-key" not in settings.model_dump_json()
+
+
+def test_codex_ignores_base_url_requirement() -> None:
+    settings = load_llm_settings(
+        {
+            "FATTY_LLM_PROVIDER": "codex",
+            "FATTY_LLM_BASE_URL": "https://llm.example.invalid/v1",
+        }
+    )
+
+    assert settings.provider == "codex"
+    assert settings.base_url == "https://llm.example.invalid/v1"
+
+
 def test_real_provider_requires_api_key() -> None:
     with pytest.raises(ValidationError):
         LLMSettings(provider="openai", model="gpt-4o-mini")

@@ -24,9 +24,10 @@ ENV_PREFIX = "FATTY_LLM_"
 #: Supported provider selectors. ``openai_compatible`` covers any endpoint that
 #: speaks the OpenAI Chat Completions wire format (vLLM, LM Studio, Together, ...).
 #: ``claude_code`` wraps a locally installed, first-party Claude Code session
-#: (subscription auth, no Fatty-side key). ``fake`` is the in-memory test/dev
-#: provider and never makes network calls.
-ProviderName = Literal["openai", "anthropic", "openai_compatible", "claude_code", "fake"]
+#: (subscription auth, no Fatty-side key). ``codex`` wraps a locally installed,
+#: first-party Codex CLI session. ``fake`` is the in-memory test/dev provider
+#: and never makes network calls.
+ProviderName = Literal["openai", "anthropic", "openai_compatible", "claude_code", "codex", "fake"]
 
 #: Default OpenAI API base. ``openai_compatible`` has no default — the operator
 #: must supply ``FATTY_LLM_BASE_URL`` for their endpoint.
@@ -54,9 +55,9 @@ class LLMSettings(BaseModel):
     base_url: str | None = None
     #: Provider model identifier (e.g. ``gpt-4o-mini``, ``claude-3-5-sonnet``).
     #: Required for ``openai``/``anthropic``/``openai_compatible``. **Optional for
-    #: ``claude_code``**: the local Claude Code session/plan selects the model, so
-    #: an empty value lets it use its session default; a supplied value is passed
-    #: through to the invocation (``--model``).
+    #: ``claude_code`` and ``codex``**: the local CLI session/config selects the
+    #: model, so an empty value lets it use its default; a supplied value is
+    #: passed through to the invocation (``--model``).
     model: str = Field(default="", description="Provider model identifier.")
     #: Per-attempt wall-clock timeout. A documented tunable.
     timeout_seconds: float = Field(default=30.0, gt=0, le=600)
@@ -80,6 +81,13 @@ class LLMSettings(BaseModel):
             # the model from the active session/plan, so a Fatty-side key is
             # meaningless and the model is optional. A supplied model is honored
             # (passed through to the invocation); a supplied key is simply unused.
+            return self
+        if self.provider == "codex":
+            # Codex owns its saved auth under CODEX_HOME unless an optional
+            # Fatty-side key is supplied for this child process only. Its model is
+            # also optional: an empty value lets the local Codex install choose
+            # its configured/default model. FATTY_LLM_BASE_URL is intentionally
+            # ignored by the factory for this provider.
             return self
         if self.provider == "openai_compatible":
             # A keyless local endpoint (Ollama, LM Studio, vLLM) requires no API key
