@@ -74,8 +74,10 @@ _ENV_ALLOWLIST: frozenset[str] = frozenset(
 #: only; the matched text is never logged or surfaced.
 _AUTH_FAILURE_MARKERS = (
     "not logged in",
+    "please run codex login",
     "please log in",
     "login required",
+    "authenticat",
     "authentication failed",
     "unauthorized",
     "invalid api key",
@@ -83,6 +85,7 @@ _AUTH_FAILURE_MARKERS = (
     "credential",
     "access token",
     "session expired",
+    "no api key",
 )
 
 #: Substrings that mark a non-zero exit as retryable. Kept small and specific to

@@ -311,9 +311,20 @@ def test_missing_binary_is_configuration_error() -> None:
         _provider(runner).structured_completion("an apple", Candidate)
 
 
-def test_auth_failure_is_configuration_error() -> None:
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "authentication failed",
+        "Authentication required",
+        "Failed to authenticate Codex session",
+        "Not authenticated; please run codex login",
+        "Please run codex login",
+        "No API key found",
+    ],
+)
+def test_auth_failure_is_configuration_error(stderr: str) -> None:
     def runner(invocation: Invocation, *, timeout_seconds: float) -> CodexResult:
-        return _result(returncode=1, stderr="authentication failed")
+        return _result(returncode=1, stderr=stderr)
 
     with pytest.raises(LLMConfigurationError):
         _provider(runner).structured_completion("an apple", Candidate)
