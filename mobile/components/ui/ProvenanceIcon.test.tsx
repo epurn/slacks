@@ -45,6 +45,7 @@ const SOURCE_LABELS: Record<ItemSourceDTO['source_type'], string> = {
   product_database: 'Open Food Facts',
   official_source: 'example.com',
   user_label: 'Label scan',
+  user_text: 'You logged',
   reference_source: 'reference.example.com',
   model_prior: 'Rough estimate',
 };
@@ -86,6 +87,7 @@ describe('ProvenanceIcon', () => {
       ['trusted_nutrition_database', 'USDA'],
       ['product_database', 'Open Food Facts'],
       ['user_label', 'Label scan'],
+      ['user_text', 'You logged'],
       ['official_source', 'example.com'],
       ['reference_source', 'reference.example.com'],
     ])('%s: a11y label includes the source label', (sourceType, expectedLabel) => {
@@ -181,8 +183,27 @@ describe('provenancePresentation()', () => {
     expect(provenancePresentation(sourceOf('reference_source')).icon).toBe('book.closed');
   });
 
+  it("maps user_text to a distinct icon (not camera/pencil) with a 'Source: You logged' label", () => {
+    const result = provenancePresentation(sourceOf('user_text'));
+    expect(result.icon).toBe('text.bubble');
+    expect(result.icon).not.toBe('camera');
+    expect(result.icon).not.toBe('pencil');
+    expect(result.accessibilityLabel).toBe('Source: You logged');
+  });
+
   it('is_edited takes precedence over the source type', () => {
     const result = provenancePresentation(sourceOf('trusted_nutrition_database'), true);
     expect(result.accessibilityLabel).toBe('Edited by you');
+  });
+
+  it('falls back to the unknown-source presentation for an unmodelled source_type (defensive default)', () => {
+    const unmodelled = {
+      source_type: 'future_source_type',
+      label: 'Future source',
+      ref: 'future_source_type:123',
+    } as unknown as ItemSourceDTO;
+    const result = provenancePresentation(unmodelled);
+    expect(result.icon).toBe('questionmark.circle');
+    expect(result.accessibilityLabel).toBe('Source unknown');
   });
 });

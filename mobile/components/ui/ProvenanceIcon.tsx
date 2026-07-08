@@ -38,12 +38,19 @@ export function provenancePresentation(
       return { icon: 'barcode', accessibilityLabel: `Source: ${source.label}` };
     case 'user_label':
       return { icon: 'camera', accessibilityLabel: `Source: ${source.label}` };
+    case 'user_text':
+      return { icon: 'text.bubble', accessibilityLabel: `Source: ${source.label}` };
     case 'official_source':
       return { icon: 'globe', accessibilityLabel: `Source: ${source.label}` };
     case 'reference_source':
       return { icon: 'book.closed', accessibilityLabel: `Source: ${source.label}` };
     case 'model_prior':
       return { icon: 'plus.forwardslash.minus', accessibilityLabel: 'Rough estimate' };
+    default:
+      // Defensive: a source_type the client hasn't modelled yet (e.g. a future
+      // backend-added tier) degrades to the unknown-source presentation instead
+      // of throwing on the caller's destructure.
+      return { icon: 'questionmark.circle', accessibilityLabel: 'Source unknown' };
   }
 }
 
