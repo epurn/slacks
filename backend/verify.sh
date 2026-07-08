@@ -7,7 +7,13 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # Install exactly what uv.lock pins; --frozen fails if the lockfile is stale.
-uv sync --frozen --dev
+# See docs/architecture/repo-layout.md for the explicit pre-provisioned-deps
+# skip.
+if [[ "${FATTY_VERIFY_SKIP_INSTALL:-}" =~ ^(1|true|TRUE|yes|YES|on|ON)$ ]]; then
+  echo "Skipping dependency install because FATTY_VERIFY_SKIP_INSTALL is set."
+else
+  uv sync --frozen --dev
+fi
 
 uv run ruff check .
 uv run ruff format --check .
