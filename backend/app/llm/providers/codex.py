@@ -100,6 +100,14 @@ _TRANSIENT_FAILURE_MARKERS = (
     "service unavailable",
 )
 
+#: Codex CLI image attachment formats that are part of the public Slacks
+#: contract. ``ImageInput`` also accepts WebP/GIF for other providers, but Codex
+#: support for those formats has not been established and therefore fails closed.
+_CODEX_IMAGE_EXTENSIONS: Mapping[str, str] = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+}
+
 
 @dataclass(frozen=True)
 class Invocation:
@@ -188,6 +196,7 @@ class CodexProvider(Provider):
         *,
         schema_path: Path,
         workdir: Path,
+        image_paths: Sequence[Path] | None = None,
     ) -> Invocation:
         """Construct the isolated ``codex exec`` invocation for ``prompt``."""
 
@@ -211,6 +220,8 @@ class CodexProvider(Provider):
         ]
         if self._model:
             argv += ["--model", self._model]
+        for image_path in image_paths or ():
+            argv += ["--image", str(image_path)]
         argv.append("-")
 
         return Invocation(
@@ -228,21 +239,18 @@ class CodexProvider(Provider):
         images: Sequence[ImageInput] | None,
         timeout_seconds: float,
     ) -> dict[str, Any]:
-        if images:
-            # Image support is intentionally deferred to FTY-295. Fail before
-            # creating an invocation so image bytes can never reach Codex here.
-            raise LLMConfigurationError("provider 'codex' does not support image input")
-
         with tempfile.TemporaryDirectory(prefix="fatty-codex-") as temp_root_name:
             temp_root = Path(temp_root_name)
             workdir = temp_root / "work"
             workdir.mkdir(mode=0o700)
             schema_path = temp_root / "output_schema.json"
+            image_paths = _write_image_files(temp_root, images)
             invocation = self.build_invocation(
                 prompt,
                 schema,
                 schema_path=schema_path,
                 workdir=workdir,
+                image_paths=image_paths,
             )
 
             try:
@@ -274,6 +282,37 @@ def _write_schema(schema_path: Path, schema: type[BaseModel]) -> None:
 
     schema_json = json.dumps(json_schema_for(schema), separators=(",", ":"), sort_keys=True)
     schema_path.write_text(schema_json, encoding="utf-8")
+
+
+def _write_image_files(
+    temp_root: Path,
+    images: Sequence[ImageInput] | None,
+) -> tuple[Path, ...]:
+    """Materialize Codex image attachments as restrictive temp files."""
+
+    image_paths: list[Path] = []
+    for index, image in enumerate(images or ()):
+        extension = _CODEX_IMAGE_EXTENSIONS.get(image.media_type)
+        if extension is None:
+            raise LLMConfigurationError("codex supports only JPEG and PNG image input")
+        image_path = temp_root / f"image-{index}{extension}"
+        _write_restrictive_bytes(image_path, image.data)
+        image_paths.append(image_path)
+    return tuple(image_paths)
+
+
+def _write_restrictive_bytes(path: Path, data: bytes) -> None:
+    """Create ``path`` with owner-only permissions and write ``data``."""
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            fd = -1
+            handle.write(data)
+    finally:
+        if fd != -1:
+            os.close(fd)
 
 
 def _build_child_env(*, api_key: str | None) -> dict[str, str]:
