@@ -45,8 +45,7 @@ def build_provider(settings: LLMSettings) -> Provider:
 
     # Codex also authenticates through its local CLI state by default and accepts
     # an optional child-only API key, so it must be built before keyed-provider
-    # guards. ``supports_vision`` is threaded for the shared capability gate even
-    # though this story's adapter remains text-only and rejects images itself.
+    # guards. ``supports_vision`` is threaded for the shared image-capability gate.
     if settings.provider == "codex":
         return CodexProvider(
             model=settings.model,

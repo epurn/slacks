@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
+import stat
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from app.llm.base import ImageInput
 from app.llm.errors import (
     LLMConfigurationError,
     LLMResponseError,
@@ -23,11 +26,12 @@ from app.llm.providers.codex import (
     Invocation,
     run_codex,
 )
-from tests.llm.conftest import Candidate, sample_image
+from tests.llm.conftest import SENSITIVE_IMAGE_BYTES, Candidate, sample_image
 
 SENSITIVE_PROMPT = "SENSITIVE_PROMPT_two boiled eggs and toast"
 SENSITIVE_KEY = "codex-child-secret-must-not-leak"
 SENSITIVE_OUTPUT = "SENSITIVE_CODEX_OUTPUT_must_not_leak"
+SENSITIVE_PATH_LIKE_IMAGE_TEXT = "/Users/example/private-label-photo.jpg"
 
 
 def _result(returncode: int = 0, stdout: str = "", stderr: str = "") -> CodexResult:
@@ -51,6 +55,11 @@ def _provider(
         binary="codex",
         runner=runner,  # type: ignore[arg-type]
     )
+
+
+def _image_paths_from(invocation: Invocation) -> list[Path]:
+    argv = invocation.argv
+    return [Path(argv[index + 1]) for index, arg in enumerate(argv) if arg == "--image"]
 
 
 def test_success_returns_schema_validated_object() -> None:
@@ -94,6 +103,7 @@ def test_invocation_uses_safe_flags_and_stdin_prompt() -> None:
     assert invocation.stdin == SENSITIVE_PROMPT
     assert all(SENSITIVE_PROMPT not in arg for arg in argv)
     assert "--model" not in argv
+    assert "--image" not in argv
 
 
 def test_model_flag_is_present_only_when_configured() -> None:
@@ -126,10 +136,15 @@ def test_schema_file_is_generated_and_temp_tree_is_cleaned_up() -> None:
         captured_schema_path["path"] = schema_path
         captured_temp_root["path"] = schema_path.parent
 
+        assert "--image" not in invocation.argv
         assert schema_path.exists()
         assert schema_path.parent == workdir.parent
         assert workdir.exists()
         assert list(workdir.iterdir()) == []
+        assert sorted(path.name for path in schema_path.parent.iterdir()) == [
+            "output_schema.json",
+            "work",
+        ]
         assert not (workdir / "AGENTS.md").exists()
         assert not (workdir / ".codex").exists()
         assert Path(__file__).resolve().parents[3] not in workdir.parents
@@ -419,7 +434,73 @@ def test_schema_invalid_json_is_rejected_by_base_class() -> None:
         _provider(runner).structured_completion("an apple", Candidate)
 
 
-def test_images_fail_fast_without_spawning() -> None:
+@pytest.mark.parametrize(
+    ("media_type", "suffix"),
+    [
+        ("image/jpeg", ".jpg"),
+        ("image/png", ".png"),
+    ],
+)
+def test_jpeg_and_png_images_are_attached_as_restrictive_temp_files(
+    media_type: str,
+    suffix: str,
+) -> None:
+    captured_image_path: dict[str, Path] = {}
+    captured_temp_root: dict[str, Path] = {}
+    image = ImageInput(data=SENSITIVE_IMAGE_BYTES, media_type=media_type)
+
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> CodexResult:
+        image_paths = _image_paths_from(invocation)
+        assert len(image_paths) == 1
+        image_path = image_paths[0]
+        captured_image_path["path"] = image_path
+        captured_temp_root["path"] = image_path.parent
+
+        assert "--output-schema" in invocation.argv
+        assert invocation.argv.count("--image") == 1
+        assert invocation.argv[invocation.argv.index("--image") + 1] == str(image_path)
+        assert invocation.argv[-1] == "-"
+        assert image_path.suffix == suffix
+        assert image_path.exists()
+        assert image_path.read_bytes() == SENSITIVE_IMAGE_BYTES
+        assert stat.S_IMODE(image_path.stat().st_mode) & 0o077 == 0
+        return _result(stdout='{"name": "granola bar", "calories": 190}')
+
+    result = _provider(runner, supports_vision=True).structured_completion(
+        "read this label",
+        Candidate,
+        images=[image],
+    )
+
+    assert result == Candidate(name="granola bar", calories=190)
+    assert not captured_image_path["path"].exists()
+    assert not captured_temp_root["path"].exists()
+
+
+@pytest.mark.parametrize("media_type", ["image/webp", "image/gif"])
+def test_codex_unsupported_image_media_types_fail_fast_without_spawning(
+    media_type: str,
+) -> None:
+    calls = {"n": 0}
+    image = ImageInput(data=SENSITIVE_IMAGE_BYTES, media_type=media_type)
+
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> CodexResult:
+        calls["n"] += 1
+        return _result(stdout='{"name": "apple", "calories": 95}')
+
+    with pytest.raises(LLMConfigurationError) as exc_info:
+        _provider(runner, supports_vision=True).structured_completion(
+            "read this label",
+            Candidate,
+            images=[image],
+        )
+
+    assert calls["n"] == 0
+    assert media_type not in str(exc_info.value)
+    assert "SENSITIVE_IMAGE_BYTES" not in str(exc_info.value)
+
+
+def test_images_with_non_vision_codex_model_fail_before_runner() -> None:
     calls = {"n": 0}
 
     def runner(invocation: Invocation, *, timeout_seconds: float) -> CodexResult:
@@ -427,13 +508,68 @@ def test_images_fail_fast_without_spawning() -> None:
         return _result(stdout='{"name": "apple", "calories": 95}')
 
     with pytest.raises(LLMConfigurationError):
-        _provider(runner, supports_vision=True).structured_completion(
+        _provider(runner).structured_completion(
             "read this label",
             Candidate,
             images=[sample_image()],
         )
 
     assert calls["n"] == 0
+
+
+@pytest.mark.parametrize(
+    ("runner_result", "expected_error"),
+    [
+        (_result(returncode=2, stderr="internal failure"), LLMResponseError),
+        (_result(stdout="not json"), LLMResponseError),
+        (_result(stdout='{"name": "apple", "calories": "many"}'), StructuredOutputValidationError),
+    ],
+)
+def test_image_temp_files_are_removed_after_runner_and_validation_failures(
+    runner_result: CodexResult,
+    expected_error: type[Exception],
+) -> None:
+    captured_image_path: dict[str, Path] = {}
+    captured_temp_root: dict[str, Path] = {}
+
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> CodexResult:
+        image_path = _image_paths_from(invocation)[0]
+        captured_image_path["path"] = image_path
+        captured_temp_root["path"] = image_path.parent
+        assert image_path.exists()
+        return runner_result
+
+    with pytest.raises(expected_error):
+        _provider(runner, supports_vision=True).structured_completion(
+            "read this label",
+            Candidate,
+            images=[sample_image()],
+        )
+
+    assert not captured_image_path["path"].exists()
+    assert not captured_temp_root["path"].exists()
+
+
+def test_image_temp_files_are_removed_after_timeout() -> None:
+    captured_image_path: dict[str, Path] = {}
+    captured_temp_root: dict[str, Path] = {}
+
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> CodexResult:
+        image_path = _image_paths_from(invocation)[0]
+        captured_image_path["path"] = image_path
+        captured_temp_root["path"] = image_path.parent
+        assert image_path.exists()
+        raise subprocess.TimeoutExpired(cmd="codex", timeout=timeout_seconds)
+
+    with pytest.raises(LLMTransientError):
+        _provider(runner, supports_vision=True).structured_completion(
+            "read this label",
+            Candidate,
+            images=[sample_image()],
+        )
+
+    assert not captured_image_path["path"].exists()
+    assert not captured_temp_root["path"].exists()
 
 
 def test_errors_and_logs_do_not_echo_prompt_output_key_or_secret(
@@ -458,6 +594,49 @@ def test_errors_and_logs_do_not_echo_prompt_output_key_or_secret(
     exception_text = str(exc_info.value)
     log_text = caplog.text
     for sensitive in (SENSITIVE_PROMPT, SENSITIVE_OUTPUT, SENSITIVE_KEY):
+        assert sensitive not in exception_text
+        assert sensitive not in log_text
+
+
+def test_image_errors_and_logs_do_not_echo_image_bytes_or_temp_paths(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    image = ImageInput(
+        data=SENSITIVE_IMAGE_BYTES + b" " + SENSITIVE_PATH_LIKE_IMAGE_TEXT.encode("utf-8"),
+        media_type="image/jpeg",
+    )
+    encoded = base64.b64encode(image.data).decode("ascii")
+    captured_image_path: dict[str, str] = {}
+
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> CodexResult:
+        captured_image_path["path"] = str(_image_paths_from(invocation)[0])
+        return _result(
+            returncode=2,
+            stdout=SENSITIVE_OUTPUT,
+            stderr=f"internal failure: {SENSITIVE_OUTPUT}",
+        )
+
+    with (
+        caplog.at_level(logging.DEBUG, logger="app.llm"),
+        pytest.raises(LLMResponseError) as exc_info,
+    ):
+        _provider(runner, api_key=SENSITIVE_KEY, supports_vision=True).structured_completion(
+            SENSITIVE_PROMPT,
+            Candidate,
+            images=[image],
+        )
+
+    exception_text = str(exc_info.value)
+    log_text = caplog.text
+    for sensitive in (
+        SENSITIVE_PROMPT,
+        SENSITIVE_OUTPUT,
+        SENSITIVE_KEY,
+        "SENSITIVE_IMAGE_BYTES",
+        SENSITIVE_PATH_LIKE_IMAGE_TEXT,
+        encoded,
+        captured_image_path["path"],
+    ):
         assert sensitive not in exception_text
         assert sensitive not in log_text
 
