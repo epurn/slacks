@@ -68,6 +68,19 @@ def test_sanitized_identity_drops_instruction_and_personal_context_tokens() -> N
         assert forbidden not in tokens
 
 
+def test_sanitized_identity_drops_user_goal_personal_context() -> None:
+    # Acceptance-criterion fixture the reviewer flagged as missing: a user's *goals* are
+    # personal context — `goal`/`goals` are on the deny-list — and must not egress on the
+    # search query even when the diary phrase states them next to the food. Both the marker
+    # words and a numeric goal value glued to / trailing the marker (`goal=1800 kcal`) drop;
+    # only open-vocabulary food identity ("cutting", "lean") is allowed to ride along.
+    identity = sanitized_identity("buffalo chicken lime wrap goal=1800 kcal cutting goals lean")
+    tokens = identity.split()
+    assert "buffalo" in tokens and "chicken" in tokens and "lime" in tokens and "wrap" in tokens
+    for forbidden in ("goal", "goals", "1800", "kcal"):
+        assert forbidden not in tokens
+
+
 def test_sanitized_identity_drops_chat_and_reasoning_framing_words() -> None:
     # Prompt-like *ordinary* words the reviewer flagged — chat-role and reasoning-framing
     # vocabulary an injection uses to address the model ("developer message", "hidden chain
