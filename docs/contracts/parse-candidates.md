@@ -37,6 +37,22 @@ estimator / contracts / backend-core lane:
 
 ## Version
 
+7 (FTY-298, contract only): defines the versioned **rare clarification policy** for
+natural-language text logs. The default operator mode is now
+`FATTY_ESTIMATOR_CLARIFY_MODE=estimate_first`: a recognizable food or exercise
+identity is enough to attempt a rough, editable estimate even when the user did not
+state a count, serving, duration, distance, or other amount. Counts, portions, brands,
+product identities, explicit nutrition facts, exercise durations/distances/steps/games,
+and standard-serving cues still make an estimate stronger, but they are no longer the
+only route to estimation. Provider-raised `needs_clarification` output is advisory,
+not authoritative, whenever recognized candidates or a recoverable identity can be
+validated under the active policy. Clarification under `estimate_first` is reserved for
+missing recognizable identity, non-log/gibberish input, deterministic unsafe
+contradictions or implausibilities, an unavailable/disabled estimator path after its
+bounded recovery attempts, or an operator-selected stricter mode. This version changes
+the public contract only; the settings and estimator implementation are downstream
+FTY-299/FTY-300/FTY-301 follow-ups.
+
 6 (FTY-279, contract only): the parser may **extract explicit nutrition facts the
 user stated** in the entry text into new optional, bounded `ParsedCandidate` fields
 — `stated_calories`, `stated_protein_g`, `stated_carbs_g`, `stated_fat_g`. A
@@ -50,9 +66,10 @@ nutrition fact is a **detail signal** that — like a stated portion (FTY-275) �
 defers a source-miss to estimation rather than clarification. This version settles
 the **schema/routing contract only**; the estimator/parser code (and any additive
 persistence) are the **downstream FTY-280 implementation follow-up**, and the
-FTY-278/FTY-275 baseline ships until it lands. The stated fields need **no new parse
-persistence column** — like `brand`, they are consumed at resolution time, and the
-`derived_food_items` energy/macro columns are already nullable (FTY-044/FTY-051).
+historical FTY-278/FTY-275 runtime baseline shipped until that implementation landed.
+The stated fields need **no new parse persistence column** — like `brand`, they are
+consumed at resolution time, and the `derived_food_items` energy/macro columns are
+already nullable (FTY-044/FTY-051).
 FTY-280 implementation note: because a stated calorie total becomes rank-1
 `user_text` evidence, the FTY-158 self-consistency concordance also **compares the
 `stated_*` fields** across samples, and the parse step fails a stated total **closed**
@@ -73,12 +90,12 @@ question (parse-time ambiguity not tied to one component) leaves the reference
 representable unchanged. This version **settles the schema/routing contract only**;
 the additive, reversible migration that adds the column and the estimator changes
 that populate it and persist resolved siblings are a **downstream implementation
-follow-up** (see Migration / Compatibility). Until then, the shipped behaviour is
-the **FTY-275 baseline**: a genuinely amountless component still routes the whole
-event to an event-level `needs_clarification` and persists no candidates. The
-answer flow and read shape are `clarification.md`; the item-scoped status and
-counting semantics are `log-events.md` v6, `estimation-jobs.md` v3, and
-`daily-summary.md`.
+follow-up** (see Migration / Compatibility). Under the historical **FTY-275
+baseline**, a genuinely amountless component routed the whole event to an event-level
+`needs_clarification` and persisted no candidates; FTY-298 supersedes that default for
+recognizable identities by falling forward to rough estimation before any question. The
+answer flow and read shape are `clarification.md`; the item-scoped status and counting
+semantics are `log-events.md` v6, `estimation-jobs.md` v3, and `daily-summary.md`.
 
 4 (FTY-172): the estimator now **produces** the FTY-170 clarification-with-options
 shape and records schema version `parse/v2`. Model-raised clarification output is
@@ -117,6 +134,43 @@ answer endpoint — `clarification.md`), FTY-153 (render).
 1 (FTY-042). Schema version string `parse/v1`, recorded on the estimation run.
 
 ## Inputs
+
+### Clarify policy config (FTY-298)
+
+The text-log clarify gate is policy-driven. Downstream implementation stories expose
+the mode through:
+
+| Variable | Default | Values | Meaning |
+| --- | --- | --- | --- |
+| `FATTY_ESTIMATOR_CLARIFY_MODE` | `estimate_first` | `estimate_first`, `balanced`, `strict` | Operator-selected abstention posture for natural-language parse/resolution. Unknown values fail closed at config load. |
+
+Mode semantics:
+
+- **`estimate_first` (default).** Ask only when the estimator cannot identify a
+  recognizable food/exercise identity, the input is non-log/gibberish, deterministic
+  validators find an impossible/unsafe contradiction, every enabled estimator/provider
+  path is unavailable after bounded retries/repair attempts, or the relevant estimator
+  path is explicitly disabled. Missing quantity alone is not enough to ask: `milk`,
+  `some crackers`, `crackers and hummus`, and a bare recognizable exercise identity
+  are accepted as rough candidates and resolved downstream with visible rough
+  provenance.
+- **`balanced`.** Preserve the calibrated abstention threshold from ADR 0003 / FTY-159
+  for deployments that prefer the measured ask/estimate tradeoff, but never re-ask for
+  a detail the user already stated: counts, portions (including approximate wording),
+  brands/product identities, explicit nutrition facts, exercise durations/distances/
+  steps/games, or standard-serving cues.
+- **`strict`.** Maximize precision for deployments that prefer fewer rough estimates;
+  older-style amount clarifications for recognizable-but-amountless items are allowed.
+  Deterministic plausibility and schema validation still fail closed.
+
+Optional numeric tunables are contract names for downstream code stories; this docs-only
+story does not require every runtime setting to exist yet:
+
+| Variable | Applies to | Meaning |
+| --- | --- | --- |
+| `FATTY_ESTIMATOR_PARSE_CLARIFY_THRESHOLD` | `balanced`, `strict` | Overrides the calibrated parse abstention threshold. It must never make the gate re-ask for a user-stated detail in `balanced`. |
+| `FATTY_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR` | rough nutrition facts | Minimum calibrated/cold-pass agreement for accepting a model/default-prior rough nutrition estimate; disagreement leaves a rough/unknown field or asks only for an allowed reason. |
+| `FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS` | all modes | Maximum bounded recovery/repair attempts when provider output is schema-valid but conflicts with the active policy, such as returning a clarification for a recoverable identity. |
 
 ### LLM output schema (`ParseResult`)
 
@@ -233,20 +287,35 @@ independently; the step then routes on the sample set and its **calibrated
 clarify decision** (below). When the set is trusted, the routed candidates are
 the most self-confident `parsed` sample's items.
 
+Under FTY-298 the routing table is interpreted through the active
+`FATTY_ESTIMATOR_CLARIFY_MODE`. In the default `estimate_first` mode, a
+schema-valid provider `needs_clarification` disposition, a low hybrid score, or a
+source/quantity gap is not a terminal parse decision when the sample set contains a
+recognizable food/exercise candidate or a bounded repair pass can recover one. The
+backend treats such provider-raised questions as **advisory**, discards them unless
+the policy itself allows asking, and accepts the recognizable candidate for downstream
+rough resolution with content-free assumptions. The calibrated abstention threshold
+still governs `balanced`, and `strict` may choose the older amount-clarification path.
+
 | Validated sample set | Pipeline signal | Persisted | Event transition |
 | --- | --- | --- | --- |
 | calibrated-confident, ≥1 item, all food candidates plausible | _(completes)_ | candidates `unresolved` | `processing → completed` |
 | calibrated-confident, ≥1 item, but a food candidate is implausible | `NeedsClarification` (`implausible_candidate`) | clarification question | `processing → needs_clarification` |
-| no sample `parsed`, or the hybrid score is below the calibrated operating point (and no detail-signal override) | `NeedsClarification` | clarification questions (pooled across samples, deduplicated) | `processing → needs_clarification` |
+| provider asks / no sample `parsed`, but a recognizable identity is present or recoverable and `estimate_first` is active | _(completes)_ | rough candidates `unresolved` + content-free assumptions; provider questions discarded | `processing → completed` |
+| no sample `parsed`, or the hybrid score is below the calibrated operating point, and the active policy allows asking | `NeedsClarification` | clarification questions (pooled across samples or synthesized by backend policy) | `processing → needs_clarification` |
 | unanimously `unparseable`, or a trusted set with no items | `StepFailed` (terminal) | nothing | `processing → failed` |
 | empty/whitespace input | `StepFailed` (terminal, no LLM call) | nothing | `processing → failed` |
 | schema-invalid sample / non-retryable provider error | `StepFailed` (terminal) | nothing | `processing → failed` |
 | transient provider error | `StepError` (retryable) | nothing | _(stays `processing`, retried)_ |
 
 A **mixed** set (e.g. one `unparseable` sample alongside `parsed` ones) is
-genuine ambiguity, not a terminal failure: the disagreement drags the hybrid
-score down and the event clarifies — fail closed toward asking, never toward a
-silent guess.
+genuine uncertainty, not a terminal failure. Under `balanced`/`strict`, the
+disagreement can drag the hybrid score down and route to clarification. Under the
+default `estimate_first` policy, the same disagreement routes to a rough estimate when
+the recognized identity survives validation, and to clarification only for the allowed
+rare reasons above. In every mode the pipeline fails closed on impossible quantities,
+unsafe contradictions, schema-invalid output, or missing identity; it never commits a
+silent trusted guess.
 
 ### Calibrated clarify decision (FTY-159, ADR 0003 Layer C)
 
@@ -339,16 +408,20 @@ and persists no candidates.
   FTY-043 (`exercise-burn.md`). Running an exercise duration through this gate
   would falsely reject ordinary workouts (e.g. `walking, 60 minutes`).
 
-Provider `needs_clarification` output with no usable specific question, a
-generic fallback question, or fewer than two quick-pick options fails closed
+Provider `needs_clarification` output is first checked against the active rare
+clarification policy. In `estimate_first`, a provider question that conflicts with a
+recognized/recoverable identity is discarded as advisory and the candidate is accepted
+for rough downstream resolution. Only when the backend policy itself allows asking does
+provider clarification output have to be persisted; at that point a missing specific
+question, a generic fallback question, or fewer than two quick-pick options fails closed
 (`StepFailed("clarification_quality_failed")`) and persists nothing. A
 `needs_clarification` event therefore never reaches the answer flow with a
-model-raised generic placeholder. If the calibrated policy routes a low-confidence
-`parsed` sample to clarification and no provider question was supplied, the parse
-step synthesizes one targeted backend question naming the first item without a
-detail signal and persists 2–5 bounded quick-pick options. Deterministic backend
-gates that synthesize their own targeted question without meaningful quick-picks
-persist that question with `options: []`.
+model-raised generic placeholder. If the active policy routes a low-confidence `parsed`
+sample to clarification and no provider question was supplied, the parse step
+synthesizes one targeted backend question naming the first item that still satisfies an
+allowed clarification reason and persists 2–5 bounded quick-pick options.
+Deterministic backend gates that synthesize their own targeted question without
+meaningful quick-picks persist that question with `options: []`.
 Candidates and questions are committed in the **same transaction** as the
 terminal status, so a completed/clarification outcome and its rows are atomic.
 When a **re-estimate** of an answered event (`clarification.md`, Clarification
@@ -363,7 +436,8 @@ the fresh round's open questions.
 item-scoped contract, a mixed entry is not all-or-nothing: the step commits the
 entry's **costable** components as `resolved` items (via the downstream food
 step, `food-resolution.md`) and raises a clarification only for the component(s)
-that are genuinely amountless, each question carrying its
+that still have an allowed clarification reason after the active FTY-298 policy has
+tried rough estimation, each question carrying its
 `derived_food_item_id`. Such a `partially_resolved` event (`log-events.md` v6)
 therefore carries committed `resolved` siblings alongside its open item-scoped
 questions — the
@@ -375,17 +449,19 @@ and never duplicated or double-counted, and the fresh round's questions replace
 only the **unanswered** ones (`estimation-jobs.md` v3, `daily-summary.md`). This
 paragraph is the target contract; the estimator work to persist siblings and
 populate `derived_food_item_id` is the FTY-278 implementation follow-up. The
-**FTY-275 baseline** — whole-event, event-level clarification with nothing
-committed — is what ships until then.
+historical **FTY-275 baseline** was whole-event, event-level clarification with
+nothing committed; FTY-298 now makes recognizable amountless components rough
+estimate first, and any remaining question stays item-scoped under this target.
 
-### Detail-signal routing override (FTY-167)
+### Estimate-first routing override (FTY-167, FTY-298)
 
 A casual entry is often returned by the model with a conservative confidence (or
 even a `needs_clarification` disposition) even though it already carries enough
 real-world structure to estimate — "Had a handful (5-10) of deep fried onion rings",
 "Had 3 cracker sandwiches", "ran 5 km", "played 3 games of badminton". Before routing
-such a reply to clarification, the step checks each extracted item for a **deterministic
-detail signal** (`app/estimator/detail_signals.py`):
+such a reply to clarification, the step checks each extracted item against the active
+rare clarification policy. The older **deterministic detail signal**
+(`app/estimator/detail_signals.py`) remains a strengthening signal:
 
 - **food** — a positive structured `amount` (a count or a measured quantity), a
   numeric **range** in `quantity_text` (`5-10`), a **stated worded portion**
@@ -398,21 +474,26 @@ detail signal** (`app/estimator/detail_signals.py`):
   estimation (or, for a stated nutrition fact, resolves directly from that
   `user_text` evidence) rather than re-asking — see `food-resolution.md`
   (**User-Stated Resolution (FTY-279)** (its no-second-follow-up rule), and **Official-Source
-  Resolution**, v8). A bare identity with **no** stated portion **and no** stated
-  nutrition fact (`milk`, `some milk`, `some crackers`) carries no food detail;
+  Resolution**, v8). Under the default `estimate_first` policy, a bare recognizable
+  identity with **no** stated portion and no stated nutrition fact (`milk`, `some
+  crackers`, `crackers and hummus`) is still enough to attempt a rough estimate; under
+  `balanced`/`strict` it may still lack the stronger detail signal used by the
+  calibrated abstention path;
 - **exercise** — an explicit duration, a **distance**, a **step count**, or a **game
   count**.
 
 When the sample set would otherwise clarify (a hybrid score below the calibrated
-operating point, or a set that never parsed) **but every extracted item carries a
-detail signal**, the step routes to `parsed` instead and lets the calculator layers
-estimate — a detail-rich casual log should be estimated, not asked about.
-Clarification is *sharpened*, not removed: an empty item list, or **any** item
-lacking a detail signal ("some crackers", "played sports"), still routes the whole
-event to clarification, because that item's portion is genuinely missing. A
-calibrated-confident sample set is unaffected (it never entered the clarify
-branch), and the deterministic plausibility gate above still runs on the accepted
-items.
+operating point, a provider `needs_clarification` disposition, or a set that needs a
+bounded repair pass), the default `estimate_first` policy routes to `parsed` if each
+component has a recognizable food/exercise identity and no deterministic validator
+finds an unsafe contradiction. Missing amounts become downstream rough assumptions,
+not parse questions. `balanced` keeps the FTY-159 calibrated abstention behavior except
+that a stated detail is never re-asked; `strict` may still ask for amount precision.
+Clarification is *sharpened*, not removed: an empty item list, gibberish/non-log text,
+a component with no recognizable identity, an impossible quantity, contradictory
+stated nutrition, or exhausted/disabled estimator paths can still ask or fail closed.
+A calibrated-confident sample set is unaffected (it never entered the clarify branch),
+and the deterministic plausibility gate above still runs on the accepted items.
 
 **Range midpoint.** When a food item has no structured `amount` but its `quantity_text`
 states a numeric range, the step fills the arithmetic **midpoint** as the count
@@ -469,9 +550,10 @@ no-second-follow-up rule in `food-resolution.md`.
   check before any of it backs a persisted number (`evidence-retrieval.md`).
 - Closed vocabularies (`disposition`, `CandidateType`) and `extra="forbid"` mean a
   reply cannot smuggle fields or free-form instructions.
-- Provider-raised clarification output must carry specific question text and
-  2–5 options per question; a missing/generic/under-optioned question fails
-  closed as `clarification_quality_failed` before persistence.
+- Provider-raised clarification output is advisory under `estimate_first`. If the
+  backend policy accepts a clarification outcome, the persisted question must carry
+  specific question text and 2–5 options per question; a missing/generic/under-optioned
+  accepted question fails closed as `clarification_quality_failed` before persistence.
 - A `parsed` reply with zero items fails closed rather than completing empty.
 
 ## Authorization
@@ -492,6 +574,13 @@ both `users` and `log_events` enforces object-level ownership.
   or `error`; only sanitized labels (`empty_input`, `unparseable_input`,
   `schema_validation_failed`, `clarification_quality_failed`, `provider_error`,
   `provider_transient_error`) are persisted on the run.
+- **Rough-estimate diagnostics are content-free.** Repair attempts, provider-raised
+  questions that were overridden by `estimate_first`, default-serving/model-prior
+  assumptions, source-miss reasons, and calibration artifacts record only sanitized
+  labels and source ids. They never copy raw diary text, raw prompts, raw provider
+  output, raw fetched text, or provider error bodies into `trace`, `error`,
+  `assumptions`, `source_refs`, logs, or calibration artifacts beyond explicit public
+  fixture inputs.
 - **Retention** follows the owning log event: derived items and clarification
   questions live until the event, user, or account is deleted (`ON DELETE CASCADE`),
   matching the food/exercise-log retention rule in
@@ -504,10 +593,10 @@ both `users` and `log_events` enforces object-level ownership.
 | Empty/whitespace text | Terminal `failed` (`empty_input`); no LLM call, nothing persisted. |
 | Unanimously `unparseable` / no-item trusted set | Terminal `failed`; nothing persisted. |
 | Schema-invalid model output (any sample) | Rejected; terminal `failed` (`schema_validation_failed`); nothing persisted. |
-| Provider clarification output missing a specific question or 2–5 options | Rejected; terminal `failed` (`clarification_quality_failed`); nothing persisted. |
+| Accepted provider clarification output missing a specific question or 2–5 options | Rejected; terminal `failed` (`clarification_quality_failed`); nothing persisted. Provider questions overridden by `estimate_first` are discarded instead. |
 | Non-retryable provider error (`LLMResponseError`/`LLMConfigurationError`) | Terminal `failed` (`provider_error`). |
 | Transient provider error (`LLMTransientError`) | Retryable; worker retries within its bound. |
-| Ambiguous / below the calibrated operating point | `needs_clarification`; questions (text + options) persisted; the user resolves via the clarification answer (`clarification.md`). |
+| Ambiguous / below the calibrated operating point | Under `estimate_first`, rough-estimate a recognizable identity unless an allowed clarification reason applies; under `balanced`/`strict`, `needs_clarification` with questions (text + options) persisted when the active policy asks. |
 
 ## Examples
 
@@ -523,16 +612,24 @@ event.raw_text = "two eggs and a 30 min run"
 ```
 
 ```
-event.raw_text = "crackers and peanut butter"        # count genuinely indeterminate
-  → samples disagree (window not unanimous → full N drawn; guessed portions
-    diverge / dispositions flip) → hybrid below the calibrated operating point
-  → { disposition: needs_clarification, confidence: 0.3, items: [ … ],
-      clarification_questions: [
-        { text: "How many cracker sandwiches?", options: ["2", "4", "6"] } ] }
-  → clarification_questions += one row (question_text, options, position 0)
-  → event: processing → needs_clarification
-  # the user resolves via POST .../clarification/answers (clarification.md);
-  # the re-estimate receives the (question, answer) pair as structured input
+event.raw_text = "crackers and peanut butter"        # recognizable, amountless food
+  → samples disagree or one provider asks "How much?"
+  → estimate_first policy sees recognizable identities and no unsafe contradiction
+  → provider question is advisory; bounded repair/selection keeps candidates:
+      {type: food, name: "crackers", quantity_text: "", amount: null}
+      {type: food, name: "peanut butter", quantity_text: "", amount: null}
+  → derived_food_items += rough unresolved candidates
+  → event: processing → completed
+  # downstream food resolution records rough default/reference/model-prior provenance
+  # and keeps the estimate editable; no clarification is asked solely for quantity.
+```
+
+```
+event.raw_text = "stuff"
+  → no recognizable food or exercise identity survives validation/repair
+  → estimate_first has no safe object to estimate
+  → backend synthesizes a targeted clarification if one can help, otherwise the
+     parse fails closed as unparseable
 ```
 
 ## Migration / Compatibility
@@ -582,7 +679,7 @@ event.raw_text = "crackers and peanut butter"        # count genuinely indetermi
   (`food-resolution.md`), back user-provided evidence (`evidence-retrieval.md` →
   **User-Stated Nutrition Evidence**), and let a calorie-only item count in
   `daily-summary.md`. The estimator/parser implementation is the downstream FTY-280
-  follow-up; the FTY-278/FTY-275 baseline ships until it lands.
+  follow-up; the historical FTY-278/FTY-275 runtime baseline shipped until it landed.
 - **FTY-280 (implements FTY-279).** The parser now extracts the `stated_*` fields
   (bounded by `MAX_STATED_ENERGY_KCAL` / `MAX_STATED_MACRO_G`, `allow_inf_nan=False`
   so a non-finite value is schema-invalid), a stated nutrition fact is a
@@ -605,3 +702,13 @@ event.raw_text = "crackers and peanut butter"        # count genuinely indetermi
   field, `ClarificationQuestion` shape, or column semantics change; the FTY-275
   baseline (whole-event event-level clarification, nothing committed) ships until
   the follow-up lands.
+- **FTY-298 (contract only; no code, no migration in this story).** Bumps the parse
+  contract to the rare clarification policy and reserves
+  `FATTY_ESTIMATOR_CLARIFY_MODE` plus optional numeric tunables for downstream
+  settings/code stories. `estimate_first` is the new default target: recognized bare
+  food/exercise identities are accepted as rough candidates, provider-raised
+  clarification is advisory when it conflicts with the policy, and clarification is
+  reserved for missing identity, non-log/gibberish input, unsafe contradictions or
+  implausibilities, unavailable/disabled estimator paths after bounded recovery, or a
+  stricter operator mode. No `ParseResult`, persistence, DTO, or migration changes are
+  made here; FTY-299/FTY-300/FTY-301 implement the runtime behavior.
