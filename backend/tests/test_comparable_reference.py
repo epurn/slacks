@@ -12,7 +12,6 @@ import pytest
 
 from app.estimator.comparable_reference import (
     AGREEMENT_DISTANCE,
-    MAX_IDENTITY_TOKENS,
     MIN_COMPARABLE_SOURCES,
     OUTLIER_DISTANCE,
     ComparableCandidate,
@@ -21,9 +20,9 @@ from app.estimator.comparable_reference import (
     _median_vector,
     aggregate,
     compatibility,
-    sanitized_identity,
 )
 from app.estimator.food_serving import NutritionFacts
+from app.estimator.identity_sanitizer import MAX_IDENTITY_TOKENS, sanitized_identity
 
 _TARGET = "buffalo chicken lime wrap"
 

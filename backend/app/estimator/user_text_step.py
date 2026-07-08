@@ -67,7 +67,6 @@ from app.estimator.comparable_reference import (
     build_missing_macro_fill,
     cold_pass_identity,
     compatibility,
-    sanitized_identity,
 )
 from app.estimator.evidence_utils import _record_source_ref
 from app.estimator.food_serving import NutritionFacts
@@ -76,6 +75,7 @@ from app.estimator.hardened_fetch import (
     FetchResponseError,
     FetchTransientError,
 )
+from app.estimator.identity_sanitizer import sanitized_identity
 from app.estimator.official_step import (
     _EXTRACT_PROMPT,
     _MODEL_PRIOR_PROMPT,
