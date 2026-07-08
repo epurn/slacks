@@ -317,7 +317,10 @@ never invented while better evidence is still reachable:
    the item identity) and canonicalised to per-100g (per-serving facts with no gram
    basis, and implausible facts, are excluded), outliers are dropped in Atwater
    macro-fraction space, and the survivors' **median** grams-per-kcal density per macro
-   is scaled to the stated calorie total. Fewer than `MIN_COMPARABLE_SOURCES` survivors,
+   is scaled to the stated calorie total. The minimum counts **distinct** reference
+   sources: duplicate search hits sharing one `reference_source:<url>` collapse to a
+   single source before the count, so repeated hits of one page can never satisfy
+   `MIN_COMPARABLE_SOURCES`. Fewer than `MIN_COMPARABLE_SOURCES` distinct survivors,
    or a material disagreement after outlier filtering, falls through to step 3. The tier
    is recorded on the run `source_refs` as `comparable_reference`; the item's own
    `source_type` stays `user_text` (only its missing macros are filled).

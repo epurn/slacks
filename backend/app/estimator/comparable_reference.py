@@ -654,17 +654,38 @@ def _median_vector(vectors: list[tuple[float, ...]]) -> tuple[float, ...]:
     return tuple(statistics.median(v[i] for v in vectors) for i in range(len(_MACRO_NAMES)))
 
 
+def _distinct_by_source(candidates: list[ComparableCandidate]) -> list[ComparableCandidate]:
+    """Collapse candidates that share a ``source_ref`` to their first occurrence.
+
+    The minimum-source and outlier gates count **distinct reference sources**, not raw
+    search hits: a provider can return the same ``reference_source:<url>`` more than once
+    (duplicate hits, paginated repeats), and each would otherwise fetch to an identical
+    candidate and inflate the source count — three duplicate hits of one URL must never
+    satisfy the three-source minimum. Deduplicating by ``source_ref`` here makes the
+    minimum a guarantee over distinct sources by construction. First occurrence wins so
+    the survivor set stays deterministic and independent of duplicate ordering.
+    """
+
+    seen: dict[str, ComparableCandidate] = {}
+    for candidate in candidates:
+        seen.setdefault(candidate.source_ref, candidate)
+    return list(seen.values())
+
+
 def aggregate(candidates: list[ComparableCandidate]) -> ComparableAggregate | None:
     """Median-aggregate compatible references, dropping outliers; ``None`` if too weak.
 
-    Deterministic (the LLM has no part here): normalise each candidate to its Atwater
-    macro-fraction vector, drop any lying more than :data:`OUTLIER_DISTANCE` from the
-    sample median (one bad reference removed **before** aggregation), require at least
-    :data:`MIN_COMPARABLE_SOURCES` survivors, bail when the survivors spread wider than
-    :data:`AGREEMENT_DISTANCE` (they **materially disagree**), and otherwise return the
-    **median** grams-per-kcal density per macro over the survivors.
+    Deterministic (the LLM has no part here): collapse candidates sharing a
+    ``source_ref`` to one **distinct source** (:func:`_distinct_by_source` — duplicate
+    search hits of the same URL never count twice toward the minimum), normalise each to
+    its Atwater macro-fraction vector, drop any lying more than :data:`OUTLIER_DISTANCE`
+    from the sample median (one bad reference removed **before** aggregation), require at
+    least :data:`MIN_COMPARABLE_SOURCES` distinct survivors, bail when the survivors
+    spread wider than :data:`AGREEMENT_DISTANCE` (they **materially disagree**), and
+    otherwise return the **median** grams-per-kcal density per macro over the survivors.
     """
 
+    candidates = _distinct_by_source(candidates)
     if len(candidates) < MIN_COMPARABLE_SOURCES:
         return None
 

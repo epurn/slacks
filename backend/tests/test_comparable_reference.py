@@ -249,13 +249,43 @@ def test_too_few_sources_produce_no_aggregate() -> None:
     assert aggregate(candidates) is None
 
 
+def test_duplicate_source_hits_do_not_satisfy_the_minimum() -> None:
+    # The reviewer's finding: the 3-source minimum counts *distinct sources*, not raw
+    # search hits. Three candidates that all share one `reference_source:<url>` (duplicate
+    # hits / paginated repeats of the same page) collapse to a single distinct source, so
+    # no aggregate is produced even though the naive candidate count reaches the threshold.
+    candidates = [_candidate(100, 5.0, 12.0, 3.0, ref="reference_source:dup")] * (
+        MIN_COMPARABLE_SOURCES + 1
+    )
+    assert aggregate(candidates) is None
+
+
+def test_distinct_sources_reached_via_dedup_still_aggregate() -> None:
+    # Deduplication only collapses shared source_refs: a duplicate hit alongside three
+    # distinct sources still leaves three distinct survivors, so the aggregate is produced
+    # over exactly the distinct references (the duplicate is not double-counted).
+    candidates = [
+        _candidate(100, 5.0, 12.0, 3.0, ref="reference_source:a"),
+        _candidate(100, 5.0, 12.0, 3.0, ref="reference_source:a"),
+        _candidate(200, 10.0, 24.0, 6.0, ref="reference_source:b"),
+        _candidate(150, 7.5, 18.0, 4.5, ref="reference_source:c"),
+    ]
+    result = aggregate(candidates)
+    assert result is not None
+    assert [c.source_ref for c in result.contributors] == [
+        "reference_source:a",
+        "reference_source:b",
+        "reference_source:c",
+    ]
+
+
 def test_median_aggregate_over_compatible_sources() -> None:
     # Three references with identical macro *densities* (grams per kcal) at different
     # portion sizes → the median density is exact.
     candidates = [
-        _candidate(100, 5.0, 12.0, 3.0),
-        _candidate(200, 10.0, 24.0, 6.0),
-        _candidate(150, 7.5, 18.0, 4.5),
+        _candidate(100, 5.0, 12.0, 3.0, ref="reference_source:a"),
+        _candidate(200, 10.0, 24.0, 6.0, ref="reference_source:b"),
+        _candidate(150, 7.5, 18.0, 4.5, ref="reference_source:c"),
     ]
     result = aggregate(candidates)
     assert result is not None
@@ -289,9 +319,9 @@ def test_materially_disagreeing_sources_produce_no_aggregate() -> None:
     # A bimodal sample (two high-protein, two high-fat) has no consistent centre: after
     # outlier filtering nothing survives that agrees, so no aggregate is produced.
     candidates = [
-        _candidate(100, 20.0, 5.0, 0.5),
-        _candidate(100, 20.0, 5.0, 0.5),
-        _candidate(100, 2.0, 5.0, 10.0),
-        _candidate(100, 2.0, 5.0, 10.0),
+        _candidate(100, 20.0, 5.0, 0.5, ref="reference_source:a"),
+        _candidate(100, 20.0, 5.0, 0.5, ref="reference_source:b"),
+        _candidate(100, 2.0, 5.0, 10.0, ref="reference_source:c"),
+        _candidate(100, 2.0, 5.0, 10.0, ref="reference_source:d"),
     ]
     assert aggregate(candidates) is None

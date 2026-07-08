@@ -837,6 +837,46 @@ def test_too_few_comparables_leave_macros_unknown_without_a_second_question(
     assert _questions(session, event_id) == []
 
 
+def test_duplicate_source_hits_do_not_satisfy_the_minimum(
+    client: TestClient, session: Session
+) -> None:
+    # The reviewer's finding: the 3-source minimum counts *distinct sources*, not raw
+    # search hits. A provider that returns the same reference URL three times (duplicate /
+    # paginated hits) would fetch to three identical candidates sharing one
+    # `reference_source:<url>`; those collapse to a single distinct source, so no aggregate
+    # is produced. The macros stay unknown, the calories still count, and NO second serving
+    # question is asked.
+    user_id, event_id = _seed_event(client, "dupsrc@example.com", _SOBEYS_TEXT)
+    dup_url = "https://ref-dup.example.com/wrap"
+    search = KeyedSearchProvider(
+        branded=SearchResult(status=SearchStatus.PARTIAL),
+        comparable=SearchResult(
+            status=SearchStatus.SUCCESS,
+            candidates=tuple(
+                SearchCandidate(url=dup_url, title="wrap nutrition") for _ in range(3)
+            ),
+        ),
+    )
+    # Every duplicate hit transcribes to the same compatible, plausible page.
+    estimates = _comparable_extractions(
+        _page("Buffalo Chicken Wrap", 100.0, 5.0, 12.0, 3.0),
+        _page("Buffalo Chicken Wrap", 100.0, 5.0, 12.0, 3.0),
+        _page("Buffalo Chicken Wrap", 100.0, 5.0, 12.0, 3.0),
+    )
+    estimator = _macro_estimator(search=search, estimates=estimates)
+    pipeline = _pipeline(session, parsed_item=_stated_item(), macro_estimator=estimator)
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+    assert result.event_status is LogEventStatus.COMPLETED
+
+    food = _foods(session, event_id)[0]
+    assert food.calories == 580.0
+    assert food.protein_g is None
+    assert food.carbs_g is None
+    assert food.fat_g is None
+    assert _questions(session, event_id) == []
+
+
 def test_comparable_page_with_disagreeing_cold_passes_is_excluded(
     client: TestClient, session: Session
 ) -> None:
