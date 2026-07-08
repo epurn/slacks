@@ -156,6 +156,21 @@ def test_sanitized_identity_drops_worded_body_metric_after_marker() -> None:
         assert leaked not in tokens
 
 
+def test_sanitized_identity_drops_worded_body_metric_with_connector_after_marker() -> None:
+    # The reviewer's remaining egress finding: normal connector/filler text between the
+    # marker and the value (`height is five foot ten`, `weight is about 200 lb`) is neither
+    # digit-shaped, a unit, nor a number word, so a value-only forward taint disarms on the
+    # connector (`is`/`about`) and leaks the trailing metric. Pure connector/filler words
+    # must *bridge* the taint (keep it armed) so the whole metric run still drops.
+    identity = sanitized_identity(
+        "buffalo chicken lime wrap height is five foot ten weight is about 200 lb"
+    )
+    tokens = identity.split()
+    assert tokens == ["buffalo", "chicken", "lime", "wrap"]
+    for leaked in ("five", "foot", "ten", "200", "lb", "height", "weight", "is", "about"):
+        assert leaked not in tokens
+
+
 def test_sanitized_identity_keeps_open_vocab_worded_number_identity() -> None:
     # The worded-number taint stays as narrow as the digit taint: a spelled-out number that
     # is *not* preceded by a personal-context marker is open-vocabulary food identity

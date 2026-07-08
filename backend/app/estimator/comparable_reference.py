@@ -149,6 +149,26 @@ _STOPWORDS: Final[frozenset[str]] = frozenset(
         "that",
         "these",
         "those",
+        # copulas / approximators: the connector/filler text a worded body metric puts
+        # between its personal-context marker and the value (``height is five foot ten``,
+        # ``weight is about 200 lb``). None is ever a food identity token, so they are
+        # generally stripped; while the forward taint is armed they also *bridge* it (see
+        # :func:`sanitized_identity`) so a marker separated from its value by a connector
+        # cannot leak the value.
+        "is",
+        "am",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "about",
+        "around",
+        "approx",
+        "approximately",
+        "roughly",
+        "at",
         "fresh",
         "style",
         "flavour",
@@ -517,14 +537,19 @@ def sanitized_identity(name: str) -> str:
       (``42`` / ``200lb``) untainted, so a dropped marker word taints the following run of
       *value-shaped* words (any token carrying a digit — the shape of an id or body metric),
       **bare measurement-unit words** (``ft``/``in``/``lb``…, :data:`_BODY_METRIC_UNITS`),
-      **and spelled-out number words** (``five``/``ten``/``hundred``…,
-      :data:`_NUMBER_WORDS`) the value splits across (``height 5 ft 10 in``,
-      ``height five foot ten``). All three keep the taint armed, so a whole
-      ``<number> <unit>`` body metric drops — whether the value is a digit or worded —
-      rather than a digit-free unit or number word disarming it and leaking the trailing
-      value. This is deliberately narrow: it only consumes digit-bearing, pure-unit, or
-      pure-number words *following a marker*, so an open-vocabulary numeric food identity
-      that is *not* preceded by a marker (``5 Guys``, ``7 Up``, ``Seven Up``) still egresses.
+      **spelled-out number words** (``five``/``ten``/``hundred``…, :data:`_NUMBER_WORDS`)
+      the value splits across, **and pure connector/filler words** (all tokens are
+      stopwords — ``is``/``about``/``of``…, :data:`_STOPWORDS`) a worded metric puts between
+      its marker and value (``height 5 ft 10 in``, ``height is five foot ten``, ``weight is
+      about 200 lb``). All keep the taint armed, so a whole body metric drops — whether the
+      value is a digit or worded and whether or not a connector separates it from the marker
+      — rather than a unit, number, or connector word disarming the taint and leaking the
+      trailing value. Bridging on a filler word never over-strips food identity because a
+      filler word carries no identity token; only a word with a **real** identity token (not
+      a stopword/value/unit/number) disarms the taint. This is deliberately narrow: it only
+      consumes value/unit/number/filler words *following a marker*, so an open-vocabulary
+      numeric food identity that is *not* preceded by a marker (``5 Guys``, ``7 Up``,
+      ``Seven Up``) still egresses.
     - **Token-count bound** — because the deny-list cannot be exhaustive over an
       open-vocabulary identity, the surviving identity is truncated to the first
       :data:`MAX_IDENTITY_TOKENS`. A real name + brand fits comfortably; a longer run of
@@ -548,15 +573,19 @@ def sanitized_identity(name: str) -> str:
             tainted = True
             continue
         # A value-shaped word (any token carrying a digit — the shape of an id or body
-        # metric), a bare measurement-unit word, or a spelled-out number word drops while
-        # the forward taint is armed, and keeps it armed so a run of value/unit/number words
-        # (``5 ft 10 in``, ``200 lb``, ``five foot ten``) all drop rather than leaking a
-        # unit, a digit value, or a worded value the metric introduces. A word that is none
-        # of these (an open-vocab identity word) disarms the taint.
+        # metric), a bare measurement-unit word, a spelled-out number word, or a pure
+        # connector/filler word (all tokens are stopwords — ``is``/``about``/``of``…)
+        # drops while the forward taint is armed, and keeps it armed so a run of
+        # value/unit/number/filler words (``5 ft 10 in``, ``200 lb``, ``is five foot ten``,
+        # ``is about 200 lb``) all drop rather than leaking a unit, a digit value, a worded
+        # value, or the value a connector introduces after the marker. A filler word carries
+        # no identity, so bridging the taint across it never over-strips a food token; only a
+        # word with a real identity token (not a stopword/value/unit/number) disarms the taint.
         if tainted and (
             any(_DIGIT_RE.search(token) for token in word_tokens)
             or (bool(word_tokens) and all(t in _BODY_METRIC_UNITS for t in word_tokens))
             or (bool(word_tokens) and all(t in _NUMBER_WORDS for t in word_tokens))
+            or (bool(word_tokens) and all(t in _STOPWORDS for t in word_tokens))
         ):
             continue
         tainted = False

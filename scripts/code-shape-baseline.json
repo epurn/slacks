@@ -5,6 +5,12 @@
     "test": 1000
   },
   "large_files": {
+    "backend/app/estimator/comparable_reference.py": {
+      "kind": "source",
+      "lane": "estimator",
+      "lines": 763,
+      "reason": "FTY-281 comparable-reference aggregation tier: deterministic per-100g canonicalisation + plausibility gate, Atwater-space outlier rejection, median grams-per-kcal aggregation with minimum-source/material-disagreement fall-through, and the search-query identity sanitizer (structural-framing strip + instruction/personal-context deny-list + stopword strip + MAX_IDENTITY_TOKENS cap) that keeps the exact and comparable reference searches from egressing the raw parser phrase, body metrics, ids, or prompt-injection framing. Crosses the 750-line source threshold across the FTY-281 review rounds hardening the sanitizer's forward-taint so a personal-context marker separated from its worded/split body-metric value cannot leak it: value-shaped, measurement-unit, spelled-out-number, and (final round) pure connector/filler words (``height is five foot ten``, ``weight is about 200 lb``) all bridge the taint so the whole metric run drops, while a real food-identity word still disarms it. Additive; no schema/migration/serving-math change."
+    },
     "backend/app/estimator/user_text_step.py": {
       "kind": "source",
       "lane": "estimator",
