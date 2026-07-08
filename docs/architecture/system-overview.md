@@ -23,7 +23,7 @@ Slacks is an iOS-first, self-hostable nutrition and exercise tracker.
 - Database: Postgres.
 - Jobs: Celery workers with Redis queue.
 - Deployment: Docker Compose for self-hosting; hosted service later uses the same service boundaries.
-- LLM providers: Pluggable provider configuration implemented natively in Python supporting API-key providers (OpenAI, Anthropic), the `claude_code` subscription provider, and keyless local-model runtimes (Ollama, LM Studio, vLLM) via OpenAI-compatible wire format.
+- LLM providers: Pluggable provider configuration implemented natively in Python supporting API-key providers (OpenAI, Anthropic), local CLI providers (`claude_code`, `codex`), and keyless local-model runtimes (Ollama, LM Studio, vLLM) via OpenAI-compatible wire format.
 - Evidence providers: USDA FoodData Central, Open Food Facts, and a configurable web search plus hardened fetch adapter.
 - Core endpoints: goal and target reveal (FTY-106), daily summary with range reads (FTY-123), log creation and editing, saved foods and typeahead, and weight entry management.
 
