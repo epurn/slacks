@@ -381,6 +381,15 @@ class UserTextMacroEstimator:
         # chokepoint, exactly like the comparable tier, so prompt-like parser output in the
         # name never egresses to the provider.
         identity = sanitized_identity(_identity_query(candidate))
+        if not identity:
+            # Fail closed on an empty sanitized identity (FTY-281 recognizable-item /
+            # sanitized-identity boundary). With no surviving item-identity token the query
+            # degenerates to the broad fixed intent (``nutrition facts``) alone, and this
+            # single-source path has **no** per-page compatibility gate — it would commit
+            # the first plausible unrelated page as a source-backed match. Fall through to
+            # the comparable / model-prior / unknown tiers instead of issuing a broad
+            # source-backed lookup.
+            return None
         query = sanitize_query(f"{identity} {REFERENCE_SEARCH_INTENT}")
         result = self.search_provider.search(query)
         if result.status is not SearchStatus.SUCCESS:
@@ -432,7 +441,14 @@ class UserTextMacroEstimator:
         # structural framing a prompt injection would smuggle through the parser-derived
         # name cannot ride along, and the whole string is passed through the
         # ``sanitize_query`` chokepoint (control-char strip + length bound) before egress.
-        query = sanitize_query(f"{sanitized_identity(candidate.name)} {REFERENCE_SEARCH_INTENT}")
+        identity = sanitized_identity(candidate.name)
+        if not identity:
+            # Fail closed on an empty sanitized identity, as the exact tier does: with no
+            # item-identity token the brand-dropped query degenerates to the broad fixed
+            # intent alone, so aggregate over pages the resolver can no longer tie to the
+            # item. Fall through to the model-prior / unknown tiers instead.
+            return None
+        query = sanitize_query(f"{identity} {REFERENCE_SEARCH_INTENT}")
         result = self.search_provider.search(query)
         if result.status is not SearchStatus.SUCCESS:
             return None
