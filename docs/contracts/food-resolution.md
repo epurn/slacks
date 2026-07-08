@@ -228,8 +228,8 @@ Optional downstream tunables use the shared names from `parse-candidates.md`:
 The key is a `SecretStr`, read from the environment only, never exposed to clients,
 never logged, and sent only in the `X-Api-Key` **header** (never the query string, so
 it cannot leak through a logged URL). The allowlisted host is derived from the base
-URL. With no key the source is disabled and food candidates are left `unresolved`
-(the offline bundled-dataset fallback is a documented deferral).
+URL. With no key the FDC source is disabled; no request is attempted and the candidate falls
+forward to the next source or rough/default-prior estimate with `source_disabled:usda_fdc` provenance; the bundled-dataset fallback remains deferred.
 
 ### Candidate input
 
@@ -367,7 +367,7 @@ FDC facts (per 100 g): 130 kcal / 2.0 g protein / 28 g carbs / 0.2 g fat
 | Unresolvable quantity, active policy allows amount asking or all rough paths unavailable/unsafe | `NeedsClarification` | clarification question | `processing → needs_clarification` |
 | Transient source failure (timeout/5xx) | `StepError` (retryable) | nothing | retries within bound, then `failed` |
 | Non-retryable source error (4xx/non-JSON/policy) | `StepFailed` (terminal) | nothing | `processing → failed` |
-| Source unconfigured (no key) | _(skipped, completes)_ | food items `unresolved` | `processing → completed` |
+| Source unconfigured (no key) | _(skipped; falls forward under `estimate_first`)_ | next source / reference / model/default-prior rough evidence + `source_disabled:usda_fdc` assumption for recognizable items; clarification only when no identity remains, all rough paths are unavailable/unsafe, or active policy asks | per resulting source / policy |
 | No food candidates (exercise-only) | _(no-op, completes)_ | — | _(unchanged)_ |
 
 A `needs_clarification` outcome records a fixed, sanitized question for the later
@@ -450,7 +450,7 @@ loaded the event scoped to the job's `user_id`; see `estimation-jobs.md`).
 | User-stated facts self-contradictory / implausible (FTY-279) | `needs_clarification`; nothing costed for that item (a usable, valid stated fact resolves instead — never re-asked). |
 | Timeout / connection error / 5xx | `StepError` (`fdc_transient_error`); retried within the bound. |
 | 4xx / non-JSON / oversized / policy violation | Terminal `failed` (`fdc_response_error`); nothing persisted. |
-| No FDC key configured | Food left `unresolved`; event still completes. |
+| No FDC key configured | FDC is skipped with an explicit disabled-source reason; under `estimate_first`, a recognizable item falls forward to the next source or rough/default-prior estimate with provenance. `needs_clarification` only when no recognizable identity remains, every rough path is unavailable/unsafe, or the active policy asks. |
 
 ## Examples
 
