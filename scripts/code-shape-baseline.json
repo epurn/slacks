@@ -14,8 +14,8 @@
     "backend/app/estimator/user_text_step.py": {
       "kind": "source",
       "lane": "estimator",
-      "lines": 752,
-      "reason": "FTY-281 crosses the 750-line source threshold wiring the comparable-reference aggregate fallback into UserTextMacroEstimator: a brand-dropped identity search for compatible reference pages, per-page compatibility/plausibility filtering, cold-pass page-fact extraction, and deterministic median aggregation (via comparable_reference.py) filling missing macros before the model-prior cold-pass; plus the review-round hardening — retained contributor provenance + read-model estimate_basis, sanitized search queries, and gated cold-pass product identity. Additive; no schema/migration/serving-math change."
+      "lines": 759,
+      "reason": "FTY-281 crosses the 750-line source threshold wiring the comparable-reference aggregate fallback into UserTextMacroEstimator: a brand-dropped identity search for compatible reference pages, per-page compatibility/plausibility filtering, cold-pass page-fact extraction, and deterministic median aggregation (via comparable_reference.py) filling missing macros before the model-prior cold-pass; plus the review-round hardening — retained contributor provenance + read-model estimate_basis, sanitized search queries, and gated cold-pass product identity. +7 in the FTY-281 review round routing the exact reference lookup query through the same sanitized_identity + sanitize_query chokepoint as the comparable tier so prompt-like parser output in the item name never egresses. Additive; no schema/migration/serving-math change."
     },
     "backend/tests/test_daily_summary_api.py": {
       "kind": "test",
@@ -32,8 +32,8 @@
     "backend/tests/test_user_text_resolution.py": {
       "kind": "test",
       "lane": "backend",
-      "lines": 1076,
-      "reason": "FTY-281 crosses the 1000-line test threshold with the comparable-reference aggregate coverage: exact-source-miss -> compatible aggregate fill with source refs/assumptions, exact-source-wins -> no aggregation, incompatible/outlier rejection, insufficient-evidence fall-through to model-prior provenance, explicit user calorie/macro preservation, search-query sanitization, and the persistence/read-model provenance (rough comparable-reference label, contributor content hashes + per-100g snapshots, no raw page retention). Additive test coverage only."
+      "lines": 1087,
+      "reason": "FTY-281 crosses the 1000-line test threshold with the comparable-reference aggregate coverage: exact-source-miss -> compatible aggregate fill with source refs/assumptions, exact-source-wins -> no aggregation, incompatible/outlier rejection, insufficient-evidence fall-through to model-prior provenance, explicit user calorie/macro preservation, search-query sanitization, and the persistence/read-model provenance (rough comparable-reference label, contributor content hashes + per-100g snapshots, no raw page retention). +11 in the FTY-281 review round extending the sanitization test to assert instruction/personal-context tokens are dropped from every egressed query (exact + comparable), not just punctuation/control chars. Additive test coverage only."
     },
     "docs/contracts/evidence-retrieval.md": {
       "kind": "source",

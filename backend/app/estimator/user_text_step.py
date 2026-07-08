@@ -374,7 +374,14 @@ class UserTextMacroEstimator:
         if not self.reference_fetch_settings.is_available:
             return None
 
-        query = f"{_identity_query(candidate)} {REFERENCE_SEARCH_INTENT}"
+        # Exact reference lookup: item identity **with** its brand (so a brand-exact page
+        # can win) plus the fixed nutrition intent — but the brand-inclusive identity is
+        # reduced to bounded ``[a-z0-9]+`` tokens with instruction/personal-context tokens
+        # stripped (:func:`sanitized_identity`) and passed through the ``sanitize_query``
+        # chokepoint, exactly like the comparable tier, so prompt-like parser output in the
+        # name never egresses to the provider.
+        identity = sanitized_identity(_identity_query(candidate))
+        query = sanitize_query(f"{identity} {REFERENCE_SEARCH_INTENT}")
         result = self.search_provider.search(query)
         if result.status is not SearchStatus.SUCCESS:
             return None

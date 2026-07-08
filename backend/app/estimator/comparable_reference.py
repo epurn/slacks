@@ -160,6 +160,64 @@ _STOPWORDS: Final[frozenset[str]] = frozenset(
     }
 )
 
+#: Tokens that are **never** part of a food's identity and must not egress in a search
+#: query even after tokenization: prompt-injection / instruction framing a parser-derived
+#: name could smuggle (``ignore``/``system``/``instructions``/``reveal``…) and the
+#: personal-context vocabulary the data-minimization rule forbids (``profile``/``goal``/
+#: ``weight``/``history``/``id``…). Dropped by :func:`sanitized_identity` so only bounded
+#: identity/nutrition tokens reach the provider. This is a deny-list, not an allow-list
+#: (item identity is open-vocabulary); it is intentionally conservative — words that could
+#: plausibly name a food are left in — but it strips the instruction/meta tokens a naive
+#: ``[a-z0-9]+`` tokenizer would otherwise pass straight through.
+_NON_IDENTITY_TOKENS: Final[frozenset[str]] = frozenset(
+    {
+        # prompt-injection / instruction framing
+        "ignore",
+        "ignored",
+        "disregard",
+        "override",
+        "overwrite",
+        "bypass",
+        "forget",
+        "instruction",
+        "instructions",
+        "prompt",
+        "prompts",
+        "system",
+        "assistant",
+        "reveal",
+        "print",
+        "output",
+        "execute",
+        "respond",
+        "reply",
+        "pretend",
+        "roleplay",
+        "jailbreak",
+        "sudo",
+        "admin",
+        "previous",
+        "prior",
+        "above",
+        "below",
+        # personal-context vocabulary (profile, goals, body metrics, history, ids)
+        "profile",
+        "goal",
+        "goals",
+        "weight",
+        "height",
+        "bmi",
+        "metrics",
+        "history",
+        "id",
+        "ids",
+        "email",
+        "password",
+        "token",
+        "secret",
+    }
+)
+
 _TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"[a-z0-9]+")
 
 
@@ -292,16 +350,24 @@ def compatibility(target_name: str, page_name: str | None) -> _Match | None:
 def sanitized_identity(name: str) -> str:
     """Reduce a parser-derived item name to its bounded identity tokens, in order.
 
-    The comparable-reference search must egress the item's *identity only* — the same
-    bounded, lower-cased ``[a-z0-9]+`` token vocabulary the deterministic compatibility
-    check reads — never the raw parser phrase. Punctuation and structural framing a
-    prompt injection would use to smuggle instructions past a naive concatenation
-    (quotes, colons, code fences, angle-bracket tags, newlines) carry no identity token
-    and are dropped; the caller still passes the result through the ``sanitize_query``
-    chokepoint (control-char strip + length bound) before egress.
+    The comparable-reference (and exact) reference search must egress the item's
+    *identity only* — the same bounded, lower-cased ``[a-z0-9]+`` token vocabulary the
+    deterministic compatibility check reads — never the raw parser phrase. Two layers of
+    stripping apply:
+
+    - **Structural framing** a prompt injection would use to smuggle instructions past a
+      naive concatenation (quotes, colons, code fences, angle-bracket tags, newlines)
+      carries no identity token and is dropped by the tokenizer itself.
+    - **Instruction / personal-context tokens** that *survive* tokenization but are never
+      part of a food's identity (``ignore``, ``system``, ``instructions``, ``profile``,
+      ``goal``…) are removed via :data:`_NON_IDENTITY_TOKENS`, so prompt-like parser
+      output cannot ride along on the query even as bare words.
+
+    The caller still passes the result through the ``sanitize_query`` chokepoint
+    (control-char strip + length bound) before egress.
     """
 
-    return " ".join(_tokens(name))
+    return " ".join(token for token in _tokens(name) if token not in _NON_IDENTITY_TOKENS)
 
 
 def cold_pass_identity(names: list[str | None]) -> str | None:

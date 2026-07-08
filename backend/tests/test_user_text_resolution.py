@@ -954,18 +954,29 @@ def test_comparable_search_query_carries_sanitized_identity_only(
 
     process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
 
+    assert search.queries  # at least the exact + comparable tiers searched
+    # Prompt-like framing tokens that survive tokenization but carry no food identity
+    # must not egress on **any** query — the exact (brand-inclusive) lookup and the
+    # brand-dropped comparable tier both reduce the parser-derived name to bounded
+    # identity tokens with instruction/personal-context words stripped.
+    prompt_tokens = ("ignore", "previous", "instructions", "system", "reveal", "profile")
+    for query in search.queries:
+        lowered = query.lower()
+        # Control characters and structural prompt framing are stripped before egress.
+        assert "\n" not in query and "\t" not in query
+        for framing in ('"', ":", "<", ">"):
+            assert framing not in query
+        for token in prompt_tokens:
+            assert token not in lowered.split()
+        # Length-bounded at the sanitize chokepoint.
+        assert len(query) <= MAX_QUERY_LEN
+
     comparable_queries = [q for q in search.queries if "sobeys" not in q.lower()]
     assert comparable_queries  # the brand-dropped comparable tier searched
     for query in comparable_queries:
         # Item identity + fixed nutrition intent survive.
         assert "buffalo chicken lime wrap" in query
         assert "nutrition" in query
-        # Control characters and structural prompt framing are stripped before egress.
-        assert "\n" not in query and "\t" not in query
-        for framing in ('"', ":", "<", ">"):
-            assert framing not in query
-        # Length-bounded at the sanitize chokepoint.
-        assert len(query) <= MAX_QUERY_LEN
 
 
 def test_exact_reference_wins_over_comparable_aggregate(
