@@ -47,6 +47,16 @@ changing the root contract.
 A package `verify.sh` should run that package's own formatter, linter,
 typechecker, and tests, and exit non-zero on failure.
 
+Package hooks may skip only their dependency-install step when
+`FATTY_VERIFY_SKIP_INSTALL` is set to a truthy value (`1`, `true`, `yes`, or
+`on`, case-sensitive variants accepted by the hook). This signal is for
+pre-provisioned author environments where locked dependencies are already
+installed and network dependency installation is intentionally unavailable. The
+signal is explicit opt-in only: hooks must not infer it from the presence or
+absence of `node_modules`, `.venv`, or other local artifacts. With the signal
+unset, package hooks must keep installing exactly what their lockfiles pin before
+running checks so CI and fresh checkouts remain reproducible.
+
 ## Notes For Upcoming Stories
 
 - **FTY-011 (infra / Docker Compose):** add compose and infra config at the repo

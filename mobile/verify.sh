@@ -10,8 +10,13 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # `npm ci` installs exactly what package-lock.json pins and fails if the
-# lockfile is stale, keeping CI and local runs reproducible.
-npm ci
+# lockfile is stale, keeping CI and local runs reproducible. See
+# docs/architecture/repo-layout.md for the explicit pre-provisioned-deps skip.
+if [[ "${FATTY_VERIFY_SKIP_INSTALL:-}" =~ ^(1|true|TRUE|yes|YES|on|ON)$ ]]; then
+  echo "Skipping dependency install because FATTY_VERIFY_SKIP_INSTALL is set."
+else
+  npm ci
+fi
 
 npm run typecheck
 npm run lint
