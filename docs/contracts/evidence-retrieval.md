@@ -810,7 +810,7 @@ entry**.
 ## Item Re-match — FTY-093
 
 The **item re-match** capability is the "Change match" lever of the correction sheet:
-a user whose entry matched the **wrong food** (Fatty heard "turkey", matched chicken)
+a user whose entry matched the **wrong food** (Slacks heard "turkey", matched chicken)
 fixes it without delete-and-retype. It is two cohesive halves of one capability,
 layered on the resolution pipeline — a *list-alternatives* (read) operation and a
 *re-resolve-to-chosen-source* (write) operation. It is distinct from the **portion

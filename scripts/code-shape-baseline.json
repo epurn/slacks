@@ -5,12 +5,6 @@
     "test": 1000
   },
   "large_files": {
-    "backend/app/estimator/search.py": {
-      "kind": "source",
-      "lane": "estimator",
-      "lines": 788,
-      "reason": "Existing over-threshold first-party source file at FTY-200 baseline."
-    },
     "backend/app/estimator/user_text_step.py": {
       "kind": "source",
       "lane": "estimator",
@@ -46,12 +40,6 @@
       "lane": "docs",
       "lines": 914,
       "reason": "FTY-280 implements FTY-279: +11 documenting the landed user_text_step (UserTextResolveStep + UserTextMacroEstimator, wired before the food step) and the additive 0018 evidence_sources migration. FTY-278 (contract only) routes a mixed food log to the new first-class `partially_resolved` event status: crosses the 750-line source threshold documenting the item-scoped partial routing (mixed → `processing → partially_resolved` carrying committed `resolved` siblings; no-costable → event-level `needs_clarification`) across the version note, routing tables, and migration note. +129 in FTY-279 (contract only) adding the **User-Stated Resolution** section: direct resolution of a user-stated calorie total from `user_text` `as_logged` evidence (calories counted immediately, missing macros estimated via the source-backed-lookup → comparable-source-aggregation → model-prior order or left `null`), the no-second-follow-up clarification boundary (clarify only for a component with no usable detail or self-contradictory/implausible facts), the Sobeys-wrap worked example, and the version/routing/errors/migration notes. +3 in the FTY-279 review round narrowing the FDC **Candidate input** note: a candidate may now carry user-stated `stated_*` nutrition facts (routed to the `user_text` evidence path), while the FDC request itself still receives only the sanitized food name — reconciling the old \"LLM never supplies nutrition facts\" line with the new parser/evidence contract. +14 in FTY-281 documenting the comparable-reference aggregate fallback (UserTextMacroEstimator now searches brand-dropped identity for compatible references, filters compatibility/outliers, and fills missing macros from their median before the model-prior cold-pass; deterministic aggregation in comparable_reference.py; additive, no schema/migration/serving-math change). +3 in the FTY-281 review round noting the retained contributor content hash + per-100g snapshot in assumptions and the additive optional ItemSourceDTO.estimate_basis read-model field."
-    },
-    "docs/contracts/log-events.md": {
-      "kind": "source",
-      "lane": "docs",
-      "lines": 791,
-      "reason": "FTY-278 (contract only) adds the first-class `partially_resolved` event status and its `processing → partially_resolved` / `partially_resolved → processing` transitions as the item-scoped partial state: crosses the 750-line source threshold documenting the status/transitions, the day-listing and clarification read/answer gating over both clarifying states, the FTY-170-unchanged read/answer shape (the item↔question link stays an internal, non-surfaced `derived_food_item_id`), and the sibling-preserving answer flow that re-costs only the open component and leaves resolved siblings untouched."
     },
     "mobile/components/SettingsScreen.test.tsx": {
       "kind": "test",

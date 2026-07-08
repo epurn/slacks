@@ -1,6 +1,6 @@
 # Evidence Retrieval
 
-Fatty v1 estimates should be source-backed whenever a relevant source can be
+Slacks v1 estimates should be source-backed whenever a relevant source can be
 queried. The LLM can help parse user input, choose lookup strategies, and
 extract structured facts, but it must not be the source of truth for nutrition
 facts or calorie math when external evidence is available.

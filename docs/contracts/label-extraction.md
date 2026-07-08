@@ -111,7 +111,7 @@ terminal `completed` status:
   corrections). The deterministic serving math is unchanged; only the item's
   committed/counted status changes — a label parse is held as an uncounted proposal
   until the user confirms it (`label-upload.md` → Confirmation gate), because "OCR
-  is fallible — Fatty never silently trusts a fallible parse"
+  is fallible — Slacks never silently trusts a fallible parse"
   (`docs/design-philosophy.md`). It was `resolved` (immediately counted) before
   FTY-196;
 - a user-owned **`evidence_sources`** row with `source_type = user_label`,

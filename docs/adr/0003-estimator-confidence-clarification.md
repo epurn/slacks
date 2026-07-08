@@ -49,13 +49,13 @@ Dogfooding surfaced two failures with this design:
      task — a fixed cutoff picked without calibration data leaves real
      accuracy on the table.
 
-**The load-bearing constraint: Fatty's plan-covered provider is Claude.**
-Fatty runs LLM calls through the `claude_code` subscription provider
+**The load-bearing constraint: Slacks' plan-covered provider is Claude.**
+Slacks runs LLM calls through the `claude_code` subscription provider
 (`docs/architecture/system-overview.md`), and the **Anthropic Messages API
 exposes no token log-probabilities**. This rules out the standard
 logprob-based confidence estimators (e.g. mean token log-probability,
 predictive entropy) used in most confidence-calibration literature — they are
-not computable against Fatty's primary provider. The signals that remain
+not computable against Slacks' primary provider. The signals that remain
 viable are:
 
 - **verbalized confidence** — available, but weak (see above);

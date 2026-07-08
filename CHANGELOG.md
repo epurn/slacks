@@ -2,7 +2,7 @@
 
 ## v1.0.0 — 2026-06-28
 
-First stable release of Fatty, an iOS-first, self-hostable calorie and macro tracker. Users describe meals and exercise in natural language; the backend turns those descriptions into structured, evidence-backed, editable entries.
+First stable release of Slacks, an iOS-first, self-hostable calorie and macro tracker. Users describe meals and exercise in natural language; the backend turns those descriptions into structured, evidence-backed, editable entries.
 
 ### Accounts & Profile
 
@@ -72,7 +72,7 @@ First stable release of Fatty, an iOS-first, self-hostable calorie and macro tra
 - Health endpoints: `GET /healthz` (stack liveness) and `GET /healthz/sources` (per-provider availability and configuration status).
 - Egress policy visibility: `GET /healthz/egress` reports the active official-fetch host allowlist.
 - **Claude subscription provider** (`FATTY_LLM_PROVIDER=claude_code`): runs estimation through a locally installed Claude Code CLI on the operator's own Claude monthly plan — no API key, no per-token billing. The backend image ships a pinned Claude Code CLI; a one-time `claude login` establishes a session in a persistent Docker volume shared by `api` and `worker` (FTY-087, FTY-088).
-- **Keyless local-model provider** (`FATTY_LLM_PROVIDER=openai_compatible`, no `FATTY_LLM_API_KEY`): point Fatty at a local Ollama, LM Studio, or vLLM instance with no API key — the adapter omits the `Authorization` header for keyless local runtimes (FTY-089).
+- **Keyless local-model provider** (`FATTY_LLM_PROVIDER=openai_compatible`, no `FATTY_LLM_API_KEY`): point Slacks at a local Ollama, LM Studio, or vLLM instance with no API key — the adapter omits the `Authorization` header for keyless local runtimes (FTY-089).
 - `GET /healthz/sources` now reports the `claude_code` LLM provider's `enabled`/`available` status so operators can confirm the CLI is installed and the session is valid without making any estimation calls (FTY-088).
 - Compose network hardening: Postgres and Redis are no longer exposed to the host; worker container has restart policies and health-check probes (FTY-109).
 - Database readiness probe: `/readyz` endpoint waits for Postgres to be ready before reporting the backend as alive (FTY-117).

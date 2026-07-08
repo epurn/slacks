@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Fatty is an iOS-first, self-hostable calorie and macro tracker. Users log food
+Slacks is an iOS-first, self-hostable calorie and macro tracker. Users log food
 and exercise in natural language; the backend turns messy inputs into
 evidence-backed, editable entries. The app handles personal body, food, and
 goal data, so privacy, security, testing, and review are product requirements.
@@ -29,7 +29,7 @@ must stay outside this repo.
 - Never commit secrets, real user data, API keys, private nutrition logs,
   machine-specific automation state, or production credentials.
 - Do not inspect `.env` or real secret files by default.
-- Do not store data Fatty does not need for the product behavior being
+- Do not store data Slacks does not need for the product behavior being
   implemented.
 - Do not merge or self-approve your own implementation work.
 

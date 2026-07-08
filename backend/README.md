@@ -1,6 +1,6 @@
 # backend
 
-The Fatty backend package (FastAPI, Python).
+The Slacks backend package (FastAPI, Python).
 
 ## Owns
 
