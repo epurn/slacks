@@ -1,1 +1,1 @@
-"""Concrete provider adapters (OpenAI, Anthropic, OpenAI-compatible, fake)."""
+"""Concrete provider adapters (OpenAI, Anthropic, local CLI providers, fake)."""

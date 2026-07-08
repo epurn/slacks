@@ -13,6 +13,7 @@ from app.llm.config import LLMSettings
 from app.llm.errors import LLMConfigurationError
 from app.llm.providers.anthropic import AnthropicProvider
 from app.llm.providers.claude_code import ClaudeCodeProvider
+from app.llm.providers.codex import CodexProvider
 from app.llm.providers.fake import FakeProvider
 from app.llm.providers.openai import OpenAIProvider
 
@@ -40,6 +41,19 @@ def build_provider(settings: LLMSettings) -> Provider:
             model=settings.model,  # may be empty — Claude Code uses its session default
             timeout_seconds=settings.timeout_seconds,
             max_retries=settings.max_retries,
+        )
+
+    # Codex also authenticates through its local CLI state by default and accepts
+    # an optional child-only API key, so it must be built before keyed-provider
+    # guards. ``supports_vision`` is threaded for the shared capability gate even
+    # though this story's adapter remains text-only and rejects images itself.
+    if settings.provider == "codex":
+        return CodexProvider(
+            model=settings.model,
+            api_key=settings.api_key.get_secret_value() if settings.api_key else None,
+            timeout_seconds=settings.timeout_seconds,
+            max_retries=settings.max_retries,
+            supports_vision=settings.supports_vision,
         )
 
     if settings.provider == "anthropic":

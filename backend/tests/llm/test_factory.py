@@ -8,6 +8,7 @@ from app.llm.config import LLMSettings
 from app.llm.factory import build_provider
 from app.llm.providers.anthropic import AnthropicProvider
 from app.llm.providers.claude_code import ClaudeCodeProvider
+from app.llm.providers.codex import CodexProvider
 from app.llm.providers.fake import FakeProvider
 from app.llm.providers.openai import OpenAIProvider
 
@@ -64,6 +65,41 @@ def test_claude_code_model_is_passed_through() -> None:
 
     assert isinstance(provider, ClaudeCodeProvider)
     assert provider._model == "claude-sonnet-4-5"
+
+
+def test_codex_selected_without_key() -> None:
+    settings = LLMSettings(provider="codex")
+
+    provider = build_provider(settings)
+
+    assert isinstance(provider, CodexProvider)
+
+
+def test_codex_model_is_passed_through() -> None:
+    settings = LLMSettings(provider="codex", model="gpt-5-codex")
+
+    provider = build_provider(settings)
+
+    assert isinstance(provider, CodexProvider)
+    assert provider._model == "gpt-5-codex"
+
+
+def test_codex_optional_key_is_passed_to_provider() -> None:
+    settings = LLMSettings(provider="codex", api_key=SecretStr("codex-secret"))
+
+    provider = build_provider(settings)
+
+    assert isinstance(provider, CodexProvider)
+    assert provider._api_key == "codex-secret"
+
+
+def test_codex_supports_vision_flag_is_threaded() -> None:
+    settings = LLMSettings(provider="codex", supports_vision=True)
+
+    provider = build_provider(settings)
+
+    assert isinstance(provider, CodexProvider)
+    assert provider._supports_vision is True
 
 
 def test_supports_vision_is_threaded_to_provider() -> None:
