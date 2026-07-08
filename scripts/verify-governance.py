@@ -23,6 +23,7 @@ REQUIRED_FILES = [
     "Makefile",
     ".gitignore",
     "scripts/code-shape-baseline.json",
+    "scripts/verify-brand-names.py",
     "scripts/verify-code-shape.py",
     ".github/CODEOWNERS",
     ".github/pull_request_template.md",
@@ -219,11 +220,15 @@ def main() -> None:
     if not protection.get("required_conversation_resolution"):
         fail("branch protection template must require conversation resolution")
 
-    code_shape = ROOT / "scripts" / "verify-code-shape.py"
-    for args in ([], ["--self-test"]):
-        result = subprocess.run([sys.executable, str(code_shape), *args], cwd=ROOT)
-        if result.returncode != 0:
-            raise SystemExit(result.returncode)
+    for script_name, args_list in {
+        "verify-brand-names.py": ([], ["--self-test"]),
+        "verify-code-shape.py": ([], ["--self-test"]),
+    }.items():
+        script_path = ROOT / "scripts" / script_name
+        for args in args_list:
+            result = subprocess.run([sys.executable, str(script_path), *args], cwd=ROOT)
+            if result.returncode != 0:
+                raise SystemExit(result.returncode)
 
     print("governance checks passed")
 
