@@ -36,7 +36,9 @@ are intentionally out of scope.
 
 - [Docker](https://docs.docker.com/get-docker/) and Docker Compose v2
 - A USDA FoodData Central API key (free, from [fdc.nal.usda.gov/api-guide](https://fdc.nal.usda.gov/api-guide)) if you want generic-food USDA nutrition lookups — optional; the app runs without it
-- An LLM API key (OpenAI, Anthropic, or OpenAI-compatible) for full estimation quality — optional; the app starts and serves health with the built-in `fake` provider
+- An LLM API key, a local model runtime, or a first-party CLI login (Claude Code
+  or Codex) for full estimation quality — optional; the app starts and serves
+  health with the built-in `fake` provider
 
 ### Step-by-Step Bring-Up
 
@@ -89,6 +91,15 @@ Open `.env` and configure any providers you want:
     # No FATTY_LLM_API_KEY — auth is your 'claude login' session (see step 7 below)
     ```
     See **Claude Code session setup** (step 7) to complete the one-time login.
+  - **Codex CLI:** if you use Codex through ChatGPT or an enterprise access token, the `codex` provider runs estimation through the first-party Codex CLI installed in the backend image:
+    ```
+    FATTY_LLM_PROVIDER=codex
+    # FATTY_LLM_MODEL is optional — set it for reproducible deployments
+    # Leave FATTY_LLM_BASE_URL unset; Codex is not an HTTP base-URL provider
+    # Optional for image-capable Codex models:
+    # FATTY_LLM_SUPPORTS_VISION=true
+    ```
+    See **Codex session setup** (step 8) to complete the one-time login. If you prefer API-key auth, set `FATTY_LLM_API_KEY` instead; Slacks passes it only to the `codex exec` child as `CODEX_API_KEY`.
   - **Zero-cost local model:** run [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), or [vLLM](https://github.com/vllm-project/vllm) locally, then set:
     ```
     FATTY_LLM_PROVIDER=openai_compatible
@@ -137,7 +148,46 @@ curl -fsS http://localhost:8000/healthz/sources | python3 -m json.tool
 
 **Security note:** the `claude-config` Docker volume contains your OAuth session credentials. It is a host secret — never copy its contents into the image, never commit it to source control, and restrict its host-path permissions if you bind-mount it. The image itself contains only the Claude Code binary; no credentials are baked in.
 
-**8. Confirm health:**
+**8. (Required if using `codex` provider without `FATTY_LLM_API_KEY`) One-time Codex login:**
+
+The `codex` provider authenticates through Codex CLI state under `CODEX_HOME`.
+The Codex CLI is pre-installed in the backend image. The session is stored in a
+named Docker volume (`codex-config`) mounted at `/codex-config` and shared by
+`api` and `worker`, so it survives `docker compose down && docker compose up`
+without re-login.
+
+After starting the stack for the first time, use one of these setup paths:
+
+```sh
+# Browser login in the running api container:
+docker compose exec api codex login
+
+# Headless/device-code login:
+docker compose exec api codex login --device-auth
+
+# Enterprise/access-token login, using a token from your secret manager:
+printf '%s' "$CODEX_ACCESS_TOKEN" | docker compose exec -T api codex login --with-access-token
+```
+
+For API-key auth, skip saved login and set `FATTY_LLM_API_KEY` in `.env`.
+The adapter maps that value only to the `codex exec` child process as
+`CODEX_API_KEY`; do not set `CODEX_API_KEY` globally in `.env`.
+
+To verify the session or API-key path is visible without making an estimation
+call:
+
+```sh
+curl -fsS http://localhost:8000/healthz/sources | python3 -m json.tool
+# Look for: {"id": "codex", "enabled": true, "available": true, ...}
+```
+
+**Security note:** the `codex-config` Docker volume may contain `auth.json`
+access tokens, sessions, logs, and other Codex state. It is a host secret: never
+copy it into the image, never commit it, never include it in support artifacts,
+and restrict host-path permissions if you bind-mount it. The image itself
+contains only the Codex CLI/runtime; no Codex credentials are baked in.
+
+**9. Confirm health:**
 
 ```sh
 curl -fsS http://localhost:8000/healthz
@@ -209,4 +259,3 @@ See `CONTRIBUTING.md`, `AGENTS.md`, and `docs/operations/branching-and-prs.md`.
 ## License
 
 The project is intended to be open source. A license has not been formally selected yet; self-hosting for personal use is encouraged in the meantime.
-

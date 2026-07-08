@@ -62,9 +62,9 @@ checklist, smoke check) see the README **Self-Hosting** section.
   out of scope and would need a separate, explicit operator story. Search
   degrades gracefully (model-prior-with-status) when the service is unreachable,
   so `api`/`worker` do not hard-depend on it starting.
-- The `backend/` image includes a pinned Node.js runtime and the Claude Code CLI
-  (`claude`) so the `api` and `worker` services can use the `claude_code` LLM
-  provider (FTY-087/088) without mounting a host binary.
+- The `backend/` image includes a pinned Node.js runtime, the Claude Code CLI
+  (`claude`), and the Codex CLI (`codex`) so the `api` and `worker` services can
+  use the first-party local CLI LLM providers without mounting host binaries.
 
 ## Volumes
 
@@ -72,12 +72,22 @@ checklist, smoke check) see the README **Self-Hosting** section.
 | --- | --- | --- |
 | `postgres-data` | `/var/lib/postgresql/data` | Postgres data. Persists across restarts. |
 | `claude-config` | `/claude-config` (api + worker) | Claude Code session / config dir (FTY-088). |
+| `codex-config` | `/codex-config` (api + worker) | Codex CLI state / session dir (`CODEX_HOME`, FTY-296). |
 
 The `claude-config` volume is populated once by `claude login` (see **Claude Code
 login** below) and persists the OAuth session so subsequent `docker compose down &&
 up` cycles do not require re-login. Treat it as a **host secret**: never copy its
 contents into the image or commit them. `CLAUDE_CONFIG_DIR=/claude-config` is
 fixed in the compose `environment:` block for both `api` and `worker`.
+
+The `codex-config` volume is populated once by `codex login`,
+`codex login --device-auth`, or `codex login --with-access-token` (see
+**Codex login** below) and persists Codex state so subsequent `docker compose
+down && up` cycles do not require re-login. Treat it as a **host secret**: it may
+contain `auth.json` access tokens, sessions, logs, and other Codex state. Never
+copy it into the image, commit it, or include it in support artifacts.
+`CODEX_HOME=/codex-config` is fixed in the compose `environment:` block for both
+`api` and `worker`.
 
 ## Configuration
 
@@ -102,8 +112,9 @@ Key variable groups (see `.env.example` for full documentation):
 ## LLM Providers
 
 The `FATTY_LLM_PROVIDER` variable selects the LLM backend. It defaults to `fake`
-(no network calls; estimation degrades to model-prior-with-status). Two keyless
-options are available for self-hosters who want live estimation without an API key:
+(no network calls; estimation degrades to model-prior-with-status). CLI-session
+and local-runtime options are available for self-hosters who want live estimation
+without an API key:
 
 ### `claude_code` — Claude subscription, no per-token billing
 
@@ -115,6 +126,21 @@ FATTY_LLM_PROVIDER=claude_code
 ```
 
 Then complete the **one-time Claude Code login** (see below).
+
+### `codex` — Codex CLI login or child-only API key
+
+Set in `.env`:
+```
+FATTY_LLM_PROVIDER=codex
+# FATTY_LLM_MODEL is optional — set it for reproducible deployments
+# FATTY_LLM_SUPPORTS_VISION=true only for image-capable Codex models
+# No FATTY_LLM_BASE_URL — Codex is not an HTTP base-URL provider
+```
+
+Then complete the **one-time Codex login** (see below). As an alternative, set
+`FATTY_LLM_API_KEY` for the Codex provider; the adapter maps it only to the
+`codex exec` child process as `CODEX_API_KEY` for that invocation. Do not add a
+global `CODEX_API_KEY` to `.env`.
 
 ### `openai_compatible` — Local model runtime (Ollama / LM Studio / vLLM)
 
@@ -156,6 +182,69 @@ curl -fsS http://localhost:8000/healthz/sources | python3 -m json.tool
 it to a path with loose permissions, never copy its contents into the image, and
 never commit it. The image contains only the Claude Code binary — no credentials.
 
+## Codex Login (One-Time Setup, FTY-296)
+
+The `codex` provider uses the first-party Codex CLI installed in the backend
+image. By default it authenticates through saved Codex state under `CODEX_HOME`;
+the compose stack sets `CODEX_HOME=/codex-config` and mounts the same
+`codex-config` volume into `api` and `worker`.
+
+**Prerequisites:** the stack must be running (`docker compose up -d`) and
+`FATTY_LLM_PROVIDER=codex` must be set in `.env`. Leave `FATTY_LLM_BASE_URL`
+unset for this provider. `FATTY_LLM_MODEL` is optional but recommended for
+reproducible deployments, and `FATTY_LLM_SUPPORTS_VISION=true` is required before
+image-capable Codex models receive image inputs.
+
+Use one of these saved-auth flows in the `api` container:
+
+```sh
+# Browser login:
+docker compose exec api codex login
+
+# Headless/device-code login:
+docker compose exec api codex login --device-auth
+
+# Enterprise/access-token login, using a token from your secret manager:
+printf '%s' "$CODEX_ACCESS_TOKEN" | docker compose exec -T api codex login --with-access-token
+```
+
+`CODEX_ACCESS_TOKEN` is only an operator setup input for seeding Codex auth into
+`CODEX_HOME`; it is not a Slacks configuration variable. For API-key auth instead
+of saved login, set `FATTY_LLM_API_KEY` in `.env`. The Slacks adapter maps that
+value only to the `codex exec` child process as `CODEX_API_KEY`; do not set
+`CODEX_API_KEY` globally in `.env`.
+
+Confirm the provider is selected and locally available without making an
+estimation call:
+
+```sh
+curl -fsS http://localhost:8000/healthz/sources | python3 -m json.tool
+# Expect: {"id": "codex", "enabled": true, "available": true, ...}
+```
+
+Optional live provider smoke, after login or with a one-command `CODEX_API_KEY`
+injection from your secret manager:
+
+```sh
+docker compose exec -T api sh <<'SH'
+cat >/tmp/slacks-codex-smoke.schema.json <<'JSON'
+{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}
+JSON
+printf 'Return {"ok": true} as JSON only.\n' \
+  | codex exec - --output-schema /tmp/slacks-codex-smoke.schema.json
+rm -f /tmp/slacks-codex-smoke.schema.json
+SH
+```
+
+This smoke uses a neutral synthetic prompt and tiny schema; it never sends diary
+text. Do not require live Codex in CI.
+
+**Security:** the `codex-config` volume may contain `auth.json` access tokens,
+sessions, logs, and other Codex state. Never bind-mount it to a path with loose
+permissions, never copy its contents into the image, never commit it, and never
+include it in support artifacts. The image contains only the Codex CLI/runtime —
+no credentials.
+
 ## Verifying
 
 ```sh
@@ -183,8 +272,11 @@ curl -fsS http://localhost:8000/healthz/sources | python3 -m json.tool
 Selecting Brave without a key, or setting `FATTY_SEARCH_PROVIDER=none` /
 `FATTY_SEARCH_ENABLED=false`, flips these flags so the opt-out or missing
 credential is visible here. The `claude_code` entry specifically shows whether
-the CLI is installed and the session is valid — both must be `true` for the
-provider to work.
+the CLI is installed and the session is valid; the `codex` entry shows whether
+the CLI is installed and either a saved auth marker under `CODEX_HOME` or
+`FATTY_LLM_API_KEY` is configured while `FATTY_LLM_PROVIDER=codex`. These
+descriptors expose booleans only — no credential contents, identity, host path,
+filename content, or raw CLI output.
 
 ## Simulator Readiness Smoke (FTY-250)
 
@@ -282,8 +374,9 @@ suite.
 The backend image runs all three services (`migrate`, `api`, `worker`) as a
 dedicated non-root user — `fatty` (UID/GID 10001) — rather than root (FTY-116).
 This limits the blast radius of an in-container exploit to an unprivileged
-account. The `claude-config` volume mountpoint is created owned by this user so
-`claude login` and subsequent session writes succeed without elevated privileges.
+account. The `claude-config` and `codex-config` volume mountpoints are created
+owned by this user so provider login and subsequent session writes succeed
+without elevated privileges.
 
 ## Out of Scope
 

@@ -12,12 +12,12 @@ FROM python:3.14-slim-bookworm
 COPY --from=ghcr.io/astral-sh/uv:0.11.21 /uv /uvx /usr/local/bin/
 
 # ---------------------------------------------------------------------------
-# Claude Code CLI (FTY-088): Install Node.js LTS + the Claude Code CLI so the
-# Celery worker and API can invoke 'claude' in headless mode for the claude_code
-# LLM provider (FTY-087). Both versions are pinned per the security baseline's
-# pinned-dependency principle. NO credentials are added here — only the binary
-# and its runtime. The operator's Claude Code session is mounted at runtime via
-# the compose claude-config volume; nothing session-related is baked in.
+# Claude Code CLI (FTY-088) + Codex CLI (FTY-296): Install Node.js LTS and the
+# first-party CLI packages so the Celery worker and API can invoke local
+# subprocess LLM providers in headless mode. All versions are pinned per the
+# security baseline's pinned-dependency principle. NO credentials are added here
+# — only binaries and their runtime. Operator sessions are mounted at runtime via
+# compose provider config volumes; nothing auth/session-related is baked in.
 #
 # CLAUDE_CODE_VERSION pin rationale (FTY-150): the pin MUST track a CLI release
 # new enough to recognise the model id set in FATTY_LLM_MODEL. Older releases
@@ -27,9 +27,16 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.21 /uv /uvx /usr/local/bin/
 # implementation time. The CLI evolves quickly — a stale pin silently breaks the
 # provider, so bump this when upgrading the configured model or when a newer
 # release fixes a relevant bug.
+#
+# CODEX_CLI_VERSION pin rationale (FTY-296): the standalone Codex installer is
+# official but does not provide a stable checksum/version pin in the documented
+# unattended flow. The official npm install path is pin-capable, so the image
+# installs @openai/codex at an exact release. Bump deliberately when validating a
+# newer CLI against the codex provider's non-interactive structured-output flags.
 # ---------------------------------------------------------------------------
 ARG NODE_MAJOR=22
 ARG CLAUDE_CODE_VERSION=2.1.196
+ARG CODEX_CLI_VERSION=0.143.0
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
@@ -41,6 +48,8 @@ RUN apt-get update \
     && apt-get update \
     && apt-get install -y --no-install-recommends nodejs \
     && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+    && npm install -g "@openai/codex@${CODEX_CLI_VERSION}" \
+    && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root runtime user (FTY-116): fixed UID/GID keeps ownership stable across
@@ -73,12 +82,13 @@ COPY alembic.ini ./
 
 # Transfer ownership of the app tree (incl. .venv) to the runtime user so all
 # three service commands (.venv/bin/python, .venv/bin/alembic, .venv/bin/celery)
-# are readable/executable by it. Create the claude-config mountpoint owned by
+# are readable/executable by it. Create the provider config mountpoints owned by
 # the same user so named-volume population inherits the correct owner on first
-# use (FTY-116, FTY-088).
+# use (FTY-116, FTY-088, FTY-296).
 RUN chown -R fatty:fatty /app \
     && mkdir -p /claude-config \
-    && chown fatty:fatty /claude-config
+    && mkdir -p /codex-config \
+    && chown fatty:fatty /claude-config /codex-config
 
 EXPOSE 8000
 

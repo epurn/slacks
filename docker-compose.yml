@@ -105,6 +105,12 @@ services:
       # are sensitive. The volume is a host secret: restrict its permissions
       # and never copy it into the image or commit it.
       CLAUDE_CONFIG_DIR: "/claude-config"
+      # Codex CLI state directory (FTY-296). The codex-config volume below
+      # persists auth.json, sessions, logs, and other Codex state across restarts
+      # for the codex LLM provider. This env var is not a secret by itself; the
+      # mounted volume contents are a host secret and must never be copied into
+      # the image, committed, or included in support bundles.
+      CODEX_HOME: "/codex-config"
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
@@ -112,6 +118,10 @@ services:
       # running 'claude login' interactively (see README Self-Hosting section).
       # Survives 'docker compose down && up' without re-login.
       - claude-config:/claude-config
+      # Persistent Codex CLI state volume (FTY-296). Populated once by
+      # 'codex login' / device auth / access-token login in the container, or
+      # bypassed per-run by FATTY_LLM_API_KEY. Treat as a host secret.
+      - codex-config:/codex-config
     # Wait for migrations to complete and datastores to be healthy before starting.
     depends_on:
       postgres:
@@ -145,8 +155,12 @@ services:
       # Claude Code session directory — same volume as the API so both services
       # share the single session created by 'claude login' (FTY-088).
       CLAUDE_CONFIG_DIR: "/claude-config"
+      # Codex CLI state directory — same volume as the API so both services share
+      # the single auth/session store created by 'codex login' (FTY-296).
+      CODEX_HOME: "/codex-config"
     volumes:
       - claude-config:/claude-config
+      - codex-config:/codex-config
     depends_on:
       redis:
         condition: service_healthy
@@ -204,3 +218,12 @@ volumes:
   # credentials written by 'claude login'. Never copy its contents into the
   # image or commit them. Restrict host-path permissions if bind-mounting.
   claude-config:
+  # Codex CLI state directory (FTY-296). Shared by api and worker.
+  # Populated once by 'docker compose exec api codex login',
+  # 'codex login --device-auth', or
+  # 'printf %s "$CODEX_ACCESS_TOKEN" | codex login --with-access-token'.
+  # Treat this volume as a host secret: it may contain auth.json access tokens,
+  # sessions, logs, and other Codex state. Never copy its contents into the image,
+  # commit them, or include them in support artifacts. Restrict host-path
+  # permissions if bind-mounting.
+  codex-config:

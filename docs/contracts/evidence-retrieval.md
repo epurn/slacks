@@ -408,8 +408,11 @@ a `source_ref`, or a lookup `status`, and they do not participate in source
 selection or the **Fallback Rule**. The `claude_code` provider (FTY-087/088) is the
 first instance: `id = claude_code`, `enabled` when it is the active
 `FATTY_LLM_PROVIDER`, and `available` when the CLI is on `PATH` and a login session
-is detected — booleans only, no credential content surfaced. `llm-provider.md`
-owns the provider contract itself and defers its operator/health diagnostics here.
+is detected — booleans only, no credential content surfaced. FTY-296 adds `codex`
+with the same shape: enabled when selected, available when the CLI is on `PATH`
+and saved `CODEX_HOME` auth or selected-provider `FATTY_LLM_API_KEY` exists, with
+no keys, tokens, identities, auth-file contents, host paths, or raw CLI output.
+`llm-provider.md` owns the provider contract itself and defers diagnostics here.
 
 ### Lookup status (the outcome of one source lookup)
 
@@ -1032,11 +1035,7 @@ cross-user / unknown / unauthenticated fail-closed.
   aggregation (compatibility filtering, outlier rejection, median density) is a new **deterministic** step. No live network in tests.
 - FTY-088 adds a **diagnostics-only** LLM-provider descriptor to
   `GET /healthz/sources` (`id = claude_code`, `source_type = llm_provider`,
-  `kinds = [estimation]`). It is additive and surfaces operator/health state only:
-  it introduces no estimation source, no schema change, and no new lookup status —
-  the two descriptor values live outside the estimation Source Hierarchy and `kinds`
-  enums by design (see **Provider Capability / Status** → diagnostics-only
-  descriptors). The provider contract itself stays in `llm-provider.md`.
+  `kinds = [estimation]`). It is additive operator/health state only: no estimation source, schema change, or lookup status; descriptor values stay outside the estimation Source Hierarchy and `kinds` enums. Provider contract: `llm-provider.md`.
 - FTY-079 adds the `official_source` search adapter (`search.py`) and an
   `official_source` entry in `GET /healthz/sources`. It is additive: a new
   `FATTY_SEARCH_`-prefixed config block, no schema change, and a

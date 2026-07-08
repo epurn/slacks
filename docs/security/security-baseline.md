@@ -153,10 +153,19 @@ and `test` the docs remain available.
   10001) rather than root (FTY-116). A fixed UID/GID keeps ownership stable
   across rebuilds and named-volume mounts.
 - All runtime paths owned by the `fatty` user: `/app` (app source + `.venv`),
-  `/home/fatty` (CLI scratch / cache), and `/claude-config` (Claude Code session
-  volume mountpoint — inherits owner on first use).
-- `HOME` is set to `/home/fatty` so the `claude` CLI has a writable home
+  `/home/fatty` (CLI scratch / cache), `/claude-config` (Claude Code session
+  volume mountpoint — inherits owner on first use), and `/codex-config`
+  (`CODEX_HOME` for Codex CLI state — inherits owner on first use).
+- `HOME` is set to `/home/fatty` so local CLI providers have a writable home
   directory without falling back to root-owned paths.
+- The backend image includes pinned first-party CLI runtimes for `claude_code`
+  and `codex`, but no provider credentials. Claude Code session state lives only
+  in the `claude-config` named volume. Codex state lives only in the
+  `codex-config` named volume mounted as `CODEX_HOME`; that volume may contain
+  `auth.json` access tokens, sessions, logs, and other Codex state and is treated
+  as a host secret. `/healthz/sources` exposes only booleans for CLI/auth
+  presence and never credential contents, identity, auth file contents, host
+  paths, or raw CLI output.
 - Future hardening (read-only root filesystem, `cap_drop`, `no-new-privileges`,
   seccomp) is deferred to dedicated stories and is not yet applied.
 
