@@ -259,6 +259,26 @@ def test_prompt_or_personal_context_overlap_is_not_ingredient_overlap() -> None:
     assert set(match.shared_terms) == {"chicken"}
 
 
+def test_body_metric_residue_overlap_is_not_ingredient_overlap() -> None:
+    # The reviewer's blocking finding: compatibility reads the *raw* parser-derived item
+    # name, so a diary phrase that carries a worded body metric (``weight 200 lb``,
+    # ``height five foot ten``) leaves its bare value/unit residue in that raw name. The
+    # marker words (``weight``/``height``) are on the deny-list, but the value tokens
+    # (``200``), measurement units (``lb``/``ft``), and spelled-out numbers (``five``)
+    # are not — so without filtering them an adversarial page whose only overlap is that
+    # residue would count as a shared *food* term and enter the aggregate. It must not:
+    # body-metric residue is not an ingredient/flavor overlap.
+    metric_target = "weight 200 lb height five foot ten buffalo chicken wrap"
+    assert compatibility(metric_target, "200 lb") is None
+    assert compatibility(metric_target, "Five Foot Ten") is None
+    assert compatibility(metric_target, "200lb five ft wrap") is None
+    # A real shared food term still makes the same phrase compatible — the body-metric
+    # residue simply does not count toward the overlap.
+    match = compatibility(metric_target, "Buffalo Ranch Wrap 200 lb")
+    assert match is not None
+    assert set(match.shared_terms) == {"buffalo"}
+
+
 # --- aggregate --------------------------------------------------------------------
 
 

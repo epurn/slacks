@@ -473,10 +473,28 @@ def _content_terms(tokens: list[str]) -> set[str]:
     must match on a shared **food** term — an adversarial page whose only overlap with
     the diary phrase is a framing/context word (``system``, ``developer``, ``profile``)
     can never read as an ingredient/flavor match and enter the aggregate.
+
+    **Body-metric residue** is excluded on the same reasoning. The personal-context
+    *marker* words (``weight``/``height``/``bmi``…) are already on
+    ``_NON_IDENTITY_TOKENS``, but a worded body metric the parser leaves in the raw name
+    (``weight 200 lb``, ``height five foot ten``) also carries its bare **value/unit**
+    residue — digit-bearing value tokens (``200``, ``200lb``), measurement-unit words
+    (:data:`_BODY_METRIC_UNITS` — ``lb``/``ft``/``kg``…), and spelled-out number words
+    (:data:`_NUMBER_WORDS` — ``five``/``ten``/``hundred``…). None names a food, so an
+    adversarial page whose only overlap with the diary phrase is that value/unit residue
+    (``200 lb``, ``five foot``) must not read as an ingredient/flavor match. Dropping it
+    here forces the shared term to be a genuine food token — the aggregate never accepts a
+    page on body-metric residue alone.
     """
 
-    exclude = _STOPWORDS | _NON_IDENTITY_TOKENS | frozenset().union(*_FORM_GROUPS)
-    return {t for t in tokens if t not in exclude}
+    exclude = (
+        _STOPWORDS
+        | _NON_IDENTITY_TOKENS
+        | _BODY_METRIC_UNITS
+        | _NUMBER_WORDS
+        | frozenset().union(*_FORM_GROUPS)
+    )
+    return {t for t in tokens if t not in exclude and not _DIGIT_RE.search(t)}
 
 
 def compatibility(target_name: str, page_name: str | None) -> _Match | None:
@@ -489,7 +507,9 @@ def compatibility(target_name: str, page_name: str | None) -> _Match | None:
       **incompatible**;
     - **major ingredient/flavor overlap** — the names must share at least one content
       term (``buffalo``/``chicken``/``lime``); a page that overlaps only on the form
-      word, or that the transcriber could not even name, is **excluded**.
+      word, on framing/personal-context vocabulary, or on **body-metric value/unit
+      residue** (``200``/``lb``/``five``…, see :func:`_content_terms`), or that the
+      transcriber could not even name, is **excluded**.
     """
 
     if not page_name or not page_name.strip():
