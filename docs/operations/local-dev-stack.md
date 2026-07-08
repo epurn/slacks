@@ -188,7 +188,7 @@ provider to work.
 
 ## Simulator Readiness Smoke (FTY-250)
 
-Before testing Fatty in an iOS simulator, run one command to confirm the stack is
+Before testing Slacks in an iOS simulator, run one command to confirm the stack is
 actually *ready* — not just serving `/healthz`. A stack can be healthy at the
 process level yet fail the app later: backend images built from different
 checkouts, Postgres behind the code's Alembic head, or a simulator pointed at the

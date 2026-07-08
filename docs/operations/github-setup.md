@@ -47,7 +47,7 @@ temporary PR compatibility job named `mobile-e2e` may still pass while this
 transition lands, but it only logs the policy change and does not run native
 E2E.
 
-Fatty enforces non-author review with the required `reviewer-approved` commit
+Slacks enforces non-author review with the required `reviewer-approved` commit
 status published by the reviewer agent. The status may pass only after approval
 from an eligible reviewer on the current PR head SHA. This custom status is the
 merge gate because GitHub's native required-review rule may not count approvals

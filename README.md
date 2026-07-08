@@ -1,6 +1,6 @@
-# Fatty
+# Slacks
 
-Fatty is an iOS-first, open source calorie and macro tracker for people who hate traditional tracking. Users describe what they ate or did in natural language, and Fatty turns that into structured, editable food and exercise entries with evidence and assumptions.
+Slacks is an iOS-first, open source calorie and macro tracker for people who hate traditional tracking. Users describe what they ate or did in natural language, and Slacks turns that into structured, editable food and exercise entries with evidence and assumptions.
 
 The product principle is simple: natural input, deterministic math, visible evidence, easy correction.
 
@@ -25,7 +25,7 @@ See `docs/architecture/system-overview.md` for the working architecture.
 
 ## Self-Hosting
 
-Fatty is designed for self-hosting. The Docker Compose stack brings up Postgres,
+Slacks is designed for self-hosting. The Docker Compose stack brings up Postgres,
 Redis, the FastAPI API, and a Celery worker over plain HTTP from a clean checkout.
 
 **Scope:** HTTP-only local self-host. TLS/HTTPS termination, reverse proxy,
@@ -43,8 +43,8 @@ are intentionally out of scope.
 **1. Clone and enter the repo:**
 
 ```sh
-git clone https://github.com/epurn/fatty.git
-cd fatty
+git clone https://github.com/epurn/slacks.git
+cd slacks
 ```
 
 **2. Copy the environment template:**

@@ -1,6 +1,6 @@
 # Security Baseline
 
-Fatty handles sensitive personal data. The baseline is privacy by design, least privilege, and explicit trust boundaries.
+Slacks handles sensitive personal data. The baseline is privacy by design, least privilege, and explicit trust boundaries.
 
 ## Standards
 

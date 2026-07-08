@@ -6,7 +6,7 @@ Accepted.
 
 ## Context
 
-Fatty needs to support natural language food and exercise logging, async estimation, self-hosting, iOS-first UX, and strict privacy/security boundaries.
+Slacks needs to support natural language food and exercise logging, async estimation, self-hosting, iOS-first UX, and strict privacy/security boundaries.
 
 ## Decision
 

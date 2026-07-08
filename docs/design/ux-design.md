@@ -1,9 +1,9 @@
-# Fatty — UX Design
+# Slacks — UX Design
 
-The canonical description of what the Fatty product *is*: its frame, information
+The canonical description of what the Slacks product *is*: its frame, information
 architecture, core flows, screens, interaction model, visual direction, states,
 and cross-cutting stance. UX work should implement a slice of this doc rather than
-re-deciding the design; the living taste that governs it — Fatty's design
+re-deciding the design; the living taste that governs it — Slacks' design
 philosophy — is maintained alongside the agent tooling, embedded into agent work,
 and enforced in review. This doc must stay consistent with it.
 
@@ -14,7 +14,7 @@ and enforced in review. This doc must stay consistent with it.
 
 ## 1. Product frame
 
-Fatty is an **iOS-native, self-hostable, natural-language calorie & macro
+Slacks is an **iOS-native, self-hostable, natural-language calorie & macro
 tracker**. The wedge is two things competitors don't do well together:
 
 1. **Fast input** — describe what you ate in plain language ("a bowl of oatmeal
@@ -70,9 +70,9 @@ tracker**. The wedge is two things competitors don't do well together:
   session" feed — the optimistic insert *is* the acknowledgement.
 - **Correction is a universal slide-up sheet** from any item (see §4a) — never a
   page change.
-- **Missing details are asked inline, non-blocking.** When Fatty needs a detail to
+- **Missing details are asked inline, non-blocking.** When Slacks needs a detail to
   be accurate, the entry shows a gentle "needs a detail" affordance and is *not
-  counted* in totals until answered. Fatty never fabricates a number.
+  counted* in totals until answered. Slacks never fabricates a number.
 
 ### Barcode & label capture
 
@@ -86,7 +86,7 @@ composer (an intended modal, not a surprise navigation), dismissing back to Toda
 - **Label = capture-then-confirm (OCR is fallible).** Capture the nutrition label,
   then confirm the parsed values (looks-right / edit) before it's added (label
   provenance). Unreadable scan → retake or type. This keeps OCR misreads out of the
-  day's totals — Fatty never silently trusts a fallible parse.
+  day's totals — Slacks never silently trusts a fallible parse.
 
 ### Onboarding
 
@@ -147,10 +147,10 @@ trust-and-correct wedge.
   phrase quoted. A rough estimate is treated distinctly ("≈ Rough estimate" + an
   explicit "Make it exact" nudge into Change-match). Compact and calm — honest about
   origin, and it actively lifts the lowest-trust items rather than hiding them.
-- **Clarify-mode (for "needs a detail"): Fatty's question + quick-pick chips +
+- **Clarify-mode (for "needs a detail"): Slacks' question + quick-pick chips +
   free-text fallback.** The specific question ("What milk?") with likely answers as
   tappable chips plus "type your own". One tap resolves → the entry recomputes and
-  starts counting. Fatty never fabricates the missing detail.
+  starts counting. Slacks never fabricates the missing detail.
 - **Save-as-food: a manual action in the sheet.** Saves the current (corrected) item
   with its per-unit definition so it surfaces in the Log typeahead later. No
   auto-prompt or nagging. (Smart "save this for next time?" suggestions are v2.)
@@ -176,7 +176,7 @@ Where time-over-time lives.
   numeric entry sheet (defaults to today, seeded with the last value). Weight logging
   is deliberately **not** on the status-first Today screen and not buried in Profile.
 - **Weigh-in cadence: default weekly, user-adjustable** (Weekly · Every 2 weeks ·
-  Monthly · Off). Fatty must **not** encourage scale-watching: the reminder is
+  Monthly · Off). Slacks must **not** encourage scale-watching: the reminder is
   low-frequency and fires only when a reading is actually due — never daily, no
   streaks — and the UI leads with the smoothed trend, de-emphasizing any single day's
   number. This is evidence-based: weekly weighing captures the full weight-loss
@@ -221,7 +221,7 @@ It mirrors the inputs onboarding captures, so this is where you edit them later.
 ### 4d. Sign-in & self-host connection
 
 - **Self-host-first, with accounts on your own server.** First run: (1) connect to
-  your Fatty server — enter or scan the server URL; (2) sign in or create an account
+  your Slacks server — enter or scan the server URL; (2) sign in or create an account
   on that server (email + password); (3) → onboarding → Today. The session persists,
   so returning users skip to Today. Accounts live on the user's own server. The LLM
   provider's authentication is a server-side setup concern, separate from this

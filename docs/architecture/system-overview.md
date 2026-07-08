@@ -1,6 +1,6 @@
 # System Overview
 
-Fatty is an iOS-first, self-hostable nutrition and exercise tracker.
+Slacks is an iOS-first, self-hostable nutrition and exercise tracker.
 
 ## Product Decisions
 

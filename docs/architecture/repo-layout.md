@@ -1,6 +1,6 @@
 # Repository Layout
 
-Fatty is a monorepo. This document is the layout contract that later backend,
+Slacks is a monorepo. This document is the layout contract that later backend,
 mobile, infra, and contract stories build on. The goal of the FTY-010 scaffold
 is predictable, empty package homes — not product behavior.
 
