@@ -220,6 +220,14 @@ _NON_IDENTITY_TOKENS: Final[frozenset[str]] = frozenset(
 
 _TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"[a-z0-9]+")
 
+#: Angle-bracket framing markers (``<end>``, ``<|im_start|>``, ``<system>``…) a prompt
+#: injection uses to delimit smuggled instructions. Their **inner** tokens (``end``,
+#: ``im``, ``start``…) survive a naive ``[a-z0-9]+`` tokenizer and are not food-identity
+#: words, so :func:`sanitized_identity` strips the whole marker — content included —
+#: before tokenizing. A trailing unclosed ``<end`` is stripped too (``>`` optional). Real
+#: food names never contain angle brackets, so this removes only framing residue.
+_STRUCTURAL_FRAMING_RE: Final[re.Pattern[str]] = re.compile(r"<[^>]*>?")
+
 
 @dataclass(frozen=True)
 class ComparableCandidate:
@@ -356,8 +364,11 @@ def sanitized_identity(name: str) -> str:
     stripping apply:
 
     - **Structural framing** a prompt injection would use to smuggle instructions past a
-      naive concatenation (quotes, colons, code fences, angle-bracket tags, newlines)
-      carries no identity token and is dropped by the tokenizer itself.
+      naive concatenation (quotes, colons, code fences, newlines) carries no identity
+      token and is dropped by the tokenizer itself. Angle-bracket framing markers
+      (``<end>``, ``<|im_start|>``…) are stripped **with their inner tokens** via
+      :data:`_STRUCTURAL_FRAMING_RE` first — the tokenizer alone would keep the bare
+      word (``end``) and let framing residue ride along on the query.
     - **Instruction / personal-context tokens** that *survive* tokenization but are never
       part of a food's identity (``ignore``, ``system``, ``instructions``, ``profile``,
       ``goal``…) are removed via :data:`_NON_IDENTITY_TOKENS`, so prompt-like parser
@@ -367,7 +378,8 @@ def sanitized_identity(name: str) -> str:
     (control-char strip + length bound) before egress.
     """
 
-    return " ".join(token for token in _tokens(name) if token not in _NON_IDENTITY_TOKENS)
+    unframed = _STRUCTURAL_FRAMING_RE.sub(" ", name)
+    return " ".join(token for token in _tokens(unframed) if token not in _NON_IDENTITY_TOKENS)
 
 
 def cold_pass_identity(names: list[str | None]) -> str | None:

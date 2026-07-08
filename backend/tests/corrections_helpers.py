@@ -89,12 +89,14 @@ def seed_evidence(
     *,
     source_type: str,
     source_ref: str,
+    assumptions: list[str] | None = None,
 ) -> uuid.UUID:
     """Insert a user-owned ``evidence_sources`` row for a derived food item.
 
     Lets the provenance read-model tests assert the source descriptor mapping and
     that an amount adjust leaves this snapshot untouched. Reuses the item's owning
-    ``log_event_id`` so ownership cascades stay consistent.
+    ``log_event_id`` so ownership cascades stay consistent. ``assumptions`` seeds the
+    stored provenance list (e.g. to exercise the FTY-281 ``estimate_basis`` derivation).
     """
 
     factory = create_session_factory(db_engine)
@@ -108,6 +110,7 @@ def seed_evidence(
             product_id=None,
             source_type=source_type,
             source_ref=source_ref,
+            assumptions=assumptions,
             content_hash="0" * 64,
             fetched_at=datetime.now(UTC),
             calories_per_100g=130.0,

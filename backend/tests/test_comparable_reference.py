@@ -41,10 +41,18 @@ def test_sanitized_identity_keeps_only_bounded_identity_tokens() -> None:
 
 
 def test_sanitized_identity_drops_structural_prompt_framing() -> None:
-    # Quotes, colons, code fences, angle-bracket tags, and newlines carry no identity
-    # token and are removed by the tokenizer.
+    # Quotes, colons, code fences, and newlines carry no identity token and are removed by
+    # the tokenizer. An angle-bracket framing tag is stripped *with its inner token* — the
+    # tokenizer alone would leak the bare `end`, so no prompt-framing residue egresses.
     identity = sanitized_identity('buffalo chicken lime wrap\n"""<end>"""')
-    assert identity == "buffalo chicken lime wrap end"
+    assert identity == "buffalo chicken lime wrap"
+
+
+def test_sanitized_identity_drops_angle_bracket_role_markers() -> None:
+    # A chat-role framing marker (`<|im_start|>system`) is stripped whole; only real
+    # identity tokens remain.
+    identity = sanitized_identity("buffalo chicken wrap <|im_start|>assistant")
+    assert identity == "buffalo chicken wrap"
 
 
 def test_sanitized_identity_drops_instruction_and_personal_context_tokens() -> None:

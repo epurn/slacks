@@ -23,7 +23,13 @@ from sqlalchemy import select
 from sqlalchemy.engine import Engine
 
 from app.db import create_session_factory
-from app.enums import CandidateType, CorrectionSource, SourceType
+from app.enums import (
+    ESTIMATE_BASIS_ASSUMPTION_PREFIX,
+    CandidateType,
+    CorrectionSource,
+    MacroEstimateBasis,
+    SourceType,
+)
 from app.models.corrections import Correction
 from app.models.derived import DerivedExerciseItem, DerivedFoodItem
 from app.models.food_sources import EvidenceSource
@@ -265,6 +271,58 @@ def test_model_prior_item_surfaces_rough_estimate_descriptor(
     assert dto.source is not None
     assert dto.source.source_type is SourceType.MODEL_PRIOR
     assert dto.source.label == "Rough estimate"
+
+
+def test_user_text_comparable_marker_surfaces_estimate_basis(
+    client: TestClient, db_engine: Engine
+) -> None:
+    # A user_text evidence row carrying the code-emitted comparable-reference marker in its
+    # assumptions surfaces the trusted rough-aggregate estimate_basis (FTY-281).
+    user_id, _ = register(client, "prov-basis@example.com")
+    item_id = seed_food_item(db_engine, user_id)
+    seed_evidence(
+        db_engine,
+        user_id,
+        item_id,
+        source_type=SourceType.USER_TEXT,
+        source_ref="user_text:" + "a" * 8,
+        assumptions=[
+            f"{ESTIMATE_BASIS_ASSUMPTION_PREFIX}{MacroEstimateBasis.COMPARABLE_REFERENCE.value}",
+            "protein_g estimated from a rough comparable-reference aggregate",
+        ],
+    )
+
+    dto = _read_food(db_engine, item_id)
+
+    assert dto.source is not None
+    assert dto.source.source_type is SourceType.USER_TEXT
+    assert dto.source.estimate_basis is MacroEstimateBasis.COMPARABLE_REFERENCE
+
+
+def test_provider_assumption_mimicking_marker_on_model_prior_is_not_a_basis(
+    client: TestClient, db_engine: Engine
+) -> None:
+    # The estimate_basis derivation is a *trusted* signal keyed on source_type == user_text.
+    # A non-aggregate tier (model_prior) persists provider-generated free-form assumptions;
+    # even one that mimics the marker text must never be read as a comparable-reference basis.
+    user_id, _ = register(client, "prov-spoof@example.com")
+    item_id = seed_food_item(db_engine, user_id)
+    seed_evidence(
+        db_engine,
+        user_id,
+        item_id,
+        source_type=SourceType.MODEL_PRIOR,
+        source_ref="model_prior",
+        assumptions=[
+            f"{ESTIMATE_BASIS_ASSUMPTION_PREFIX}{MacroEstimateBasis.COMPARABLE_REFERENCE.value}",
+        ],
+    )
+
+    dto = _read_food(db_engine, item_id)
+
+    assert dto.source is not None
+    assert dto.source.source_type is SourceType.MODEL_PRIOR
+    assert dto.source.estimate_basis is None
 
 
 def test_missing_evidence_yields_null_source_defensively(

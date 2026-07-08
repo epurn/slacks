@@ -126,11 +126,13 @@ def build_item_source(session: Session, item: DerivedFoodItem) -> ItemSourceDTO 
         source_type=source_type,
         label=_source_label(source_type, evidence.source_ref),
         ref=evidence.source_ref,
-        estimate_basis=_macro_estimate_basis(evidence.assumptions),
+        estimate_basis=_macro_estimate_basis(source_type, evidence.assumptions),
     )
 
 
-def _macro_estimate_basis(assumptions: list[str] | None) -> MacroEstimateBasis | None:
+def _macro_estimate_basis(
+    source_type: SourceType, assumptions: list[str] | None
+) -> MacroEstimateBasis | None:
     """Recover a ``user_text`` item's macro estimate basis from its own evidence row.
 
     Derived **at read time** from the already-stored ``assumptions`` — the FTY-281
@@ -139,8 +141,18 @@ def _macro_estimate_basis(assumptions: list[str] | None) -> MacroEstimateBasis |
     from a plain user_text item with **no** new persisted column (the same derive-don't-
     store philosophy as ``is_edited``). An absent or unrecognized marker yields ``None``
     defensively rather than failing the read.
+
+    The derivation is **gated on ``source_type == user_text``** — the trusted signal for
+    the comparable-reference path. A comparable aggregate only ever backs a user-stated
+    calorie item, and a ``user_text`` row's ``assumptions`` are exclusively code-emitted
+    (``build_missing_macro_fill`` / ``_scale_missing``). The non-aggregate tiers
+    (``model_prior``/``official_source``/``reference_source``) persist **provider-generated**
+    free-form assumptions (the model is asked to "list the assumptions you made"), which
+    must never be read as this trusted basis even if their text mimics the marker.
     """
 
+    if source_type is not SourceType.USER_TEXT:
+        return None
     for assumption in assumptions or ():
         if assumption.startswith(ESTIMATE_BASIS_ASSUMPTION_PREFIX):
             raw = assumption[len(ESTIMATE_BASIS_ASSUMPTION_PREFIX) :].strip()
