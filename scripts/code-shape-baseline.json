@@ -5,12 +5,6 @@
     "test": 1000
   },
   "large_files": {
-    "backend/app/estimator/search.py": {
-      "kind": "source",
-      "lane": "estimator",
-      "lines": 788,
-      "reason": "Existing over-threshold first-party source file at FTY-200 baseline."
-    },
     "backend/tests/test_daily_summary_api.py": {
       "kind": "test",
       "lane": "backend",
