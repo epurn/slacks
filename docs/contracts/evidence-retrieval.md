@@ -1019,11 +1019,11 @@ cross-user / unknown / unauthenticated fail-closed.
   estimate_basis = comparable_reference` — derived at read time from the item's own
   `assumptions` (no new persisted column), so a client can tell a rough
   comparable-reference macro estimate from a plain `user_text` item while the item's
-  `source_type` stays `user_text`. It reuses the FTY-166 search adapter, searched-result hardened
-  fetch, `NamedFoodEstimate` extraction, `_to_per_100g` plausibility gate, and
-  `sanitize_query` chokepoint unchanged — only the query is **brand-relaxed** and the
-  aggregation (compatibility filtering, outlier rejection, median density) is a new
-  **deterministic** step. No live network in tests.
+  `source_type` stays `user_text`. It reuses the FTY-166 search adapter, searched-result hardened fetch,
+  `NamedFoodEstimate` extraction schema, `_to_per_100g` plausibility gate, and `sanitize_query` chokepoint —
+  only the query is **brand-relaxed**, each page's transcription is drawn over the **cold-pass** self-consistency
+  path (N independent passes gated on committed-macro-density agreement, wherever an LLM participates), and the
+  aggregation (compatibility filtering, outlier rejection, median density) is a new **deterministic** step. No live network in tests.
 - FTY-088 adds a **diagnostics-only** LLM-provider descriptor to
   `GET /healthz/sources` (`id = claude_code`, `source_type = llm_provider`,
   `kinds = [estimation]`). It is additive and surfaces operator/health state only:

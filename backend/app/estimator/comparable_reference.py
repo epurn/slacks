@@ -15,8 +15,9 @@ This module owns the two **deterministic** halves the story keeps out of the LLM
 - :func:`compatibility` — is a fetched page's item a comparable of the target? It
   checks **food form/category** (a wrap/sandwich is not a salad/bowl) and **major
   ingredient/flavor overlap** (``buffalo``/``chicken``/``lime``) against the target
-  identity. The LLM only *transcribes* each page's facts + product name upstream;
-  the compatibility judgement here is a pure token comparison over that bounded,
+  identity. The LLM only *cold-pass transcribes* each page's facts + product name
+  upstream (``user_text_step.py`` draws N passes and gates on their agreement); the
+  compatibility judgement here is a pure token comparison over that bounded,
   validated name — never the raw page.
 - :func:`aggregate` — over the compatible per-100g compositions, work in **grams per
   kcal** density space (the basis actually committed when scaling to the user's

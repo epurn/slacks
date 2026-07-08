@@ -654,6 +654,20 @@ def _page(name: str, calories: float, protein: float, carbs: float, fat: float) 
     }
 
 
+def _comparable_extractions(*pages: dict[str, Any]) -> list[dict[str, Any] | LLMError]:
+    """Expand each comparable reference page into its cold-pass extraction samples.
+
+    FTY-281 transcribes every comparable page over ``MACRO_ESTIMATE_NUM_SAMPLES``
+    independent passes and gates on their agreement, so a page yields that many
+    (here identical, fully agreeing) extraction replies consumed in page order.
+    """
+
+    scripted: list[dict[str, Any] | LLMError] = []
+    for page in pages:
+        scripted.extend([page] * MACRO_ESTIMATE_NUM_SAMPLES)
+    return scripted
+
+
 def test_missing_macros_filled_from_comparable_aggregate(
     client: TestClient, session: Session
 ) -> None:
@@ -665,11 +679,11 @@ def test_missing_macros_filled_from_comparable_aggregate(
         comparable=_comparable_result(3),
     )
     fetcher = RecordingFetcher(text=f"wrap page {_RAW_PAGE_SENTINEL}")
-    estimates: list[dict[str, Any] | LLMError] = [
+    estimates = _comparable_extractions(
         _page("Buffalo Chicken Wrap", 100.0, 5.0, 12.0, 3.0),
         _page("Grilled Buffalo Chicken Wrap", 200.0, 10.0, 24.0, 6.0),
         _page("Buffalo Chicken Lime Wrap", 150.0, 7.5, 18.0, 4.5),
-    ]
+    )
     estimator = _macro_estimator(search=search, estimates=estimates, reference_fetcher=fetcher)
     pipeline = _pipeline(session, parsed_item=_stated_item(), macro_estimator=estimator)
 
@@ -733,11 +747,11 @@ def test_aggregate_never_overwrites_a_user_stated_macro(
         branded=SearchResult(status=SearchStatus.PARTIAL),
         comparable=_comparable_result(3),
     )
-    estimates: list[dict[str, Any] | LLMError] = [
+    estimates = _comparable_extractions(
         _page("Buffalo Chicken Wrap", 100.0, 5.0, 12.0, 3.0),
         _page("Grilled Buffalo Chicken Wrap", 200.0, 10.0, 24.0, 6.0),
         _page("Buffalo Chicken Lime Wrap", 150.0, 7.5, 18.0, 4.5),
-    ]
+    )
     estimator = _macro_estimator(search=search, estimates=estimates)
     pipeline = _pipeline(
         session,
@@ -770,13 +784,13 @@ def test_incompatible_and_outlier_candidates_are_rejected(
         branded=SearchResult(status=SearchStatus.PARTIAL),
         comparable=_comparable_result(5),
     )
-    estimates: list[dict[str, Any] | LLMError] = [
+    estimates = _comparable_extractions(
         _page("Buffalo Chicken Wrap", 100.0, 5.0, 12.0, 3.0),
         _page("Caesar Salad", 150.0, 9.0, 8.0, 11.0),  # wrong form → rejected
         _page("Grilled Buffalo Chicken Wrap", 200.0, 10.0, 24.0, 6.0),
         _page("Buffalo Chicken Wrap Deluxe", 100.0, 30.0, 5.0, 1.0),  # compatible outlier
         _page("Buffalo Chicken Lime Wrap", 150.0, 7.5, 18.0, 4.5),
-    ]
+    )
     estimator = _macro_estimator(search=search, estimates=estimates)
     pipeline = _pipeline(session, parsed_item=_stated_item(), macro_estimator=estimator)
 
@@ -804,9 +818,48 @@ def test_too_few_comparables_leave_macros_unknown_without_a_second_question(
         branded=SearchResult(status=SearchStatus.PARTIAL),
         comparable=_comparable_result(2),
     )
-    estimates: list[dict[str, Any] | LLMError] = [
+    estimates = _comparable_extractions(
         _page("Buffalo Chicken Wrap", 100.0, 5.0, 12.0, 3.0),
         _page("Grilled Buffalo Chicken Wrap", 200.0, 10.0, 24.0, 6.0),
+    )
+    estimator = _macro_estimator(search=search, estimates=estimates)
+    pipeline = _pipeline(session, parsed_item=_stated_item(), macro_estimator=estimator)
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+    assert result.event_status is LogEventStatus.COMPLETED
+
+    food = _foods(session, event_id)[0]
+    assert food.calories == 580.0
+    assert food.protein_g is None
+    assert food.carbs_g is None
+    assert food.fat_g is None
+    assert _questions(session, event_id) == []
+
+
+def test_comparable_page_with_disagreeing_cold_passes_is_excluded(
+    client: TestClient, session: Session
+) -> None:
+    # A comparable page is transcribed over N cold passes; when those passes materially
+    # disagree on the committed macro density the page is kept OUT of the aggregate. Two
+    # agreeing pages plus one self-disagreeing page leaves < MIN_COMPARABLE_SOURCES
+    # survivors, so the macros stay unknown — the calories still count and NO second
+    # serving question is asked (a lone over-confident transcription cannot seed a fill).
+    user_id, event_id = _seed_event(client, "coldpage@example.com", _SOBEYS_TEXT)
+    search = KeyedSearchProvider(
+        branded=SearchResult(status=SearchStatus.PARTIAL),
+        comparable=_comparable_result(3),
+    )
+    # Pages 1 and 2 each transcribe consistently across their passes; page 3's passes
+    # disagree wildly (protein- vs carb- vs fat-skewed at the same energy), so its
+    # cold-pass gate fails and it never becomes a comparable candidate.
+    estimates: list[dict[str, Any] | LLMError] = [
+        *_comparable_extractions(
+            _page("Buffalo Chicken Wrap", 100.0, 5.0, 12.0, 3.0),
+            _page("Grilled Buffalo Chicken Wrap", 200.0, 10.0, 24.0, 6.0),
+        ),
+        _page("Buffalo Chicken Lime Wrap", 100.0, 25.0, 0.0, 0.0),
+        _page("Buffalo Chicken Lime Wrap", 100.0, 0.0, 25.0, 0.0),
+        _page("Buffalo Chicken Lime Wrap", 100.0, 0.0, 0.0, 11.1),
     ]
     estimator = _macro_estimator(search=search, estimates=estimates)
     pipeline = _pipeline(session, parsed_item=_stated_item(), macro_estimator=estimator)
@@ -820,6 +873,10 @@ def test_too_few_comparables_leave_macros_unknown_without_a_second_question(
     assert food.carbs_g is None
     assert food.fat_g is None
     assert _questions(session, event_id) == []
+    evidence = _evidence(session, event_id)
+    assert evidence.assumptions is None or not any(
+        "comparable-reference aggregate" in a for a in evidence.assumptions
+    )
 
 
 def test_exact_reference_wins_over_comparable_aggregate(
