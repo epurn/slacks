@@ -21,7 +21,7 @@ This contract covers four things:
 It deliberately excludes actual NL parsing (FTY-042), exercise math (FTY-043),
 food resolution (FTY-044), LLM provider integration (FTY-041), and any
 derived-item / evidence tables (owned by the step stories). The clarification
-answer **endpoint and persistence** are `log-events.md`'s (v4); this contract
+answer **endpoint and persistence** are `clarification.md`'s; this contract
 owns the job/run mechanics of the answer-triggered re-estimate (v2, below).
 
 ## Owner
@@ -58,7 +58,7 @@ re-estimate is the v2 event-level round-trip unchanged. See
 [Answer-triggered re-estimate](#answer-triggered-re-estimate-fty-171).
 
 2 (FTY-171): the **answer-triggered re-estimate**. The clarification answer
-(`log-events.md` v4) re-opens a job terminal in `needs_clarification` so the
+(`clarification.md`) re-opens a job terminal in `needs_clarification` so the
 same event can be estimated again with the user's accumulated answers as
 structured input. v1's "one job per event" anchor is unchanged; its "a job
 terminal in `needs_clarification` is never reprocessed" rule is **amended**:
@@ -163,7 +163,7 @@ committed) is decided at the **event** transition, and the resolve re-opens the
 
 ### Answer-triggered re-estimate (FTY-171)
 
-A valid, fresh clarification answer (`log-events.md` v4) re-estimates the
+A valid, fresh clarification answer (`clarification.md`) re-estimates the
 **same** event. The resolve endpoint — not the worker — prepares the job, all
 in the one transaction that persists the `clarification_answers` row:
 
@@ -307,7 +307,7 @@ POST /api/users/{uid}/log-events  →  201 pending event
   `attempts + DEFAULT_MAX_ATTEMPTS`) in the same transaction as the answer and
   the `needs_clarification → processing` transition, then enqueues a fresh
   task. No schema change: `estimation_jobs` / `estimation_runs` are untouched
-  (the additive `clarification_answers` table is `log-events.md`'s, migration
+  (the additive `clarification_answers` table is `clarification.md`'s, migration
   `0016`). The unique `log_event_id` (one job per event) still holds — a
   re-estimate is a new attempt/run on the *same* job, not a second job — and
   redelivery idempotency for queue-delivered tasks is preserved because the

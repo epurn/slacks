@@ -22,7 +22,7 @@ into FTY-040's pipeline-step interface and status transitions (see
 `estimation-jobs.md`). It excludes calorie/macro resolution (FTY-044) and
 exercise burn (FTY-043). The clarification **answer** flow — the resolve
 endpoint, its semantics, and the `clarification_answers` persistence — is owned
-by `log-events.md` (FTY-170 defines it; FTY-171 implements); the clarify sheet
+by `clarification.md` (FTY-170 defines it; FTY-171 implements); the clarify sheet
 UI is FTY-153.
 
 ## Owner
@@ -76,8 +76,9 @@ that populate it and persist resolved siblings are a **downstream implementation
 follow-up** (see Migration / Compatibility). Until then, the shipped behaviour is
 the **FTY-275 baseline**: a genuinely amountless component still routes the whole
 event to an event-level `needs_clarification` and persists no candidates. The
-answer flow, read shape, and counting semantics are `log-events.md` v6,
-`estimation-jobs.md` v3, and `daily-summary.md`.
+answer flow and read shape are `clarification.md`; the item-scoped status and
+counting semantics are `log-events.md` v6, `estimation-jobs.md` v3, and
+`daily-summary.md`.
 
 4 (FTY-172): the estimator now **produces** the FTY-170 clarification-with-options
 shape and records schema version `parse/v2`. Model-raised clarification output is
@@ -111,7 +112,7 @@ sheet renders as tappable chips (audit finding A2). Schema version string
 and a fresh clarification round on a re-estimate **replaces** the event's
 unanswered question rows. Consumers landing against the new shape: FTY-172
 (produce), FTY-171 (serve via the clarification read and resolve via the
-answer endpoint — `log-events.md` v4), FTY-153 (render).
+answer endpoint — `clarification.md`), FTY-153 (render).
 
 1 (FTY-042). Schema version string `parse/v1`, recorded on the estimation run.
 
@@ -163,7 +164,7 @@ specific question the clarify sheet shows, e.g. "How many cracker
 sandwiches?") and `options` (candidate quick-pick answer strings; ≤ 5 per
 question, each 1–80 chars). Options are **display candidates** the client
 renders as one-tap chips — never an enum the server validates an answer
-against; free text is always an allowed answer (see `log-events.md`,
+against; free text is always an allowed answer (see `clarification.md`,
 Clarification read / Clarification answer). The parse estimator produces **2–5
 meaningful candidates** for model-raised parse clarifications,
 backend-routed low-confidence parsed clarifications, and deterministic parse
@@ -199,7 +200,7 @@ clarification quick-pick options (additive; no prior user data is required):
   producer→estimator link — **never surfaced in the clarification read** — and is
   `SET NULL` (not `CASCADE`) on purpose: the answer-triggered re-estimate re-costs
   **only the open component** and leaves the already-`resolved` siblings untouched
-  (`estimation-jobs.md` v3, `log-events.md` v6). The answered component's own row is
+  (`estimation-jobs.md` v3, `clarification.md`). The answered component's own row is
   advanced **in place** from `unresolved` to `resolved` rather than deleted, so the
   link is not exercised in the normal flow; but were a referenced
   `derived_food_items` row ever removed (e.g. an event-level re-estimate or
@@ -212,7 +213,7 @@ clarification quick-pick options (additive; no prior user data is required):
   `question_text`. Question
   ownership/retention still cascades from the owning event and user (`log_event_id`,
   `user_id`). The stored `question_text` +
-  `options` are what the clarification read serves (`log-events.md`) — the
+  `options` are what the clarification read serves (`clarification.md`) — the
   **unchanged FTY-170 read shape**; `derived_food_item_id` is **not** part of that
   read shape (it stays internal to the producer/estimator), so the producer (this
   step) and the reader continue to share the FTY-170 `question_text` + `options`
@@ -350,12 +351,12 @@ gates that synthesize their own targeted question without meaningful quick-picks
 persist that question with `options: []`.
 Candidates and questions are committed in the **same transaction** as the
 terminal status, so a completed/clarification outcome and its rows are atomic.
-When a **re-estimate** of an answered event (`log-events.md`, Clarification
+When a **re-estimate** of an answered event (`clarification.md`, Clarification
 answer) lands on `needs_clarification` again, the fresh round's questions
 **replace** the event's unanswered question rows in that same transaction —
 answered questions and their `clarification_answers` are preserved, since they
 carry the accumulated details the re-estimate consumes — so the clarification
-read (status-gated to `needs_clarification`; `log-events.md`) serves exactly
+read (status-gated to `needs_clarification`; `clarification.md`) serves exactly
 the fresh round's open questions.
 
 **Item-scoped partial clarification (FTY-278, contract only).** Under the
@@ -506,7 +507,7 @@ both `users` and `log_events` enforces object-level ownership.
 | Provider clarification output missing a specific question or 2–5 options | Rejected; terminal `failed` (`clarification_quality_failed`); nothing persisted. |
 | Non-retryable provider error (`LLMResponseError`/`LLMConfigurationError`) | Terminal `failed` (`provider_error`). |
 | Transient provider error (`LLMTransientError`) | Retryable; worker retries within its bound. |
-| Ambiguous / below the calibrated operating point | `needs_clarification`; questions (text + options) persisted; the user resolves via the clarification answer (`log-events.md`). |
+| Ambiguous / below the calibrated operating point | `needs_clarification`; questions (text + options) persisted; the user resolves via the clarification answer (`clarification.md`). |
 
 ## Examples
 
@@ -530,7 +531,7 @@ event.raw_text = "crackers and peanut butter"        # count genuinely indetermi
         { text: "How many cracker sandwiches?", options: ["2", "4", "6"] } ] }
   → clarification_questions += one row (question_text, options, position 0)
   → event: processing → needs_clarification
-  # the user resolves via POST .../clarification/answers (log-events.md);
+  # the user resolves via POST .../clarification/answers (clarification.md);
   # the re-estimate receives the (question, answer) pair as structured input
 ```
 
@@ -554,7 +555,7 @@ event.raw_text = "crackers and peanut butter"        # count genuinely indetermi
   string-list shape is retired with no back-compat shim — pre-v1, it has no
   consumers to preserve. The `options` migration landed with FTY-172 (`0017`,
   the first producer); FTY-171 serves the options through the clarification
-  read and implements the answer resolve (`log-events.md` v4); FTY-153 renders
+  read and implements the answer resolve (`clarification.md`); FTY-153 renders
   the chips and free-text fallback.
 - **FTY-159 (breaking behaviour, pre-v1, no shim).** The clarify decision
   becomes the calibrated policy over the FTY-158 hybrid self-consistency
@@ -599,7 +600,7 @@ event.raw_text = "crackers and peanut butter"        # count genuinely indetermi
   default it to `NULL` and remain valid event-level questions; no backfill), but
   they are **owned by the downstream FTY-278 implementation follow-up**, not this
   spec — this version fixes the shape and routing so that story and the backend
-  read/answer story (`log-events.md` v6, `estimation-jobs.md` v3,
+  read/answer story (`clarification.md`, `log-events.md` v6, `estimation-jobs.md` v3,
   `daily-summary.md`) build to one agreed contract. No existing `ParseResult`
   field, `ClarificationQuestion` shape, or column semantics change; the FTY-275
   baseline (whole-event event-level clarification, nothing committed) ships until
