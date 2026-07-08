@@ -65,7 +65,7 @@ authenticated user's own `{user_id}`.
 clarification questions the estimator persisted for an event (the parse step
 writes one `clarification_questions` row per question when the input is
 genuinely indeterminate; this endpoint reads them back to the owning client).
-It is the data the mobile clarify sheet (FTY-153) needs to render Fatty's
+It is the data the mobile clarify sheet (FTY-153) needs to render Slacks'
 actual question with tappable quick-pick chips and a free-text fallback
 (`docs/design/ux-design.md` §4a) instead of a generic line over a bare text
 field.

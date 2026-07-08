@@ -66,7 +66,7 @@ persisted by the FTY-061 pipeline (a `derived_food_items` row + a `user_label`
 **The legible-panel food item lands `proposed`, not counted (FTY-196).** A legible
 parse persists its `derived_food_items` row in the **`proposed`** state — an
 **uncounted proposal** — instead of a counted `resolved` item, because "OCR is
-fallible — Fatty never silently trusts a fallible parse"
+fallible — Slacks never silently trusts a fallible parse"
 (`docs/design-philosophy.md`). The event still reaches terminal `completed`
 (extraction finished), but the food item is **excluded from `daily-summary` intake
 by construction** (the finalized-state filter requires item `status == 'resolved'`

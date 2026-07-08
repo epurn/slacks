@@ -4,7 +4,7 @@
 
 Give the estimator pipeline one config-driven, provider-agnostic capability:
 turn a prompt plus an output schema into a schema-validated object. A
-self-hoster points Fatty at OpenAI, Anthropic, or any OpenAI-compatible endpoint
+self-hoster points Slacks at OpenAI, Anthropic, or any OpenAI-compatible endpoint
 through environment variables; consuming code (FTY-042) depends only on this
 interface, never on a concrete provider or SDK. This is the transport contract,
 not the estimator's parse logic.
@@ -94,7 +94,7 @@ first-party Claude Code** session in headless mode. A self-hoster who already pa
 for a Claude monthly plan pays nothing per token.
 
 - **No `FATTY_LLM_API_KEY`.** Claude Code owns its own authentication
-  (`claude login`); Fatty supplies no key and stores, reads, or logs **no**
+  (`claude login`); Slacks supplies no key and stores, reads, or logs **no**
   operator credential. A supplied key is ignored.
 - **`FATTY_LLM_MODEL` is optional.** Claude Code selects the model from the active
   session/plan when the value is empty; a supplied model is passed through

@@ -423,7 +423,7 @@ The consulted source system `user_text` is recorded on the run `source_refs`.
 
 Once the user supplies a **usable concrete detail** for a recognizable item — a
 portion/count (FTY-167/275), a `brand` identity (FTY-062), or a stated nutrition fact
-(this story) — Fatty **estimates or counts with provenance** and must **not** ask a
+(this story) — Slacks **estimates or counts with provenance** and must **not** ask a
 second follow-up for that same item merely because the detail was not the exact field
 the pipeline hoped for. A stated calorie total is a usable detail even when the user
 adds "idk the breakdown": the item resolves as a `user_text` calorie item, and the
@@ -441,7 +441,7 @@ inputs:
   exceeds a co-stated calorie total).
 
 This is a **product expectation, not a hard quota**: across representative everyday
-logs Fatty should estimate or resolve **far more often than it asks**, and future
+logs Slacks should estimate or resolve **far more often than it asks**, and future
 eval/regression sets should hold a **low clarification rate** on such logs — without
 encoding a numeric percentage in code (ADR 0003; `parse-candidates.md`, Calibrated
 clarify decision). Item-scoped partial resolution for a *mixed* log (some components
@@ -500,7 +500,7 @@ endpoint (`backend/app/routers/health.py`, `backend/app/services/sources.py`).
 | `FATTY_OFF_ENABLED` | `true` | Self-host enable/disable flag. OFF is an open API (no key), so it is **on by default**; set `false` to disable the source. |
 | `FATTY_OFF_BASE_URL` | `https://world.openfoodfacts.org` | API base; **must be https**. The allowlisted host is derived from it. |
 | `FATTY_OFF_TIMEOUT_SECONDS` | `10` | Per-request wall-clock timeout. |
-| `FATTY_OFF_USER_AGENT` | `Fatty/1.0 (+…)` | Non-secret identifying user-agent (OFF API etiquette / rate limits). |
+| `FATTY_OFF_USER_AGENT` | `Fatty/1.0 (+…)` | Non-secret identifying user-agent (OFF API etiquette / rate limits). `Fatty/1.0` is the current runtime literal (`backend/app/estimator/off.py`); it is a legacy identifier pending a separate runtime rename, not the product name. |
 
 OFF needs no credentials, so a provider is **available** whenever it is enabled. A
 candidate carries a barcode only when one was explicitly supplied (a future scan,
