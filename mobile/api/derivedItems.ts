@@ -45,14 +45,16 @@ export interface ItemSourceDTO {
   /**
    * Evidence hierarchy type from evidence-retrieval.md.
    * `reference_source` is a public nutrition reference page (FTY-166), between
-   * an official page and a rough estimate; `model_prior` signals the
-   * "≈ rough estimate · make it exact" treatment.
+   * an official page and a rough estimate; `user_text` (FTY-279) is a
+   * user-stated calorie/macro fact extracted from the log entry text; `model_prior`
+   * signals the "≈ rough estimate · make it exact" treatment.
    */
   readonly source_type:
     | "trusted_nutrition_database"
     | "product_database"
     | "official_source"
     | "user_label"
+    | "user_text"
     | "reference_source"
     | "model_prior";
   /** Display-ready label (e.g. "USDA", "Open Food Facts", "Label scan", "Rough estimate"). */
