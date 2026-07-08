@@ -352,6 +352,19 @@ _CASES: list[dict[str, Any]] = [
     },
     {
         "difficulty": "inferable",
+        "template": "count_plus_household_volume",
+        "input": "6 crackers with about 1.5-2 tbsp dill pickle hummus",
+        "sampling": "unanimous",
+        "decision": "estimate",
+        "parse": [
+            _c("food", "crackers", "6", 6.0, "count"),
+            _c("food", "dill pickle hummus", "about 1.5-2 tbsp", 1.75, "tbsp"),
+        ],
+        "baseline": ("parsed", 0.59),
+        "provenance": "authored",
+    },
+    {
+        "difficulty": "inferable",
         "template": "casual_hedge",
         "input": "a bowl of cereal w/ milk, prob a normal serving",
         "sampling": "unanimous",

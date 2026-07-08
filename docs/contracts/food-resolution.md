@@ -38,6 +38,16 @@ estimator / contracts / backend-core / security-privacy lane:
 
 ## Version
 
+11 (FTY-292) locks the dogfood regression class for **explicit count + measured
+household-volume spread** entries. A parsed snack such as "6 crackers with about
+1.5-2 tbsp dill pickle hummus" carries sufficient quantity detail for both
+components: the cracker count resolves through the count/default-serving path and
+the hummus resolves through the household-volume path. If exact product lookup
+misses for the cracker or hummus brand hint, resolution falls forward through the
+existing searched-reference / comparable-reference / model-prior order with rough
+provenance; it must not ask the generic quantity question again. A truly
+amountless phrase such as "crackers and hummus" remains clarifiable.
+
 10 (FTY-279, contract only) makes a **user-stated nutrition fact evidence, not a
 clarification trigger**. A recognizable food item carrying a concrete user-supplied
 detail — a portion/count (FTY-167/275), a `brand` identity (FTY-062), **or an
