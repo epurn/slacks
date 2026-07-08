@@ -3,7 +3,7 @@ import { act, create } from 'react-test-renderer';
 import { useColorScheme } from 'react-native';
 import { ThemeProvider } from '@/theme';
 import { ProvenanceIcon, provenancePresentation } from '@/components/ui';
-import type { ItemSourceDTO } from '@/api/derivedItems';
+import type { ItemSourceDTO, MacroEstimateBasis } from '@/api/derivedItems';
 
 // jest-expo's preset already mocks useColorScheme as a jest.fn() returning 'light'.
 const mockUseColorScheme = useColorScheme as jest.MockedFunction<typeof useColorScheme>;
@@ -55,7 +55,6 @@ function sourceOf(source_type: ItemSourceDTO['source_type']): ItemSourceDTO {
     source_type,
     label: SOURCE_LABELS[source_type],
     ref: `${source_type}:123`,
-    estimate_basis: null,
   };
 }
 
@@ -206,5 +205,47 @@ describe('provenancePresentation()', () => {
     const result = provenancePresentation(unmodelled);
     expect(result.icon).toBe('questionmark.circle');
     expect(result.accessibilityLabel).toBe('Source unknown');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FTY-281 read-model distinction: a typed client must be able to tell a plain
+// user-stated item apart from one whose missing macros were filled by a rough
+// comparable-reference aggregate. Both are `user_text`; the aggregate carries
+// the optional `estimate_basis`, so the two shapes are not identical.
+// ---------------------------------------------------------------------------
+
+describe('ItemSourceDTO.estimate_basis (comparable-reference distinction)', () => {
+  it('lets a client distinguish an aggregate-backed user_text item from a plain one', () => {
+    const comparableReference: MacroEstimateBasis = 'comparable_reference';
+    const aggregateBacked: ItemSourceDTO = {
+      source_type: 'user_text',
+      label: 'You logged',
+      ref: 'user_text:abc123',
+      estimate_basis: comparableReference,
+    };
+    const plainUserText: ItemSourceDTO = {
+      source_type: 'user_text',
+      label: 'You logged',
+      ref: 'user_text:def456',
+    };
+
+    // Same evidence type, but the aggregate basis is observable — a typed
+    // consumer branches on estimate_basis, not on source_type.
+    expect(aggregateBacked.source_type).toBe(plainUserText.source_type);
+    expect(aggregateBacked.estimate_basis).toBe('comparable_reference');
+    expect(plainUserText.estimate_basis ?? null).toBeNull();
+  });
+
+  it('leaves the provenance presentation unchanged for an aggregate-backed user_text item', () => {
+    const aggregateBacked: ItemSourceDTO = {
+      source_type: 'user_text',
+      label: 'You logged',
+      ref: 'user_text:abc123',
+      estimate_basis: 'comparable_reference',
+    };
+    // The comparable-reference aggregate is a macro-fill detail, not a new icon
+    // tier: it still presents as the user_text source.
+    expect(provenancePresentation(aggregateBacked).icon).toBe('text.bubble');
   });
 });

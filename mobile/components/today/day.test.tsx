@@ -53,7 +53,6 @@ function usdaSource(): ItemSourceDTO {
     source_type: "trusted_nutrition_database",
     label: "USDA",
     ref: "usda_fdc:168880",
-    estimate_basis: null,
   };
 }
 

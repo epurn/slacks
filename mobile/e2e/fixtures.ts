@@ -528,7 +528,6 @@ export const E2E_RERESOLVED_ITEM: DerivedFoodItemDTO = {
     source_type: 'trusted_nutrition_database',
     label: 'USDA',
     ref: E2E_SOURCE_CANDIDATE.source_ref,
-    estimate_basis: null,
   },
   is_edited: false,
   created_at: '2026-01-01T08:00:00Z',
@@ -647,7 +646,6 @@ export const E2E_RESOLVE_ITEM: DerivedFoodItemDTO = {
     source_type: 'trusted_nutrition_database',
     label: 'USDA',
     ref: 'usda_fdc:171284',
-    estimate_basis: null,
   },
   is_edited: false,
 };
@@ -678,7 +676,6 @@ export const E2E_RESOLVE_EXTRA_ITEM: DerivedFoodItemDTO = {
     source_type: 'trusted_nutrition_database',
     label: 'USDA',
     ref: 'usda_fdc:173944',
-    estimate_basis: null,
   },
   is_edited: false,
 };
@@ -761,7 +758,6 @@ export const E2E_CORRECTION_ITEM: DerivedFoodItemDTO = {
     source_type: 'trusted_nutrition_database',
     label: 'USDA',
     ref: 'usda_fdc:169705',
-    estimate_basis: null,
   },
   is_edited: false,
 };
@@ -859,7 +855,6 @@ export const E2E_TARGET_ITEM: DerivedFoodItemDTO = {
     source_type: 'model_prior',
     label: 'Estimated',
     ref: 'model_prior',
-    estimate_basis: null,
   },
   is_edited: false,
 };

@@ -65,12 +65,7 @@ export const CONFIRM_PARSED_ITEM: DerivedFoodItemDTO = {
   fat_g_estimated: 7,
   created_at: "2026-01-01T09:00:00Z",
   updated_at: "2026-01-01T09:00:00Z",
-  source: {
-    source_type: "user_label",
-    label: "Label scan",
-    ref: "user_label",
-    estimate_basis: null,
-  },
+  source: { source_type: "user_label", label: "Label scan", ref: "user_label" },
   is_edited: false,
 };
 

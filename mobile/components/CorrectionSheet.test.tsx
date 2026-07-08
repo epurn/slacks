@@ -85,7 +85,6 @@ function usdaSource(): ItemSourceDTO {
     source_type: "trusted_nutrition_database",
     label: "USDA",
     ref: "usda_fdc:168880",
-    estimate_basis: null,
   };
 }
 
@@ -94,7 +93,6 @@ function modelPriorSource(): ItemSourceDTO {
     source_type: "model_prior",
     label: "Rough estimate",
     ref: "model_prior",
-    estimate_basis: null,
   };
 }
 
@@ -451,14 +449,7 @@ describe("change-match flow", () => {
   it("calls reResolve with the chosen source_ref", async () => {
     const c = candidate({ source_ref: "usda_fdc:999" });
     const listCandidates = jest.fn().mockResolvedValue([c]);
-    const updatedFood = food({
-      source: {
-        source_type: "trusted_nutrition_database",
-        label: "USDA",
-        ref: "usda_fdc:999",
-        estimate_basis: null,
-      },
-    });
+    const updatedFood = food({ source: { source_type: "trusted_nutrition_database", label: "USDA", ref: "usda_fdc:999" } });
     const reResolve = jest.fn().mockResolvedValue(updatedFood);
     const onItemChange = jest.fn();
 

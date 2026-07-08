@@ -66,10 +66,12 @@ export interface ItemSourceDTO {
   readonly ref: string;
   /**
    * Secondary basis for missing macro estimates on a `user_text` item (FTY-281).
-   * `comparable_reference` marks a rough comparable-reference aggregate; null
-   * means no secondary macro-estimate basis backs this source.
+   * `comparable_reference` marks a rough comparable-reference aggregate; null or
+   * absent means no secondary macro-estimate basis backs this source. Optional to
+   * mirror the backend read model (`ItemSourceDTO.estimate_basis`, default null),
+   * so a plain source descriptor need not spell out the empty basis.
    */
-  readonly estimate_basis: MacroEstimateBasis | null;
+  readonly estimate_basis?: MacroEstimateBasis | null;
 }
 
 /**

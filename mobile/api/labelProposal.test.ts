@@ -43,12 +43,7 @@ function proposalItem(): DerivedFoodItemDTO {
     protein_g_estimated: 4,
     carbs_g_estimated: 29,
     fat_g_estimated: 7,
-    source: {
-      source_type: "user_label",
-      label: "Label scan",
-      ref: "user_label",
-      estimate_basis: null,
-    },
+    source: { source_type: "user_label", label: "Label scan", ref: "user_label" },
     is_edited: false,
     created_at: "2026-07-02T08:00:00Z",
     updated_at: "2026-07-02T08:00:00Z",

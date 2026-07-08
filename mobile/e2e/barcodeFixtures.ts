@@ -84,7 +84,6 @@ export const E2E_BARCODE_ITEM: DerivedFoodItemDTO = {
     source_type: 'product_database',
     label: 'Open Food Facts',
     ref: 'open_food_facts:0894700010137',
-    estimate_basis: null,
   },
   is_edited: false,
 };

@@ -60,12 +60,7 @@ const SESSION: ApiSession = {
 };
 
 function labelSource(): ItemSourceDTO {
-  return {
-    source_type: "user_label",
-    label: "Label scan",
-    ref: "user_label",
-    estimate_basis: null,
-  };
+  return { source_type: "user_label", label: "Label scan", ref: "user_label" };
 }
 
 /** A legible label parse held `proposed` (uncounted) — the FTY-196 read shape. */
