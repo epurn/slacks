@@ -8,6 +8,7 @@ toolchains are scaffolded.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -195,9 +196,11 @@ def main() -> None:
                 fail(f"mobile-e2e compatibility job must log transition term {term!r}")
 
     e2e_workflow = read(".github/workflows/mobile-e2e.yml")
-    for term in ["workflow_dispatch:", "schedule:", "PLATFORM=android ./verify-e2e.sh", "actions/upload-artifact@v4"]:
+    for term in ["workflow_dispatch:", "schedule:", "PLATFORM=android ./verify-e2e.sh"]:
         if term not in e2e_workflow:
             fail(f"mobile-e2e workflow must retain full-suite evidence term {term!r}")
+    if not re.search(r"actions/upload-artifact@v\d+\b", e2e_workflow):
+        fail("mobile-e2e workflow must retain versioned full-suite artifact upload evidence")
     if "pull_request" in e2e_workflow:
         fail("full mobile-e2e workflow must not run as a pull_request gate")
 
