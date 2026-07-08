@@ -431,7 +431,14 @@ def sanitized_identity(name: str) -> str:
       :data:`_NON_IDENTITY_TOKENS` (``ignore``, ``system``, ``developer``, ``message``,
       ``hidden``, ``chain``, ``profile``, ``goal``…) and articles / prepositions /
       marketing filler via :data:`_STOPWORDS` (``the``, ``and``, ``with``…). Prompt-like
-      or filler parser output cannot ride along on the query even as bare words.
+      or filler parser output cannot ride along on the query even as bare words. The
+      deny-list is applied per **whitespace-delimited word**, not per token: a marker
+      taints its whole word, so a personal-context payload value *glued* to a marker by
+      punctuation the tokenizer discards (``user_id=42``, ``weight=200lb`` →
+      ``['user', 'id', '42']`` / ``['weight', '200lb']``) is dropped *with* the marker
+      rather than surviving as an orphaned ``42`` / ``200lb`` token. Fail-closed: a word
+      carrying a marker is dropped whole even if it also holds a would-be-identity token,
+      because an id or body metric next to a stripped marker must never egress.
     - **Token-count bound** — because the deny-list cannot be exhaustive over an
       open-vocabulary identity, the surviving identity is truncated to the first
       :data:`MAX_IDENTITY_TOKENS`. A real name + brand fits comfortably; a longer run of
@@ -444,11 +451,14 @@ def sanitized_identity(name: str) -> str:
     """
 
     unframed = _STRUCTURAL_FRAMING_RE.sub(" ", name)
-    identity = [
-        token
-        for token in _tokens(unframed)
-        if token not in _NON_IDENTITY_TOKENS and token not in _STOPWORDS
-    ]
+    identity: list[str] = []
+    for word in unframed.lower().split():
+        word_tokens = _TOKEN_RE.findall(word)
+        # A marker anywhere in the word taints the whole word: the marker and any
+        # personal-context value glued to it by dropped punctuation drop together.
+        if any(token in _NON_IDENTITY_TOKENS for token in word_tokens):
+            continue
+        identity.extend(token for token in word_tokens if token not in _STOPWORDS)
     return " ".join(identity[:MAX_IDENTITY_TOKENS])
 
 

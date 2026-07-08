@@ -87,6 +87,28 @@ def test_sanitized_identity_drops_stopword_filler() -> None:
     )
 
 
+def test_sanitized_identity_drops_payload_glued_to_a_stripped_marker() -> None:
+    # The reviewer's egress finding: a personal-context value glued to a marker by
+    # punctuation the tokenizer discards (`user_id=42`, `weight=200lb`) must drop *with*
+    # the marker, not survive as an orphaned `42` / `200lb` token. The deny-list is applied
+    # per whitespace-delimited word, so a marker anywhere in the word taints the whole word.
+    identity = sanitized_identity(
+        "buffalo chicken lime wrap user_id=42 weight=200lb history_ref:beef-bowl"
+    )
+    tokens = identity.split()
+    assert tokens == ["buffalo", "chicken", "lime", "wrap"]
+    # No id/body-metric payload value egresses, even though `42` / `200lb` / `beef` / `bowl`
+    # are on neither the deny-list nor the stopword list on their own.
+    for leaked in ("42", "200lb", "beef", "bowl", "user", "id", "weight", "history"):
+        assert leaked not in tokens
+
+
+def test_sanitized_identity_keeps_open_vocab_numeric_identity() -> None:
+    # An adjacency drop must not over-strip: a numeric token that is *not* glued to a marker
+    # is open-vocabulary food identity (brand names like "5 Guys", "7 Up") and still egresses.
+    assert sanitized_identity("5 Guys Bacon Burger") == "5 guys bacon burger"
+
+
 def test_sanitized_identity_bounds_token_count() -> None:
     # The structural guarantee behind the open-vocabulary deny-list: even would-be-identity
     # words that are on neither the deny-list nor the stopword list can only egress inside a
