@@ -15,12 +15,14 @@ estimator lane (`backend/app/llm/`).
 
 ## Version
 
-4 (keyless `openai_compatible` path added in FTY-089; `claude_code` subscription
-provider added in FTY-087; image input added in FTY-076; v1 introduced in
-FTY-041). v4 is **backward-compatible**: `FATTY_LLM_API_KEY` is now optional for
-`openai_compatible` (keyless local endpoints — Ollama/LM Studio/vLLM) while
-remaining required for `openai` and `anthropic`; every other env var and the
-`structured_completion` signature are unchanged.
+5 (OpenRouter structured-output routing guard added in FTY-291; keyless
+`openai_compatible` path added in FTY-089; `claude_code` subscription provider
+added in FTY-087; image input added in FTY-076; v1 introduced in FTY-041). v5 is
+**backward-compatible**: keyed OpenRouter is supported through the existing
+`openai_compatible` selector and env vars. When the configured base URL is
+`https://openrouter.ai/api/v1`, structured-output requests include OpenRouter's
+non-secret `provider.require_parameters=true` routing preference so OpenRouter
+routes only to endpoints that support the requested `response_format`.
 
 ## Inputs
 
@@ -62,9 +64,9 @@ Provider configuration is read from `FATTY_LLM_`-prefixed environment variables:
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `FATTY_LLM_PROVIDER` | `fake` | One of `openai`, `anthropic`, `openai_compatible`, `claude_code`, `fake`. |
-| `FATTY_LLM_API_KEY` | _(none)_ | Required for `openai`/`anthropic`. **Optional for `openai_compatible`** — a keyless local endpoint (Ollama/LM Studio/vLLM) requires no authentication; when absent no `Authorization` header is sent. **Not required (and unused) for `claude_code`** — it authenticates via the local Claude Code session. Secret; env/secret-manager only. |
-| `FATTY_LLM_MODEL` | _(empty)_ | Required for `openai`/`anthropic`/`openai_compatible` (e.g. `gpt-4o-mini`, `claude-3-5-sonnet`). **Optional for `claude_code`** — Claude Code picks the model from the session/plan; a supplied value is passed through to the invocation. |
-| `FATTY_LLM_BASE_URL` | provider default | Required for `openai_compatible`; overrides the default OpenAI/Anthropic base. |
+| `FATTY_LLM_API_KEY` | _(none)_ | Required for `openai`/`anthropic`. **Optional for `openai_compatible`** — omit it for keyless local endpoints (Ollama/LM Studio/vLLM); set it for keyed remote endpoints such as OpenRouter or Together. When absent no `Authorization` header is sent. **Not required (and unused) for `claude_code`** — it authenticates via the local Claude Code session. Secret; env/secret-manager only. |
+| `FATTY_LLM_MODEL` | _(empty)_ | Required for `openai`/`anthropic`/`openai_compatible` (e.g. `gpt-4o-mini`, `claude-3-5-sonnet`, `deepseek/deepseek-v4-pro`). **Optional for `claude_code`** — Claude Code picks the model from the session/plan; a supplied value is passed through to the invocation. |
+| `FATTY_LLM_BASE_URL` | provider default | Required for `openai_compatible`; overrides the default OpenAI/Anthropic base. Use `https://openrouter.ai/api/v1` for OpenRouter. |
 | `FATTY_LLM_TIMEOUT_SECONDS` | `30` | Per-attempt wall-clock timeout (0–600). Tunable. |
 | `FATTY_LLM_MAX_RETRIES` | `2` | Additional attempts after the first, on transient failures only (0–10). Tunable. |
 | `FATTY_LLM_SUPPORTS_VISION` | `false` | Declares the configured model as vision-capable. Required to be `true` before `images` may be supplied; otherwise image input fails fast. |
@@ -86,6 +88,37 @@ name; leave `FATTY_LLM_API_KEY` unset. The adapter sends no `Authorization` head
 The existing base-URL scheme expectations (SSRF/egress posture) are unchanged;
 keyless only affects whether an `Authorization` header is emitted — it does not
 relax which URLs are reachable.
+
+### `openai_compatible` keyed OpenRouter
+
+OpenRouter is supported as a keyed `openai_compatible` endpoint:
+
+```
+FATTY_LLM_PROVIDER=openai_compatible
+FATTY_LLM_BASE_URL=https://openrouter.ai/api/v1
+FATTY_LLM_MODEL=deepseek/deepseek-v4-pro
+FATTY_LLM_API_KEY=<openrouter key>
+```
+
+`deepseek/deepseek-v4-pro` is the intended local dogfooding choice at the time
+of FTY-291, but the model slug is operator-tunable. The selected OpenRouter
+model and routed provider must support JSON-schema structured outputs for the
+adapter contract to hold. For OpenRouter only, the adapter adds
+`provider: {"require_parameters": true}` whenever it sends the JSON-schema
+`response_format`; this is not sent to OpenAI, Ollama, LM Studio, vLLM,
+Together, or arbitrary OpenAI-compatible endpoints.
+
+Optional live smoke, skipped without a key:
+
+```
+cd backend
+FATTY_OPENROUTER_SMOKE_API_KEY=<openrouter key> \
+  uv run pytest tests/llm/test_openrouter_smoke.py
+```
+
+The smoke uses a neutral synthetic prompt and tiny schema; it never sends diary
+text. `FATTY_OPENROUTER_SMOKE_MODEL` may override the default
+`deepseek/deepseek-v4-pro`.
 
 ### `claude_code` (subscription, no per-token billing)
 
@@ -132,7 +165,9 @@ never returned in responses. No bundled default key or default hosted provider.
 
 - Keys, prompts, **images**, and raw responses are never logged. Logs carry only
   the provider label, attempt number, outcome, and (on validation failure) an
-  error count.
+  error count. Schema-validation failures suppress the raw Pydantic validation
+  details from the raised exception chain because rejected output may echo
+  personal context.
 - Transport errors carry content-free messages and suppress the original
   exception chain so request URLs/bodies (which in v2 may include encoded image
   data) cannot leak into traces.
@@ -197,6 +232,12 @@ result = provider.structured_completion(
   `FATTY_LLM_BASE_URL` and `FATTY_LLM_MODEL`; all other variables and the
   `structured_completion` signature are unchanged. A keyed `openai_compatible`
   deployment continues to work exactly as in v3.
+- **v5 is backward-compatible.** OpenRouter remains an `openai_compatible`
+  endpoint using the existing `FATTY_LLM_*` variables. The only wire difference
+  is host-scoped: when `FATTY_LLM_BASE_URL` is exactly the OpenRouter API root
+  (`https://openrouter.ai/api/v1`, trailing slash ignored), structured-output
+  requests include the OpenRouter `provider.require_parameters=true` routing
+  preference. Non-OpenRouter endpoints receive the same request shape as v4.
 - Per-provider structured-output mechanics (OpenAI JSON-schema `response_format`
   vs. Anthropic forced tool use) and multimodal mechanics (OpenAI `image_url`
   content parts vs. Anthropic base64 `image` blocks) are implementation details

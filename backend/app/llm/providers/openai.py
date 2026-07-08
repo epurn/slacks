@@ -16,6 +16,7 @@ import base64
 import json
 from collections.abc import Sequence
 from typing import Any
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel
 
@@ -57,7 +58,7 @@ class OpenAIProvider(Provider):
         timeout_seconds: float,
     ) -> dict[str, Any]:
         image_parts = [_image_content_part(image) for image in images or ()]
-        payload = {
+        payload: dict[str, Any] = {
             "model": self._model,
             "messages": build_user_messages(prompt, image_parts),
             "response_format": {
@@ -69,6 +70,9 @@ class OpenAIProvider(Provider):
                 },
             },
         }
+        if _is_openrouter_base_url(self._base_url):
+            payload["provider"] = {"require_parameters": True}
+
         # When no key is configured (keyless local endpoint), omit the header
         # entirely — never send "Bearer " with an empty value.
         headers: dict[str, str] = {}
@@ -81,6 +85,19 @@ class OpenAIProvider(Provider):
             timeout_seconds=timeout_seconds,
         )
         return _extract_content(response)
+
+
+def _is_openrouter_base_url(base_url: str) -> bool:
+    """Return whether ``base_url`` is the OpenRouter OpenAI-compatible API root."""
+
+    parsed = urlsplit(base_url.rstrip("/"))
+    return (
+        parsed.scheme.lower() == "https"
+        and (parsed.hostname or "").lower() == "openrouter.ai"
+        and parsed.path.rstrip("/") == "/api/v1"
+        and not parsed.query
+        and not parsed.fragment
+    )
 
 
 def _image_content_part(image: ImageInput) -> dict[str, Any]:

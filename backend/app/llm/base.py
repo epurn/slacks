@@ -162,7 +162,7 @@ class Provider(ABC):
             )
             raise StructuredOutputValidationError(
                 f"provider output failed validation against {schema.__name__}"
-            ) from exc
+            ) from None
 
     def _complete_with_retries(
         self,

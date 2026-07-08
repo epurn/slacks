@@ -106,6 +106,11 @@ This project uses the following as design references:
 
 - Treat the LLM as an untrusted analyst.
 - Use structured outputs and schema validation.
+- Keyed OpenRouter deployments stay behind the `openai_compatible` adapter. When
+  the configured base URL is the OpenRouter API root, the adapter sends the
+  non-secret `provider.require_parameters=true` routing preference so
+  OpenRouter must choose an endpoint that honors the requested structured-output
+  parameter; all returned content remains untrusted until local schema validation.
 - Keep tools allowlisted and parameter-validated.
 - Sanitize search queries so personal context is not sent to search providers.
 - Use a hardened fetcher with SSRF protections.
@@ -114,7 +119,7 @@ This project uses the following as design references:
 
 ## Logging and Telemetry
 
-- Logs must not contain secrets, auth tokens, raw sensitive prompts, full food histories, or unnecessary body data. *(v1: structured single-line JSON logs with a `RedactionFilter` that scrubs secret/header-shaped **fields** by name; a second pass via `_redact_values` scrubs token-shaped **values** — Bearer tokens, JWTs, provider API keys (`sk-…`, `gh…_…`, Slack `xox…`, AWS `AKIA…`), and inline `key=value` / `key: value` forms — from rendered messages and serialised exception traces. The inline form absorbs the HTTP auth *scheme* label (Bearer/Basic/Digest/token/…), so an `Authorization`/`Proxy-Authorization` header redacts the credential itself — including opaque, non-token-shaped values like base64 Basic creds — not just the scheme word. The LLM layer logs only provider/attempt/error-count — never the prompt, key, image, or raw response. Proven by `tests/security/test_secret_no_disclosure.py`.)*
+- Logs must not contain secrets, auth tokens, raw sensitive prompts, full food histories, or unnecessary body data. *(v1: structured single-line JSON logs with a `RedactionFilter` that scrubs secret/header-shaped **fields** by name; a second pass via `_redact_values` scrubs token-shaped **values** — Bearer tokens, JWTs, provider API keys (`sk-…`, `gh…_…`, Slack `xox…`, AWS `AKIA…`), and inline `key=value` / `key: value` forms — from rendered messages and serialised exception traces. The inline form absorbs the HTTP auth *scheme* label (Bearer/Basic/Digest/token/…), so an `Authorization`/`Proxy-Authorization` header redacts the credential itself — including opaque, non-token-shaped values like base64 Basic creds — not just the scheme word. The LLM layer logs only provider/attempt/error-count — never the prompt, key, image, or raw response — and schema-validation failures suppress raw Pydantic validation details from the raised exception chain. Proven by `tests/security/test_secret_no_disclosure.py` and `tests/llm/test_openai_provider.py`.)*
 - Use request IDs and event IDs instead of personal values where possible.
 - Redact sensitive fields in errors and provider traces. *(v1: transport and fetch errors are content-free — no URL, headers, request body, or response body; exception traces carrying token-shaped secrets are also scrubbed by `_redact_values` before serialisation.)*
 - Telemetry must be opt-in or clearly documented before public launch. *(v1 ships no product telemetry.)*
@@ -161,4 +166,3 @@ and `test` the docs remain available.
 - Enable dependency update automation.
 - Use GitHub branch protection and required checks.
 - Add SBOM/provenance work before public releases.
-
