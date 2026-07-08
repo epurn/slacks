@@ -31,7 +31,12 @@ jest.mock("expo-symbols", () => {
 });
 
 function usdaSource(): ItemSourceDTO {
-  return { source_type: "trusted_nutrition_database", label: "USDA", ref: "usda_fdc:168880" };
+  return {
+    source_type: "trusted_nutrition_database",
+    label: "USDA",
+    ref: "usda_fdc:168880",
+    estimate_basis: null,
+  };
 }
 
 function foodItem(overrides: Partial<DerivedFoodItemDTO> = {}): DerivedFoodItemDTO {

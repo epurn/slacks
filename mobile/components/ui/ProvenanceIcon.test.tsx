@@ -55,6 +55,7 @@ function sourceOf(source_type: ItemSourceDTO['source_type']): ItemSourceDTO {
     source_type,
     label: SOURCE_LABELS[source_type],
     ref: `${source_type}:123`,
+    estimate_basis: null,
   };
 }
 

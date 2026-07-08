@@ -374,7 +374,12 @@ describe("TodayScreen confirm-parsed-values sheet", () => {
       protein_g: 4,
       carbs_g: 29,
       fat_g: 7,
-      source: { source_type: "user_label", label: "Label scan", ref: "user_label" },
+      source: {
+        source_type: "user_label",
+        label: "Label scan",
+        ref: "user_label",
+        estimate_basis: null,
+      },
       ...overrides,
     });
   }

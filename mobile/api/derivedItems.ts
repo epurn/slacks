@@ -36,6 +36,9 @@ type DerivedItemStatus = "unresolved" | "resolved" | "proposed";
 /** Discriminator for the two derived-item kinds. */
 export type DerivedItemType = "food" | "exercise";
 
+/** How missing macros on a user_text item were filled, when a secondary basis exists. */
+export type MacroEstimateBasis = "comparable_reference";
+
 /**
  * Per-item provenance source descriptor (FTY-092).
  * Derived server-side from the item's evidence_sources row; null when no
@@ -61,6 +64,12 @@ export interface ItemSourceDTO {
   readonly label: string;
   /** Stable source reference (e.g. "usda_fdc:168880", "open_food_facts:barcode"). */
   readonly ref: string;
+  /**
+   * Secondary basis for missing macro estimates on a `user_text` item (FTY-281).
+   * `comparable_reference` marks a rough comparable-reference aggregate; null
+   * means no secondary macro-estimate basis backs this source.
+   */
+  readonly estimate_basis: MacroEstimateBasis | null;
 }
 
 /**

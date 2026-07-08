@@ -11,9 +11,14 @@ from __future__ import annotations
 import pytest
 
 from app.estimator.comparable_reference import (
+    AGREEMENT_DISTANCE,
     MAX_IDENTITY_TOKENS,
     MIN_COMPARABLE_SOURCES,
+    OUTLIER_DISTANCE,
     ComparableCandidate,
+    _distance,
+    _macro_fractions,
+    _median_vector,
     aggregate,
     compatibility,
     sanitized_identity,
@@ -354,12 +359,17 @@ def test_outlier_is_dropped_before_aggregation() -> None:
 
 
 def test_materially_disagreeing_sources_produce_no_aggregate() -> None:
-    # A bimodal sample (two high-protein, two high-fat) has no consistent centre: after
-    # outlier filtering nothing survives that agrees, so no aggregate is produced.
+    # Each source is close enough to the sample median to survive outlier filtering, but
+    # the survivor spread is still wider than the material-disagreement bound. This pins
+    # the AGREEMENT_DISTANCE branch directly instead of passing only because the inputs
+    # were discarded as outliers first.
     candidates = [
-        _candidate(100, 20.0, 5.0, 0.5, ref="reference_source:a"),
-        _candidate(100, 20.0, 5.0, 0.5, ref="reference_source:b"),
-        _candidate(100, 2.0, 5.0, 10.0, ref="reference_source:c"),
-        _candidate(100, 2.0, 5.0, 10.0, ref="reference_source:d"),
+        _candidate(100, 13.5, 6.25, 2.3333333333, ref="reference_source:a"),
+        _candidate(100, 6.25, 13.5, 2.3333333333, ref="reference_source:b"),
+        _candidate(100, 6.25, 6.25, 5.5555555556, ref="reference_source:c"),
     ]
+    vectors = [_macro_fractions(candidate.facts) for candidate in candidates]
+    median = _median_vector(vectors)
+    assert all(_distance(vector, median) <= OUTLIER_DISTANCE for vector in vectors)
+    assert any(_distance(vector, median) > AGREEMENT_DISTANCE for vector in vectors)
     assert aggregate(candidates) is None
