@@ -43,10 +43,10 @@
     "eslint": "^9.39.4",
     "eslint-config-expo": "~57.0.0",
     "eslint-plugin-sonarjs": "^4.1.0",
-    "globals": "^14.0.0",
+    "globals": "^17.7.0",
     "jest": "~29.7.0",
     "jest-expo": "~57.0.0",
-    "knip": "^6.24.0",
+    "knip": "^6.25.0",
     "react-test-renderer": "^19.2.3",
     "sf-symbols-typescript": "^2.2.0",
     "typescript": "~6.0.3"
