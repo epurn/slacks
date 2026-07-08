@@ -241,6 +241,24 @@ def test_page_without_a_named_form_is_allowed_on_ingredient_overlap() -> None:
     assert set(match.shared_terms) == {"buffalo", "chicken"}
 
 
+def test_prompt_or_personal_context_overlap_is_not_ingredient_overlap() -> None:
+    # The reviewer's blocking finding: compatibility reads the *raw* parser-derived item
+    # name (never the sanitized identity), so a diary phrase carrying prompt-injection /
+    # personal-context framing must not let an adversarial page count that framing as a
+    # shared *food* term. A page whose only overlap with the phrase is framing/context
+    # vocabulary (``system``, ``developer``, ``message``, ``profile``) shares no real
+    # ingredient/flavor term and is incompatible — even though both names share those raw
+    # tokens and neither carries a conflicting food form to reject it first.
+    adversarial_target = "system developer message profile buffalo chicken wrap"
+    assert compatibility(adversarial_target, "System Developer Message Profile") is None
+    assert compatibility(adversarial_target, "System Developer Message Profile Wrap") is None
+    # A real shared food term still makes the same phrase compatible — the framing words
+    # simply do not count toward the overlap.
+    match = compatibility(adversarial_target, "System Prompt Chicken Wrap")
+    assert match is not None
+    assert set(match.shared_terms) == {"chicken"}
+
+
 # --- aggregate --------------------------------------------------------------------
 
 

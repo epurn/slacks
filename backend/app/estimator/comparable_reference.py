@@ -465,10 +465,18 @@ def _form_token(tokens: list[str]) -> str | None:
 
 
 def _content_terms(tokens: list[str]) -> set[str]:
-    """Ingredient/flavor tokens: non-stopword, non-food-form words."""
+    """Ingredient/flavor tokens: non-stopword, non-food-form, non-framing words.
 
-    forms = frozenset().union(*_FORM_GROUPS)
-    return {t for t in tokens if t not in _STOPWORDS and t not in forms}
+    ``_NON_IDENTITY_TOKENS`` (prompt-injection / chat-framing / personal-context
+    vocabulary) is excluded alongside stopwords and forms: :func:`compatibility` reads
+    the *raw* parser-derived item name (not the sanitized identity), so a comparable
+    must match on a shared **food** term — an adversarial page whose only overlap with
+    the diary phrase is a framing/context word (``system``, ``developer``, ``profile``)
+    can never read as an ingredient/flavor match and enter the aggregate.
+    """
+
+    exclude = _STOPWORDS | _NON_IDENTITY_TOKENS | frozenset().union(*_FORM_GROUPS)
+    return {t for t in tokens if t not in exclude}
 
 
 def compatibility(target_name: str, page_name: str | None) -> _Match | None:

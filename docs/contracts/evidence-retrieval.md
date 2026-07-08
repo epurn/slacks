@@ -314,7 +314,10 @@ never invented while better evidence is still reachable:
    the exact (identity + brand) reference lookup misses, a **brand-dropped** identity +
    `nutrition facts` search surfaces comparable pages; each transcribed page is
    compatibility-checked (food form/category **and** ingredient/flavor overlap against
-   the item identity) and canonicalised to per-100g (per-serving facts with no gram
+   the item identity — the overlap must be a real **food** term: prompt-injection /
+   chat-framing / personal-context words the raw diary phrase and an adversarial page
+   happen to share are excluded, so a page with no shared ingredient/flavor can never
+   read as compatible) and canonicalised to per-100g (per-serving facts with no gram
    basis, and implausible facts, are excluded), outliers are dropped in Atwater
    macro-fraction space, and the survivors' **median** grams-per-kcal density per macro
    is scaled to the stated calorie total. The minimum counts **distinct** reference
