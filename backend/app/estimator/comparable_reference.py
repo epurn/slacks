@@ -276,6 +276,12 @@ MAX_IDENTITY_TOKENS: Final[int] = 12
 
 _TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"[a-z0-9]+")
 
+#: A token is *value-shaped* — the shape of an id or body metric (``42``, ``200lb``,
+#: ``5ft``) — when it carries a digit. :func:`sanitized_identity` drops value-shaped words
+#: that follow a dropped personal-context/framing marker so a marker separated from its
+#: value by a space cannot leak the value.
+_DIGIT_RE: Final[re.Pattern[str]] = re.compile(r"[0-9]")
+
 #: Angle-bracket framing markers (``<end>``, ``<|im_start|>``, ``<system>``…) a prompt
 #: injection uses to delimit smuggled instructions. Their **inner** tokens (``end``,
 #: ``im``, ``start``…) survive a naive ``[a-z0-9]+`` tokenizer and are not food-identity
@@ -438,7 +444,14 @@ def sanitized_identity(name: str) -> str:
       ``['user', 'id', '42']`` / ``['weight', '200lb']``) is dropped *with* the marker
       rather than surviving as an orphaned ``42`` / ``200lb`` token. Fail-closed: a word
       carrying a marker is dropped whole even if it also holds a would-be-identity token,
-      because an id or body metric next to a stripped marker must never egress.
+      because an id or body metric next to a stripped marker must never egress. The taint
+      also extends **forward** across whitespace: a marker separated from its value by a
+      space (``user id 42``, ``weight 200lb``) would otherwise leave the value word
+      (``42`` / ``200lb``) untainted, so a dropped marker word taints the following run of
+      *value-shaped* words (any token carrying a digit — the shape of an id or body
+      metric). This is deliberately narrow: only digit-bearing words following a marker
+      drop, so an open-vocabulary numeric food identity that is *not* preceded by a marker
+      (``5 Guys``, ``7 Up``) still egresses.
     - **Token-count bound** — because the deny-list cannot be exhaustive over an
       open-vocabulary identity, the surviving identity is truncated to the first
       :data:`MAX_IDENTITY_TOKENS`. A real name + brand fits comfortably; a longer run of
@@ -452,12 +465,21 @@ def sanitized_identity(name: str) -> str:
 
     unframed = _STRUCTURAL_FRAMING_RE.sub(" ", name)
     identity: list[str] = []
+    tainted = False
     for word in unframed.lower().split():
         word_tokens = _TOKEN_RE.findall(word)
         # A marker anywhere in the word taints the whole word: the marker and any
-        # personal-context value glued to it by dropped punctuation drop together.
+        # personal-context value glued to it by dropped punctuation drop together. The
+        # taint also arms forward so a value the marker introduced across a space drops.
         if any(token in _NON_IDENTITY_TOKENS for token in word_tokens):
+            tainted = True
             continue
+        # A value-shaped word (any token carrying a digit — the shape of an id or body
+        # metric) drops while the forward taint is armed, and keeps it armed so a run of
+        # such values (``weight 200 lb 34 in``) all drop. A non-value word disarms it.
+        if tainted and any(_DIGIT_RE.search(token) for token in word_tokens):
+            continue
+        tainted = False
         identity.extend(token for token in word_tokens if token not in _STOPWORDS)
     return " ".join(identity[:MAX_IDENTITY_TOKENS])
 

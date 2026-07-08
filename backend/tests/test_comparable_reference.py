@@ -103,10 +103,30 @@ def test_sanitized_identity_drops_payload_glued_to_a_stripped_marker() -> None:
         assert leaked not in tokens
 
 
+def test_sanitized_identity_drops_payload_separated_from_a_stripped_marker() -> None:
+    # The reviewer's follow-up egress finding: a personal-context value separated from its
+    # marker by *whitespace* (`user id 42`, `weight 200lb`) is its own word, so per-word
+    # marker tainting alone leaves the bare `42` / `200lb` value untainted. The forward
+    # taint must extend across the space: a dropped marker taints the following run of
+    # value-shaped (digit-bearing) words, so no id or body metric egresses.
+    identity = sanitized_identity("buffalo chicken lime wrap user id 42 weight 200lb")
+    tokens = identity.split()
+    assert tokens == ["buffalo", "chicken", "lime", "wrap"]
+    for leaked in ("42", "200lb", "user", "id", "weight"):
+        assert leaked not in tokens
+
+
 def test_sanitized_identity_keeps_open_vocab_numeric_identity() -> None:
     # An adjacency drop must not over-strip: a numeric token that is *not* glued to a marker
     # is open-vocabulary food identity (brand names like "5 Guys", "7 Up") and still egresses.
     assert sanitized_identity("5 Guys Bacon Burger") == "5 guys bacon burger"
+
+
+def test_sanitized_identity_forward_taint_disarms_on_non_value_word() -> None:
+    # The forward taint is narrow: it only consumes digit-bearing value words. A marker
+    # followed by an ordinary open-vocab identity word (no digit) disarms the taint, so a
+    # legitimate numeric brand token later in the name still egresses.
+    assert sanitized_identity("weight gainer 5 alive smoothie") == "gainer 5 alive smoothie"
 
 
 def test_sanitized_identity_bounds_token_count() -> None:
