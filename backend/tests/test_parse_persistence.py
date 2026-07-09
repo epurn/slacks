@@ -281,6 +281,53 @@ def test_low_confidence_recognized_entry_persists_candidates_in_estimate_first(
     assert _questions(session, event_id) == []
 
 
+def test_calibrated_confident_generic_parsed_entry_persists_question_not_candidate(
+    client: TestClient, session: Session
+) -> None:
+    user_id, event_id, auth = _seed_event_with_auth(
+        client, "parse-generic-identity-clarify@example.com", "some stuff"
+    )
+    pipeline = _pipeline(
+        [
+            {
+                "disposition": "parsed",
+                "confidence": 0.95,
+                "items": [{"type": "food", "name": "food", "quantity_text": "some"}],
+                "clarification_questions": [
+                    _clarify("What food did you have?", ["Rice", "Eggs", "Yogurt"])
+                ],
+            }
+        ]
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.job_status is EstimationJobStatus.NEEDS_CLARIFICATION
+    assert result.event_status is LogEventStatus.NEEDS_CLARIFICATION
+    assert _food(session, event_id) == []
+    assert _exercise(session, event_id) == []
+    questions = _questions(session, event_id)
+    assert [(q.question_text, q.options) for q in questions] == [
+        ("What food did you have?", ["Rice", "Eggs", "Yogurt"])
+    ]
+
+    read = client.get(
+        f"/api/users/{user_id}/log-events/{event_id}/clarification",
+        headers={"Authorization": auth},
+    )
+
+    assert read.status_code == 200
+    assert read.json() == {
+        "questions": [
+            {
+                "id": str(questions[0].id),
+                "text": "What food did you have?",
+                "options": ["Rice", "Eggs", "Yogurt"],
+            }
+        ]
+    }
+
+
 def test_balanced_low_confidence_parsed_entry_persists_backend_clarification_options(
     client: TestClient, session: Session
 ) -> None:

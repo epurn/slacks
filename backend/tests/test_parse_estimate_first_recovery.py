@@ -105,6 +105,48 @@ def test_no_recognizable_identity_still_routes_to_clarification() -> None:
     assert context.food_candidates == []
 
 
+def test_calibrated_confident_generic_parsed_item_routes_to_clarification() -> None:
+    provider = FakeProvider(
+        responses=_sampled(
+            {
+                **_parsed(
+                    [{"type": "food", "name": "food", "quantity_text": "some"}],
+                    confidence=0.95,
+                ),
+                "clarification_questions": [
+                    _clarify("What food did you have?", ["Rice", "Eggs", "Yogurt"])
+                ],
+            }
+        )
+    )
+    context = _context(raw_text="some stuff")
+
+    with pytest.raises(NeedsClarification) as exc:
+        _run(provider, context)
+
+    assert exc.value.reason == "missing_identity"
+    assert _question_texts(context) == ["What food did you have?"]
+    assert context.food_candidates == []
+
+
+def test_calibrated_confident_generic_parsed_item_without_question_fails_closed() -> None:
+    provider = FakeProvider(
+        responses=_sampled(
+            _parsed(
+                [{"type": "food", "name": "food", "quantity_text": "some"}],
+                confidence=0.95,
+            )
+        )
+    )
+    context = _context(raw_text="some stuff")
+
+    with pytest.raises(StepFailed) as exc:
+        _run(provider, context)
+
+    assert exc.value.reason == "clarification_quality_failed"
+    assert context.food_candidates == []
+
+
 @pytest.mark.parametrize(
     "raw_text",
     [

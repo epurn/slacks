@@ -224,7 +224,12 @@ class ParseStep:
         # strict keeps old-style abstention.
         conservative = signal.all_non_parsed or self.policy.should_clarify(signal.hybrid)
         if conservative and not _policy_allows_estimate(self.policy.mode, result.items):
-            fallback_items = result.items if not signal.all_non_parsed else ()
+            fallback_items = (
+                result.items
+                if not signal.all_non_parsed
+                and _all_candidates_have_recognizable_identity(result.items)
+                else ()
+            )
             context.clarification_questions = _clarification_questions(
                 samples,
                 fallback_items=fallback_items,
@@ -237,6 +242,10 @@ class ParseStep:
         # with no candidates.
         if not result.items:
             raise StepFailed("no_candidates")
+
+        if not _all_candidates_have_recognizable_identity(result.items):
+            context.clarification_questions = _clarification_questions(samples)
+            raise NeedsClarification("missing_identity")
 
         # Deterministic plausibility gate (FTY-156): check each *food* candidate's
         # quantity/unit against physical sanity ranges before trusting the parse.
@@ -385,6 +394,12 @@ def _has_recognizable_candidates(items: Sequence[ParsedCandidate]) -> bool:
     """Whether the validated reply contains a concrete food/exercise identity."""
 
     return any(_is_recognizable_identity(item.name) for item in items)
+
+
+def _all_candidates_have_recognizable_identity(items: Sequence[ParsedCandidate]) -> bool:
+    """Whether every extracted item names a concrete food/exercise identity."""
+
+    return bool(items) and all(_is_recognizable_identity(item.name) for item in items)
 
 
 def _is_recognizable_identity(name: str) -> bool:
