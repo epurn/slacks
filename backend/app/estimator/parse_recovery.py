@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from typing import Any
+from functools import lru_cache
+from typing import Any, ClassVar
 
-from pydantic import ValidationError
+from pydantic import ConfigDict, ValidationError, model_validator
 
 from app.llm.errors import StructuredOutputValidationError
 from app.schemas.parse import ParseResult
@@ -33,7 +34,39 @@ _ITEM_NUMERIC_FIELDS = frozenset(
 )
 
 
-def validate_parse_result(raw: Mapping[str, Any], *, max_repair_attempts: int) -> ParseResult:
+def recoverable_parse_result_schema(max_repair_attempts: int) -> type[ParseResult]:
+    """Return a ``ParseResult`` schema with bounded pre-validation recovery.
+
+    The provider contract remains ``structured_completion(prompt, schema)``:
+    callers pass this ParseResult-compatible schema, the provider performs its
+    normal retry and validation flow, and the schema's before-validator handles
+    only deterministic shape repair before Pydantic enforces the real schema.
+    """
+
+    return _recoverable_parse_result_schema(max(0, max_repair_attempts))
+
+
+@lru_cache(maxsize=16)
+def _recoverable_parse_result_schema(max_repair_attempts: int) -> type[ParseResult]:
+    class RecoverableParseResult(ParseResult):
+        model_config = ConfigDict(extra="forbid", title="ParseResult")
+
+        _max_repair_attempts: ClassVar[int] = max_repair_attempts
+
+        @model_validator(mode="before")
+        @classmethod
+        def _apply_recovery(cls, value: Any) -> Any:
+            return repair_parse_result_payload(
+                value,
+                max_repair_attempts=cls._max_repair_attempts,
+            )
+
+    RecoverableParseResult.__name__ = "ParseResult"
+    RecoverableParseResult.__qualname__ = "ParseResult"
+    return RecoverableParseResult
+
+
+def validate_parse_result(raw: Any, *, max_repair_attempts: int) -> ParseResult:
     """Validate ``raw`` as ``ParseResult`` after bounded mechanical recovery.
 
     The first pass is the normal strict schema boundary. If it fails, at most
@@ -42,23 +75,39 @@ def validate_parse_result(raw: Mapping[str, Any], *, max_repair_attempts: int) -
     there is no provider retry and no loop that can depend on model output.
     """
 
+    repaired = repair_parse_result_payload(raw, max_repair_attempts=max_repair_attempts)
     try:
-        return ParseResult.model_validate(raw)
+        return ParseResult.model_validate(repaired)
+    except ValidationError:
+        pass
+
+    raise StructuredOutputValidationError(
+        "provider output failed validation against ParseResult"
+    ) from None
+
+
+def repair_parse_result_payload(raw: Any, *, max_repair_attempts: int) -> Any:
+    """Return ``raw`` or a mechanically repaired payload for ParseResult validation."""
+
+    try:
+        ParseResult.model_validate(raw)
     except ValidationError:
         current: Any = raw
+    else:
+        return raw
 
     for _ in range(max(0, max_repair_attempts)):
         repaired = _repair_once(current)
         if repaired == current:
             break
         try:
-            return ParseResult.model_validate(repaired)
+            ParseResult.model_validate(repaired)
         except ValidationError:
             current = repaired
+        else:
+            return repaired
 
-    raise StructuredOutputValidationError(
-        "provider output failed validation against ParseResult"
-    ) from None
+    return current
 
 
 def _repair_once(value: Any) -> Any:

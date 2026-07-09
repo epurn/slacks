@@ -43,7 +43,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from app.estimator.parse_prompt import build_parse_prompt
-from app.estimator.parse_recovery import validate_parse_result
+from app.estimator.parse_recovery import recoverable_parse_result_schema
 from app.estimator.pipeline import AnsweredClarification
 from app.llm.base import Provider
 from app.schemas.parse import ParsedCandidate, ParseDisposition, ParseResult
@@ -340,10 +340,10 @@ def _sample_parallel(
 
 
 def _sample_once(provider: Provider, prompt: str, *, max_repair_attempts: int) -> ParseResult:
-    """Draw one raw structured sample and validate it through bounded recovery."""
+    """Draw one structured sample through the public provider contract."""
 
-    raw = provider._complete_with_retries(prompt, ParseResult, None)
-    return validate_parse_result(raw, max_repair_attempts=max_repair_attempts)
+    schema = recoverable_parse_result_schema(max_repair_attempts)
+    return provider.structured_completion(prompt, schema)
 
 
 def _verbalized_mean(samples: Sequence[ParseResult]) -> float:

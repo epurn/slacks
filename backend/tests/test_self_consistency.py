@@ -27,7 +27,7 @@ from app.estimator.self_consistency import (
     hybrid_score,
     pair_concordance,
 )
-from app.llm.base import ImageInput, Provider
+from app.llm.base import ImageInput, OutputT, Provider
 from app.llm.errors import LLMResponseError, StructuredOutputValidationError
 from app.llm.providers.fake import FakeProvider
 from app.schemas.parse import ParseResult
@@ -329,6 +329,48 @@ def test_invalid_sampling_bounds_are_rejected() -> None:
         collect_parse_samples(fake, "2 eggs", num_samples=0)
     with pytest.raises(ValueError):
         collect_parse_samples(fake, "2 eggs", first_window=0)
+
+
+class _PublicOnlyProvider(Provider):
+    """Provider double that fails if callers bypass ``structured_completion``."""
+
+    name = "public-only-fake"
+
+    def __init__(self, payload: dict[str, Any]) -> None:
+        super().__init__(timeout_seconds=1.0, max_retries=0)
+        self._payload = payload
+        self.prompts: list[str] = []
+
+    def structured_completion(
+        self,
+        prompt: str,
+        schema: type[OutputT],
+        *,
+        images: Sequence[ImageInput] | None = None,
+    ) -> OutputT:
+        assert images is None
+        self.prompts.append(prompt)
+        return schema.model_validate(self._payload)
+
+    def _complete(
+        self,
+        prompt: str,
+        schema: type[BaseModel],
+        *,
+        images: Sequence[ImageInput] | None,
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        raise AssertionError("parse sampling must use structured_completion")
+
+
+def test_sampler_uses_public_structured_completion_contract() -> None:
+    provider = _PublicOnlyProvider(_payload())
+
+    samples = collect_parse_samples(provider, "2 eggs", num_samples=1)
+
+    assert len(samples) == 1
+    assert samples[0].items[0].name == "eggs"
+    assert provider.prompts == [build_parse_prompt("2 eggs")]
 
 
 class _BarrierProvider(Provider):
