@@ -50,6 +50,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from app.estimator.count_serving_resolution import (
+    can_scale_reference,
+    has_explicit_amount,
+    scale_count_reference,
+)
 from app.estimator.evidence_utils import _content_hash, _record_source_ref
 from app.estimator.food_serving import NutritionFacts, resolve_grams, scale_facts
 from app.estimator.hardened_fetch import (
@@ -83,7 +88,7 @@ from app.estimator.searched_reference import (
     REFERENCE_SOURCE_TYPE,
     SearchedReferenceFacts,
     _identity_query,
-    _to_per_100g,
+    _searched_reference_from_facts,
     searched_reference_per_100g,
 )
 from app.llm.base import Provider
@@ -94,6 +99,7 @@ from app.llm.errors import (
     StructuredOutputValidationError,
 )
 from app.schemas.official_source import (
+    OFFICIAL_SOURCE_SCHEMA_VERSION,
     EstimateDisposition,
     FactBasis,
     NamedFoodEstimate,
@@ -152,6 +158,8 @@ class OfficialSourceResolveStep:
             # No candidate fell through from the food step; nothing to do.
             context.record_step(self.name, "skipped")
             return
+
+        context.schema_version = OFFICIAL_SOURCE_SCHEMA_VERSION
 
         for candidate in pending:
             context.resolved_food_items.append(self._resolve(context, candidate))
@@ -289,6 +297,8 @@ class OfficialSourceResolveStep:
             query=query,
             page_kind=page_kind,
             source_type=source_type,
+            allow_count_serving=True,
+            accept_result=lambda found: can_scale_reference(candidate, found),
         )
         if found is None:
             return None
@@ -447,11 +457,50 @@ class OfficialSourceResolveStep:
                 basis=FactBasis.AS_LOGGED.value,
             )
 
+        count_scaled = scale_count_reference(
+            candidate=candidate,
+            reference=reference,
+            source_type=source_type,
+            assumptions=assumptions,
+        )
+        if count_scaled is not None:
+            scaled = count_scaled.scaled
+            snapshot = count_scaled.snapshot
+            assumptions = count_scaled.assumptions
+            content_hash = _content_hash(hash_key, reference.facts)
+            return ResolvedFoodItem(
+                name=candidate.name,
+                quantity_text=candidate.quantity_text,
+                unit=candidate.unit,
+                amount=candidate.amount,
+                grams=scaled.grams,
+                calories=scaled.calories,
+                protein_g=scaled.protein_g,
+                carbs_g=scaled.carbs_g,
+                fat_g=scaled.fat_g,
+                product_id=None,
+                source_type=source_type,
+                source_ref=source_ref,
+                content_hash=content_hash,
+                fetched_at=datetime.now(UTC),
+                calories_per_100g=round(snapshot.calories, 4),
+                protein_per_100g=round(snapshot.protein_g, 4),
+                carbs_per_100g=round(snapshot.carbs_g, 4),
+                fat_per_100g=round(snapshot.fat_g, 4),
+                assumptions=assumptions,
+                basis=count_scaled.basis,
+            )
+
+        if reference.count_serving is not None and has_explicit_amount(candidate):
+            return None
+
         grams = resolve_grams(
             unit=candidate.unit,
             amount=candidate.amount,
             quantity_text=candidate.quantity_text,
-            default_serving_g=reference.default_serving_g,
+            default_serving_g=(
+                None if reference.count_serving is not None else reference.default_serving_g
+            ),
         )
         if grams is None:
             grams = _default_serving_grams(candidate, reference.default_serving_g)
@@ -471,7 +520,7 @@ class OfficialSourceResolveStep:
                 ),
             )
 
-        per_100g = reference.facts
+        per_100g = reference.per_100g_facts or reference.facts
         scaled = scale_facts(per_100g, grams)
         content_hash = _content_hash(hash_key, per_100g)
 
@@ -582,15 +631,10 @@ def _searched_reference_from_estimate(
             assumptions=tuple(estimate.assumptions),
             basis=FactBasis.AS_LOGGED.value,
         )
-    canonical = _to_per_100g(estimate.facts)
-    if canonical is None:
-        return None
-    per_100g, default_serving_g = canonical
-    return SearchedReferenceFacts(
-        facts=per_100g,
+    return _searched_reference_from_facts(
+        estimate.facts,
         source_ref=source_ref,
         hash_key=hash_key,
-        default_serving_g=default_serving_g,
         assumptions=tuple(estimate.assumptions),
-        basis=FactBasis.PER_100G.value,
+        allow_count_serving=True,
     )

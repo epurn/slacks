@@ -2,7 +2,7 @@
 
 Pure functions, no I/O, no LLM: a candidate's quantity (the parse step's
 ``unit`` / ``amount`` / ``quantity_text``) plus a per-100g nutrition fact sheet in,
-canonical calories and macros out. This module owns two deterministic rules:
+canonical calories and macros out. This module owns three deterministic rules:
 
 1. **quantity → grams** (:func:`resolve_grams`) — the v1-simple resolution the story
    scopes: an explicit mass (grams), a volume (millilitres or a standard household
@@ -10,7 +10,10 @@ canonical calories and macros out. This module owns two deterministic rules:
    or a *count* multiplied by the source's default serving size. A quantity that
    cannot be resolved to grams confidently returns ``None`` so the caller routes to
    ``needs_clarification`` rather than guessing.
-2. **grams → calories/macros** (:func:`scale_facts`) — scale canonical per-100g
+2. **count-serving facts → calories/macros** (:func:`scale_count_serving_facts`) —
+   scale source facts stated per ``N <count_unit>`` to a compatible consumed count
+   without needing grams first (FTY-252).
+3. **grams → calories/macros** (:func:`scale_facts`) — scale canonical per-100g
    facts by the resolved grams, rounded to 0.1.
 
 Storage is always canonical (kcal, grams); display units are a user preference,
@@ -176,8 +179,33 @@ _COUNT_UNITS: Final[frozenset[str]] = frozenset(
         "plates",
         "cracker",
         "crackers",
+        "egg",
+        "eggs",
     }
 )
+
+#: Closed, bounded count-serving vocabulary for source/model facts stated as
+#: ``per N <unit>``. This is deliberately smaller than ``_COUNT_UNITS``: serving math
+#: may treat broad portion words ("bowl", "handful") as a default-serving count, but
+#: source-backed count-to-count scaling only accepts concrete count nouns with an
+#: explicit synonym map. No fuzzy matching.
+_COUNT_SERVING_UNIT_ALIASES: Final[dict[str, str]] = {
+    "strip": "strip",
+    "strips": "strip",
+    "piece": "piece",
+    "pieces": "piece",
+    "slice": "slice",
+    "slices": "slice",
+    "egg": "egg",
+    "eggs": "egg",
+    "cracker": "cracker",
+    "crackers": "cracker",
+    "bar": "bar",
+    "bars": "bar",
+}
+
+COUNT_SERVING_UNITS: Final[frozenset[str]] = frozenset(_COUNT_SERVING_UNIT_ALIASES.values())
+MAX_COUNT_SERVING_AMOUNT: Final[float] = 1_000.0
 
 #: Match a leading "<number> <unit>" inside a free-text quantity phrase ("150 g",
 #: "2 cups"-style won't match a known unit and falls through). Used only when the
@@ -217,10 +245,72 @@ class ScaledNutrition:
     fat_g: float
 
 
+@dataclass(frozen=True)
+class CountServing:
+    """A source serving stated as a count, such as ``3 strips`` or ``5 crackers``."""
+
+    amount: float
+    unit: str
+
+    def __post_init__(self) -> None:
+        if (
+            not math.isfinite(self.amount)
+            or self.amount <= 0
+            or self.amount > MAX_COUNT_SERVING_AMOUNT
+        ):
+            raise ValueError("count serving amount out of bounds")
+        normalized = normalize_count_unit(self.unit)
+        if normalized is None:
+            raise ValueError("count serving unit is not recognized")
+        object.__setattr__(self, "unit", normalized)
+
+
+@dataclass(frozen=True)
+class ScaledCountNutrition:
+    """Calories/macros for a count-scaled portion.
+
+    ``grams`` is present only when the source/model also supplied the gram mass for
+    the source count serving (for example, ``5 crackers (19 g)``).
+    """
+
+    grams: float | None
+    calories: float
+    protein_g: float
+    carbs_g: float
+    fat_g: float
+
+
 def _normalize_unit(unit: str | None) -> str:
     """Lower-case and strip a unit token; ``None`` becomes the empty (count) token."""
 
-    return (unit or "").strip().lower()
+    return re.sub(r"\s+", " ", (unit or "").strip().lower())
+
+
+def normalize_count_unit(unit: str | None) -> str | None:
+    """Return the canonical count-serving unit, or ``None`` for an unsupported unit."""
+
+    return _COUNT_SERVING_UNIT_ALIASES.get(_normalize_unit(unit))
+
+
+def count_serving_multiplier(
+    *,
+    source_serving: CountServing,
+    consumed_unit: str | None,
+    consumed_amount: float | None,
+) -> float | None:
+    """Return ``consumed_count / source_count`` for compatible count units.
+
+    A count-serving relation is usable only when the consumed quantity has a positive
+    structured amount and an explicitly compatible count unit. Missing units and broad
+    serving words are rejected so ``4`` cannot accidentally mean four full source
+    servings when the source said ``per 5 crackers``.
+    """
+
+    if consumed_amount is None or not math.isfinite(consumed_amount) or consumed_amount <= 0:
+        return None
+    if normalize_count_unit(consumed_unit) != source_serving.unit:
+        return None
+    return consumed_amount / source_serving.amount
 
 
 def resolve_grams(
@@ -254,6 +344,27 @@ def resolve_grams(
             return round(amount * default_serving_g, 3)
 
     return _grams_from_text(quantity_text)
+
+
+def grams_from_count_serving(
+    *,
+    source_serving: CountServing,
+    serving_g: float | None,
+    consumed_unit: str | None,
+    consumed_amount: float | None,
+) -> float | None:
+    """Resolve consumed grams from a count-serving gram relation, when available."""
+
+    if serving_g is None or serving_g <= 0:
+        return None
+    multiplier = count_serving_multiplier(
+        source_serving=source_serving,
+        consumed_unit=consumed_unit,
+        consumed_amount=consumed_amount,
+    )
+    if multiplier is None:
+        return None
+    return round(serving_g * multiplier, 3)
 
 
 def _grams_from_measure(normalized_unit: str, amount: float) -> float | None:
@@ -294,6 +405,38 @@ def scale_facts(facts: NutritionFacts, grams: float) -> ScaledNutrition:
         protein_g=round(facts.protein_g * factor, 1),
         carbs_g=round(facts.carbs_g * factor, 1),
         fat_g=round(facts.fat_g * factor, 1),
+    )
+
+
+def scale_count_serving_facts(
+    facts: NutritionFacts,
+    *,
+    source_serving: CountServing,
+    consumed_unit: str | None,
+    consumed_amount: float | None,
+    serving_g: float | None = None,
+) -> ScaledCountNutrition | None:
+    """Scale facts stated per counted source serving to a consumed count.
+
+    ``facts`` are the calories/macros for ``source_serving`` itself. The consumed
+    unit must normalize to the same closed count unit; otherwise ``None`` is returned
+    so callers can try the next evidence result/tier rather than silently guessing.
+    """
+
+    multiplier = count_serving_multiplier(
+        source_serving=source_serving,
+        consumed_unit=consumed_unit,
+        consumed_amount=consumed_amount,
+    )
+    if multiplier is None:
+        return None
+    grams = round(serving_g * multiplier, 3) if serving_g is not None and serving_g > 0 else None
+    return ScaledCountNutrition(
+        grams=grams,
+        calories=round(facts.calories * multiplier, 1),
+        protein_g=round(facts.protein_g * multiplier, 1),
+        carbs_g=round(facts.carbs_g * multiplier, 1),
+        fat_g=round(facts.fat_g * multiplier, 1),
     )
 
 
