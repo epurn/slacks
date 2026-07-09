@@ -56,16 +56,12 @@ Adapter — FTY-079 / FTY-164**.
 
 ## Version
 
-2 (FTY-298, contract only): clarifies rough-estimate provenance under the default
-`FATTY_ESTIMATOR_CLARIFY_MODE=estimate_first` policy. Recognizable natural-language
-food/exercise identities, source misses, and unresolvable serving sizes may fall forward
-to reference/comparable evidence, model-prior, or default-serving rough estimates before
-any clarification. Such estimates are valid only when their source type/reference,
-field or basis provenance, and content-free assumptions make the uncertainty visible
-and the item remains editable. Exact/product-backed, official/reference-backed,
-comparable aggregate, and model/default-prior estimates must stay distinguishable in
-the evidence/read model; raw diary text and raw provider/fetched output remain outside
-source refs, assumptions, traces, logs, diagnostics, and calibration artifacts.
+2 (FTY-298, contract only): clarifies rough-estimate provenance under the shared
+`estimate_first` policy now owned by
+[estimator-policy.md](estimator-policy.md). This evidence contract keeps the source
+hierarchy, evidence record shape, source provenance, search/fetch/re-match rules, and
+retention rules that carry those provenance requirements in the read and persistence
+models.
 
 1 (FTY-045). The source-system identifiers are stable strings recorded on each
 evidence record and on the estimation run `source_refs`: `usda_fdc`,
@@ -154,28 +150,13 @@ A `model_prior` result is recorded as an evidence record with
 surfaced to clients and the entry remains editable. This is a contract-level
 restatement of the architecture `Lookup Rule`; adapters must not weaken it.
 
-**Rare clarification / rough-estimate fallback (FTY-298).** Under the default
-`estimate_first` policy, a recognizable item is not sent back solely because a source
-missed or the serving size could not be resolved. The estimator falls forward through
-the applicable evidence tiers and then to rough default/model-prior estimation before
-asking. This does not make a rough estimate look trusted:
-
-- exact source-backed values keep their concrete source (`user_label`, `user_text`,
-  `official_source`, `product_database`, `trusted_nutrition_database`, or a single
-  `reference_source`) and `status = success`;
-- comparable aggregates remain rough reference evidence, surfaced by their
-  `estimate_basis = comparable_reference` read-model hint and the contributing
-  `reference_source:<url>` refs/hashes in `assumptions`;
-- pure model-prior or default-serving estimates use `source_type = model_prior` (or the
-  concrete source type whose facts were used plus a default-serving assumption), a
-  `model_prior`/source `source_ref`, and content-free assumptions such as the source
-  miss, serving prior, cold-pass agreement, and active clarify mode;
-- every rough estimate remains user-editable and visibly distinct from trusted
-  database, product, official, label, user-stated, and correction evidence.
-
-The rough path is still fail-closed for unsafe contradictions, implausible facts,
-schema-invalid provider output, missing recognizable identity, disabled/unavailable
-estimator paths after bounded retries, or an operator-selected stricter mode.
+**Rare clarification / rough-estimate fallback (FTY-298).** The shared
+estimate-first and rough-provenance semantics are defined in
+[estimator-policy.md](estimator-policy.md). This evidence contract owns the concrete
+`source_type`, `source_ref`,
+`field_provenance`, `estimate_basis`, `assumptions`, status, and retention shapes that
+make exact/product-backed, official/reference-backed, comparable aggregate, and
+model/default-prior estimates distinguishable in persistence and read models.
 
 **User-stated facts and the fallback rule (FTY-279).** A nutrition fact the user
 stated in the entry text (`user_text`) is the **highest-preference** source for
@@ -1140,15 +1121,13 @@ cross-user / unknown / unauthenticated fail-closed.
   captured-once rule: a re-match re-snapshots `*_estimated` and is **not** `user_edit`
   (see **Item Re-match — FTY-093**). The provenance read-model dependency is enforced by
   the steward (FTY-093 ships after FTY-092).
-- **FTY-298 (contract only; no schema/code in this story).** Bumps the evidence
-  contract to describe rough-estimate provenance for the `estimate_first` clarification
-  policy. It adds no new table or enum requirement: the existing `source_type`,
-  `source_ref`, `field_provenance`, `assumptions`, run `source_refs`, and read-model
-  estimate-basis fields carry the distinction between exact/product-backed,
-  official/reference-backed, comparable aggregate, and model/default-prior estimates.
-  Downstream implementation stories may add runtime settings for
-  `FATTY_ESTIMATOR_CLARIFY_MODE`,
-  `FATTY_ESTIMATOR_PARSE_CLARIFY_THRESHOLD`,
-  `FATTY_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR`, and
-  `FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS`; this docs-only story does not require
-  product code behavior.
+- **FTY-298 / FTY-303 (contract only; no schema/code in this story).** FTY-298 bumps
+  the evidence contract to describe rough-estimate provenance for the
+  `estimate_first` clarification policy, and FTY-303 extracts the global policy text
+  to [estimator-policy.md](estimator-policy.md). It adds no new table or enum
+  requirement: the existing `source_type`, `source_ref`, `field_provenance`,
+  `assumptions`, run `source_refs`, and read-model estimate-basis fields carry the
+  distinction between
+  exact/product-backed, official/reference-backed, comparable aggregate, and
+  model/default-prior estimates. This docs-only extraction does not require product
+  code behavior.
