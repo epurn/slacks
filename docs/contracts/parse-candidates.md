@@ -500,13 +500,17 @@ shared clarification policy ([estimator-policy.md](estimator-policy.md)). The ol
   count**.
 
 When the sample set would otherwise clarify (a hybrid score below the calibrated
-operating point, a provider `needs_clarification` disposition, or a schema-validated
-sample that first needed bounded schema-shape repair), the parse step applies the
-shared mode semantics and allowed clarification reasons from
-[estimator-policy.md](estimator-policy.md). Missing amounts
-become downstream rough assumptions, not parse questions, under the default policy. A
-calibrated-confident sample set is unaffected (it never entered the clarify branch),
-and the deterministic plausibility gate above still runs on the accepted items.
+operating point or a provider `needs_clarification` disposition), the parse step
+applies the shared mode semantics and allowed clarification reasons from
+[estimator-policy.md](estimator-policy.md). Successful bounded schema-shape repair
+is not an independent clarification branch: after pre-validation repair yields a
+trusted `ParseResult`, routing uses the same disposition, sample
+confidence/agreement, recognizable-identity, plausibility, stated-nutrition
+safety, and active-policy gates as any other validated sample. Missing amounts
+become downstream rough assumptions, not parse questions, under the default policy.
+A calibrated-confident sample set is unaffected (it never entered the clarify
+branch), and the deterministic plausibility gate above still runs on the accepted
+items.
 
 **Range midpoint.** When a food item has no structured `amount` but its `quantity_text`
 states a numeric range, the step fills the arithmetic **midpoint** as the count
