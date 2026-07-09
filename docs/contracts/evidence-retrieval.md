@@ -56,6 +56,17 @@ Adapter — FTY-079 / FTY-164**.
 
 ## Version
 
+2 (FTY-298, contract only): clarifies rough-estimate provenance under the default
+`FATTY_ESTIMATOR_CLARIFY_MODE=estimate_first` policy. Recognizable natural-language
+food/exercise identities, source misses, and unresolvable serving sizes may fall forward
+to reference/comparable evidence, model-prior, or default-serving rough estimates before
+any clarification. Such estimates are valid only when their source type/reference,
+field or basis provenance, and content-free assumptions make the uncertainty visible
+and the item remains editable. Exact/product-backed, official/reference-backed,
+comparable aggregate, and model/default-prior estimates must stay distinguishable in
+the evidence/read model; raw diary text and raw provider/fetched output remain outside
+source refs, assumptions, traces, logs, diagnostics, and calibration artifacts.
+
 1 (FTY-045). The source-system identifiers are stable strings recorded on each
 evidence record and on the estimation run `source_refs`: `usda_fdc`,
 `open_food_facts`, `official_source`, `user_label`, `user_text` (FTY-279),
@@ -109,7 +120,7 @@ configured v1 provider sits:
 | 3 | `product_database` | `open_food_facts` | barcoded and packaged food products |
 | 4 | `trusted_nutrition_database` | `usda_fdc` | generic foods and common serving references |
 | 5 | `reference_source` | search + hardened searched-result fetch | public nutrition reference pages, when the higher tiers miss or do not apply (FTY-166) |
-| 6 | `model_prior` | `model_prior` | last-resort fallback only (see **Fallback Rule**) |
+| 6 | `model_prior` | `model_prior` | last-resort rough/default-prior fallback only, with explicit assumptions and editability (see **Fallback Rule**) |
 
 Ingredient-based recipe calculation and similar-dish reference estimates
 (system-overview ranks 6–7) are deferred; this contract reserves room for them
@@ -142,6 +153,29 @@ A `model_prior` result is recorded as an evidence record with
 `source_type = model_prior` and the reason it was used, so the source status is
 surfaced to clients and the entry remains editable. This is a contract-level
 restatement of the architecture `Lookup Rule`; adapters must not weaken it.
+
+**Rare clarification / rough-estimate fallback (FTY-298).** Under the default
+`estimate_first` policy, a recognizable item is not sent back solely because a source
+missed or the serving size could not be resolved. The estimator falls forward through
+the applicable evidence tiers and then to rough default/model-prior estimation before
+asking. This does not make a rough estimate look trusted:
+
+- exact source-backed values keep their concrete source (`user_label`, `user_text`,
+  `official_source`, `product_database`, `trusted_nutrition_database`, or a single
+  `reference_source`) and `status = success`;
+- comparable aggregates remain rough reference evidence, surfaced by their
+  `estimate_basis = comparable_reference` read-model hint and the contributing
+  `reference_source:<url>` refs/hashes in `assumptions`;
+- pure model-prior or default-serving estimates use `source_type = model_prior` (or the
+  concrete source type whose facts were used plus a default-serving assumption), a
+  `model_prior`/source `source_ref`, and content-free assumptions such as the source
+  miss, serving prior, cold-pass agreement, and active clarify mode;
+- every rough estimate remains user-editable and visibly distinct from trusted
+  database, product, official, label, user-stated, and correction evidence.
+
+The rough path is still fail-closed for unsafe contradictions, implausible facts,
+schema-invalid provider output, missing recognizable identity, disabled/unavailable
+estimator paths after bounded retries, or an operator-selected stricter mode.
 
 **User-stated facts and the fallback rule (FTY-279).** A nutrition fact the user
 stated in the entry text (`user_text`) is the **highest-preference** source for
@@ -179,7 +213,7 @@ from. Records are split so global source facts never carry user-specific data:
 | `facts` | normalized nutrition facts | Immutable snapshot (see below). |
 | `status` | lookup status | The outcome that produced this record (see **Provider Capability / Status**). |
 | `field_provenance` | map | _(FTY-279, optional)_ Per-field provenance when a record's fields have **heterogeneous** origins (user-stated calories + estimated/unknown macros): maps each of `calories` / `protein_g` / `carbs_g` / `fat_g` to `user_stated`, `estimated`, or `unknown`. Absent → every present fact field shares this record's `source_type`. |
-| `assumptions` | string[] | Any documented assumptions (density, default serving, model-prior reason, per-field estimate reason). |
+| `assumptions` | string[] | Any documented assumptions (density, default serving, model-prior reason, per-field estimate reason, active rough-estimate basis). Assumptions are content-free labels and source ids only; never raw diary text, prompts, provider output, fetched text, URLs with secrets, request/response bodies, or provider error bodies. |
 
 `source_ref` for a fetched `official_source` or `reference_source` records the
 URL only (no headers, body, or query secrets). Object-level ownership and
@@ -498,6 +532,11 @@ body, or response body.
   applicable source lookup was available violates this contract. Filling a **missing**
   field of a user-stated item from `model_prior` (with `field_provenance = estimated`)
   is permitted and is **not** such a violation.
+- Under `estimate_first`, a model/default-prior rough estimate is accepted only after
+  schema validation, deterministic plausibility checks, and any configured cold-pass or
+  numeric floor succeeds. If the rough estimate cannot be made plausible and
+  provenance-backed, the estimator asks only for an allowed rare clarification reason
+  or fails closed; it never records a trusted-looking guess.
 
 ## Authorization
 
@@ -524,6 +563,13 @@ body, or response body.
   provenance is auditable without retaining the sensitive sentence. (The raw entry
   text lives only on the owning `log_events` row per `docs/security/data-retention.md`,
   not copied into the evidence layer.)
+- **No raw text/output leakage from rough estimates (FTY-298).** A rough default,
+  reference/comparable, or model-prior estimate may record the source ids consulted,
+  source-miss labels, cold-pass agreement labels, serving-prior labels, and the active
+  clarify mode. It must not copy raw diary text, raw model/provider output, raw fetched
+  page text, search result bodies, provider errors, prompts, URLs containing secrets, or
+  request/response bodies into `source_ref`, `assumptions`, logs, traces, diagnostics,
+  source refs, or calibration artifacts beyond explicit public fixture inputs.
 - **Source status retained and surfaced.** Each entry keeps its `source_type`,
   `source_ref`, lookup `status`, and assumptions so the user can see how it was
   estimated and edit it; `model_prior` entries record why the fallback was used.
@@ -574,6 +620,18 @@ generic food with no configured source and no label:
   trusted_nutrition_database  usda_fdc → unavailable (no API key)
   → Fallback Rule allows model_prior; evidence record source_type=model_prior,
     assumptions=["usda_fdc unavailable"], surfaced to client as a model-prior estimate
+```
+
+```
+recognizable amountless food under estimate_first: "some crackers"
+  parser/resolver identifies the item but has no count
+  trusted_nutrition_database / reference_source miss or lack a usable serving
+  → model/default-prior rough estimate accepted only after schema + plausibility checks
+  → evidence record: source_type=model_prior, source_ref=model_prior,
+    assumptions=["clarify_mode:estimate_first", "amount_missing",
+                 "default_serving_prior", "source_miss:usda_fdc"]
+  # editable rough provenance, not a trusted database value and not a clarification
+  # solely for missing quantity
 ```
 
 ```
@@ -753,8 +811,10 @@ the resolver fall to `model_prior` — with per-tier `assumptions` naming why.
   search + fetch** → model prior with status;
 - **detail-rich generic item (FTY-167):** no brand page exists, so the official
   search is skipped → **reference source search + fetch** → model prior with status;
-- a generic item with **no usable amount** still routes to `needs_clarification`
-  before any of this (FTY-167 boundary unchanged).
+- a recognizable generic item with **no usable amount** follows the same rough
+  reference/model/default-prior path under `estimate_first`; it routes to
+  `needs_clarification` only when `balanced`/`strict` asks or no plausible rough
+  estimate can be produced.
 
 ### Owner
 
@@ -1080,3 +1140,15 @@ cross-user / unknown / unauthenticated fail-closed.
   captured-once rule: a re-match re-snapshots `*_estimated` and is **not** `user_edit`
   (see **Item Re-match — FTY-093**). The provenance read-model dependency is enforced by
   the steward (FTY-093 ships after FTY-092).
+- **FTY-298 (contract only; no schema/code in this story).** Bumps the evidence
+  contract to describe rough-estimate provenance for the `estimate_first` clarification
+  policy. It adds no new table or enum requirement: the existing `source_type`,
+  `source_ref`, `field_provenance`, `assumptions`, run `source_refs`, and read-model
+  estimate-basis fields carry the distinction between exact/product-backed,
+  official/reference-backed, comparable aggregate, and model/default-prior estimates.
+  Downstream implementation stories may add runtime settings for
+  `FATTY_ESTIMATOR_CLARIFY_MODE`,
+  `FATTY_ESTIMATOR_PARSE_CLARIFY_THRESHOLD`,
+  `FATTY_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR`, and
+  `FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS`; this docs-only story does not require
+  product code behavior.

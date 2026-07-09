@@ -19,8 +19,9 @@ This covers five things:
    provenance) tables, the calories/macros columns added to `derived_food_items`, and
    the `0007` migration;
 5. the **routing and trust boundary** — how a resolved candidate completes, how an
-   unknown food or unresolvable quantity routes to `needs_clarification`, and how a
-   transient source failure retries while a bad response fails closed.
+   unknown food or unresolvable quantity falls forward to rough estimation or, only for
+   allowed policy reasons, `needs_clarification`, and how a transient source failure
+   retries while a bad response fails closed.
 
 It consumes FTY-042's `unresolved` food candidates (see `parse-candidates.md`) and
 plugs into FTY-040's pipeline-step interface and status transitions (see
@@ -38,6 +39,22 @@ estimator / contracts / backend-core / security-privacy lane:
 
 ## Version
 
+12 (FTY-298, contract only) adopts the **rare clarification / estimate-first** food
+resolution boundary. With the default
+`FATTY_ESTIMATOR_CLARIFY_MODE=estimate_first`, a recognizable food identity is enough
+to attempt a rough, editable estimate: bare `milk`, `some crackers`, `crackers and
+hummus`, and candidates whose exact source match or serving math misses fall forward
+through source-backed lookup, reference/comparable evidence, model-prior, or
+default-serving estimation before any question. Counts, portions, brands, product
+identities, explicit nutrition facts, and standard-serving cues still make the estimate
+stronger, but missing quantity alone no longer triggers the default clarification path.
+`balanced` preserves the calibrated abstention path without re-asking for stated
+details, and `strict` lets self-hosters keep older amount-clarification behavior. Rough
+estimates must carry distinct provenance (`trusted` / `product` / `official` /
+`reference_source` / `comparable_reference` / `model_prior` or default-prior
+assumptions), source-miss/serving assumptions, and remain user-editable. This is a
+contract-only target for downstream estimator/settings stories.
+
 11 (FTY-292) locks the dogfood regression class for **explicit count + measured
 household-volume spread** entries. A parsed snack such as "6 crackers with about
 1.5-2 tbsp dill pickle hummus" carries sufficient quantity detail for both
@@ -45,8 +62,10 @@ components: the cracker count resolves through the count/default-serving path an
 the hummus resolves through the household-volume path. If exact product lookup
 misses for the cracker or hummus brand hint, resolution falls forward through the
 existing searched-reference / comparable-reference / model-prior order with rough
-provenance; it must not ask the generic quantity question again. A truly
-amountless phrase such as "crackers and hummus" remains clarifiable.
+provenance; it must not ask the generic quantity question again. Before FTY-298, a
+truly amountless phrase such as "crackers and hummus" remained clarifiable; v12
+supersedes that as the default and makes it a rough estimate unless a stricter operator
+mode is selected or another allowed clarification reason applies.
 
 10 (FTY-279, contract only) makes a **user-stated nutrition fact evidence, not a
 clarification trigger**. A recognizable food item carrying a concrete user-supplied
@@ -89,38 +108,43 @@ column (`0012` migration) and an additive `brand` field on the parse candidate; 
 does not change the FTY-044 USDA, FTY-060 OFF, or FTY-061 label paths. See
 **Official-Source Resolution (FTY-062)** below.
 
-6 (FTY-167) **sharpens the generic-food clarification boundary** and widens the count
-vocabulary. A generic (unbranded) food USDA/OFF cannot cost no longer always clarifies:
+6 (FTY-167) **sharpened the generic-food clarification boundary** and widened the count
+vocabulary. If USDA/OFF could not cost a generic (unbranded) food, the resolver no
+longer always clarified:
 a **detail-rich** generic candidate (identity plus a usable amount — a count, a numeric
 range, or a measured quantity) is deferred to the official-source step and estimated
 from the **model prior** with an explicit `source_type = model_prior` status, exactly
 like the FTY-062 branded fallback but **skipping the official web search** (a generic
-food has no brand page to find). Only a generic food with **no usable amount** ("some
-crackers") still routes to `needs_clarification`. The serving math's count vocabulary
-also gains common serving/portion nouns (`slice`, `sandwich`, `handful`, `ring`,
-`finger`, …). No schema, migration, or serving-math change beyond the count vocabulary;
-the USDA/OFF/label/official paths and their plausibility gate are unchanged.
+food has no brand page to find). Under that historical boundary, only a generic food
+with **no usable amount** ("some crackers") still routed to `needs_clarification`; FTY-298
+supersedes that as the default and lets `strict` retain it. The serving math's count
+vocabulary also gains common serving/portion nouns (`slice`, `sandwich`, `handful`,
+`ring`, `finger`, …). No schema, migration, or serving-math change beyond the count
+vocabulary; the USDA/OFF/label/official paths and their plausibility gate are unchanged.
 
-9 (FTY-278, contract only) **makes a genuinely amountless component's clarification
+9 (FTY-278, contract only) **makes any remaining amount clarification
 item-scoped** instead of whole-entry-terminal, routing a mixed log to the new
 first-class **`partially_resolved`** event status. Today (v8 and earlier) the food
 step is all-or-nothing: if any candidate cannot be costed — an amountless generic
 food, an unknown food, or an unresolvable quantity — the **whole event** goes
 `needs_clarification` with *nothing costed*, even when the entry's other components
-resolved cleanly ("chicken breast 150g and some milk"). FTY-278 settles the target:
-when at least one component costs and at least one is amountless, the food step
+resolved cleanly ("chicken breast 150g and some milk"). FTY-278 settled the target:
+when at least one component costs and one component still has an allowed clarification
+reason, the food step
 **commits the costable components as `resolved` items** (with their
 evidence/`products` rows) in the same terminal transaction as a `processing →
 partially_resolved` transition, and raises an **item-scoped** clarification naming
-only the amountless component (the `derived_food_item_id` carrier is
-`parse-candidates.md` v5); an entry with *no* costable component still routes to
-event-level `needs_clarification`. This decides routing/counting semantics only (no
+only that component (the `derived_food_item_id` carrier is `parse-candidates.md` v5);
+an entry with *no* costable component still routes to event-level
+`needs_clarification`. FTY-298 supersedes the amountless default by trying a rough
+estimate first; `strict` or an unavailable/unsafe rough path can still produce the
+item-scoped question FTY-278 defined. This decides routing/counting semantics only (no
 `food_step.py`/serving-math/DTO/schema/migration change); the estimator work is a
 **downstream follow-up** (`log-events.md` v6, `estimation-jobs.md` v3,
 `daily-summary.md`), and the **v8 baseline** ships until then.
 
-8 (FTY-275) **widens the deterministic serving math to standard household volume
-measures** and sharpens the clarification boundary to *any stated portion*. A parsed
+8 (FTY-275) **widened the deterministic serving math to standard household volume
+measures** and sharpened the clarification boundary to *any stated portion*. A parsed
 household-measure portion — `cup`, `tsp`, `tbsp`, `fl oz`, `pint`, `quart`, `gallon`
 and their common spellings — now converts to grams at its standard millilitre volume
 under the existing `1 ml ≈ 1 g` v1 assumption (tsp 5 ml, tbsp 15 ml, fl oz 30 ml, cup
@@ -134,13 +158,14 @@ household unit, a colloquial measure word (`splash`/`drizzle`/`dash`/`pinch`/
 `handful`/`glug`), or an indefinite-article measure (`a`/`an` = 1) as detail present,
 so a generic source-miss defers to the model-prior estimate rather than clarifying —
 never re-asking for an amount the user already stated in words. Only a component with
-**no** stated portion ("some milk", bare "milk") still clarifies — and in a *mixed*
-entry that amountless component still drags the **whole event** to
-`needs_clarification` with nothing costed. Making that clarification **item-scoped**
-so the entry's costable siblings are committed and counted while only the amountless
-component is asked about is the explicit follow-up, **FTY-278** (v9 above). No
-schema, migration, DTO, or new prompt-string change; the LLM still supplies no
-calories/macros and the deterministic serving math owns every number.
+**no** stated portion ("some milk", bare "milk") clarified under that historical
+boundary — and in a *mixed* entry that amountless component dragged the **whole event**
+to `needs_clarification` with nothing costed. FTY-298 supersedes the amountless default:
+`estimate_first` rough-estimates the recognizable identity, while `strict` may keep the
+older ask. Making any remaining clarification **item-scoped** so the entry's costable
+siblings are committed and counted while only the asked component is blocked is
+**FTY-278** (v9 above). No schema, migration, DTO, or new prompt-string change; the LLM
+still supplies no calories/macros and the deterministic serving math owns every number.
 
 7 (FTY-166) inserts the **reference-source tier** between the official source and
 the model prior inside the FTY-062 step: a branded item official sources miss — and
@@ -168,6 +193,29 @@ the re-snapshot-not-`user_edit` distinction is documented there and in `correcti
 
 ## Inputs
 
+### Clarify policy config (FTY-298)
+
+Food resolution consumes the same estimator clarify policy defined by
+`parse-candidates.md`. The shared operator setting is:
+
+| Variable | Default | Values | Meaning |
+| --- | --- | --- | --- |
+| `FATTY_ESTIMATOR_CLARIFY_MODE` | `estimate_first` | `estimate_first`, `balanced`, `strict` | Natural-language estimator abstention mode. Unknown values fail closed at config load. |
+
+Under `estimate_first`, a source miss, a missing default serving, or unresolvable
+serving math is a recovery condition, not an immediate question, when the item identity
+is recognizable. Resolution falls forward through the available evidence tiers and
+rough-prior paths; only missing identity, non-log/gibberish upstream parse input,
+unsafe contradictions/implausibilities, exhausted/unavailable estimator paths, or a
+stricter operator mode can ask. `balanced` keeps the calibrated abstention threshold
+without re-asking for a detail already supplied. `strict` may ask older-style amount
+questions for recognizable-but-amountless items.
+
+Optional downstream tunables use the shared names from `parse-candidates.md`:
+`FATTY_ESTIMATOR_PARSE_CLARIFY_THRESHOLD` (`balanced`/`strict` only),
+`FATTY_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR` (accepting rough nutrition facts), and
+`FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS` (bounded provider/policy repair).
+
 ### Config (`FdcSettings`, `FATTY_FDC_` env vars)
 
 | Variable | Default | Meaning |
@@ -180,8 +228,8 @@ the re-snapshot-not-`user_edit` distinction is documented there and in `correcti
 The key is a `SecretStr`, read from the environment only, never exposed to clients,
 never logged, and sent only in the `X-Api-Key` **header** (never the query string, so
 it cannot leak through a logged URL). The allowlisted host is derived from the base
-URL. With no key the source is disabled and food candidates are left `unresolved`
-(the offline bundled-dataset fallback is a documented deferral).
+URL. With no key the FDC source is disabled; no request is attempted and the candidate falls
+forward to the next source or rough/default-prior estimate with `source_disabled:usda_fdc` provenance; the bundled-dataset fallback remains deferred.
 
 ### Candidate input
 
@@ -248,11 +296,16 @@ quantity to grams, v1-simple per the story scope:
    instead of stopping at clarification;
 4. otherwise scan `quantity_text` for a leading `<number> <mass|volume unit>`.
 
-Returns `None` (→ `needs_clarification`) when none apply — e.g. a count with no known
-serving size, or an unrecognised/absent quantity. Calories/macros then scale per-100g
-facts by `grams / 100`, rounded to 0.1. Storage is canonical (kcal, grams); the
-1 ml ≈ 1 g density and the simple grams/millilitres/count scope are documented
-assumptions, with richer portion inference deferred.
+Returns `None` when none apply — e.g. a count with no known serving size, or an
+unrecognised/absent quantity. Under the default `estimate_first` policy this is not
+itself a clarification: the resolver falls forward to rough default-serving,
+reference/comparable, or model-prior estimation with explicit assumptions before
+asking. Under `balanced`/`strict`, or when every rough path is unavailable or unsafe,
+`None` may still route to `needs_clarification`. Calories/macros then scale per-100g
+facts by `grams / 100`, rounded to 0.1 when grams are resolved; rough-prior paths store
+their own basis and assumptions. Storage is canonical (kcal, grams); the 1 ml ≈ 1 g
+density and the simple grams/millilitres/count scope are documented assumptions, with
+richer portion inference deferred.
 
 ### Persistence
 
@@ -288,10 +341,15 @@ FDC facts (per 100 g): 130 kcal / 2.0 g protein / 28 g carbs / 0.2 g fat
 ## Validation
 
 - **Source match.** No confident FDC match (no result, none with energy, or none whose
-  per-100g facts pass the plausibility bound above) → `needs_clarification` (the food is
-  recognisable but cannot be costed; never guessed).
-- **Quantity.** Must resolve to grams via the rule above. Unresolvable →
-  `needs_clarification`.
+  per-100g facts pass the plausibility bound above) is a non-match, not a final
+  question under `estimate_first`: the resolver tries the next applicable source and
+  then rough reference/model/default-prior estimation with explicit provenance. Under
+  `balanced`/`strict`, or when every rough path is unavailable/unsafe, the same miss may
+  route to `needs_clarification`.
+- **Quantity.** Deterministic serving math is preferred. An unresolvable quantity falls
+  forward to rough default-serving/reference/model-prior estimation under
+  `estimate_first`; it asks only when the active policy allows asking or the fallback
+  cannot produce a plausible, provenance-backed estimate.
 - **Source response.** FDC JSON is untrusted until it validates against the response
   schema; only the fields used are trusted, and the description is length-bounded.
 
@@ -302,16 +360,20 @@ FDC facts (per 100 g): 130 kcal / 2.0 g protein / 28 g carbs / 0.2 g fat
 | All food candidates resolve | _(completes)_ | food items `resolved` + `products` + `evidence_sources` | `processing → completed` |
 | Recognizable item with a **valid user-stated nutrition fact** (FTY-279) | _(resolves from `user_text`)_ | food item `resolved` (`user_text`, `as_logged`) + `evidence_sources` (`user_text:<hash>`, no `product_id`); missing macros estimated or `null` | `processing → completed` |
 | User-stated facts **self-contradictory / implausible** (FTY-279) | `NeedsClarification` | clarification question | `processing → needs_clarification` |
-| No confident source match, generic food **without** usable amount | `NeedsClarification` | clarification question | `processing → needs_clarification` |
+| No confident source match, recognizable generic food **without** usable amount, `estimate_first` | _(falls forward → rough estimate)_ | `reference_source` / `comparable_reference` / `model_prior` or default-prior evidence + assumptions | `processing → completed` |
+| No confident source match, recognizable generic food **without** usable amount, `balanced`/`strict` asks | `NeedsClarification` | clarification question | `processing → needs_clarification` |
 | No confident source match, **detail-rich** generic food (FTY-167) | _(deferred → model-prior)_ | via official step (`model_prior`) | per the official step |
-| Unresolvable quantity | `NeedsClarification` | clarification question | `processing → needs_clarification` |
+| Unresolvable quantity, `estimate_first` | _(falls forward → rough estimate)_ | default-serving/reference/model-prior evidence + assumptions | `processing → completed` |
+| Unresolvable quantity, active policy allows amount asking or all rough paths unavailable/unsafe | `NeedsClarification` | clarification question | `processing → needs_clarification` |
 | Transient source failure (timeout/5xx) | `StepError` (retryable) | nothing | retries within bound, then `failed` |
 | Non-retryable source error (4xx/non-JSON/policy) | `StepFailed` (terminal) | nothing | `processing → failed` |
-| Source unconfigured (no key) | _(skipped, completes)_ | food items `unresolved` | `processing → completed` |
+| Source unconfigured (no key) | _(skipped; falls forward under `estimate_first`)_ | next source / reference / model/default-prior rough evidence + `source_disabled:usda_fdc` assumption for recognizable items; clarification only when no identity remains, all rough paths are unavailable/unsafe, or active policy asks | per resulting source / policy |
 | No food candidates (exercise-only) | _(no-op, completes)_ | — | _(unchanged)_ |
 
 A `needs_clarification` outcome records a fixed, sanitized question for the later
-answer flow. Resolved items, their evidence rows, and the cached products are
+answer flow. A rough-estimate outcome records source type, source reference,
+field/basis provenance where applicable, and content-free assumptions instead of a
+question; rough items remain editable. Resolved items, their evidence rows, and the cached products are
 committed in the **same transaction** as the terminal status — `completed` today,
 and, under the FTY-278 item-scoped contract, `partially_resolved` too (see
 **Item-scoped partial resolution (FTY-278)** below).
@@ -328,21 +390,24 @@ about:
 | **Mixed** (≥1 costable, ≥1 amountless) | committed `resolved`, **counted** | keeps `unresolved`, owns an **item-scoped** question (`derived_food_item_id`) | `processing → partially_resolved`, carrying the committed siblings |
 | No component costable | — | one or more event-level questions | `processing → needs_clarification`, nothing committed |
 
-- Only a component with **no stated portion** raises a question (the v8 boundary is
-  unchanged — a stated/worded/approximate portion still estimates); the question
-  names it through `derived_food_item_id` and its sanitized `name`, never the raw
-  diary phrase. An *implausible* candidate still routes the **whole** event to
-  `needs_clarification` (`parse-candidates.md`) — distinct from a merely
-  un-costable one.
+- Under the FTY-298 default, a component with **no stated portion** is first treated as
+  a recognizable rough-estimate candidate; it raises a question only when
+  `balanced`/`strict` asks, every rough path is unavailable or unsafe, or the component
+  lacks a recognizable identity. A question names the component through
+  `derived_food_item_id` and its sanitized `name`, never the raw diary phrase. An
+  *implausible* candidate still routes the **whole** event to `needs_clarification`
+  (`parse-candidates.md`) — distinct from a merely un-costable one.
 - Committed siblings are ordinary `resolved` `derived_food_items` rows with their
   `evidence_sources` (and, for trusted-database sources, cached `products`) — the
   same shape the all-costable path writes — so they surface and count with no new
   read path. Answering the item-scoped question re-estimates the **same** event and
   preserves those siblings without duplicating or double-counting them
   (`daily-summary.md`, `log-events.md` v6, `estimation-jobs.md` v3).
-- **Baseline** (ships until the FTY-278 `food_step.py` follow-up lands): the
-  whole-event routing tables above — an amountless/unknown/unresolvable component
-  sends the entire event to `needs_clarification`, nothing costed (FTY-275 v8).
+- **Baseline** (ships until the downstream estimator follow-ups land): the historical
+  whole-event routing tables may still send an amountless/unknown/unresolvable
+  component to `needs_clarification`, nothing costed. FTY-298 changes the target
+  contract: `estimate_first` falls forward to rough provenance before asking, and
+  FTY-278 keeps any remaining question item-scoped when some siblings are costable.
 
 ## Authorization
 
@@ -370,19 +435,36 @@ loaded the event scoped to the job's `user_id`; see `estimation-jobs.md`).
 - **Evidence, not pages.** `evidence_sources` stores the source reference, content
   hash, fetch timestamp, and extracted per-100g facts — never a raw page. `products`
   holds global source facts only (no user data). See `docs/security/data-retention.md`.
+- **Rough-estimate provenance without raw text.** Default-serving/model-prior fallback
+  reasons and source-miss diagnostics are recorded as content-free assumption labels and
+  source ids only. They never store raw diary text, raw provider output, raw fetched
+  text, URLs with secrets, request/response bodies, or provider error bodies in
+  `assumptions`, `source_refs`, logs, traces, or diagnostic messages.
 
 ## Errors
 
 | Condition | Result |
 | --- | --- |
-| No FDC match / no energy value | `needs_clarification` (`unknown_food`); nothing costed. |
-| Quantity not resolvable to grams | `needs_clarification` (`unresolvable_quantity`). |
+| No FDC match / no energy value | Non-match; under `estimate_first`, fall forward to the next source or rough estimate with provenance. `needs_clarification` (`unknown_food`) only when active policy allows asking or all rough paths are unavailable/unsafe. |
+| Quantity not resolvable to grams | Under `estimate_first`, fall forward to rough default-serving/reference/model-prior estimation. `needs_clarification` (`unresolvable_quantity`) only when active policy allows asking or no plausible rough estimate survives. |
 | User-stated facts self-contradictory / implausible (FTY-279) | `needs_clarification`; nothing costed for that item (a usable, valid stated fact resolves instead — never re-asked). |
 | Timeout / connection error / 5xx | `StepError` (`fdc_transient_error`); retried within the bound. |
 | 4xx / non-JSON / oversized / policy violation | Terminal `failed` (`fdc_response_error`); nothing persisted. |
-| No FDC key configured | Food left `unresolved`; event still completes. |
+| No FDC key configured | FDC is skipped with an explicit disabled-source reason; under `estimate_first`, a recognizable item falls forward to the next source or rough/default-prior estimate with provenance. `needs_clarification` only when no recognizable identity remains, every rough path is unavailable/unsafe, or the active policy asks. |
 
 ## Examples
+
+```
+parsed food candidate: name "crackers", quantity_text "", unit null, amount null
+  → USDA/OFF exact serving unavailable or unresolvable
+  → estimate_first falls forward to reference/model/default-prior rough estimation
+  → derived_food_items += crackers (resolved, rough calories/macros, grams nullable or
+    assumption-backed)
+  → evidence_sources += source_type model_prior/reference_source (or trusted source
+    with a default-serving assumption), source_ref, field/basis provenance, assumptions
+  → event: processing → completed
+  # NOT needs_clarification solely because the user omitted a count.
+```
 
 See the worked example above. The serving math, FDC mapping, SSRF policy, migration
 rollback, and end-to-end resolution (with a stubbed FDC source) are covered by
@@ -435,17 +517,23 @@ Once the user supplies a **usable concrete detail** for a recognizable item — 
 portion/count (FTY-167/275), a `brand` identity (FTY-062), or a stated nutrition fact
 (this story) — Slacks **estimates or counts with provenance** and must **not** ask a
 second follow-up for that same item merely because the detail was not the exact field
-the pipeline hoped for. A stated calorie total is a usable detail even when the user
-adds "idk the breakdown": the item resolves as a `user_text` calorie item, and the
-missing macros are estimated or left unknown — not re-asked as "How much did you have?".
+the pipeline hoped for. Under the default `estimate_first` mode, the recognizable
+identity itself is also sufficient to start a rough estimate: `milk`, `some crackers`,
+and `crackers and hummus` are rough estimates with editable provenance, not quantity
+questions by default. A stated calorie total is a usable detail even when the user adds
+"idk the breakdown": the item resolves as a `user_text` calorie item, and the missing
+macros are estimated or left unknown — not re-asked as "How much did you have?".
 
 `needs_clarification` is a **rare last resort**, not a routine step in the logging
 flow. For a recognizable item it is reserved for genuinely indeterminate or unsafe
-inputs:
+inputs, or for stricter operator modes:
 
-- an entry **component with no usable identity/detail at all** (bare "milk", "some
-  crackers" — no portion, no count, no brand, no stated nutrition), per the FTY-167/275
-  amountless boundary; or
+- **no recognizable identity** to estimate (for example non-log/gibberish text or a
+  component the parser cannot identify as food/exercise after bounded repair);
+- every enabled estimator/provider path needed for a rough estimate is unavailable,
+  exhausted after retries, or explicitly disabled;
+- `balanced`/`strict` is selected and the active calibrated/strict policy chooses an
+  amount question for a recognizable-but-amountless item; or
 - **self-contradictory / implausible** stated facts (negative/non-finite values, an
   as-logged total over the abuse cap, or macros whose Atwater-implied energy grossly
   exceeds a co-stated calorie total).
@@ -454,8 +542,9 @@ This is a **product expectation, not a hard quota**: across representative every
 logs Slacks should estimate or resolve **far more often than it asks**, and future
 eval/regression sets should hold a **low clarification rate** on such logs — without
 encoding a numeric percentage in code (ADR 0003; `parse-candidates.md`, Calibrated
-clarify decision). Item-scoped partial resolution for a *mixed* log (some components
-stated, one genuinely amountless) is tracked by FTY-278, not changed here.
+clarify decision). Item-scoped partial resolution for a *mixed* log with any remaining
+allowed question is tracked by FTY-278; FTY-298 changes the default amountless case to
+rough estimation before asking.
 
 ### Worked example (the Sobeys wrap)
 
@@ -558,19 +647,22 @@ user-owned `evidence_sources` row records `source_type = product_database`,
 | --- | --- | --- | --- |
 | Barcode + OFF match + resolvable quantity | _(completes)_ | food `resolved` (`product_database`) + `products` (by barcode) + `evidence_sources` | `processing → completed` |
 | OFF preferred over USDA for a barcode candidate | _(as above)_ | OFF facts win; USDA not consulted | `processing → completed` |
-| Barcode OFF no match / invalid barcode / no usable or implausible energy | `NeedsClarification` (`barcode_unknown`) | clarification question | `processing → needs_clarification` |
-| Unresolvable quantity | `NeedsClarification` (`unresolvable_quantity`) | clarification question | `processing → needs_clarification` |
+| Barcode OFF no match / invalid barcode / no usable or implausible energy, but recognizable identity and `estimate_first` | _(falls back)_ | next source / reference / model/default-prior rough evidence + assumptions | per the source it falls to |
+| Barcode OFF no match / invalid barcode / no usable or implausible energy, no identity or active policy asks | `NeedsClarification` (`barcode_unknown`) | clarification question | `processing → needs_clarification` |
+| Unresolvable quantity, `estimate_first` | _(falls back)_ | default-serving/reference/model-prior rough evidence + assumptions | per the source it falls to |
+| Unresolvable quantity, active policy asks or rough paths unavailable/unsafe | `NeedsClarification` (`unresolvable_quantity`) | clarification question | `processing → needs_clarification` |
 | OFF transient failure (timeout/5xx) | `StepError` (`off_transient_error`, retryable) | nothing | retries within bound, then `failed` |
 | OFF non-retryable error (4xx/non-JSON/policy) | `StepFailed` (`off_response_error`) | nothing | `processing → failed` |
-| OFF disabled/unavailable for a barcode candidate | _(falls back)_ | next source (USDA by name) if applicable, else `needs_clarification` | per the source it falls to |
+| OFF disabled/unavailable for a barcode candidate | _(falls back)_ | next source / rough estimate when policy allows, else `needs_clarification` | per the source it falls to |
 
-A barcode is **never** finalized from a guessed model-prior value while OFF is
-available; `model_prior` would be permitted only when OFF is unavailable/disabled and
-no other source applies (the model-prior persistence path itself remains deferred).
-When OFF is disabled, a barcode candidate falls back to the next applicable source
-(USDA generic by name). The run records the consulted source system(s)
-(`open_food_facts`, and/or `usda_fdc`) in `source_refs` so estimation source status is
-surfaced.
+A barcode is **never** finalized from a guessed model-prior value **as a barcode
+match** while OFF is available; if OFF misses and the candidate has a recognizable
+food identity, `estimate_first` may rough-estimate from that identity with explicit
+non-barcode provenance and assumptions. When OFF is disabled, unavailable, or misses,
+a barcode candidate falls back to the next applicable source (USDA generic by name,
+reference, then model/default-prior as allowed by policy). The run records the
+consulted source system(s) (`open_food_facts`, and/or `usda_fdc`) in `source_refs` so
+estimation source status is surfaced.
 
 ### Diagnostics
 
@@ -665,17 +757,21 @@ empty for a generic food (`"white rice"`). A candidate carrying a non-blank `bra
 - The food step (FTY-044/060) tries USDA/OFF first. On a **miss**, a *branded*
   candidate is **deferred** to the official-source step (it does not stop at
   `needs_clarification`); a *generic* candidate is deferred too **when it is detail-rich**
-  (identity plus a usable amount — FTY-167), otherwise it clarifies. A branded item
-  USDA/OFF **does** resolve never reaches this step.
+  (identity plus a usable amount — FTY-167), and under `estimate_first` a recognizable
+  amountless generic candidate is deferred to rough reference/model/default-prior
+  estimation before any question. `balanced`/`strict` may still ask the older amount
+  question. A branded item USDA/OFF **does** resolve never reaches this step.
 - The model never supplies a `brand` it was not given, and `brand` is stored as data,
   never interpreted.
 
 Inside the official step, a **branded** candidate is searched against official sources
-first (a named product has an authoritative page); a **generic** detail-rich candidate
-has no brand page, so official search is skipped. Either way, on a miss the candidate
-falls through to the **reference-source tier** (FTY-166 — a public-nutrition-reference
-search + searched-result fetch), and only when that also produces nothing confident to
-the **model-prior** estimate, whose `assumptions` name the per-tier reason (e.g.
+first (a named product has an authoritative page); a **generic** candidate has no brand
+page, so official search is skipped whether it is detail-rich or a default
+`estimate_first` amountless rough-estimate candidate. Either way, on a miss the
+candidate falls through to the **reference-source tier** (FTY-166 — a
+public-nutrition-reference search + searched-result fetch), and only when that also
+produces nothing confident to the **model-prior** estimate, whose `assumptions` name
+the per-tier reason (e.g.
 `"generic food (no official page to search); reference_source returned no confident
 match; estimated from model prior"`). The result always carries its explicit
 `source_type` and stays user-editable — never a silent guess.
@@ -761,8 +857,10 @@ The consulted source systems (`official_source`, `reference_source`, and/or
 | Search disabled / unavailable, a tier's fetch off, or no confident match on either tier → model-prior | _(completes)_ | food `resolved` (`model_prior`) + `evidence_sources` (`model_prior`, per-tier assumptions) | `processing → completed` |
 | Model-prior estimate fails the FTY-115 plausibility bound | `NeedsClarification` | clarification question | `processing → needs_clarification` |
 | Branded candidate USDA/OFF **resolves** | _(as FTY-044/060)_ | official/reference source not consulted | `processing → completed` |
-| Generic candidate USDA miss, **no usable amount** | `NeedsClarification` | clarification question | `processing → needs_clarification` |
-| Usable facts but unresolvable quantity, or model cannot estimate | `NeedsClarification` | clarification question | `processing → needs_clarification` |
+| Generic candidate USDA miss, **no usable amount**, `estimate_first` | _(falls forward)_ | reference/model/default-prior rough evidence + assumptions | `processing → completed` |
+| Generic candidate USDA miss, **no usable amount**, `balanced`/`strict` asks | `NeedsClarification` | clarification question | `processing → needs_clarification` |
+| Usable facts but unresolvable quantity, `estimate_first` | _(falls forward)_ | default-serving/reference/model-prior rough evidence + assumptions | `processing → completed` |
+| Model cannot estimate, all rough paths unavailable/unsafe, or active policy asks | `NeedsClarification` | clarification question | `processing → needs_clarification` |
 
 ### Security / Privacy
 
@@ -881,8 +979,8 @@ The backend exposes four health-check endpoints, all returning structured JSON w
   strings, the `assumptions` column already carries per-field reasons, and the
   derived-item macro columns are already nullable). The estimator implementation
   (parser extraction + `user_text` step + validation) is the **downstream FTY-280
-  follow-up**; the FTY-278/FTY-275 baseline ships until then. See **User-Stated
-  Resolution (FTY-279)**.
+  follow-up**; the historical FTY-278/FTY-275 baseline shipped until then. See
+  **User-Stated Resolution (FTY-279)**.
 - **FTY-280 (implements FTY-279).** Adds `backend/app/estimator/user_text_step.py`
   (`UserTextResolveStep` + `UserTextMacroEstimator`), wired **before** the food step:
   it claims each candidate carrying a valid stated calorie total, resolves it from the
@@ -922,3 +1020,13 @@ The backend exposes four health-check endpoints, all returning structured JSON w
   **FTY-278 implementation follow-up** (reads/answer flow: `daily-summary.md`,
   `log-events.md` v6, `estimation-jobs.md` v3); the FTY-275 (v8) baseline ships until
   then.
+- **FTY-298 (contract only; no code, no migration in this story).** Bumps the food
+  resolution contract to the rare clarification policy. The default target is
+  `FATTY_ESTIMATOR_CLARIFY_MODE=estimate_first`: recognizable-but-amountless foods,
+  source misses, and unresolvable serving math fall forward to source-backed,
+  reference/comparable, model-prior, or default-serving rough estimates before asking.
+  `balanced` preserves the calibrated ask/estimate tradeoff while never re-asking for
+  stated details, and `strict` lets self-hosters keep older amount clarifications.
+  Rough estimates must record source type/ref, field or basis provenance where
+  applicable, content-free assumptions, and remain editable. Runtime settings and
+  estimator changes are downstream FTY-299/FTY-300/FTY-301 work.
