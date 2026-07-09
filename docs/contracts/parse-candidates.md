@@ -37,6 +37,13 @@ estimator / contracts / backend-core lane:
 
 ## Version
 
+8 (FTY-304, wording clarification): names the concrete FTY-300 pre-validation
+provider-output repair phases governed by
+`FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS`, clarifies that the cap does not
+retry provider calls or repair schema-valid policy conflicts, and records the
+fail-closed label when bounded repair is exhausted or unsafe. No schema,
+persistence, prompt, provider, settings, or estimator behavior changes.
+
 7 (FTY-298, contract only): adopts the shared **rare clarification /
 estimate-first** policy for natural-language text logs. The parse step consumes the
 mode semantics, advisory-provider-clarification rule, allowed last-resort
@@ -132,8 +139,10 @@ answer endpoint — `clarification.md`), FTY-153 (render).
 The text-log clarify gate is policy-driven. Mode names, defaults, optional tunables,
 invalid-config fail-closed behavior, allowed last-resort clarification reasons, and
 rough-provenance requirements are defined once in [estimator-policy.md](estimator-policy.md). This parse
-contract owns how that active policy is applied to schema-validated samples, bounded
-provider repair, parse disposition, question quality, and persistence.
+contract owns how that active policy is applied to schema-validated samples, the
+bounded pre-validation provider-output repair phases governed by
+`FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS`, parse disposition, question quality,
+and persistence.
 
 ### LLM output schema (`ParseResult`)
 
@@ -192,6 +201,49 @@ quality gate for provider output, rejecting missing, generic, or under-optioned
 clarification questions before persistence.
 
 String length and list count bounds cap an adversarial or runaway reply.
+
+### Pre-validation provider-output repair (FTY-300 / FTY-304)
+
+`FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS` caps deterministic, local
+schema-shape repair for each provider sample before the parse step has a trusted
+`ParseResult`. The cap applies to every sampled provider reply, including the
+first early-stop window and any remaining self-consistency samples. It does not
+issue another provider call, change the prompt, reinterpret content, invent
+fields, or repair a schema-valid `needs_clarification` / `parsed` /
+`unparseable` output that conflicts with the active clarification policy. Those
+schema-valid outputs are routed by the policy gates described below.
+
+Each repair pass consumes one attempt. One pass may either unwrap one harmless
+top-level object wrapper or normalize the enumerated field shapes in the current
+object before strict `ParseResult` validation runs again. The repairable phases
+are:
+
+- unwrap a single top-level wrapper named `parse_result`, `result`, `response`,
+  or `output` when that wrapper is the only key and its value is an object;
+- normalize closed-vocabulary tokens for top-level `disposition` and candidate
+  `type` by trimming, case-folding, and replacing spaces/hyphens with
+  underscores;
+- replace `null` top-level `items` or `clarification_questions` with empty
+  arrays;
+- coerce finite numeric strings for top-level `confidence`, candidate `amount`,
+  and candidate `stated_calories` / `stated_protein_g` / `stated_carbs_g` /
+  `stated_fat_g`.
+
+Repairable examples include `{ "result": { ...ParseResult... } }`,
+`"Parsed"` / `"Food"` tokens, `"0.82"` confidence, `"6"` amounts, and
+`clarification_questions: null`. Unsafe or unenumerated shapes remain
+schema-invalid: unknown dispositions or candidate types, extra smuggled keys,
+missing required candidate names, non-finite or out-of-bounds numbers,
+non-object wrappers, multi-key wrappers, and any shape that still fails strict
+validation after the cap is exhausted.
+
+If the payload validates after bounded repair, the repaired value is treated as
+ordinary schema-validated provider output and continues through the same
+calibration, advisory-provider-clarification, plausibility, question-quality,
+and persistence gates as any other sample. If repair is disabled (`0`),
+exhausted, unsafe, or still schema-invalid, the sample fails closed as
+`StepFailed("schema_validation_failed")`; no candidates, questions, raw provider
+output, raw diary text, or repair transcript are persisted.
 
 ### Persistence
 
@@ -253,18 +305,17 @@ the most self-confident `parsed` sample's items.
 Under FTY-298 the routing table is interpreted through the active shared policy
 ([estimator-policy.md](estimator-policy.md)). In the default `estimate_first` mode, a
 schema-valid provider `needs_clarification` disposition, a low hybrid score, or a
-source/quantity gap is not a terminal parse decision when the sample set contains a
-recognizable food/exercise candidate or a bounded repair pass can recover one. The
-parse step discards advisory provider questions unless backend policy itself allows
-asking, and accepts the recognizable candidate for downstream rough resolution with
-content-free assumptions.
+source/quantity gap is not a terminal parse decision when the schema-validated sample
+set contains a recognizable food/exercise candidate. The parse step discards advisory
+provider questions unless backend policy itself allows asking, and accepts the
+recognizable candidate for downstream rough resolution with content-free assumptions.
 
 | Validated sample set | Pipeline signal | Persisted | Event transition |
 | --- | --- | --- | --- |
 | calibrated-confident, ≥1 item, all food candidates plausible | _(completes)_ | candidates `unresolved` | `processing → completed` |
 | calibrated-confident, ≥1 item, but a food candidate is implausible | `NeedsClarification` (`implausible_candidate`) | clarification question | `processing → needs_clarification` |
-| provider asks / no sample `parsed`, but a recognizable identity is present or recoverable and `estimate_first` is active | _(completes)_ | rough candidates `unresolved` + content-free assumptions; provider questions discarded | `processing → completed` |
-| active policy allows asking, and either no recognizable/recoverable candidate remains after repair or the hybrid score is below the calibrated operating point | `NeedsClarification` | clarification questions (pooled across samples or synthesized by backend policy) | `processing → needs_clarification` |
+| provider asks / no sample `parsed`, but a recognizable schema-validated identity is present and `estimate_first` is active | _(completes)_ | rough candidates `unresolved` + content-free assumptions; provider questions discarded | `processing → completed` |
+| active policy allows asking, and either no recognizable schema-validated candidate remains or the hybrid score is below the calibrated operating point | `NeedsClarification` | clarification questions (pooled across samples or synthesized by backend policy) | `processing → needs_clarification` |
 | unanimously `unparseable`, or a trusted set with no items | `StepFailed` (terminal) | nothing | `processing → failed` |
 | empty/whitespace input | `StepFailed` (terminal, no LLM call) | nothing | `processing → failed` |
 | schema-invalid sample / non-retryable provider error | `StepFailed` (terminal) | nothing | `processing → failed` |
@@ -297,8 +348,8 @@ which owns the architecture decision this implements):
   only 40% coverage and agreement-only never reaches it at all. A sample set
   with **no `parsed` sample** has no hybrid score to trust (its agreement can be
   a perfect 1.0 *about asking*), so the active FTY-298 policy owns routing:
-  under `estimate_first`, clarification-only samples with a recognizable or
-  recoverable identity are advisory and may be repaired into rough candidates;
+  under `estimate_first`, clarification-only samples with a recognizable
+  schema-validated identity are advisory and may be accepted as rough candidates;
   under `balanced`/`strict`, or when `estimate_first` has no recognizable
   identity or another allowed clarification reason applies, the set routes to
   clarification or failure.
@@ -449,9 +500,10 @@ shared clarification policy ([estimator-policy.md](estimator-policy.md)). The ol
   count**.
 
 When the sample set would otherwise clarify (a hybrid score below the calibrated
-operating point, a provider `needs_clarification` disposition, or a set that needs a
-bounded repair pass), the parse step applies the shared mode semantics and allowed
-clarification reasons from [estimator-policy.md](estimator-policy.md). Missing amounts
+operating point, a provider `needs_clarification` disposition, or a schema-validated
+sample that first needed bounded schema-shape repair), the parse step applies the
+shared mode semantics and allowed clarification reasons from
+[estimator-policy.md](estimator-policy.md). Missing amounts
 become downstream rough assumptions, not parse questions, under the default policy. A
 calibrated-confident sample set is unaffected (it never entered the clarify branch),
 and the deterministic plausibility gate above still runs on the accepted items.
@@ -502,8 +554,10 @@ no-second-follow-up rule in `food-resolution.md`.
 ## Validation
 
 - Every provider reply is validated against `ParseResult` before any of it is
-  used; schema-invalid output is rejected (`StepFailed("schema_validation_failed")`)
-  and **never persisted** — the step fails closed.
+  used. Explicitly enumerated schema-shape mistakes may consume bounded repair
+  attempts first; repair exhaustion, unsafe shapes, and still-invalid output are
+  rejected (`StepFailed("schema_validation_failed")`) and **never persisted** —
+  the step fails closed.
 - **User-stated nutrition fields (FTY-279)** validate as finite, non-negative, and
   within the schema abuse cap; an out-of-range/negative/non-finite `stated_*` value
   is schema-invalid and fails closed. Extraction is trusted only as **untrusted
@@ -536,12 +590,13 @@ both `users` and `log_events` enforces object-level ownership.
   or `error`; only sanitized labels (`empty_input`, `unparseable_input`,
   `schema_validation_failed`, `clarification_quality_failed`, `provider_error`,
   `provider_transient_error`) are persisted on the run.
-- **Rough-estimate diagnostics are content-free.** Repair attempts, provider-raised
-  questions that were overridden by `estimate_first`, default-serving/model-prior
-  assumptions, source-miss reasons, and calibration artifacts follow the shared
-  privacy invariant in [estimator-policy.md](estimator-policy.md): they record only
-  sanitized labels and source ids, not raw diary text, prompts, provider/fetched
-  output, error bodies, or secrets.
+- **Rough-estimate diagnostics are content-free.** Schema-shape repair attempts,
+  provider-raised questions that were overridden by `estimate_first`,
+  default-serving/model-prior assumptions, source-miss reasons, and calibration
+  artifacts follow the shared privacy invariant in
+  [estimator-policy.md](estimator-policy.md): they record only sanitized labels
+  and source ids, not raw diary text, prompts, provider/fetched output, error
+  bodies, or secrets.
 - **Retention** follows the owning log event: derived items and clarification
   questions live until the event, user, or account is deleted (`ON DELETE CASCADE`),
   matching the food/exercise-log retention rule in
@@ -553,7 +608,7 @@ both `users` and `log_events` enforces object-level ownership.
 | --- | --- |
 | Empty/whitespace text | Terminal `failed` (`empty_input`); no LLM call, nothing persisted. |
 | Unanimously `unparseable` / no-item trusted set | Terminal `failed`; nothing persisted. |
-| Schema-invalid model output (any sample) | Rejected; terminal `failed` (`schema_validation_failed`); nothing persisted. |
+| Schema-invalid model output, unsafe/unrecoverable shape, or exhausted bounded repair cap (any sample) | Rejected; terminal `failed` (`schema_validation_failed`); nothing persisted. |
 | Accepted provider clarification output missing a specific question or 2–5 options | Rejected; terminal `failed` (`clarification_quality_failed`); nothing persisted. Provider questions overridden by `estimate_first` are discarded instead. |
 | Non-retryable provider error (`LLMResponseError`/`LLMConfigurationError`) | Terminal `failed` (`provider_error`). |
 | Transient provider error (`LLMTransientError`) | Retryable; worker retries within its bound. |
@@ -576,7 +631,7 @@ event.raw_text = "two eggs and a 30 min run"
 event.raw_text = "crackers and peanut butter"        # recognizable, amountless food
   → samples disagree or one provider asks "How much?"
   → estimate_first policy sees recognizable identities and no unsafe contradiction
-  → provider question is advisory; bounded repair/selection keeps candidates:
+  → provider question is advisory; schema-validated candidates continue:
       {type: food, name: "crackers", quantity_text: "", amount: null}
       {type: food, name: "peanut butter", quantity_text: "", amount: null}
   → derived_food_items += rough unresolved candidates
@@ -587,7 +642,8 @@ event.raw_text = "crackers and peanut butter"        # recognizable, amountless 
 
 ```
 event.raw_text = "stuff"
-  → no recognizable food or exercise identity survives validation/repair
+  → no recognizable food or exercise identity survives validation and any
+     bounded schema-shape repair
   → estimate_first has no safe object to estimate
   → backend synthesizes a targeted clarification if one can help, otherwise the
      parse fails closed as unparseable
@@ -671,3 +727,9 @@ event.raw_text = "stuff"
   question-quality, and persistence rules. No `ParseResult`, persistence, DTO, or
   migration changes are made here; FTY-299/FTY-300/FTY-301 implement the runtime
   behavior.
+- **FTY-304 (documentation-only wording clarification).** The shared
+  `FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS` setting already existed from FTY-300.
+  This contract now names the concrete pre-validation provider-output repair phases
+  and the `schema_validation_failed` fail-closed result when repair is disabled,
+  exhausted, unsafe, or still invalid. No `ParseResult`, persistence, DTO, migration,
+  provider, prompt, settings, or estimator behavior changes are made here.
