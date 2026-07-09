@@ -210,6 +210,7 @@ class OfficialSourceResolveStep:
             return None
 
         _record_source_ref(context, OFFICIAL_SOURCE)
+        reason_count = len(reasons)
         item = self._resolve_from_search(
             context,
             candidate,
@@ -217,8 +218,9 @@ class OfficialSourceResolveStep:
             fetch=self._fetch_official,
             page_kind=_OFFICIAL_PAGE_KIND,
             source_type=OFFICIAL_SOURCE_TYPE,
+            reasons=reasons,
         )
-        if item is None:
+        if item is None and len(reasons) == reason_count:
             reasons.append("official_source returned no confident match")
         return item
 
@@ -246,6 +248,7 @@ class OfficialSourceResolveStep:
             return None
 
         _record_source_ref(context, REFERENCE_SOURCE)
+        reason_count = len(reasons)
         item = self._resolve_from_search(
             context,
             candidate,
@@ -253,8 +256,9 @@ class OfficialSourceResolveStep:
             fetch=self._fetch_reference,
             page_kind=_REFERENCE_PAGE_KIND,
             source_type=REFERENCE_SOURCE_TYPE,
+            reasons=reasons,
         )
-        if item is None:
+        if item is None and len(reasons) == reason_count:
             reasons.append("reference_source returned no confident match")
         return item
 
@@ -267,6 +271,7 @@ class OfficialSourceResolveStep:
         fetch: Callable[[str], str | None],
         page_kind: str,
         source_type: str,
+        reasons: list[str],
     ) -> ResolvedFoodItem | None:
         """Run one evidence tier: search ``query``, then fetch/extract each result.
 
@@ -286,7 +291,7 @@ class OfficialSourceResolveStep:
         )
         if found is None:
             return None
-        return self._build_item(
+        item = self._build_item(
             context,
             candidate,
             found,
@@ -294,7 +299,11 @@ class OfficialSourceResolveStep:
             source_ref=found.source_ref,
             hash_key=found.hash_key,
             base_assumptions=(),
+            allow_unresolvable_fallthrough=self.clarify_mode == "estimate_first",
         )
+        if item is None:
+            reasons.append(f"{source_type} returned unscalable serving math")
+        return item
 
     def _model_prior(
         self, context: EstimationContext, candidate: CandidateDraft, reasons: list[str]
@@ -332,6 +341,7 @@ class OfficialSourceResolveStep:
             source_ref=MODEL_PRIOR_SOURCE,
             hash_key=_identity_query(candidate),
             base_assumptions=(reason,),
+            allow_unresolvable_fallthrough=self.clarify_mode == "estimate_first",
         )
         if item is None:
             # The estimate was unusable (e.g. per-serving facts with no gram serving
@@ -396,6 +406,7 @@ class OfficialSourceResolveStep:
         source_ref: str,
         hash_key: str,
         base_assumptions: tuple[str, ...],
+        allow_unresolvable_fallthrough: bool = False,
     ) -> ResolvedFoodItem | None:
         """Apply deterministic serving math and build the resolved item + provenance.
 
@@ -439,7 +450,12 @@ class OfficialSourceResolveStep:
         )
         if grams is None:
             grams = _default_serving_grams(candidate, reference.default_serving_g)
-            if grams is None or not _allows_default_serving_estimate(self.clarify_mode, candidate):
+            if grams is None:
+                if allow_unresolvable_fallthrough:
+                    return None
+                context.clarification_questions = [ClarificationDraft(text=QUANTITY_QUESTION)]
+                raise NeedsClarification("unresolvable_quantity")
+            if not _allows_default_serving_estimate(self.clarify_mode, candidate):
                 context.clarification_questions = [ClarificationDraft(text=QUANTITY_QUESTION)]
                 raise NeedsClarification("unresolvable_quantity")
             assumptions = _with_unique_assumptions(
