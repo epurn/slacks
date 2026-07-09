@@ -267,6 +267,28 @@ def test_low_hybrid_with_identity_routes_to_candidates() -> None:
     assert context.clarification_questions == []
 
 
+def test_low_hybrid_uses_non_representative_recognizable_candidates() -> None:
+    provider = FakeProvider(
+        responses=[
+            _parsed([{"type": "food", "name": "food", "quantity_text": "some"}], confidence=0.95),
+            _parsed(
+                [{"type": "food", "name": "crackers", "quantity_text": "some"}],
+                confidence=_low(),
+            ),
+            _parsed(
+                [{"type": "food", "name": "crackers", "quantity_text": "some"}],
+                confidence=_low(),
+            ),
+        ]
+    )
+    context = _context(raw_text="some crackers")
+
+    _run(provider, context)
+
+    assert [candidate.name for candidate in context.food_candidates] == ["crackers"]
+    assert context.clarification_questions == []
+
+
 def test_mixed_detail_and_amountless_items_routes_to_candidates() -> None:
     provider = FakeProvider(
         responses=_sampled(

@@ -223,19 +223,22 @@ class ParseStep:
         # the calibrated threshold except for details the user already stated, while
         # strict keeps old-style abstention.
         conservative = signal.all_non_parsed or self.policy.should_clarify(signal.hybrid)
-        if conservative and not _policy_allows_estimate(self.policy.mode, result.items):
-            fallback_items = (
-                result.items
-                if not signal.all_non_parsed
-                and _all_candidates_have_recognizable_identity(result.items)
-                else ()
-            )
-            context.clarification_questions = _clarification_questions(
-                samples,
-                fallback_items=fallback_items,
-                prefer_backend_missing_detail=self.policy.mode == "balanced",
-            )
-            raise NeedsClarification("low_confidence_or_ambiguous")
+        if conservative:
+            policy_result = _policy_allowed_result(self.policy.mode, samples, default=result)
+            if policy_result is None:
+                fallback_items = (
+                    result.items
+                    if not signal.all_non_parsed
+                    and _all_candidates_have_recognizable_identity(result.items)
+                    else ()
+                )
+                context.clarification_questions = _clarification_questions(
+                    samples,
+                    fallback_items=fallback_items,
+                    prefer_backend_missing_detail=self.policy.mode == "balanced",
+                )
+                raise NeedsClarification("low_confidence_or_ambiguous")
+            result = policy_result
 
         # A sample set that claims "parsed" yet routes nothing to persist is
         # treated as unparseable (fail closed) rather than silently completing
@@ -307,6 +310,19 @@ def _representative(samples: Sequence[ParseResult]) -> ParseResult:
     parsed = [s for s in samples if s.disposition is ParseDisposition.PARSED]
     pool = parsed or [s for s in samples if s.items] or list(samples)
     return max(pool, key=lambda sample: sample.confidence)
+
+
+def _policy_allowed_result(
+    mode: str, samples: Sequence[ParseResult], *, default: ParseResult
+) -> ParseResult | None:
+    """Pick the sample to route when conservative policy still permits estimating."""
+
+    if _policy_allows_estimate(mode, default.items):
+        return default
+    candidates = [sample for sample in samples if _policy_allows_estimate(mode, sample.items)]
+    if not candidates:
+        return None
+    return _representative(candidates)
 
 
 def _effective_candidate(item: ParsedCandidate) -> tuple[ParsedCandidate, str | None]:
