@@ -39,6 +39,18 @@ estimator / contracts / backend-core / security-privacy lane:
 
 ## Version
 
+13 (FTY-252) adds **count-serving facts for named foods** to the official /
+reference / model-prior estimate schema (`official_source/v2`). A validated
+`NamedFoodEstimate` can now state facts per counted serving (`serving_count`, e.g.
+`3 strips`, `1 slice`, `2 eggs`, `5 crackers`) independently of any gram serving
+size. When the logged quantity carries a compatible explicit count unit, the
+resolver scales deterministically by `consumed_count / source_count`; when the
+source also states grams for that counted serving, the same multiplier yields the
+logged grams. Count units are normalized through a closed synonym map (singular /
+plural concrete nouns only) and incompatible or missing count units are rejected so
+the resolver tries the next evidence result/tier instead of multiplying a whole
+default serving by the user's count.
+
 12 (FTY-298, contract only) adopts the shared **rare clarification /
 estimate-first** food-resolution boundary. The mode semantics, allowed last-resort
 clarification reasons, rough-provenance requirements, and advisory-provider rule are
@@ -263,22 +275,34 @@ quantity to grams, v1-simple per the story scope:
    at its standard millilitre volume under the same `1 ml ≈ 1 g` assumption, so a
    stated "1/3 cup" or "a tsp" costs at that portion. Bare `oz` stays **mass**
    (28.35 g); bare single-letter `t`/`T` are unrecognised;
-3. structured `amount` + **count** unit (or no unit) → `amount × default_serving_g`
+3. **named-food count-serving facts** (`serving_count = N <count_unit>`) plus a
+   structured consumed `amount` and compatible count unit → source facts ×
+   `consumed_count / source_count`. If the same source/model also supplies the gram
+   mass for that counted serving (`5 crackers (19 g)` or `serving_size = 30 g` with
+   `serving_count = 5 crackers`), logged grams are `serving_g × consumed_count /
+   source_count`. This path is used before any generic default-serving fallback so
+   `4 crackers` against `90 kcal per 5 crackers (19 g)` resolves to `72 kcal` and
+   `15.2 g`, not four full servings. Count-unit matching is closed and bounded:
+   concrete singular/plural units such as `strip(s)`, `piece(s)`, `slice(s)`,
+   `egg(s)`, `cracker(s)`, and `bar(s)` normalize; broad or incompatible units
+   (`cup`, `handful`, unknown spellings) do not fuzzy-match.
+4. structured `amount` + **count** unit (or no unit) → `amount × default_serving_g`
    when the source supplies a default serving size. The count vocabulary includes the
    common serving/portion nouns a casual log uses — `slice`, `sandwich`, `handful`,
    `ring`, `finger`, `bowl`, `scoop`, … (FTY-167) — so "a slice of pizza", "3 cracker
    sandwiches", or "a handful of onion rings" resolve via the default serving size
    instead of stopping at clarification;
-4. otherwise scan `quantity_text` for a leading `<number> <mass|volume unit>`.
+5. otherwise scan `quantity_text` for a leading `<number> <mass|volume unit>`.
 
 Returns `None` when none apply — e.g. a count with no known serving size, or an
 unrecognised/absent quantity. The active shared policy ([estimator-policy.md](estimator-policy.md))
 determines whether that gap falls forward to rough default-serving/reference/
 model-prior estimation or asks for more detail. Calories/macros then scale per-100g
-facts by `grams / 100`, rounded to 0.1 when grams are resolved; rough-prior paths store
-their own basis and assumptions. Storage is canonical (kcal, grams); the 1 ml ≈ 1 g
-density and the simple grams/millilitres/count scope are documented assumptions, with
-richer portion inference deferred.
+facts by `grams / 100`, rounded to 0.1 when grams are resolved; count-serving facts
+scale the source serving facts by the count ratio; rough-prior paths store their own
+basis and assumptions. Storage is canonical (kcal, grams); the 1 ml ≈ 1 g density
+and the simple grams/millilitres/count scope are documented assumptions, with richer
+portion inference deferred.
 
 ### Persistence
 
@@ -740,18 +764,28 @@ injected adapters (the step itself opens no socket):
 2. **Fetch** each candidate result URL through the FTY-078 hardened fetcher, taking
    back sanitized, active-content-stripped inert text.
 3. **Extract** the nutrition facts the page states by sending that inert text to the
-   provider with the strict `NamedFoodEstimate` schema (`schemas/official_source.py`).
+   provider with the strict `NamedFoodEstimate` schema (`schemas/official_source.py`,
+   `official_source/v2`). The schema accepts `per_100g`, `per_serving`, and
+   `as_logged` facts plus an optional structured `serving_count` for count-serving
+   facts (`3 strips`, `1 slice`, `2 eggs`, `5 crackers`); count units validate
+   against the closed synonym map above.
    The page text is **untrusted data**; the reply is trusted only after it validates,
    and a low-confidence / fact-less reply is not trusted.
 4. **Recompute** canonical calories/macros from the validated facts with the FTY-044
-   serving math (per-serving facts are canonicalised to per-100g via the page's gram
-   serving size, then scaled to the consumed quantity) — the model never supplies the
-   stored numbers. The canonical per-100g facts must clear the **FTY-115 plausibility
-   bound** (`≤ 900` kcal/100g, non-negative, finite — the same gate FDC/OFF enforce),
-   applied after any per-serving → per-100g conversion. An implausible result (e.g. a
-   kJ value mislabelled as kcal) is a **non-match**: the official page falls through to
-   model-prior, and an implausible *model-prior* estimate routes to
-   `needs_clarification` rather than committing an absurd total (FTY-132).
+   serving math — the model never supplies the stored numbers. Per-serving facts with
+   a gram/millilitre serving size are canonicalised to per-100g and scaled to the
+   consumed quantity; per-serving facts with a structured counted serving are scaled
+   by `consumed_count / source_count` and only need grams when the logged item itself
+   needs a gram value. A source that states both count and grams uses the count
+   relation for count logs before any default-serving fallback. The canonical
+   per-100g facts must clear the **FTY-115 plausibility bound** (`≤ 900` kcal/100g,
+   non-negative, finite — the same gate FDC/OFF enforce), applied after any
+   per-serving → per-100g conversion. Count-serving facts with no gram serving cannot
+   be canonicalised to per-100g, so they are bounded by the schema and only scale
+   compatible explicit counts. An implausible result (e.g. a kJ value mislabelled as
+   kcal) is a **non-match**: the official page falls through to model-prior, and an
+   implausible *model-prior* estimate routes to `needs_clarification` rather than
+   committing an absurd total (FTY-132).
 
 ### Reference-source tier (FTY-166, before any model prior)
 
@@ -801,6 +835,18 @@ The consulted source systems (`official_source`, `reference_source`, and/or
 `model_prior`) are recorded on the run `source_refs`, and the assumptions on the run
 `assumptions`.
 
+### Count-serving named-food evidence (FTY-252)
+
+Official/reference pages and model-prior estimates may state facts per counted
+serving. The count relation is structured output, never mined from free-text
+assumptions. Source-backed count servings keep the page URL in `source_ref` and do
+not add invented assumptions; a model-prior count serving records a content-free
+assumption such as `model_prior_count_serving:5 cracker` so the rough count relation
+is visible. If the user's logged unit is absent or incompatible with the source count
+unit (`per 3 strips` vs. `2 cups`), the resolver rejects that result and continues to
+the next evidence result/tier; only when no usable result remains does policy decide
+whether to ask.
+
 ### Routing
 
 | Condition | Pipeline signal | Persisted | Event transition |
@@ -841,7 +887,9 @@ fetchers: official-page resolution end-to-end; the official → reference → mo
 tier order for a branded item and reference-before-model-prior for a detail-rich
 generic item (FTY-166); the official step runs only after a USDA/OFF miss; the
 disabled-provider / reference-miss model-prior-with-per-tier-status fallback; that no
-raw page text is persisted; and no direct egress. `tests/test_reference_fetch.py`
+raw page text is persisted; count-serving fixtures for `3 strips`, `1 slice`,
+`2 eggs`, `5 crackers (19 g)`, model-prior `5 crackers = 30 g`, and incompatible
+count units; and no direct egress. `tests/test_reference_fetch.py`
 proves the searched-result policy negatives (HTTPS-only, private/loopback/link-local/
 metadata blocked, redirects refused, oversized and non-text bodies rejected, inert
 text, fail-closed off switch). `tests/test_food_migration.py` applies/rolls back the

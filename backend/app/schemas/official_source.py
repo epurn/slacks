@@ -34,11 +34,17 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.estimator.food_serving import (
+    COUNT_SERVING_UNITS,
+    MAX_COUNT_SERVING_AMOUNT,
+    normalize_count_unit,
+)
 
 #: Schema version recorded on the estimation run for reproducibility. Bump when the
 #: estimate shape changes so old runs remain interpretable.
-OFFICIAL_SOURCE_SCHEMA_VERSION = "official_source/v1"
+OFFICIAL_SOURCE_SCHEMA_VERSION = "official_source/v2"
 
 #: Upper bounds that cap an adversarial or runaway model reply. Generous enough for
 #: any real product yet small enough that a malicious reply cannot persist nonsense.
@@ -85,6 +91,28 @@ class FactBasis(StrEnum):
     AS_LOGGED = "as_logged"
 
 
+class CountServingEstimate(BaseModel):
+    """A validated count relation for source facts stated per ``N <count_unit>``.
+
+    ``unit`` is normalized through a closed synonym map (for example, ``strips`` →
+    ``strip``). Unknown units are rejected rather than fuzzy-matched.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    amount: float = Field(gt=0.0, le=MAX_COUNT_SERVING_AMOUNT)
+    unit: str = Field(max_length=MAX_UNIT_LEN)
+
+    @field_validator("unit", mode="before")
+    @classmethod
+    def _normalize_unit(cls, value: object) -> str:
+        normalized = normalize_count_unit(str(value)) if value is not None else None
+        if normalized is None:
+            allowed = ", ".join(sorted(COUNT_SERVING_UNITS))
+            raise ValueError(f"count unit must be one of: {allowed}")
+        return normalized
+
+
 class EstimatedFacts(BaseModel):
     """The transcribed or estimated nutrition facts for one named product.
 
@@ -92,8 +120,10 @@ class EstimatedFacts(BaseModel):
     ``per_serving`` facts, the backend — never the model — converts them to canonical
     per-100g facts and scales them to the consumed quantity
     (:mod:`app.estimator.food_serving`). ``serving_size_amount`` /
-    ``serving_size_unit`` are the source's serving size; they are **required** to
-    canonicalise ``per_serving`` facts and otherwise enable count-unit serving math.
+    ``serving_size_unit`` are the source's gram/millilitre serving size. A
+    ``serving_count`` is the source's counted serving relation (for example,
+    ``5 crackers``); when present, compatible consumed counts scale against that
+    relation before any default-serving gram fallback is considered.
     ``as_logged`` facts are already the rough consumed-portion total, so they are
     stored directly with ``basis = as_logged`` and model-prior provenance.
     """
@@ -109,6 +139,7 @@ class EstimatedFacts(BaseModel):
     fat_g: float = Field(default=0.0, ge=0.0, le=MAX_MACRO_G)
     serving_size_amount: float | None = Field(default=None, gt=0.0, le=MAX_SERVING_AMOUNT)
     serving_size_unit: str | None = Field(default=None, max_length=MAX_UNIT_LEN)
+    serving_count: CountServingEstimate | None = None
 
 
 class NamedFoodEstimate(BaseModel):

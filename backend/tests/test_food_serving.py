@@ -12,9 +12,14 @@ import math
 import pytest
 
 from app.estimator.food_serving import (
+    CountServing,
     NutritionFacts,
+    count_serving_multiplier,
+    grams_from_count_serving,
+    normalize_count_unit,
     nutrition_facts_plausible,
     resolve_grams,
+    scale_count_serving_facts,
     scale_facts,
 )
 
@@ -143,6 +148,87 @@ def test_scale_facts_is_proportional_at_100g() -> None:
         23.0,
         0.3,
     )
+
+
+# ---------------------------------------------------------------------------
+# Count-serving facts (FTY-252)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("strip", "strip"),
+        ("strips", "strip"),
+        ("piece", "piece"),
+        ("pieces", "piece"),
+        ("slice", "slice"),
+        ("slices", "slice"),
+        ("egg", "egg"),
+        ("eggs", "egg"),
+        ("cracker", "cracker"),
+        ("crackers", "cracker"),
+        ("bar", "bar"),
+        ("bars", "bar"),
+        (" CRACKERS ", "cracker"),
+    ],
+)
+def test_count_serving_unit_normalization(raw: str, expected: str) -> None:
+    assert normalize_count_unit(raw) == expected
+    assert CountServing(amount=3.0, unit=raw).unit == expected
+
+
+@pytest.mark.parametrize("raw", ["cup", "cups", "crackerz", "handful", "", None])
+def test_count_serving_unit_normalization_rejects_unbounded_units(raw: str | None) -> None:
+    assert normalize_count_unit(raw) is None
+    with pytest.raises(ValueError):
+        CountServing(amount=3.0, unit=raw or "")
+
+
+def test_count_serving_multiplier_requires_compatible_explicit_count_unit() -> None:
+    source = CountServing(amount=5.0, unit="crackers")
+
+    assert count_serving_multiplier(
+        source_serving=source, consumed_unit="cracker", consumed_amount=4.0
+    ) == pytest.approx(0.8)
+    assert (
+        count_serving_multiplier(source_serving=source, consumed_unit=None, consumed_amount=4.0)
+        is None
+    )
+    assert (
+        count_serving_multiplier(source_serving=source, consumed_unit="cups", consumed_amount=4.0)
+        is None
+    )
+
+
+def test_scale_count_serving_facts_scales_without_grams() -> None:
+    # Source says 230 kcal / 12 F / 19 C / 11 P per 3 strips; user logs 4 strips.
+    facts = NutritionFacts(calories=230.0, protein_g=11.0, carbs_g=19.0, fat_g=12.0)
+
+    scaled = scale_count_serving_facts(
+        facts,
+        source_serving=CountServing(amount=3.0, unit="strips"),
+        consumed_unit="strip",
+        consumed_amount=4.0,
+    )
+
+    assert scaled is not None
+    assert scaled.grams is None
+    assert scaled.calories == pytest.approx(306.7)
+    assert scaled.fat_g == pytest.approx(16.0)
+    assert scaled.carbs_g == pytest.approx(25.3)
+    assert scaled.protein_g == pytest.approx(14.7)
+
+
+def test_count_serving_grams_scale_with_source_mass_relation() -> None:
+    grams = grams_from_count_serving(
+        source_serving=CountServing(amount=5.0, unit="crackers"),
+        serving_g=19.0,
+        consumed_unit="crackers",
+        consumed_amount=4.0,
+    )
+
+    assert grams == pytest.approx(15.2)
 
 
 # ---------------------------------------------------------------------------

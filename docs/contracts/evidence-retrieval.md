@@ -56,6 +56,14 @@ Adapter — FTY-079 / FTY-164**.
 
 ## Version
 
+3 (FTY-252) adds **count-serving named-food evidence** to the normalized estimate
+shape used by official-source, reference-source, and model-prior resolution. A
+fact set may include `serving_count = {amount, unit}` for facts stated per counted
+serving (`3 strips`, `1 slice`, `2 eggs`, `5 crackers`). Count units validate
+against a bounded synonym map; compatible consumed counts scale by
+`consumed_count / source_count`, while incompatible or missing units are rejected so
+the resolver tries the next evidence result/tier.
+
 2 (FTY-298, contract only): clarifies rough-estimate provenance under the shared
 `estimate_first` policy now owned by
 [estimator-policy.md](estimator-policy.md). This evidence contract keeps the source
@@ -209,13 +217,14 @@ Storage is canonical units only — **kcal and grams** — per the contracts
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `basis` | enum | yes | `per_100g`, `per_100ml`, `per_serving`, or `as_logged` — what the facts are expressed against. `as_logged` facts are the **totals for the exact logged item** and are **not** scaled by the serving math. It is used for user-stated facts (`user_text`, FTY-279/280) and for bounded rough model-prior totals when grams cannot honestly be inferred (FTY-301). |
+| `basis` | enum | yes | `per_100g`, `per_100ml`, `per_serving`, or `as_logged` — what the facts are expressed against. `per_serving` may be a gram/millilitre serving or a structured count serving (`serving_count`, FTY-252). `as_logged` facts are the **totals for the exact logged item** and are **not** scaled by the serving math. It is used for user-stated facts (`user_text`, FTY-279/280) and for bounded rough model-prior totals when grams cannot honestly be inferred (FTY-301). |
 | `calories` | number (kcal) | yes | Energy for the basis quantity. A fact set with no energy value is **not** a usable match. |
 | `protein_g` | number (g) \| null | no (default 0) | Protein for the basis quantity. |
 | `carbs_g` | number (g) \| null | no (default 0) | Carbohydrate for the basis quantity. |
 | `fat_g` | number (g) \| null | no (default 0) | Total fat for the basis quantity. |
 | `default_serving_g` | number (g) | no | Serving size in grams when the source supplies one (count-unit serving math). |
 | `serving_label` | string | no | Human label for a serving (e.g. "1 cup"), display only. |
+| `serving_count` | object | no | Structured counted serving relation `{amount, unit}` when facts are stated per `N <count_unit>` (FTY-252). `unit` is normalized through the bounded count-serving map (`strip`, `piece`, `slice`, `egg`, `cracker`, `bar` and singular/plural synonyms); no fuzzy matching. |
 | `source_ref` | string | yes | The originating `source_ref`. |
 
 Density and unit conventions (e.g. 1 ml ≈ 1 g) are documented assumptions
@@ -223,6 +232,18 @@ recorded in `assumptions` and defined per implementation (`food-resolution.md`).
 Nutrition math is **out of scope** here and owned by the resolution step. An
 `as_logged` fact set is the consumed total, stored without scaling; `model_prior`
 as-logged rows must carry rough assumptions such as `as_logged_model_prior`.
+
+**Count-serving scaling (FTY-252).** For official/reference/model-prior named-food
+facts with `serving_count`, the resolver scales a compatible logged count as
+`source facts × consumed_count / source_count`. If the fact set also has
+`default_serving_g` / serving-size grams for the counted serving, logged grams are
+scaled by the same count ratio. A source such as `90 kcal per 5 crackers (19 g)` and
+a logged `4 crackers` therefore records about `72 kcal` and `15.2 g`; it must not
+be treated as four whole servings. When the logged unit is absent or incompatible
+(`per 3 strips` vs. `2 cups`), the fact set is not usable for that logged quantity
+and the resolver continues through remaining evidence results/tier fallback. Count
+relations must come from structured, schema-validated fields; free-text
+`assumptions` are never parsed for serving math.
 
 **Unknown vs. zero macros (FTY-279).** The `default 0` for a missing macro is the
 convention for a **trusted-database / label / official / reference** fact set,

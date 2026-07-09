@@ -130,10 +130,12 @@ class EvidenceSource(Base):
     #: What the immutable fact snapshot below is expressed against (FTY-279/FTY-280;
     #: ``evidence-retrieval.md`` normalized-fact schema): ``per_100g`` for a
     #: database / label / official / reference source (the default — scaled by the
-    #: serving math), or ``as_logged`` for a user-stated total that is already the
-    #: consumed-quantity total and is **not** re-scaled. The basis disambiguates the
-    #: snapshot columns, so an as-logged total is never silently reinterpreted as a
-    #: per-100g density. Existing rows are ``per_100g``.
+    #: serving math), ``per_serving`` for a count-serving source (FTY-252) whose
+    #: snapshot holds the source's per-counted-serving facts, or ``as_logged`` for a
+    #: user-stated total that is already the consumed-quantity total and is **not**
+    #: re-scaled. The basis disambiguates the snapshot columns, so a per-serving or
+    #: as-logged snapshot is never silently reinterpreted as a per-100g density.
+    #: Existing rows are ``per_100g``.
     basis: Mapped[str] = mapped_column(String(16), nullable=False, default="per_100g")
     #: Immutable snapshot of the facts used for this resolution, expressed against
     #: ``basis``. Per-100g for a scaled source; the as-logged totals for a

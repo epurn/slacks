@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from app.estimator.food_serving import (
+    CountServing,
     NutritionFacts,
     nutrition_facts_plausible,
     per_serving_to_per_100g,
@@ -81,8 +82,9 @@ _EXTRACT_PROMPT = (
     "Rules:\n"
     "- Transcribe energy in kcal and protein/carbohydrate/fat in grams exactly as "
     "stated, and set basis to per_100g or per_serving to match what the page reports.\n"
-    "- When the facts are per_serving, also report the serving size amount and unit "
-    "(grams or millilitres) the page states.\n"
+    "- When the facts are per_serving, also report any serving size amount/unit "
+    "(grams or millilitres) and any counted serving relation the page states "
+    "(for example, 3 strips, 1 slice, 2 eggs, 5 crackers).\n"
     "- Do not compute totals, per-100g values, or the amount consumed; only "
     "transcribe what the page states.\n"
     "- If the page does not clearly state nutrition facts for this product, set "
@@ -100,6 +102,8 @@ _MODEL_PRIOR_PROMPT = (
     "Rules:\n"
     "- Estimate energy in kcal and protein/carbohydrate/fat in grams, and set basis "
     "to per_100g (preferred) or per_serving with the serving size you assumed.\n"
+    "- If the serving is count-based, put the count relation in serving_count; do not "
+    "hide it in assumptions.\n"
     "- List the assumptions you made (e.g. a typical recipe or serving size).\n"
     '- If you cannot estimate this item, set disposition "unresolved".\n'
     "- Set confidence in [0, 1].\n"
@@ -121,6 +125,8 @@ _LOGGED_MODEL_PRIOR_PROMPT = (
     "you can name a typical gram serving for this food.\n"
     "- If a single serving basis is clearer, use basis per_serving and include a "
     "gram or millilitre serving_size_amount and serving_size_unit.\n"
+    "- If that serving is count-based, include serving_count (for example, "
+    "5 crackers) as structured data; do not put count math in assumptions.\n"
     "- If grams cannot honestly be inferred from the structured portion, use basis "
     "as_logged and estimate a bounded total for the logged item itself.\n"
     "- List content-free assumptions such as typical serving, default serving, or "
@@ -142,7 +148,10 @@ BeforeFetch = Callable[[str], None]
 class SearchedReferenceFacts:
     """A validated searched-result composition plus URL provenance.
 
-    ``facts`` is usually canonical per-100g and plausibility-gated. For the
+    ``facts`` is usually canonical per-100g and plausibility-gated. When
+    ``count_serving`` is present, ``facts`` may instead be the source's per-serving
+    values for that count relation; ``per_100g_facts`` is populated only when a gram
+    serving size also lets measured quantities use the canonical gram path. For the
     model-prior-only ``as_logged`` fallback, ``basis`` names that the facts are already
     the rough consumed-portion total and must not be scaled. ``source_ref`` is bounded
     and stores the source-system prefix plus the URL. ``hash_key`` remains the raw URL
@@ -155,12 +164,15 @@ class SearchedReferenceFacts:
     default_serving_g: float | None
     assumptions: tuple[str, ...]
     basis: str = "per_100g"
+    count_serving: CountServing | None = None
+    serving_g: float | None = None
+    per_100g_facts: NutritionFacts | None = None
 
 
 AcceptSearchedReference = Callable[[SearchedReferenceFacts], bool]
 
 
-def searched_reference_per_100g(
+def searched_reference_per_100g(  # noqa: PLR0913 - shared provider/fetch/extraction seam
     *,
     provider: Provider,
     search_provider: SearchProvider,
@@ -171,6 +183,7 @@ def searched_reference_per_100g(
     extract_prompt: str = _EXTRACT_PROMPT,
     before_fetch: BeforeFetch | None = None,
     accept_result: AcceptSearchedReference | None = None,
+    allow_count_serving: bool = False,
 ) -> SearchedReferenceFacts | None:
     """Return the first confident, plausible searched-reference per-100g facts.
 
@@ -200,18 +213,15 @@ def searched_reference_per_100g(
         )
         if estimate is None or estimate.facts is None:
             continue
-        canonical = _to_per_100g(estimate.facts)
-        if canonical is None:
-            continue
-        per_100g, default_serving_g = canonical
-        found = SearchedReferenceFacts(
-            facts=per_100g,
+        found = _searched_reference_from_facts(
+            estimate.facts,
             source_ref=source_ref,
             hash_key=search_candidate.url,
-            default_serving_g=default_serving_g,
             assumptions=tuple(estimate.assumptions),
-            basis=FactBasis.PER_100G.value,
+            allow_count_serving=allow_count_serving,
         )
+        if found is None:
+            continue
         if accept_result is not None and not accept_result(found):
             continue
         return found
@@ -289,3 +299,70 @@ def _to_per_100g(facts: EstimatedFacts) -> tuple[NutritionFacts, float | None] |
     if not nutrition_facts_plausible(per_100g):
         return None
     return per_100g, serving_g
+
+
+def _searched_reference_from_facts(
+    facts: EstimatedFacts,
+    *,
+    source_ref: str,
+    hash_key: str,
+    assumptions: tuple[str, ...],
+    allow_count_serving: bool,
+) -> SearchedReferenceFacts | None:
+    """Convert a validated estimate into the shared searched-reference carrier."""
+
+    count_serving = _count_serving_from_facts(facts) if allow_count_serving else None
+    raw = NutritionFacts(
+        calories=facts.calories,
+        protein_g=facts.protein_g,
+        carbs_g=facts.carbs_g,
+        fat_g=facts.fat_g,
+    )
+    serving_g: float | None = None
+    if facts.serving_size_amount is not None and facts.serving_size_unit is not None:
+        serving_g = serving_size_grams(facts.serving_size_amount, facts.serving_size_unit)
+
+    if count_serving is not None and facts.basis is FactBasis.PER_SERVING:
+        per_100g = None
+        if serving_g is not None:
+            per_100g = per_serving_to_per_100g(raw, serving_g)
+            if not nutrition_facts_plausible(per_100g):
+                return None
+        return SearchedReferenceFacts(
+            facts=raw,
+            source_ref=source_ref,
+            hash_key=hash_key,
+            default_serving_g=serving_g,
+            assumptions=assumptions,
+            basis=FactBasis.PER_SERVING.value,
+            count_serving=count_serving,
+            serving_g=serving_g,
+            per_100g_facts=per_100g,
+        )
+
+    canonical = _to_per_100g(facts)
+    if canonical is None:
+        return None
+    per_100g, default_serving_g = canonical
+    return SearchedReferenceFacts(
+        facts=per_100g,
+        source_ref=source_ref,
+        hash_key=hash_key,
+        default_serving_g=default_serving_g,
+        assumptions=assumptions,
+        basis=FactBasis.PER_100G.value,
+        count_serving=count_serving,
+        serving_g=default_serving_g,
+        per_100g_facts=per_100g,
+    )
+
+
+def _count_serving_from_facts(facts: EstimatedFacts) -> CountServing | None:
+    """Build the deterministic count-serving value from schema-normalized fields."""
+
+    if facts.serving_count is None:
+        return None
+    try:
+        return CountServing(amount=facts.serving_count.amount, unit=facts.serving_count.unit)
+    except ValueError:
+        return None

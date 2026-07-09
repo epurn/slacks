@@ -229,12 +229,13 @@ class ResolvedFoodItem:
     assumptions: tuple[str, ...] = ()
     #: What the immutable fact snapshot is expressed against (``evidence-retrieval.md``
     #: normalized-fact schema): ``per_100g`` for a database/label/official/reference
-    #: source (the default, scaled by the serving math), or ``as_logged`` for a
-    #: user-stated total (FTY-279/FTY-280) that is *already* the consumed-quantity
-    #: total and must **not** be re-scaled. On an ``as_logged`` item the snapshot
-    #: columns hold the as-logged totals (calories the user stated; a macro is the
-    #: estimated total or ``None`` when unknown), disambiguated by this basis — never
-    #: reinterpreted as a per-100g density.
+    #: source (the default, scaled by the serving math), ``per_serving`` for a
+    #: count-serving source (FTY-252) whose snapshot holds the source's per-counted-
+    #: serving facts, or ``as_logged`` for a user-stated total (FTY-279/FTY-280) that
+    #: is *already* the consumed-quantity total and must **not** be re-scaled. On an
+    #: ``as_logged`` item the snapshot columns hold the as-logged totals (calories the
+    #: user stated; a macro is the estimated total or ``None`` when unknown),
+    #: disambiguated by this basis — never reinterpreted as a per-100g density.
     basis: str = "per_100g"
     #: Per-field provenance when a record's fields have heterogeneous origins
     #: (FTY-279): maps ``calories`` / ``protein_g`` / ``carbs_g`` / ``fat_g`` to
