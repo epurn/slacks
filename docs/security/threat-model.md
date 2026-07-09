@@ -24,6 +24,11 @@ weight data. Update it when architecture, data flows, or providers change.
 - Claude Code OAuth-session credential: the operator's Claude Code login session
   persisted in the `claude-config` Docker volume (a host secret, not baked into
   the image), shared by `api` and `worker` containers.
+- Codex auth/session/cache state: Codex CLI state under `CODEX_HOME`, mounted in
+  the `codex-config` Docker volume (a host secret, not baked into the image),
+  shared by `api` and `worker` containers. This asset is distinct from provider
+  API keys and from the Claude Code OAuth-session volume; it may contain saved
+  Codex auth, sessions, logs, caches, and other CLI-owned state.
 - Estimation prompts, evidence, and source metadata.
 
 ## Trust Boundaries
@@ -34,6 +39,20 @@ weight data. Update it when architecture, data flows, or providers change.
 - Workers to LLM providers (HTTP API-key-authenticated).
 - Workers to local Claude Code subprocess (first-party CLI, operator's OAuth
   session).
+- Workers to local Codex subprocess (first-party `codex exec` CLI, saved Codex
+  auth under `CODEX_HOME` or an optional child-only `CODEX_API_KEY`) and then to
+  the OpenAI/ChatGPT/Codex service egress performed by the CLI. This is separate
+  from direct HTTP API-key providers, OpenAI-compatible/OpenRouter endpoints,
+  local-model runtimes, and the `claude_code` provider. The adapter constrains
+  the boundary by using fixed argv with no shell; putting the prompt on stdin,
+  not argv; running from a dedicated empty temp workdir; using an ephemeral run
+  with JSON Schema output; setting the Codex sandbox to read-only with approvals
+  disabled/fail-closed; avoiding web search, user/project config, rules, and MCP
+  servers; forwarding only an explicit child environment allowlist; forwarding no
+  Slacks secrets except the optional child-only `CODEX_API_KEY`; deleting temp
+  schema and image files after the call; and logging no prompt, image data, raw
+  output, raw stderr, key, auth material, or `CODEX_HOME` contents. The
+  `codex-config` volume is a host secret and is not baked into the image.
 - Workers to search, nutrition, OCR, barcode, and web sources.
 - Workers to object storage.
 - LLM output back into backend validators.
@@ -58,9 +77,15 @@ weight data. Update it when architecture, data flows, or providers change.
   register) to bound online brute-force and credential-stuffing (FTY-118).
 - Strict provider/tool allowlists (the `claude_code` subprocess provider enforces
   this by disabling every built-in Claude Code tool and MCP servers, so
-  prompt-injection in untrusted input cannot trigger tool use or code execution).
+  prompt-injection in untrusted input cannot trigger tool use or code execution;
+  the `codex` subprocess provider enforces the same control class with
+  config/rules/MCP/web-search avoidance, read-only sandboxing, approvals disabled
+  fail-closed, fixed no-shell argv, stdin-only prompt delivery, and a child env
+  allowlist).
 - SSRF-hardened fetcher.
-- Structured LLM output validation.
+- Structured LLM output validation, including subprocess provider JSON Schema
+  output followed by local JSON parsing and Pydantic validation before any LLM
+  result is trusted.
 - Sanitized search queries.
 - User-isolated memories.
 - Redacted logs.
@@ -94,4 +119,3 @@ The built v1 surface has answered the original open questions:
 - **Bearer-token revocation.** v1 tokens are stateless with no server-side session
   or revocation, so a leaked token is valid until expiry. Server-side
   sessions/revocation are deferred to a hosted-auth story (tracked finding).
-
