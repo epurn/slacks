@@ -5,7 +5,12 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.settings import Settings, load_settings
+from app.settings import (
+    DEFAULT_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS,
+    DEFAULT_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR,
+    Settings,
+    load_settings,
+)
 
 
 def test_defaults() -> None:
@@ -18,6 +23,15 @@ def test_defaults() -> None:
     assert settings.port == 8000
     assert settings.database_url == "postgresql://fatty:fatty@localhost:5432/fatty"
     assert settings.redis_url == "redis://localhost:6379/0"
+    assert settings.estimator_clarify_mode == "estimate_first"
+    assert settings.estimator_parse_clarify_threshold is None
+    assert (
+        settings.estimator_model_prior_confidence_floor
+        == DEFAULT_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR
+    )
+    assert (
+        settings.estimator_max_parse_repair_attempts == DEFAULT_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS
+    )
 
 
 def test_load_from_env_overrides_defaults() -> None:
@@ -29,6 +43,10 @@ def test_load_from_env_overrides_defaults() -> None:
             "FATTY_REDIS_URL": "redis://redis:6379/0",
             "FATTY_DATABASE_URL": "postgresql://fatty:fatty@postgres:5432/fatty",
             "FATTY_AUTH_SECRET": "a-real-production-secret",
+            "FATTY_ESTIMATOR_CLARIFY_MODE": "balanced",
+            "FATTY_ESTIMATOR_PARSE_CLARIFY_THRESHOLD": "0.82",
+            "FATTY_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR": "0.74",
+            "FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS": "4",
         }
     )
 
@@ -37,6 +55,61 @@ def test_load_from_env_overrides_defaults() -> None:
     assert settings.port == 9001
     assert settings.redis_url == "redis://redis:6379/0"
     assert settings.database_url == "postgresql://fatty:fatty@postgres:5432/fatty"
+    assert settings.estimator_clarify_mode == "balanced"
+    assert settings.estimator_parse_clarify_threshold == 0.82
+    assert settings.estimator_model_prior_confidence_floor == 0.74
+    assert settings.estimator_max_parse_repair_attempts == 4
+
+
+@pytest.mark.parametrize("mode", ["balanced", "strict"])
+def test_estimator_clarify_mode_stricter_overrides_load(mode: str) -> None:
+    settings = load_settings({"FATTY_ESTIMATOR_CLARIFY_MODE": mode})
+
+    assert settings.estimator_clarify_mode == mode
+
+
+def test_unknown_estimator_clarify_mode_fails_clearly() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        load_settings({"FATTY_ESTIMATOR_CLARIFY_MODE": "always_ask"})
+
+    message = str(exc_info.value)
+    assert "estimator_clarify_mode" in message
+    assert "estimate_first" in message
+    assert "balanced" in message
+    assert "strict" in message
+
+
+def test_estimator_numeric_tunables_accept_documented_bounds() -> None:
+    settings = load_settings(
+        {
+            "FATTY_ESTIMATOR_PARSE_CLARIFY_THRESHOLD": "0.0",
+            "FATTY_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR": "1.0",
+            "FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS": "10",
+        }
+    )
+
+    assert settings.estimator_parse_clarify_threshold == 0.0
+    assert settings.estimator_model_prior_confidence_floor == 1.0
+    assert settings.estimator_max_parse_repair_attempts == 10
+
+
+@pytest.mark.parametrize(
+    ("env_name", "env_value"),
+    [
+        ("FATTY_ESTIMATOR_PARSE_CLARIFY_THRESHOLD", "-0.01"),
+        ("FATTY_ESTIMATOR_PARSE_CLARIFY_THRESHOLD", "1.01"),
+        ("FATTY_ESTIMATOR_PARSE_CLARIFY_THRESHOLD", "not-a-number"),
+        ("FATTY_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR", "-0.01"),
+        ("FATTY_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR", "1.01"),
+        ("FATTY_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR", "not-a-number"),
+        ("FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS", "-1"),
+        ("FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS", "11"),
+        ("FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS", "not-a-number"),
+    ],
+)
+def test_estimator_numeric_tunables_reject_invalid_values(env_name: str, env_value: str) -> None:
+    with pytest.raises(ValidationError):
+        load_settings({env_name: env_value})
 
 
 def test_auth_secret_defaults_for_local_dev() -> None:

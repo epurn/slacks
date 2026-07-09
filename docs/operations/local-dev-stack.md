@@ -105,6 +105,7 @@ Key variable groups (see `.env.example` for full documentation):
 | Host ports | `API_PORT` | Published host port for the API; containers always listen on fixed ports. `POSTGRES_PORT` / `REDIS_PORT` are meaningful only if you re-enable loopback-only host mappings for direct datastore access (see Services above). |
 | Application | `FATTY_ENVIRONMENT`, `FATTY_LOG_LEVEL` | App config. |
 | LLM provider | `FATTY_LLM_*` | Optional; defaults to `fake` (model-prior-with-status). See LLM providers below. |
+| Estimator policy | `FATTY_ESTIMATOR_*` | Optional estimate-vs-ask clarification policy; defaults to estimate-first and does not change privacy/logging/provider validation rules. |
 | USDA FDC | `FATTY_FDC_*` | Optional; free data.gov key. Disabled when key absent. |
 | Open Food Facts | `FATTY_OFF_*` | Optional, open API; enabled by default, no key required. |
 | Search | `FATTY_SEARCH_*` | Keyless SearXNG by default (points at the `searxng` service; enabled, no key). Brave is an opt-in override; `none` turns search off. |

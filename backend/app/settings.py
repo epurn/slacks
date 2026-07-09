@@ -19,11 +19,14 @@ ENV_PREFIX = "FATTY_"
 
 Environment = Literal["development", "test", "production"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+EstimatorClarifyMode = Literal["estimate_first", "balanced", "strict"]
 
 #: Placeholder auth secret used for local development/tests only. Production must
 #: override ``FATTY_AUTH_SECRET`` with a real secret; the validator below refuses
 #: to start a production app while this default is in place.
 DEV_AUTH_SECRET = "dev-insecure-change-me"  # noqa: S105 (not a real credential)
+DEFAULT_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR = 0.6
+DEFAULT_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS = 2
 
 
 class Settings(BaseModel):
@@ -50,6 +53,20 @@ class Settings(BaseModel):
     # worker's broker and result backend.
     database_url: str = Field(default="postgresql://fatty:fatty@localhost:5432/fatty", min_length=1)
     redis_url: str = Field(default="redis://localhost:6379/0", min_length=1)
+    # Estimator clarify policy (FTY-299). These fields are typed plumbing only;
+    # downstream estimator stories consume them without reading ad hoc env vars.
+    estimator_clarify_mode: EstimatorClarifyMode = "estimate_first"
+    estimator_parse_clarify_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    estimator_model_prior_confidence_floor: float = Field(
+        default=DEFAULT_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR,
+        ge=0.0,
+        le=1.0,
+    )
+    estimator_max_parse_repair_attempts: int = Field(
+        default=DEFAULT_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS,
+        ge=0,
+        le=10,
+    )
     # Auth (FTY-020). The signing secret for local-auth bearer tokens is read
     # from FATTY_AUTH_SECRET and is a SecretStr so it is never rendered in repr,
     # logs, or tracebacks. Production must override the dev placeholder.

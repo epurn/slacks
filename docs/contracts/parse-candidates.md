@@ -163,14 +163,16 @@ Mode semantics:
   older-style amount clarifications for recognizable-but-amountless items are allowed.
   Deterministic plausibility and schema validation still fail closed.
 
-Optional numeric tunables are contract names for downstream code stories; this docs-only
-story does not require every runtime setting to exist yet:
+Optional numeric tunables are contract names for downstream code stories:
 
-| Variable | Applies to | Meaning |
-| --- | --- | --- |
-| `FATTY_ESTIMATOR_PARSE_CLARIFY_THRESHOLD` | `balanced`, `strict` | Overrides the calibrated parse abstention threshold. It must never make the gate re-ask for a user-stated detail in `balanced`. |
-| `FATTY_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR` | rough nutrition facts | Minimum calibrated/cold-pass agreement for accepting a model/default-prior rough nutrition estimate; disagreement leaves a rough/unknown field or asks only for an allowed reason. |
-| `FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS` | all modes | Maximum bounded recovery/repair attempts when provider output is schema-valid but conflicts with the active policy, such as returning a clarification for a recoverable identity. |
+| Variable | Default | Bounds | Applies to | Meaning |
+| --- | --- | --- | --- | --- |
+| `FATTY_ESTIMATOR_PARSE_CLARIFY_THRESHOLD` | unset (`null`) | `0.0`-`1.0` when set | `balanced`, `strict` | Overrides the calibrated parse abstention threshold. It must never make the gate re-ask for a user-stated detail in `balanced`. |
+| `FATTY_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR` | `0.6` | `0.0`-`1.0` | rough nutrition facts | Minimum calibrated/cold-pass agreement for accepting a model/default-prior rough nutrition estimate; disagreement leaves a rough/unknown field or asks only for an allowed reason. |
+| `FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS` | `2` | `0`-`10` | all modes | Maximum bounded recovery/repair attempts when provider output is schema-valid but conflicts with the active policy, such as returning a clarification for a recoverable identity. |
+
+Invalid enum values, out-of-range floats, and out-of-range attempt counts fail
+closed at application config load instead of falling back to an unintended policy.
 
 ### LLM output schema (`ParseResult`)
 
