@@ -8,6 +8,9 @@ deterministic serving math, from the highest-preference applicable source:
    barcode — a packaged-product fact, preferred over a generic estimate.
 2. **USDA FoodData Central** (``trusted_nutrition_database``, FTY-044) for a generic
    food, looked up by name.
+3. **Reference/model/default rough estimation** (FTY-301) for recognized candidates
+   whose exact source match cannot be scaled, whose source lookup misses, or whose
+   amount is absent under the default estimate-first policy.
 
 Exercise candidates are left untouched (resolution is FTY-043).
 
@@ -31,10 +34,10 @@ Routing follows FTY-042/043 conventions:
   restaurant/manufacturer/packaged product falls through to search + hardened fetch,
   then a model-prior estimate.
 - **no confident source match for a generic food** (incl. a barcode OFF cannot
-  resolve while OFF is available) / **unresolvable quantity** → raise
-  :class:`~app.estimator.pipeline.NeedsClarification`; the food is recognisable but
-  cannot be costed confidently, so the user is asked rather than guessed (terminal).
-  A barcode is **never** finalized from a guessed value while OFF is available.
+  resolve while OFF is available) / **unresolvable quantity** → under the default
+  estimate-first mode, defer to the reference/model/default rough estimator before
+  asking. ``strict`` can still keep the older quantity question. A barcode is
+  **never** finalized as a barcode match from a guessed value while OFF is available.
 - **transient source failure** → raise :class:`~app.estimator.pipeline.StepError`
   (retryable); a **non-retryable source error** → :class:`StepFailed` (fail closed).
 
@@ -82,6 +85,7 @@ from app.estimator.pipeline import (
     StepFailed,
 )
 from app.models.food_sources import Product
+from app.settings import EstimatorClarifyMode
 
 
 def _is_official_eligible(candidate: CandidateDraft) -> bool:
@@ -103,9 +107,10 @@ def _is_resolution_deferrable(candidate: CandidateDraft) -> bool:
     A branded candidate defers so official-source resolution can search for it; a
     generic candidate carrying enough amount detail (a count, range, or measured
     quantity — FTY-167) defers so it reaches a **model-prior** estimate with an
-    explicit source status instead of stopping at ``needs_clarification``. A generic
-    food with no usable amount ("some crackers") is *not* deferrable and still
-    clarifies — the portion is genuinely missing, not merely casual.
+    explicit source status instead of stopping at ``needs_clarification``. In the
+    default FTY-301 estimate-first mode, even a recognizable amountless identity
+    defers through a separate policy branch; this helper preserves the stricter-mode
+    "stated detail" signal.
     """
 
     return (
@@ -267,6 +272,7 @@ class FoodResolveStep:
 
     resolver: FoodResolver
     barcode_resolver: BarcodeResolver | None = None
+    clarify_mode: EstimatorClarifyMode = "estimate_first"
     name: str = "food_resolve"
 
     def run(self, context: EstimationContext) -> None:
@@ -286,16 +292,13 @@ class FoodResolveStep:
         """Resolve one candidate, defer it to official source, or leave it unresolved.
 
         A barcode candidate prefers Open Food Facts; a generic candidate uses USDA. On
-        a **miss**, a branded (official-source-eligible) candidate is deferred to the
-        official-source step (FTY-062) via ``pending_official_candidates``, and a
-        detail-rich generic candidate defers the same way so it reaches the
-        model-prior estimate (FTY-167); only a generic candidate with no usable
-        amount keeps the FTY-044/060 behavior (``needs_clarification``). When no
-        enabled source applies and the candidate is not eligible, it is left
+        a **miss** or an unscalable exact match, estimate-first defers recognized
+        candidates to the official/reference/model/default rough path; stricter
+        modes keep the older ask boundary for amountless items. When no enabled
+        source applies and no rough estimator is wired, the candidate is left
         ``unresolved`` and the event still completes.
         """
 
-        eligible = _is_official_eligible(candidate)
         barcode_resolver = self.barcode_resolver
 
         if candidate.barcode and barcode_resolver is not None and barcode_resolver.enabled:
@@ -303,7 +306,7 @@ class FoodResolveStep:
             if item is not None:
                 context.resolved_food_items.append(item)
                 return
-            if eligible:
+            if _should_defer_after_source_gap(candidate, self.clarify_mode):
                 context.pending_official_candidates.append(candidate)
                 return
             # No match, invalid barcode, or no usable energy value: route
@@ -316,19 +319,19 @@ class FoodResolveStep:
             if item is not None:
                 context.resolved_food_items.append(item)
                 return
-            # A branded miss searches official sources; a detail-rich generic miss
-            # falls through to a model-prior estimate (FTY-167). Only a generic food
-            # with no usable amount still clarifies.
-            if _is_resolution_deferrable(candidate):
+            # Estimate-first source gaps fall through to rough estimation for any
+            # recognized candidate; stricter modes retain the older detail gate.
+            if _should_defer_after_source_gap(candidate, self.clarify_mode):
                 context.pending_official_candidates.append(candidate)
                 return
             context.clarification_questions = [ClarificationDraft(text=UNKNOWN_FOOD_QUESTION)]
             raise NeedsClarification("unknown_food")
 
         # No enabled source applies to this candidate (e.g. no FDC key and no
-        # barcode/OFF). A branded item still gets a shot at official source +
-        # model-prior; a generic one is left unresolved and the event completes.
-        if eligible:
+        # barcode/OFF). Estimate-first still gets a shot at reference/model/default
+        # rough resolution when the downstream step is wired; otherwise the worker
+        # persists it unresolved and completes.
+        if _should_defer_after_source_gap(candidate, self.clarify_mode):
             context.pending_official_candidates.append(candidate)
             return
         context.unresolved_food_candidates.append(candidate)
@@ -342,8 +345,9 @@ class FoodResolveStep:
         """Resolve a barcode candidate from Open Food Facts; ``None`` on a miss.
 
         Raises :class:`StepError` / :class:`StepFailed` on a transient / non-retryable
-        OFF error, and :class:`NeedsClarification` (via :meth:`_build_item`) when the
-        product matched but its quantity cannot be resolved to grams.
+        OFF error. In stricter modes, :meth:`_build_item` may still raise
+        :class:`NeedsClarification` when the product matched but its quantity cannot
+        be resolved to grams.
         """
 
         _record_source_ref(context, OFF_SOURCE)
@@ -357,7 +361,15 @@ class FoodResolveStep:
 
         if resolved is None:
             return None
-        return self._build_item(context, candidate, resolved, OFF_SOURCE_TYPE)
+        return self._build_item(
+            context,
+            candidate,
+            resolved,
+            OFF_SOURCE_TYPE,
+            allow_unresolvable_defer=_should_defer_unresolvable_quantity(
+                candidate, self.clarify_mode
+            ),
+        )
 
     def _try_generic(
         self, context: EstimationContext, candidate: CandidateDraft
@@ -366,8 +378,8 @@ class FoodResolveStep:
 
         The caller guarantees the source is enabled. Raises :class:`StepError` /
         :class:`StepFailed` on a transient / non-retryable FDC error, and
-        :class:`NeedsClarification` (via :meth:`_build_item`) on an unresolvable
-        quantity.
+        in stricter modes, :class:`NeedsClarification` (via :meth:`_build_item`) on
+        an unresolvable quantity.
         """
 
         _record_source_ref(context, FDC_SOURCE)
@@ -381,7 +393,15 @@ class FoodResolveStep:
 
         if resolved is None:
             return None
-        return self._build_item(context, candidate, resolved, _source_type(resolved.product.source))
+        return self._build_item(
+            context,
+            candidate,
+            resolved,
+            _source_type(resolved.product.source),
+            allow_unresolvable_defer=_should_defer_unresolvable_quantity(
+                candidate, self.clarify_mode
+            ),
+        )
 
     @staticmethod
     def _build_item(
@@ -389,7 +409,9 @@ class FoodResolveStep:
         candidate: CandidateDraft,
         resolved: _ResolvedProduct,
         source_type: str,
-    ) -> ResolvedFoodItem:
+        *,
+        allow_unresolvable_defer: bool,
+    ) -> ResolvedFoodItem | None:
         """Apply deterministic serving math and build the resolved item + provenance."""
 
         product = resolved.product
@@ -400,6 +422,8 @@ class FoodResolveStep:
             default_serving_g=product.default_serving_g,
         )
         if grams is None:
+            if allow_unresolvable_defer:
+                return None
             context.clarification_questions = [ClarificationDraft(text=QUANTITY_QUESTION)]
             raise NeedsClarification("unresolvable_quantity")
 
@@ -444,3 +468,25 @@ def _source_type(source: str) -> str:
     if source == OFF_SOURCE:
         return OFF_SOURCE_TYPE
     return source
+
+
+def _should_defer_after_source_gap(
+    candidate: CandidateDraft, clarify_mode: EstimatorClarifyMode
+) -> bool:
+    """Whether a source miss should fall through to rough estimation."""
+
+    if clarify_mode == "estimate_first":
+        return True
+    return _is_resolution_deferrable(candidate)
+
+
+def _should_defer_unresolvable_quantity(
+    candidate: CandidateDraft, clarify_mode: EstimatorClarifyMode
+) -> bool:
+    """Whether an exact match that cannot be scaled should try rough estimation."""
+
+    if clarify_mode == "estimate_first":
+        return True
+    if clarify_mode == "balanced":
+        return _is_resolution_deferrable(candidate)
+    return False

@@ -180,11 +180,12 @@ read path.)
     that owns an open item-scoped question** (its `resolved` siblings count in
     `intake` instead, never here), and the degenerate **event-level**
     `needs_clarification` case — where no component is individually costed —
-    contributes **one for the event**. Under the **FTY-275 baseline** every mixed
-    log is the event-level `needs_clarification` case (nothing committed), so this
-    is one per event — identical to the FTY-223 count; item-scoped per-component
-    counting on `partially_resolved` events arrives with the FTY-278 estimator
-    follow-up.
+    contributes **one for the event**. After FTY-301, recognizable amountless
+    components rough-estimate under the default policy and therefore do not inflate
+    `uncounted_entries`; until item-scoped partials land, any remaining allowed
+    clarification is still the event-level case (one per event). Item-scoped
+    per-component counting on `partially_resolved` events arrives with the FTY-278
+    estimator follow-up.
   - the user's **`proposed`** derived food items (FTY-196 — a costed-but-unconfirmed
     label parse, excluded from every finalized read by construction).
 

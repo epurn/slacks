@@ -765,20 +765,21 @@ resolves the item with `source_type = reference_source` and
 `source_ref = reference_source:<url>`; like an official page it writes **no**
 global `products` row.
 
-### Model-prior fallback (with status, never a silent guess)
+### Model-prior / default-serving fallback (with status, never a silent guess)
 
 When the search provider is **disabled** or **unavailable** (no key), when a tier's
 fetch is off (**official**: empty allowlist; **reference**:
 `FATTY_REFERENCE_FETCH_ENABLED=false`), or when **nothing confident is found** on
-either tier, the candidate falls through to a **model-prior** estimate of the same
-`NamedFoodEstimate` shape, from the item identity alone. It is recorded with
-`source_type = model_prior`, `source_ref = model_prior`, and an explicit
-`assumptions` reason naming each tier's outcome (e.g. `"official_source returned no
-confident match; reference_source returned no confident match; estimated from model
-prior"`) plus the model's own assumptions, so the entry surfaces an explicit source
-status and stays user-editable — never a silent guess (per the
-`evidence-retrieval.md` Fallback Rule). A model that cannot estimate the item routes
-to `needs_clarification`.
+either tier, the candidate falls through to a **model-prior** `NamedFoodEstimate`
+from sanitized identity plus bounded amount/unit fields, never raw diary text. It
+is recorded with `source_type = model_prior`, `source_ref = model_prior`, and an
+explicit `assumptions` reason naming each tier's outcome
+(e.g. `"official_source returned no confident match; reference_source returned no
+confident match; estimated from model prior"`) plus the model's own assumptions,
+so the entry surfaces an explicit source status and stays user-editable — never a
+silent guess (per the `evidence-retrieval.md` Fallback Rule). If serving math
+cannot infer grams, it may record `estimated_default_serving` or bounded `basis =
+as_logged`; unusable estimates clarify.
 
 ### Persistence
 
@@ -979,5 +980,4 @@ The backend exposes four health-check endpoints, all returning structured JSON w
   extracts the global mode semantics, allowed last-resort clarification reasons, and
   rough-provenance requirements to [estimator-policy.md](estimator-policy.md). This
   contract keeps the source lookup, serving math, item routing, fallback behavior, and
-  food evidence persistence rules. Runtime settings and estimator changes are downstream
-  FTY-299/FTY-300/FTY-301 work.
+  food evidence persistence rules. FTY-301 needs no migration or DTO change.

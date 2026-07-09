@@ -11,8 +11,8 @@ criteria across the trust boundary:
   **no** ``needs_clarification`` / ``QUANTITY_QUESTION``: the household serving math
   (FTY-275) costs the cup / tsp / ml, oatmeal + milk from USDA and the (unmatched)
   syrup from a model-prior estimate;
-- the boundary is preserved: a genuinely amountless component ("some milk") USDA
-  cannot cost still routes to ``needs_clarification``.
+- the fail-closed boundary is preserved: a genuinely amountless component can still
+  route to ``needs_clarification`` when every rough estimator path is unavailable.
 
 The deterministic serving math and the ``has_food_detail`` net are pinned separately
 in ``test_food_serving.py`` and ``test_detail_signals.py``; this proves them wired
@@ -255,10 +255,12 @@ def test_repro_household_and_worded_portions_resolve_without_clarification(
     assert syrup_evidence.source_type == MODEL_PRIOR_SOURCE_TYPE
 
 
-def test_amountless_component_still_clarifies(client: TestClient, session: Session) -> None:
-    # Boundary preserved (FTY-275): a genuinely amountless generic component — bare
-    # "milk", no stated portion — that USDA cannot cost still routes to
-    # needs_clarification rather than being silently estimated.
+def test_amountless_component_clarifies_when_rough_estimator_unavailable(
+    client: TestClient, session: Session
+) -> None:
+    # Boundary preserved after FTY-301: estimate-first tries rough/default estimation
+    # first, but if every rough path is unavailable it may still ask rather than
+    # silently commit an unsupported number.
     user_id, event_id = _seed_event(client, "fty275-amountless@example.com", "some milk")
     parsed_items: list[dict[str, Any]] = [
         {"type": "food", "name": "milk", "quantity_text": "some milk"}

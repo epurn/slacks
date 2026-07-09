@@ -10,7 +10,8 @@ database, proving the acceptance criteria across the barcode trust boundary:
   barcode, and a user-owned ``evidence_sources`` row (``product_database``);
 - a repeat scan hits the cache and makes **no** external call;
 - a confident OFF match is preferred over generic USDA lookup for the same input;
-- a barcode OFF cannot resolve routes to ``needs_clarification`` (never guessed);
+- a barcode OFF cannot resolve falls forward under estimate-first and is persisted
+  unresolved when this focused pipeline omits the rough-estimate step;
 - when OFF is disabled, a barcode candidate falls back to the next source (USDA);
 - only the mapped facts (not the raw response) are persisted.
 """
@@ -291,7 +292,9 @@ def test_off_match_wins_over_generic_usda_for_same_input(
     assert fdc.lookups == []
 
 
-def test_unknown_barcode_needs_clarification(client: TestClient, session: Session) -> None:
+def test_unknown_barcode_completes_unresolved_without_rough_step(
+    client: TestClient, session: Session
+) -> None:
     user_id, event_id = _seed_event(client, "barcode-unknown@example.com")
     off = FakeBarcodeSource({})  # nothing matches
     pipeline = _pipeline(
@@ -310,9 +313,11 @@ def test_unknown_barcode_needs_clarification(client: TestClient, session: Sessio
 
     result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
 
-    assert result.job_status is EstimationJobStatus.NEEDS_CLARIFICATION
-    assert result.event_status is LogEventStatus.NEEDS_CLARIFICATION
-    assert _foods(session, event_id) == []
+    assert result.job_status is EstimationJobStatus.SUCCEEDED
+    assert result.event_status is LogEventStatus.COMPLETED
+    foods = _foods(session, event_id)
+    assert len(foods) == 1
+    assert foods[0].status == DerivedItemStatus.UNRESOLVED
     assert session.scalars(select(EvidenceSource)).all() == []
 
 

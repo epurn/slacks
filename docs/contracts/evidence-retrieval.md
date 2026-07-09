@@ -209,7 +209,7 @@ Storage is canonical units only — **kcal and grams** — per the contracts
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `basis` | enum | yes | `per_100g`, `per_100ml`, `per_serving`, or `as_logged` (FTY-279) — what the facts are expressed against. `as_logged` facts are the **totals for the exact logged item** and are **not** scaled by the serving math. |
+| `basis` | enum | yes | `per_100g`, `per_100ml`, `per_serving`, or `as_logged` — what the facts are expressed against. `as_logged` facts are the **totals for the exact logged item** and are **not** scaled by the serving math. It is used for user-stated facts (`user_text`, FTY-279/280) and for bounded rough model-prior totals when grams cannot honestly be inferred (FTY-301). |
 | `calories` | number (kcal) | yes | Energy for the basis quantity. A fact set with no energy value is **not** a usable match. |
 | `protein_g` | number (g) \| null | no (default 0) | Protein for the basis quantity. |
 | `carbs_g` | number (g) \| null | no (default 0) | Carbohydrate for the basis quantity. |
@@ -220,9 +220,9 @@ Storage is canonical units only — **kcal and grams** — per the contracts
 
 Density and unit conventions (e.g. 1 ml ≈ 1 g) are documented assumptions
 recorded in `assumptions` and defined per implementation (`food-resolution.md`).
-Nutrition math (scaling facts to a logged quantity) is **out of scope** here and
-owned by the resolution step. An `as_logged` fact set (FTY-279) is **already** the
-consumed-quantity total, so the resolution step stores it directly without scaling.
+Nutrition math is **out of scope** here and owned by the resolution step. An
+`as_logged` fact set is the consumed total, stored without scaling; `model_prior`
+as-logged rows must carry rough assumptions such as `as_logged_model_prior`.
 
 **Unknown vs. zero macros (FTY-279).** The `default 0` for a missing macro is the
 convention for a **trusted-database / label / official / reference** fact set,
@@ -1127,7 +1127,6 @@ cross-user / unknown / unauthenticated fail-closed.
   to [estimator-policy.md](estimator-policy.md). It adds no new table or enum
   requirement: the existing `source_type`, `source_ref`, `field_provenance`,
   `assumptions`, run `source_refs`, and read-model estimate-basis fields carry the
-  distinction between
-  exact/product-backed, official/reference-backed, comparable aggregate, and
-  model/default-prior estimates. This docs-only extraction does not require product
-  code behavior.
+  distinction between exact/product-backed, official/reference-backed, comparable
+  aggregate, and model/default-prior estimates. FTY-301 adds runtime fallback only:
+  existing `model_prior`, `basis`, and assumptions carry the rough provenance.

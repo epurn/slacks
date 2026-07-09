@@ -43,7 +43,7 @@ from app.estimator.fdc import FDC_SOURCE, ProductFacts
 from app.estimator.food_serving import NutritionFacts
 from app.estimator.food_step import FoodResolver, FoodResolveStep
 from app.estimator.official_fetch import OfficialFetchSettings
-from app.estimator.official_step import OfficialSourceResolveStep
+from app.estimator.official_step import QUANTITY_QUESTION, OfficialSourceResolveStep
 from app.estimator.parse import ParseStep
 from app.estimator.pipeline import Pipeline
 from app.estimator.processing import process_estimation
@@ -59,7 +59,7 @@ from app.estimator.searched_reference import MODEL_PRIOR_SOURCE_TYPE, REFERENCE_
 from app.estimator.self_consistency import SELF_CONSISTENCY_FIRST_WINDOW
 from app.llm.errors import LLMError
 from app.llm.providers.fake import FakeProvider
-from app.models.derived import DerivedFoodItem
+from app.models.derived import ClarificationQuestion, DerivedFoodItem
 from app.models.food_sources import EvidenceSource, Product
 
 _BIG_MAC_URL = "https://example.com/menu/big-mac"
@@ -80,6 +80,10 @@ _PAGE_FACTS = {
     "fat_g": 9.0,
     "serving_size_amount": 219.0,
     "serving_size_unit": "g",
+}
+
+_PAGE_FACTS_WITHOUT_SERVING = {
+    key: value for key, value in _PAGE_FACTS.items() if not key.startswith("serving_size_")
 }
 
 # Reference-page facts for a generic food: 60 kcal / 2 P / 11 C / 1 F per 100 g.
@@ -245,6 +249,14 @@ def _evidence(session: Session, event_id: uuid.UUID) -> EvidenceSource:
     ).one()
 
 
+def _questions(session: Session, event_id: uuid.UUID) -> list[ClarificationQuestion]:
+    return list(
+        session.scalars(
+            select(ClarificationQuestion).where(ClarificationQuestion.log_event_id == event_id)
+        )
+    )
+
+
 def _branded_item() -> dict[str, object]:
     return {
         "type": "food",
@@ -314,6 +326,57 @@ def test_branded_food_resolves_from_official_source(client: TestClient, session:
     assert reference_fetcher.fetched == []
 
 
+def test_official_source_unscalable_quantity_falls_through_to_model_prior(
+    client: TestClient, session: Session
+) -> None:
+    # The official page has plausible per-100g facts, but no serving size. A bowl/count
+    # portion cannot be scaled from that source, so estimate-first falls through instead
+    # of persisting the generic quantity question.
+    user_id, event_id = _seed_event(client, "official-unscalable@example.com", "a bowl of Big Mac")
+    search = FakeSearchProvider(_success_result())
+    fetcher = RecordingFetcher()
+    pipeline = _pipeline(
+        session,
+        food_source=FakeFoodSource({}),
+        parsed_item={
+            "type": "food",
+            "name": "Big Mac",
+            "brand": "McDonald's",
+            "quantity_text": "a bowl",
+            "unit": "bowl",
+            "amount": 1,
+        },
+        search_provider=search,
+        fetcher=fetcher,
+        reference_settings=ReferenceFetchSettings(enabled=False),
+        estimates=[
+            {"disposition": "resolved", "confidence": 0.9, "facts": _PAGE_FACTS_WITHOUT_SERVING},
+            {
+                "disposition": "resolved",
+                "confidence": 0.7,
+                "facts": _PAGE_FACTS,
+                "assumptions": ["estimated from model prior"],
+            },
+        ],
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.event_status is LogEventStatus.COMPLETED
+    assert _questions(session, event_id) == []
+    food = _foods(session, event_id)[0]
+    assert food.status == DerivedItemStatus.RESOLVED
+    assert food.calories == 547.5
+    evidence = _evidence(session, event_id)
+    assert evidence.source_type == MODEL_PRIOR_SOURCE_TYPE
+    assert evidence.assumptions is not None
+    reason = next(a for a in evidence.assumptions if "model prior" in a)
+    assert "official_source returned unscalable serving math" in reason
+    assert QUANTITY_QUESTION not in repr(evidence.assumptions)
+    assert search.queries == ["Big Mac McDonald's"]
+    assert fetcher.fetched == [_BIG_MAC_URL]
+
+
 # --- reference-source tier (FTY-166) ----------------------------------------------
 
 
@@ -366,6 +429,57 @@ def test_detailed_generic_resolves_from_reference_source(
 
     # The only search that egressed is the sanitized identity + the fixed nutrition
     # intent; the official fetcher was never used for a generic food.
+    assert search.queries == ["gruel nutrition facts"]
+    assert fetcher.fetched == []
+    assert reference_fetcher.fetched == [_REFERENCE_URL]
+
+
+def test_reference_source_unscalable_quantity_falls_through_to_model_prior(
+    client: TestClient, session: Session
+) -> None:
+    # Same policy for the reference tier: a successful scrape with per-100g facts but no
+    # serving-size basis is not enough to ask in estimate-first mode.
+    user_id, event_id = _seed_event(client, "reference-unscalable@example.com", "a bowl of gruel")
+    search = FakeSearchProvider(_success_result(_REFERENCE_URL))
+    fetcher = RecordingFetcher()
+    reference_fetcher = RecordingFetcher(text=f"Gruel — 60 kcal per 100 g {_RAW_PAGE_SENTINEL}")
+    pipeline = _pipeline(
+        session,
+        food_source=FakeFoodSource({}),
+        parsed_item={
+            "type": "food",
+            "name": "gruel",
+            "quantity_text": "a bowl",
+            "unit": "bowl",
+            "amount": 1,
+        },
+        search_provider=search,
+        fetcher=fetcher,
+        reference_fetcher=reference_fetcher,
+        estimates=[
+            {"disposition": "resolved", "confidence": 0.9, "facts": _REFERENCE_FACTS},
+            {
+                "disposition": "resolved",
+                "confidence": 0.7,
+                "facts": _PAGE_FACTS,
+                "assumptions": ["estimated from model prior"],
+            },
+        ],
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.event_status is LogEventStatus.COMPLETED
+    assert _questions(session, event_id) == []
+    food = _foods(session, event_id)[0]
+    assert food.status == DerivedItemStatus.RESOLVED
+    assert food.calories == 547.5
+    evidence = _evidence(session, event_id)
+    assert evidence.source_type == MODEL_PRIOR_SOURCE_TYPE
+    assert evidence.assumptions is not None
+    reason = next(a for a in evidence.assumptions if "model prior" in a)
+    assert "reference_source returned unscalable serving math" in reason
+    assert QUANTITY_QUESTION not in repr(evidence.assumptions)
     assert search.queries == ["gruel nutrition facts"]
     assert fetcher.fetched == []
     assert reference_fetcher.fetched == [_REFERENCE_URL]
@@ -523,9 +637,12 @@ def test_no_raw_page_text_is_persisted(client: TestClient, session: Session) -> 
 # --- FTY-167 generic routing (updated for the reference tier) -----------------------
 
 
-def test_vague_generic_miss_still_clarifies(client: TestClient, session: Session) -> None:
-    # The clarification boundary is preserved: a generic food with no usable amount
-    # detail ("some crackers") is not deferrable and still routes to clarification.
+def test_amountless_generic_miss_resolves_from_reference_source(
+    client: TestClient, session: Session
+) -> None:
+    # FTY-301: under the default estimate-first policy, a recognizable generic food
+    # with no explicit amount falls forward to rough reference/model/default serving
+    # estimation instead of the generic quantity question.
     user_id, event_id = _seed_event(client, "official-vague@example.com", "some crackers")
     search = FakeSearchProvider(_success_result())
     fetcher = RecordingFetcher()
@@ -540,10 +657,17 @@ def test_vague_generic_miss_still_clarifies(client: TestClient, session: Session
 
     result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
 
-    assert result.job_status is EstimationJobStatus.NEEDS_CLARIFICATION
-    assert _foods(session, event_id) == []
-    assert search.queries == []  # no evidence tier is consulted for a vague generic
-    assert fetcher.fetched == []
+    assert result.job_status is EstimationJobStatus.SUCCEEDED
+    assert result.event_status is LogEventStatus.COMPLETED
+    foods = _foods(session, event_id)
+    assert len(foods) == 1
+    assert foods[0].status == DerivedItemStatus.RESOLVED
+    evidence = _evidence(session, event_id)
+    assert evidence.source_type == REFERENCE_SOURCE_TYPE
+    assert evidence.assumptions is not None
+    assert "estimated_default_serving" in evidence.assumptions
+    assert search.queries == ["crackers nutrition facts"]
+    assert fetcher.fetched == [_BIG_MAC_URL]
 
 
 def test_branded_food_resolved_by_usda_skips_official(client: TestClient, session: Session) -> None:
