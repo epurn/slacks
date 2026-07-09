@@ -7,9 +7,9 @@ migrated SQLite database, proving the acceptance criteria across the trust bound
 a found generic food with a resolvable quantity becomes a ``resolved``
 ``derived_food_items`` row carrying canonical calories/macros, a cached global
 ``products`` row, and a user-owned ``evidence_sources`` row; an unknown food or an
-unresolvable quantity routes to ``needs_clarification`` with nothing user-owned
-persisted; a repeated food hits the cache instead of the source; and an unconfigured
-source leaves food unresolved.
+unresolvable quantity falls forward under estimate-first and is persisted unresolved
+when this focused pipeline omits the rough-estimate step; a repeated food hits the
+cache instead of the source; and an unconfigured source leaves food unresolved.
 """
 
 from __future__ import annotations
@@ -163,13 +163,13 @@ def test_food_resolves_with_calories_macros_evidence_and_cache(
     assert evidence.calories_per_100g == 130.0
 
 
-def test_unknown_food_without_detail_needs_clarification(
+def test_unknown_food_without_detail_completes_unresolved_without_rough_step(
     client: TestClient, session: Session
 ) -> None:
-    # A generic food USDA cannot cost and that carries no usable amount detail
-    # ("some crackers") still clarifies — the portion is genuinely missing, not just
-    # casual. (A *detail-rich* generic miss instead falls through to model-prior via
-    # the official step; see test_official_source_resolution.py.)
+    # Estimate-first defers even an amountless recognized candidate to the rough
+    # official/reference/model-prior step. This focused pipeline omits that step, so
+    # the worker persists the leftover candidate unresolved and completes rather than
+    # asking the generic quantity question.
     user_id, event_id = _seed_event(client, "food-unknown@example.com")
     source = FakeFoodSource({})  # nothing matches
     pipeline = _pipeline(
@@ -180,9 +180,12 @@ def test_unknown_food_without_detail_needs_clarification(
 
     result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
 
-    assert result.job_status is EstimationJobStatus.NEEDS_CLARIFICATION
-    assert result.event_status is LogEventStatus.NEEDS_CLARIFICATION
-    assert _foods(session, event_id) == []
+    assert result.job_status is EstimationJobStatus.SUCCEEDED
+    assert result.event_status is LogEventStatus.COMPLETED
+    foods = _foods(session, event_id)
+    assert len(foods) == 1
+    assert foods[0].status == DerivedItemStatus.UNRESOLVED
+    assert foods[0].calories is None
     assert session.scalars(select(EvidenceSource)).all() == []
 
 
@@ -211,8 +214,12 @@ def test_detailed_generic_miss_defers_instead_of_clarifying(
     assert foods[0].calories is None
 
 
-def test_unresolvable_quantity_needs_clarification(client: TestClient, session: Session) -> None:
-    # A count with no default serving size cannot be resolved to grams; ask, never guess.
+def test_unresolvable_quantity_completes_unresolved_without_rough_step(
+    client: TestClient, session: Session
+) -> None:
+    # A count with no source default serving size now falls forward under
+    # estimate-first. With no rough-estimate step wired here, it completes as an
+    # unresolved leftover instead of persisting a quantity question.
     user_id, event_id = _seed_event(client, "food-qty@example.com")
     soup = ProductFacts(
         source=FDC_SOURCE,
@@ -231,8 +238,11 @@ def test_unresolvable_quantity_needs_clarification(client: TestClient, session: 
 
     result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
 
-    assert result.job_status is EstimationJobStatus.NEEDS_CLARIFICATION
-    assert _foods(session, event_id) == []
+    assert result.job_status is EstimationJobStatus.SUCCEEDED
+    assert result.event_status is LogEventStatus.COMPLETED
+    foods = _foods(session, event_id)
+    assert len(foods) == 1
+    assert foods[0].status == DerivedItemStatus.UNRESOLVED
 
 
 def test_repeated_food_uses_cache_not_source(client: TestClient, session: Session) -> None:

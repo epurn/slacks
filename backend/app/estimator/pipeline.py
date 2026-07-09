@@ -479,7 +479,13 @@ def default_pipeline(
         # produces the same resolved-item/evidence shape the worker persists).
         if user_text_step is not None:
             steps.append(user_text_step)
-        steps.append(FoodResolveStep(food_resolver, barcode_resolver=barcode_resolver))
+        steps.append(
+            FoodResolveStep(
+                food_resolver,
+                barcode_resolver=barcode_resolver,
+                clarify_mode=parse_step.policy.mode,
+            )
+        )
         # The official-source resolver only acts on candidates the food step deferred,
         # so it is wired in only alongside the food step.
         if official_step is not None:

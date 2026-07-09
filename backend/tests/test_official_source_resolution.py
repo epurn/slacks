@@ -523,9 +523,12 @@ def test_no_raw_page_text_is_persisted(client: TestClient, session: Session) -> 
 # --- FTY-167 generic routing (updated for the reference tier) -----------------------
 
 
-def test_vague_generic_miss_still_clarifies(client: TestClient, session: Session) -> None:
-    # The clarification boundary is preserved: a generic food with no usable amount
-    # detail ("some crackers") is not deferrable and still routes to clarification.
+def test_amountless_generic_miss_resolves_from_reference_source(
+    client: TestClient, session: Session
+) -> None:
+    # FTY-301: under the default estimate-first policy, a recognizable generic food
+    # with no explicit amount falls forward to rough reference/model/default serving
+    # estimation instead of the generic quantity question.
     user_id, event_id = _seed_event(client, "official-vague@example.com", "some crackers")
     search = FakeSearchProvider(_success_result())
     fetcher = RecordingFetcher()
@@ -540,10 +543,17 @@ def test_vague_generic_miss_still_clarifies(client: TestClient, session: Session
 
     result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
 
-    assert result.job_status is EstimationJobStatus.NEEDS_CLARIFICATION
-    assert _foods(session, event_id) == []
-    assert search.queries == []  # no evidence tier is consulted for a vague generic
-    assert fetcher.fetched == []
+    assert result.job_status is EstimationJobStatus.SUCCEEDED
+    assert result.event_status is LogEventStatus.COMPLETED
+    foods = _foods(session, event_id)
+    assert len(foods) == 1
+    assert foods[0].status == DerivedItemStatus.RESOLVED
+    evidence = _evidence(session, event_id)
+    assert evidence.source_type == REFERENCE_SOURCE_TYPE
+    assert evidence.assumptions is not None
+    assert "estimated_default_serving" in evidence.assumptions
+    assert search.queries == ["crackers nutrition facts"]
+    assert fetcher.fetched == [_BIG_MAC_URL]
 
 
 def test_branded_food_resolved_by_usda_skips_official(client: TestClient, session: Session) -> None:

@@ -3,7 +3,8 @@
 These drive the real parse -> food-resolution -> official/reference/model-prior
 pipeline with network-free fakes. The load-bearing behavior is that a cracker
 count plus a household-volume spread amount resolves as intake, even when exact
-product/reference lookup misses, while an amountless snack still clarifies.
+product/reference lookup misses, and after FTY-301 amountless recognized snacks rough
+estimate instead of clarifying.
 """
 
 from __future__ import annotations
@@ -65,6 +66,8 @@ _HUMMUS_MODEL_PRIOR_FACTS = {
     "protein_g": 7.0,
     "carbs_g": 14.0,
     "fat_g": 10.0,
+    "serving_size_amount": 30.0,
+    "serving_size_unit": "g",
 }
 
 
@@ -323,11 +326,11 @@ def test_branded_counted_crackers_and_measured_hummus_variant_resolves(
     assert all(food.calories is not None for food in foods)
 
 
-def test_amountless_crackers_and_hummus_still_clarifies(
+def test_amountless_crackers_and_hummus_rough_estimates(
     client: TestClient, session: Session
 ) -> None:
     user_id, event_id = _seed_event(client, "fty292-amountless@example.com", "crackers and hummus")
-    search = FakeSearchProvider(_success_result())
+    search = FakeSearchProvider(_no_result())
     fetcher = RecordingFetcher()
     pipeline = _pipeline(
         session,
@@ -338,14 +341,18 @@ def test_amountless_crackers_and_hummus_still_clarifies(
         search=search,
         fetcher=fetcher,
         estimates=[
-            {"disposition": "resolved", "confidence": 0.9, "facts": _HUMMUS_MODEL_PRIOR_FACTS}
+            {"disposition": "resolved", "confidence": 0.9, "facts": _CRACKER_MODEL_PRIOR_FACTS},
+            {"disposition": "resolved", "confidence": 0.9, "facts": _HUMMUS_MODEL_PRIOR_FACTS},
         ],
     )
 
     result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
 
-    assert result.job_status is EstimationJobStatus.NEEDS_CLARIFICATION
-    assert result.event_status is LogEventStatus.NEEDS_CLARIFICATION
-    assert _foods(session, event_id) == []
-    assert search.queries == []
+    assert result.job_status is EstimationJobStatus.SUCCEEDED
+    assert result.event_status is LogEventStatus.COMPLETED
+    foods = _foods(session, event_id)
+    assert len(foods) == 2
+    assert {food.status for food in foods} == {DerivedItemStatus.RESOLVED}
+    assert {row.source_type for row in _evidence(session, event_id)} == {MODEL_PRIOR_SOURCE_TYPE}
+    assert search.queries == ["crackers nutrition facts", "hummus nutrition facts"]
     assert fetcher.fetched == []

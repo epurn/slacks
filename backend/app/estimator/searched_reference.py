@@ -106,6 +106,31 @@ _MODEL_PRIOR_PROMPT = (
     "Named food: {identity}"
 )
 
+#: Model-prior framing for a full food-resolution fallback. This prompt receives only
+#: sanitized item identity plus bounded structured portion fields, never the raw diary
+#: text. It lets the model choose ``as_logged`` when neither grams nor a default
+#: serving can be honestly represented for the logged item.
+_LOGGED_MODEL_PRIOR_PROMPT = (
+    "You are a nutrition estimator. No official or public reference source was "
+    "available for the named food below, so give a rough but usable estimate into "
+    "the required structured schema.\n"
+    "Rules:\n"
+    "- Use the sanitized food identity and structured logged portion only; do not "
+    "assume any profile, weight, history, or diary context.\n"
+    "- Prefer basis per_100g with a serving_size_amount and serving_size_unit when "
+    "you can name a typical gram serving for this food.\n"
+    "- If a single serving basis is clearer, use basis per_serving and include a "
+    "gram or millilitre serving_size_amount and serving_size_unit.\n"
+    "- If grams cannot honestly be inferred from the structured portion, use basis "
+    "as_logged and estimate a bounded total for the logged item itself.\n"
+    "- List content-free assumptions such as typical serving, default serving, or "
+    "as-logged estimate basis. Do not include raw diary text.\n"
+    '- If you cannot estimate this item, set disposition "unresolved".\n'
+    "- Set confidence in [0, 1].\n"
+    "Sanitized food identity: {identity}\n"
+    "Structured logged portion: {portion}"
+)
+
 #: The injectable searched-result fetch seam: takes a result URL + its egress settings
 #: and returns sanitized inert text. Tests inject network-free fakes.
 FetchReference = Callable[[str, ReferenceFetchSettings], str]
@@ -117,9 +142,11 @@ BeforeFetch = Callable[[str], None]
 class SearchedReferenceFacts:
     """A validated searched-result composition plus URL provenance.
 
-    ``facts`` is always canonical per-100g and plausibility-gated. ``source_ref`` is
-    bounded and stores the source-system prefix plus the URL. ``hash_key`` remains
-    the raw URL so caller fingerprints stay identical to the pre-extraction chain.
+    ``facts`` is usually canonical per-100g and plausibility-gated. For the
+    model-prior-only ``as_logged`` fallback, ``basis`` names that the facts are already
+    the rough consumed-portion total and must not be scaled. ``source_ref`` is bounded
+    and stores the source-system prefix plus the URL. ``hash_key`` remains the raw URL
+    so caller fingerprints stay identical to the pre-extraction chain.
     """
 
     facts: NutritionFacts
@@ -127,6 +154,7 @@ class SearchedReferenceFacts:
     hash_key: str
     default_serving_g: float | None
     assumptions: tuple[str, ...]
+    basis: str = "per_100g"
 
 
 AcceptSearchedReference = Callable[[SearchedReferenceFacts], bool]
@@ -182,6 +210,7 @@ def searched_reference_per_100g(
             hash_key=search_candidate.url,
             default_serving_g=default_serving_g,
             assumptions=tuple(estimate.assumptions),
+            basis=FactBasis.PER_100G.value,
         )
         if accept_result is not None and not accept_result(found):
             continue
@@ -231,8 +260,9 @@ def _identity_query(candidate: CandidateDraft) -> str:
 def _to_per_100g(facts: EstimatedFacts) -> tuple[NutritionFacts, float | None] | None:
     """Canonicalise validated facts to per-100g + an optional gram serving size.
 
-    Returns ``None`` when per-serving facts lack a gram basis, or when canonical
-    per-100g facts fail the shared plausibility bound.
+    Returns ``None`` when per-serving facts lack a gram basis, as-logged facts are
+    supplied to a source-backed path that requires per-100g, or when canonical per-100g
+    facts fail the shared plausibility bound.
     """
 
     raw = NutritionFacts(
@@ -249,6 +279,9 @@ def _to_per_100g(facts: EstimatedFacts) -> tuple[NutritionFacts, float | None] |
         if not nutrition_facts_plausible(raw):
             return None
         return raw, serving_g
+
+    if facts.basis is FactBasis.AS_LOGGED:
+        return None
 
     if serving_g is None:
         return None

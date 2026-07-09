@@ -261,6 +261,7 @@ def process_estimation(
                 search_provider=search_provider,
                 fetch_settings=load_official_fetch_settings(),
                 reference_fetch_settings=reference_fetch_settings,
+                clarify_mode=app_settings.estimator_clarify_mode,
             )
             # The user-text tier (FTY-280) resolves a stated calorie total directly and
             # fills its missing macros from the same reference search/fetch path before

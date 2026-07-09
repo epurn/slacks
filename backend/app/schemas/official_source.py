@@ -13,9 +13,9 @@ any of it is trusted:
    calories/macros.
 2. **Model-prior estimate** — when no official source can be searched/fetched, fall
    back to a model-prior estimate of the same shape for a *named* product, from the
-   item identity alone (name + brand). This carries an explicit source status
-   (``model_prior``) and ``assumptions`` so the entry stays user-editable; it is the
-   gated last-resort fallback, never a silent guess (see
+   sanitized item identity and structured consumed-portion fields. This carries an
+   explicit source status (``model_prior``) and ``assumptions`` so the entry stays
+   user-editable; it is the gated last-resort fallback, never a silent guess (see
    ``docs/contracts/evidence-retrieval.md`` Fallback Rule).
 
 Defence in depth against prompt injection lives in the schema shape, mirroring
@@ -74,20 +74,28 @@ class FactBasis(StrEnum):
     - :attr:`PER_SERVING` — facts are per single serving; the resolver converts them
       to per-100g using ``serving_size_amount`` / ``serving_size_unit`` (which must
       resolve to grams), exactly as the nutrition-label step does.
+    - :attr:`AS_LOGGED` — facts are a bounded rough total for the structured logged
+      portion itself. This is allowed only for model-prior fallback when grams cannot
+      honestly be inferred; it is stored as ``model_prior`` with assumptions and is
+      never presented as source-backed per-100g evidence.
     """
 
     PER_100G = "per_100g"
     PER_SERVING = "per_serving"
+    AS_LOGGED = "as_logged"
 
 
 class EstimatedFacts(BaseModel):
     """The transcribed or estimated nutrition facts for one named product.
 
-    Energy/macros are expressed against ``basis``. The backend — never the model —
-    converts them to canonical per-100g facts and scales them to the consumed
-    quantity (:mod:`app.estimator.food_serving`). ``serving_size_amount`` /
+    Energy/macros are expressed against ``basis``. For ``per_100g`` /
+    ``per_serving`` facts, the backend — never the model — converts them to canonical
+    per-100g facts and scales them to the consumed quantity
+    (:mod:`app.estimator.food_serving`). ``serving_size_amount`` /
     ``serving_size_unit`` are the source's serving size; they are **required** to
     canonicalise ``per_serving`` facts and otherwise enable count-unit serving math.
+    ``as_logged`` facts are already the rough consumed-portion total, so they are
+    stored directly with ``basis = as_logged`` and model-prior provenance.
     """
 
     model_config = ConfigDict(extra="forbid")

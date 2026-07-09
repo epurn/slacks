@@ -52,9 +52,10 @@ component is represented exactly once and no sibling is re-created or
 double-counted. No
 schema change (`estimation_jobs` / `estimation_runs` untouched). This settles the
 mechanics only; the estimator implementation is the **downstream FTY-278
-follow-up**, and until it lands a mixed log routes to an event-level
-`needs_clarification` with no committed siblings (the FTY-275 baseline) so the
-re-estimate is the v2 event-level round-trip unchanged. See
+follow-up**. FTY-301 rough-estimates recognizable amountless components under the
+default policy; until item-scoped partials land, any remaining allowed
+clarification still routes to an event-level `needs_clarification` with no
+committed siblings, so the re-estimate is the v2 event-level round-trip unchanged. See
 [Answer-triggered re-estimate](#answer-triggered-re-estimate-fty-171).
 
 2 (FTY-171): the **answer-triggered re-estimate**. The clarification answer
@@ -215,9 +216,10 @@ in the one transaction that persists the `clarification_answers` row:
   the answered component's row is updated in place (not deleted), and were a
   referenced derived-item row ever removed the link is simply nulled — detaching
   the question and preserving the accumulated detail. This is the target contract;
-  the sibling-preserving estimator
-  work is the downstream FTY-278 follow-up. Under the FTY-275 baseline the event
-  carries no committed siblings, so this reduces to the v2 event-level re-estimate.
+  the sibling-preserving estimator work is the downstream FTY-278 follow-up. Until
+  that lands, only remaining allowed clarifications after FTY-301's rough-estimate
+  fallback carry no committed siblings, so this reduces to the v2 event-level
+  re-estimate.
 
 ## Retry policy
 
@@ -322,4 +324,5 @@ POST /api/users/{uid}/log-events  →  201 pending event
   `estimation_jobs` / `estimation_runs` are untouched (the item↔question link is
   `clarification_questions.derived_food_item_id`, `parse-candidates.md` v5's
   additive column). The estimator implementation is the downstream FTY-278
-  follow-up; the FTY-275 baseline ships until then.
+  follow-up; until then, FTY-301 rough-estimates recognizable amountless items by
+  default and any remaining allowed clarification stays event-level.

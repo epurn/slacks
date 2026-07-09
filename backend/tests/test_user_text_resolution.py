@@ -1126,17 +1126,16 @@ def test_empty_sanitized_identity_fails_closed_without_a_broad_source_lookup(
 # --- representative regression: clarification is sparse ---------------------------
 
 
-def test_representative_logs_estimate_far_more_than_they_clarify(
+def test_representative_recognized_logs_complete_without_quantity_clarification(
     client: TestClient, session: Session
 ) -> None:
-    """A representative set: only a genuinely-detail-less component clarifies.
+    """Representative recognized foods resolve or estimate in estimate-first mode.
 
     Qualitative regression for the product expectation (``food-resolution.md`` — a
     low clarification rate, no hard numeric quota): ordinary branded / portioned /
-    user-stated logs resolve or estimate, and only a bare identity with no usable
-    detail asks. The named categories cover a user-stated total, a stated total plus a
-    macro, an ordinary *branded* item with no user-stated nutrition, a worded portion
-    (FTY-275), and the single genuinely-indeterminate case that still clarifies.
+    user-stated logs resolve or estimate. FTY-301 extends that fallback to
+    recognized amountless identities in default mode, so this set should not ask
+    generic quantity questions.
     """
 
     cases: list[tuple[str, dict[str, object], bool]] = [
@@ -1171,9 +1170,9 @@ def test_representative_logs_estimate_far_more_than_they_clarify(
             False,
         ),
         (
-            "bare identity, no detail",
+            "amountless recognized identity",
             {"type": "food", "name": "milk", "quantity_text": "some milk"},
-            True,
+            False,
         ),
     ]
 
@@ -1182,8 +1181,9 @@ def test_representative_logs_estimate_far_more_than_they_clarify(
         user_id, event_id = _seed_event(client, f"rep-{index}@example.com", label)
         # A low verbalized confidence makes the parse *conservative* (hybrid below the
         # calibrated operating point even with unanimous samples), so only the
-        # detail-signal override rescues a case from clarifying — exactly what a
-        # detail-rich log should do while a bare identity still asks.
+        # detail-signal override rescues a case from parse-level clarification;
+        # FTY-301's resolver fallback then rough-estimates recognized identities
+        # that still have no amount.
         pipeline = _pipeline(session, parsed_item=item, confidence=0.2)
         result = process_estimation(
             session, log_event_id=event_id, user_id=user_id, pipeline=pipeline
@@ -1192,5 +1192,5 @@ def test_representative_logs_estimate_far_more_than_they_clarify(
         assert did_clarify is expect_clarify, f"{label}: expected clarify={expect_clarify}"
         clarified += int(did_clarify)
 
-    # The representative set clarifies rarely — here exactly the one detail-less case.
-    assert clarified == 1
+    # Recognized foods should complete in default estimate-first mode.
+    assert clarified == 0

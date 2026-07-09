@@ -91,10 +91,11 @@ settles four contract points and cross-links the affected contracts:
 
 **This version is a contract decision only; it edits no product code.** The
 downstream estimator/backend implementation is a required follow-up split (called
-out under Migration / Compatibility). Until it lands, the shipped behaviour is the
-**FTY-275 baseline**: a genuinely amountless component still routes the whole event
-to an event-level `needs_clarification` with nothing committed (`food-resolution.md`
-v8/v9).
+out under Migration / Compatibility). FTY-301 changes the default amountless case:
+recognizable components now rough-estimate under `estimate_first`. Until the
+item-scoped follow-up lands, any **remaining** allowed clarification (strict mode,
+unsafe input, or every rough path unavailable) is still event-level
+`needs_clarification` with no committed siblings.
 
 5 (FTY-198): adds the **day-listing read** —
 `GET /api/users/{user_id}/log-events/by-date?day=YYYY-MM-DD` — which returns an
@@ -277,9 +278,9 @@ read; that component is instead discoverable through the status-gated
 clarification read (its open question names the component in the question
 `text`), so the
 `items` array stays "finalized costed detail only" and never surfaces an
-uncosted placeholder row. (Under the FTY-275 baseline a mixed log routes to an
-event-level `needs_clarification` with no committed items, so it returns
-`items: []` until the FTY-278 follow-up lands.)
+uncosted placeholder row. (After FTY-301, recognizable amountless components
+usually rough-estimate and complete; if a remaining allowed clarification occurs
+before the FTY-278 follow-up, it is still event-level and returns `items: []`.)
 - **Get-by-id** → `200` with the event DTO.
 
 The DTO does **not** echo `idempotency_key`: it is a write-only request token with
@@ -564,6 +565,7 @@ questions) live in `clarification.md`.
   (`estimation-jobs.md` v3, `daily-summary.md`), leaving the FTY-170
   clarification read/answer shape unchanged; and, once the reads
   expose partial state, an optional mobile presentation story (no visual redesign
-  is specified here). Until that split lands, the shipped behaviour is the
-  FTY-275 baseline: an amountless component routes the whole event to an
-  event-level `needs_clarification` with nothing committed.
+  is specified here). Until that split lands, FTY-301's default rough-estimate path
+  handles recognizable amountless components; any remaining allowed clarification
+  still routes the whole event to event-level `needs_clarification` with nothing
+  committed.
