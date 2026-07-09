@@ -39,6 +39,10 @@ REFERENCE_KINDS: tuple[str, ...] = ("generic_food", "named_product", "restaurant
 CLAUDE_CODE_SOURCE = "claude_code"
 CLAUDE_CODE_SOURCE_TYPE = "llm_provider"
 
+#: Codex LLM provider descriptor constants.
+CODEX_SOURCE = "codex"
+CODEX_SOURCE_TYPE = "llm_provider"
+
 
 def _session_present(config_dir: str) -> bool:
     """Return True if a Claude Code session file is detectable in config_dir.
@@ -76,6 +80,44 @@ def _probe_claude_code(environ: Mapping[str, str] | None = None) -> tuple[bool, 
     return True, _session_present(config_dir)
 
 
+def _codex_saved_auth_present(codex_home: str) -> bool:
+    """Return True if a Codex auth marker is detectable under ``CODEX_HOME``.
+
+    Codex's documented file credential store writes ``auth.json`` under
+    ``CODEX_HOME``. This check uses only filesystem metadata — regular file
+    existence and non-zero size — and never opens or reads the auth file, so token
+    contents cannot be surfaced through diagnostics.
+    """
+
+    auth_file = os.path.join(codex_home, "auth.json")
+    try:
+        return os.path.isfile(auth_file) and os.path.getsize(auth_file) > 0
+    except OSError:
+        return False
+
+
+def _probe_codex(environ: Mapping[str, str] | None = None) -> tuple[bool, bool]:
+    """Return (binary_present, auth_configured) for the codex provider.
+
+    Both checks are cheap, local, and content-free: no subprocess, no network
+    call, no credential read. ``auth_configured`` is true when Slacks has an
+    optional provider API key to pass only to the Codex child process, or when a
+    saved Codex auth marker exists under ``CODEX_HOME``.
+    """
+
+    source = os.environ if environ is None else environ
+
+    binary_present = shutil.which("codex") is not None
+    if not binary_present:
+        return False, False
+
+    if source.get("FATTY_LLM_PROVIDER") == "codex" and source.get("FATTY_LLM_API_KEY"):
+        return True, True
+
+    codex_home = source.get("CODEX_HOME", os.path.expanduser("~/.codex"))
+    return True, _codex_saved_auth_present(codex_home)
+
+
 def list_source_capabilities(environ: Mapping[str, str] | None = None) -> SourcesStatus:
     """Return the capability descriptor for each configured evidence source.
 
@@ -87,7 +129,11 @@ def list_source_capabilities(environ: Mapping[str, str] | None = None) -> Source
     ``available`` with an API key; Open Food Facts (barcode) needs no credentials, so
     it is always ``available`` and ``enabled`` unless a self-hoster turns it off.
     The ``claude_code`` LLM provider (FTY-087/088) is ``enabled`` when selected as
-    the active provider and ``available`` when the CLI is on PATH and a session exists.
+    the active provider and ``available`` when the CLI is on PATH and a session
+    exists. The ``codex`` LLM provider (FTY-296) follows the same diagnostics
+    shape: ``enabled`` when selected, ``available`` when the CLI is on PATH and
+    either a Fatty-side API key is configured or saved Codex auth is detectable
+    under ``CODEX_HOME``.
     """
 
     search = load_search_settings(environ)
@@ -96,6 +142,7 @@ def list_source_capabilities(environ: Mapping[str, str] | None = None) -> Source
     fdc = load_fdc_settings(environ)
     llm = load_llm_settings(environ)
     binary_present, session_valid = _probe_claude_code(environ)
+    codex_binary_present, codex_auth_configured = _probe_codex(environ)
 
     return SourcesStatus(
         sources=[
@@ -138,6 +185,16 @@ def list_source_capabilities(environ: Mapping[str, str] | None = None) -> Source
                 # available = CLI on PATH AND a session file detected — booleans only,
                 # no token/identity/session content ever surfaced (FTY-088 security).
                 available=binary_present and session_valid,
+            ),
+            SourceCapability(
+                id=CODEX_SOURCE,
+                source_type=CODEX_SOURCE_TYPE,
+                kinds=["estimation"],
+                enabled=llm.provider == "codex",
+                # available = CLI on PATH AND a saved auth marker or child-only
+                # API key exists. Booleans only: no key, token, path, identity,
+                # filename content, or raw CLI output is ever surfaced.
+                available=codex_binary_present and codex_auth_configured,
             ),
         ]
     )
