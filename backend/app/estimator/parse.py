@@ -224,9 +224,11 @@ class ParseStep:
         # strict keeps old-style abstention.
         conservative = signal.all_non_parsed or self.policy.should_clarify(signal.hybrid)
         if conservative and not _policy_allows_estimate(self.policy.mode, result.items):
+            fallback_items = result.items if not signal.all_non_parsed else ()
             context.clarification_questions = _clarification_questions(
                 samples,
-                fallback_items=result.items if not signal.all_non_parsed else (),
+                fallback_items=fallback_items,
+                prefer_backend_missing_detail=self.policy.mode == "balanced",
             )
             raise NeedsClarification("low_confidence_or_ambiguous")
 
@@ -404,7 +406,10 @@ def _candidate_has_detail(item: ParsedCandidate) -> bool:
 
 
 def _clarification_questions(
-    samples: Sequence[ParseResult], *, fallback_items: Sequence[ParsedCandidate] = ()
+    samples: Sequence[ParseResult],
+    *,
+    fallback_items: Sequence[ParsedCandidate] = (),
+    prefer_backend_missing_detail: bool = False,
 ) -> list[ClarificationDraft]:
     """Return distinct high-quality clarification questions across samples.
 
@@ -416,8 +421,14 @@ def _clarification_questions(
     fallback the user cannot act on. A low-confidence ``parsed`` result without
     provider questions is a backend-routed clarification, not provider-raised
     clarification output, so it gets a deterministic targeted question derived
-    from the first item that lacks a detail signal.
+    from the first item that lacks a detail signal. In balanced parsed-item
+    clarifications with both stated and missing details, prefer that deterministic
+    missing-detail question over provider text so the sheet cannot re-ask a detail
+    the user already supplied.
     """
+
+    if prefer_backend_missing_detail and _has_stated_and_missing_detail(fallback_items):
+        return [_backend_clarification_question(fallback_items, require_recognizable=True)]
 
     questions: list[ClarificationDraft] = []
     seen: set[str] = set()
@@ -437,7 +448,17 @@ def _clarification_questions(
     return questions
 
 
-def _backend_clarification_question(items: Sequence[ParsedCandidate]) -> ClarificationDraft:
+def _has_stated_and_missing_detail(items: Sequence[ParsedCandidate]) -> bool:
+    """Whether a mixed parsed reply has a concrete missing detail to ask for."""
+
+    return any(_candidate_has_detail(item) for item in items) and any(
+        not _candidate_has_detail(item) and _is_recognizable_identity(item.name) for item in items
+    )
+
+
+def _backend_clarification_question(
+    items: Sequence[ParsedCandidate], *, require_recognizable: bool = False
+) -> ClarificationDraft:
     """Build a bounded question for backend-routed low-confidence parses.
 
     The item name comes from the schema-validated parse reply (bounded data, not
@@ -445,7 +466,15 @@ def _backend_clarification_question(items: Sequence[ParsedCandidate]) -> Clarifi
     still accepts arbitrary free text.
     """
 
-    item = next((candidate for candidate in items if not _candidate_has_detail(candidate)), None)
+    item = next(
+        (
+            candidate
+            for candidate in items
+            if not _candidate_has_detail(candidate)
+            and (not require_recognizable or _is_recognizable_identity(candidate.name))
+        ),
+        None,
+    )
     if item is None:
         raise StepFailed("clarification_quality_failed")
     if item.type is CandidateType.EXERCISE:

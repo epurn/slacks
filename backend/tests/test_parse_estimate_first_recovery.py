@@ -275,6 +275,40 @@ def test_balanced_mode_keeps_threshold_for_amountless_identity() -> None:
     assert _question_texts(context) == ["How many crackers did you have?"]
 
 
+def test_balanced_mode_targets_missing_detail_when_provider_reasks_stated_item() -> None:
+    provider = FakeProvider(
+        responses=_sampled(
+            {
+                **_parsed(
+                    [
+                        {
+                            "type": "food",
+                            "name": "crackers",
+                            "quantity_text": "6",
+                            "amount": 6,
+                            "unit": "crackers",
+                        },
+                        {"type": "food", "name": "hummus", "quantity_text": ""},
+                    ],
+                    confidence=_low(),
+                ),
+                "clarification_questions": [
+                    _clarify("How many crackers did you have?", ["4", "6", "8"])
+                ],
+            }
+        )
+    )
+    context = _context(raw_text="6 crackers and hummus")
+
+    with pytest.raises(NeedsClarification) as exc:
+        _run(provider, context, policy=ParsePolicySettings(mode="balanced"))
+
+    assert exc.value.reason == "low_confidence_or_ambiguous"
+    assert context.food_candidates == []
+    assert _question_texts(context) == ["How much hummus did you have?"]
+    assert context.clarification_questions[0].options == ["1 tsp", "1 tbsp", "2 tbsp"]
+
+
 def test_balanced_mode_does_not_reask_for_a_stated_detail() -> None:
     provider = FakeProvider(
         responses=_sampled(

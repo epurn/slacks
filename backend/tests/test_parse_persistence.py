@@ -326,6 +326,64 @@ def test_balanced_low_confidence_parsed_entry_persists_backend_clarification_opt
     }
 
 
+def test_balanced_mixed_detail_clarification_persists_missing_item_question(
+    client: TestClient, session: Session
+) -> None:
+    user_id, event_id, auth = _seed_event_with_auth(
+        client, "parse-mixed-detail-balanced@example.com", "6 crackers and hummus"
+    )
+    pipeline = _pipeline(
+        [
+            {
+                "disposition": "parsed",
+                "confidence": 0.1,
+                "items": [
+                    {
+                        "type": "food",
+                        "name": "crackers",
+                        "quantity_text": "6",
+                        "amount": 6,
+                        "unit": "crackers",
+                    },
+                    {"type": "food", "name": "hummus", "quantity_text": ""},
+                ],
+                "clarification_questions": [
+                    _clarify("How many crackers did you have?", ["4", "6", "8"])
+                ],
+            }
+        ],
+        policy=ParsePolicySettings(mode="balanced"),
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.job_status is EstimationJobStatus.NEEDS_CLARIFICATION
+    assert result.event_status is LogEventStatus.NEEDS_CLARIFICATION
+    assert _food(session, event_id) == []
+    assert _exercise(session, event_id) == []
+    questions = _questions(session, event_id)
+    assert [(q.question_text, q.options) for q in questions] == [
+        ("How much hummus did you have?", ["1 tsp", "1 tbsp", "2 tbsp"])
+    ]
+    assert "crackers" not in questions[0].question_text.casefold()
+
+    read = client.get(
+        f"/api/users/{user_id}/log-events/{event_id}/clarification",
+        headers={"Authorization": auth},
+    )
+
+    assert read.status_code == 200
+    assert read.json() == {
+        "questions": [
+            {
+                "id": str(questions[0].id),
+                "text": "How much hummus did you have?",
+                "options": ["1 tsp", "1 tbsp", "2 tbsp"],
+            }
+        ]
+    }
+
+
 def test_implausible_candidate_persists_backend_clarification_options(
     client: TestClient, session: Session
 ) -> None:
