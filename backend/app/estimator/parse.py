@@ -224,21 +224,12 @@ class ParseStep:
         # strict keeps old-style abstention.
         conservative = signal.all_non_parsed or self.policy.should_clarify(signal.hybrid)
         if conservative:
-            policy_result = _policy_allowed_result(self.policy.mode, samples, default=result)
-            if policy_result is None:
-                fallback_items = (
-                    result.items
-                    if not signal.all_non_parsed
-                    and _all_candidates_have_recognizable_identity(result.items)
-                    else ()
-                )
-                context.clarification_questions = _clarification_questions(
-                    samples,
-                    fallback_items=fallback_items,
-                    prefer_backend_missing_detail=self.policy.mode == "balanced",
-                )
-                raise NeedsClarification("low_confidence_or_ambiguous")
-            result = policy_result
+            result = _conservative_result_or_raise(
+                self.policy.mode,
+                context,
+                signal,
+                default=result,
+            )
 
         # A sample set that claims "parsed" yet routes nothing to persist is
         # treated as unparseable (fail closed) rather than silently completing
@@ -310,6 +301,29 @@ def _representative(samples: Sequence[ParseResult]) -> ParseResult:
     parsed = [s for s in samples if s.disposition is ParseDisposition.PARSED]
     pool = parsed or [s for s in samples if s.items] or list(samples)
     return max(pool, key=lambda sample: sample.confidence)
+
+
+def _conservative_result_or_raise(
+    mode: str,
+    context: EstimationContext,
+    signal: SelfConsistencySignal,
+    *,
+    default: ParseResult,
+) -> ParseResult:
+    policy_result = _policy_allowed_result(mode, signal.samples, default=default)
+    if policy_result is not None:
+        return policy_result
+    fallback_items = (
+        default.items
+        if not signal.all_non_parsed and _all_candidates_have_recognizable_identity(default.items)
+        else ()
+    )
+    context.clarification_questions = _clarification_questions(
+        signal.samples,
+        fallback_items=fallback_items,
+        prefer_backend_missing_detail=mode == "balanced",
+    )
+    raise NeedsClarification("low_confidence_or_ambiguous")
 
 
 def _policy_allowed_result(
