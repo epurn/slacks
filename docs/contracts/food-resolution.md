@@ -39,21 +39,12 @@ estimator / contracts / backend-core / security-privacy lane:
 
 ## Version
 
-12 (FTY-298, contract only) adopts the **rare clarification / estimate-first** food
-resolution boundary. With the default
-`FATTY_ESTIMATOR_CLARIFY_MODE=estimate_first`, a recognizable food identity is enough
-to attempt a rough, editable estimate: bare `milk`, `some crackers`, `crackers and
-hummus`, and candidates whose exact source match or serving math misses fall forward
-through source-backed lookup, reference/comparable evidence, model-prior, or
-default-serving estimation before any question. Counts, portions, brands, product
-identities, explicit nutrition facts, and standard-serving cues still make the estimate
-stronger, but missing quantity alone no longer triggers the default clarification path.
-`balanced` preserves the calibrated abstention path without re-asking for stated
-details, and `strict` lets self-hosters keep older amount-clarification behavior. Rough
-estimates must carry distinct provenance (`trusted` / `product` / `official` /
-`reference_source` / `comparable_reference` / `model_prior` or default-prior
-assumptions), source-miss/serving assumptions, and remain user-editable. This is a
-contract-only target for downstream estimator/settings stories.
+12 (FTY-298, contract only) adopts the shared **rare clarification /
+estimate-first** food-resolution boundary. The mode semantics, allowed last-resort
+clarification reasons, rough-provenance requirements, and advisory-provider rule are
+now owned by [estimator-policy.md](estimator-policy.md); this contract applies them to
+source lookup, serving math, item routing, fallback behavior, and food evidence
+persistence. This is a contract-only target for downstream estimator/settings stories.
 
 11 (FTY-292) locks the dogfood regression class for **explicit count + measured
 household-volume spread** entries. A parsed snack such as "6 crackers with about
@@ -195,26 +186,10 @@ the re-snapshot-not-`user_edit` distinction is documented there and in `correcti
 
 ### Clarify policy config (FTY-298)
 
-Food resolution consumes the same estimator clarify policy defined by
-`parse-candidates.md`. The shared operator setting is:
-
-| Variable | Default | Values | Meaning |
-| --- | --- | --- | --- |
-| `FATTY_ESTIMATOR_CLARIFY_MODE` | `estimate_first` | `estimate_first`, `balanced`, `strict` | Natural-language estimator abstention mode. Unknown values fail closed at config load. |
-
-Under `estimate_first`, a source miss, a missing default serving, or unresolvable
-serving math is a recovery condition, not an immediate question, when the item identity
-is recognizable. Resolution falls forward through the available evidence tiers and
-rough-prior paths; only missing identity, non-log/gibberish upstream parse input,
-unsafe contradictions/implausibilities, exhausted/unavailable estimator paths, or a
-stricter operator mode can ask. `balanced` keeps the calibrated abstention threshold
-without re-asking for a detail already supplied. `strict` may ask older-style amount
-questions for recognizable-but-amountless items.
-
-Optional downstream tunables use the shared names from `parse-candidates.md`:
-`FATTY_ESTIMATOR_PARSE_CLARIFY_THRESHOLD` (`balanced`/`strict` only),
-`FATTY_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR` (accepting rough nutrition facts), and
-`FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS` (bounded provider/policy repair).
+Food resolution consumes the shared estimator policy defined by
+[estimator-policy.md](estimator-policy.md). This contract owns how that active mode is
+applied to source misses, missing default servings, unresolvable serving math, food
+item routing, and rough/default-prior fallback.
 
 ### Config (`FdcSettings`, `FATTY_FDC_` env vars)
 
@@ -297,11 +272,9 @@ quantity to grams, v1-simple per the story scope:
 4. otherwise scan `quantity_text` for a leading `<number> <mass|volume unit>`.
 
 Returns `None` when none apply — e.g. a count with no known serving size, or an
-unrecognised/absent quantity. Under the default `estimate_first` policy this is not
-itself a clarification: the resolver falls forward to rough default-serving,
-reference/comparable, or model-prior estimation with explicit assumptions before
-asking. Under `balanced`/`strict`, or when every rough path is unavailable or unsafe,
-`None` may still route to `needs_clarification`. Calories/macros then scale per-100g
+unrecognised/absent quantity. The active shared policy ([estimator-policy.md](estimator-policy.md))
+determines whether that gap falls forward to rough default-serving/reference/
+model-prior estimation or asks for more detail. Calories/macros then scale per-100g
 facts by `grams / 100`, rounded to 0.1 when grams are resolved; rough-prior paths store
 their own basis and assumptions. Storage is canonical (kcal, grams); the 1 ml ≈ 1 g
 density and the simple grams/millilitres/count scope are documented assumptions, with
@@ -436,10 +409,10 @@ loaded the event scoped to the job's `user_id`; see `estimation-jobs.md`).
   hash, fetch timestamp, and extracted per-100g facts — never a raw page. `products`
   holds global source facts only (no user data). See `docs/security/data-retention.md`.
 - **Rough-estimate provenance without raw text.** Default-serving/model-prior fallback
-  reasons and source-miss diagnostics are recorded as content-free assumption labels and
-  source ids only. They never store raw diary text, raw provider output, raw fetched
-  text, URLs with secrets, request/response bodies, or provider error bodies in
-  `assumptions`, `source_refs`, logs, traces, or diagnostic messages.
+  reasons and source-miss diagnostics follow the shared privacy invariant in
+  [estimator-policy.md](estimator-policy.md): they record content-free assumption
+  labels and source ids only, never raw diary text, provider/fetched output, URLs with
+  secrets, request/response bodies, provider error bodies, or credentials.
 
 ## Errors
 
@@ -517,32 +490,13 @@ Once the user supplies a **usable concrete detail** for a recognizable item — 
 portion/count (FTY-167/275), a `brand` identity (FTY-062), or a stated nutrition fact
 (this story) — Slacks **estimates or counts with provenance** and must **not** ask a
 second follow-up for that same item merely because the detail was not the exact field
-the pipeline hoped for. Under the default `estimate_first` mode, the recognizable
-identity itself is also sufficient to start a rough estimate: `milk`, `some crackers`,
-and `crackers and hummus` are rough estimates with editable provenance, not quantity
-questions by default. A stated calorie total is a usable detail even when the user adds
-"idk the breakdown": the item resolves as a `user_text` calorie item, and the missing
-macros are estimated or left unknown — not re-asked as "How much did you have?".
-
-`needs_clarification` is a **rare last resort**, not a routine step in the logging
-flow. For a recognizable item it is reserved for genuinely indeterminate or unsafe
-inputs, or for stricter operator modes:
-
-- **no recognizable identity** to estimate (for example non-log/gibberish text or a
-  component the parser cannot identify as food/exercise after bounded repair);
-- every enabled estimator/provider path needed for a rough estimate is unavailable,
-  exhausted after retries, or explicitly disabled;
-- `balanced`/`strict` is selected and the active calibrated/strict policy chooses an
-  amount question for a recognizable-but-amountless item; or
-- **self-contradictory / implausible** stated facts (negative/non-finite values, an
-  as-logged total over the abuse cap, or macros whose Atwater-implied energy grossly
-  exceeds a co-stated calorie total).
-
-This is a **product expectation, not a hard quota**: across representative everyday
-logs Slacks should estimate or resolve **far more often than it asks**, and future
-eval/regression sets should hold a **low clarification rate** on such logs — without
-encoding a numeric percentage in code (ADR 0003; `parse-candidates.md`, Calibrated
-clarify decision). Item-scoped partial resolution for a *mixed* log with any remaining
+the pipeline hoped for. The shared last-resort clarification reasons live in
+[estimator-policy.md](estimator-policy.md); food resolution applies them after
+validating source facts, serving math, and user-stated nutrition. A stated calorie
+total is a usable detail even when the user adds "idk the breakdown": the item resolves
+as a `user_text` calorie item, and the missing macros are estimated or left unknown —
+not re-asked as "How much did you have?". Item-scoped partial resolution for a *mixed*
+log with any remaining
 allowed question is tracked by FTY-278; FTY-298 changes the default amountless case to
 rough estimation before asking.
 
@@ -1020,13 +974,10 @@ The backend exposes four health-check endpoints, all returning structured JSON w
   **FTY-278 implementation follow-up** (reads/answer flow: `daily-summary.md`,
   `log-events.md` v6, `estimation-jobs.md` v3); the FTY-275 (v8) baseline ships until
   then.
-- **FTY-298 (contract only; no code, no migration in this story).** Bumps the food
-  resolution contract to the rare clarification policy. The default target is
-  `FATTY_ESTIMATOR_CLARIFY_MODE=estimate_first`: recognizable-but-amountless foods,
-  source misses, and unresolvable serving math fall forward to source-backed,
-  reference/comparable, model-prior, or default-serving rough estimates before asking.
-  `balanced` preserves the calibrated ask/estimate tradeoff while never re-asking for
-  stated details, and `strict` lets self-hosters keep older amount clarifications.
-  Rough estimates must record source type/ref, field or basis provenance where
-  applicable, content-free assumptions, and remain editable. Runtime settings and
-  estimator changes are downstream FTY-299/FTY-300/FTY-301 work.
+- **FTY-298 / FTY-303 (contract only; no code, no migration in this story).** FTY-298
+  bumps the food resolution contract to the rare clarification policy, and FTY-303
+  extracts the global mode semantics, allowed last-resort clarification reasons, and
+  rough-provenance requirements to [estimator-policy.md](estimator-policy.md). This
+  contract keeps the source lookup, serving math, item routing, fallback behavior, and
+  food evidence persistence rules. Runtime settings and estimator changes are downstream
+  FTY-299/FTY-300/FTY-301 work.

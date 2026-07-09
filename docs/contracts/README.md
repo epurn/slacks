@@ -51,6 +51,7 @@ Use contracts for:
 | [corrections.md](corrections.md) | User-initiated corrections and edits to derived food and exercise items |
 | [daily-summary.md](daily-summary.md) | Read-only daily-summary endpoint for fetching a user's daily totals and entries |
 | [estimation-jobs.md](estimation-jobs.md) | Async estimation engine that turns pending log events into resolved food and exercise items |
+| [estimator-policy.md](estimator-policy.md) | Shared estimator clarification modes, last-resort ask policy, and rough-provenance requirements |
 | [evidence-retrieval.md](evidence-retrieval.md) | Source-backed estimation contracts defining the evidence hierarchy and lookup rules |
 | [exercise-burn.md](exercise-burn.md) | Deterministic MET-based exercise burn calculation |
 | [food-resolution.md](food-resolution.md) | Deterministic generic-food resolution step using USDA and external sources |
