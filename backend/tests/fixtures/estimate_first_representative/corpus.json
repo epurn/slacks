@@ -1,0 +1,353 @@
+{
+  "story_id": "FTY-302",
+  "description": "Synthetic estimate-first representative corpus. No private user logs or provider outputs are included.",
+  "modes": ["estimate_first", "balanced", "strict"],
+  "cases": [
+    {
+      "id": "bare_milk_provider_question",
+      "input": "milk",
+      "class": "bare_recognizable_food",
+      "recognizable": true,
+      "smoke": true,
+      "expectations": {
+        "estimate_first": {"event_status": "completed", "foods": 1, "exercises": 0, "questions": 0, "rough_foods": 1},
+        "balanced": {"event_status": "needs_clarification", "foods": 0, "exercises": 0, "questions": 1},
+        "strict": {"event_status": "needs_clarification", "foods": 0, "exercises": 0, "questions": 1}
+      },
+      "parse_samples": [
+        {
+          "disposition": "needs_clarification",
+          "confidence": 0.41,
+          "items": [{"type": "food", "name": "milk"}],
+          "clarification_questions": [{"text": "How much milk did you have?", "options": ["1 cup", "2 cups", "A splash"]}]
+        },
+        {
+          "disposition": "needs_clarification",
+          "confidence": 0.41,
+          "items": [{"type": "food", "name": "milk"}],
+          "clarification_questions": [{"text": "How much milk did you have?", "options": ["1 cup", "2 cups", "A splash"]}]
+        }
+      ],
+      "model_prior_estimates": [
+        {"disposition": "resolved", "confidence": 0.82, "facts": {"basis": "as_logged", "calories": 120, "protein_g": 6, "carbs_g": 9, "fat_g": 5}, "assumptions": ["synthetic_model_prior_portion"]}
+      ]
+    },
+    {
+      "id": "some_crackers_low_confidence",
+      "input": "some crackers",
+      "class": "bare_recognizable_food",
+      "recognizable": true,
+      "smoke": false,
+      "expectations": {
+        "estimate_first": {"event_status": "completed", "foods": 1, "exercises": 0, "questions": 0, "rough_foods": 1},
+        "balanced": {"event_status": "needs_clarification", "foods": 0, "exercises": 0, "questions": 1},
+        "strict": {"event_status": "needs_clarification", "foods": 0, "exercises": 0, "questions": 1}
+      },
+      "parse_samples": [
+        {"disposition": "parsed", "confidence": 0.22, "items": [{"type": "food", "name": "crackers", "quantity_text": "some"}]},
+        {
+          "disposition": "needs_clarification",
+          "confidence": 0.35,
+          "items": [{"type": "food", "name": "crackers"}],
+          "clarification_questions": [{"text": "How many crackers did you have?", "options": ["6 crackers", "12 crackers", "1 serving"]}]
+        },
+        {"disposition": "parsed", "confidence": 0.25, "items": [{"type": "food", "name": "crackers"}]}
+      ],
+      "model_prior_estimates": [
+        {"disposition": "resolved", "confidence": 0.78, "facts": {"basis": "as_logged", "calories": 90, "protein_g": 2, "carbs_g": 14, "fat_g": 3}, "assumptions": ["synthetic_model_prior_portion"]}
+      ]
+    },
+    {
+      "id": "crackers_hummus_amountless",
+      "input": "crackers and hummus",
+      "class": "crackers_hummus",
+      "recognizable": true,
+      "smoke": true,
+      "expectations": {
+        "estimate_first": {"event_status": "completed", "foods": 2, "exercises": 0, "questions": 0, "rough_foods": 2},
+        "balanced": {"event_status": "needs_clarification", "foods": 0, "exercises": 0, "questions": 1},
+        "strict": {"event_status": "needs_clarification", "foods": 0, "exercises": 0, "questions": 1}
+      },
+      "parse_samples": [
+        {
+          "disposition": "needs_clarification",
+          "confidence": 0.38,
+          "items": [{"type": "food", "name": "crackers"}, {"type": "food", "name": "hummus"}],
+          "clarification_questions": [{"text": "How much crackers and hummus should be counted?", "options": ["1 snack plate", "2 snack plates", "Crackers only"]}]
+        },
+        {
+          "disposition": "needs_clarification",
+          "confidence": 0.38,
+          "items": [{"type": "food", "name": "crackers"}, {"type": "food", "name": "hummus"}],
+          "clarification_questions": [{"text": "How much crackers and hummus should be counted?", "options": ["1 snack plate", "2 snack plates", "Crackers only"]}]
+        }
+      ],
+      "model_prior_estimates": [
+        {"disposition": "resolved", "confidence": 0.8, "facts": {"basis": "as_logged", "calories": 95, "protein_g": 2, "carbs_g": 15, "fat_g": 3}, "assumptions": ["synthetic_model_prior_portion"]},
+        {"disposition": "resolved", "confidence": 0.8, "facts": {"basis": "as_logged", "calories": 80, "protein_g": 3, "carbs_g": 7, "fat_g": 5}, "assumptions": ["synthetic_model_prior_portion"]}
+      ]
+    },
+    {
+      "id": "crackers_hummus_phrase_variant",
+      "input": "crackers with hummus",
+      "class": "crackers_hummus",
+      "recognizable": true,
+      "smoke": false,
+      "expectations": {
+        "estimate_first": {"event_status": "completed", "foods": 2, "exercises": 0, "questions": 0, "rough_foods": 2},
+        "balanced": {"event_status": "needs_clarification", "foods": 0, "exercises": 0, "questions": 1},
+        "strict": {"event_status": "needs_clarification", "foods": 0, "exercises": 0, "questions": 1}
+      },
+      "parse_samples": [
+        {
+          "disposition": "needs_clarification",
+          "confidence": 0.39,
+          "items": [{"type": "food", "name": "crackers"}, {"type": "food", "name": "hummus"}],
+          "clarification_questions": [{"text": "How much crackers with hummus should be counted?", "options": ["1 snack plate", "2 snack plates", "A few bites"]}]
+        },
+        {
+          "disposition": "needs_clarification",
+          "confidence": 0.39,
+          "items": [{"type": "food", "name": "crackers"}, {"type": "food", "name": "hummus"}],
+          "clarification_questions": [{"text": "How much crackers with hummus should be counted?", "options": ["1 snack plate", "2 snack plates", "A few bites"]}]
+        }
+      ],
+      "model_prior_estimates": [
+        {"disposition": "resolved", "confidence": 0.8, "facts": {"basis": "as_logged", "calories": 95, "protein_g": 2, "carbs_g": 15, "fat_g": 3}, "assumptions": ["synthetic_model_prior_portion"]},
+        {"disposition": "resolved", "confidence": 0.8, "facts": {"basis": "as_logged", "calories": 80, "protein_g": 3, "carbs_g": 7, "fat_g": 5}, "assumptions": ["synthetic_model_prior_portion"]}
+      ]
+    },
+    {
+      "id": "counted_crackers_dill_hummus",
+      "input": "6 crackers with about 1.5-2 tbsp dill pickle hummus",
+      "class": "counted_crackers_hummus",
+      "recognizable": true,
+      "smoke": true,
+      "expectations": {
+        "estimate_first": {"event_status": "completed", "foods": 2, "exercises": 0, "questions": 0, "rough_foods": 2},
+        "balanced": {"event_status": "completed", "foods": 2, "exercises": 0, "questions": 0, "rough_foods": 2},
+        "strict": {"event_status": "completed", "foods": 2, "exercises": 0, "questions": 0, "rough_foods": 2}
+      },
+      "parse_samples": [
+        {
+          "result": {
+            "disposition": "Parsed",
+            "confidence": "0.93",
+            "items": [
+              {"type": "Food", "name": "crackers", "quantity_text": "6 crackers", "unit": "crackers", "amount": "6"},
+              {"type": "Food", "name": "dill pickle hummus", "quantity_text": "about 1.5-2 tbsp", "unit": "tbsp", "amount": "1.75"}
+            ],
+            "clarification_questions": null
+          }
+        },
+        {
+          "result": {
+            "disposition": "Parsed",
+            "confidence": "0.93",
+            "items": [
+              {"type": "Food", "name": "crackers", "quantity_text": "6 crackers", "unit": "crackers", "amount": "6"},
+              {"type": "Food", "name": "dill pickle hummus", "quantity_text": "about 1.5-2 tbsp", "unit": "tbsp", "amount": "1.75"}
+            ],
+            "clarification_questions": null
+          }
+        }
+      ],
+      "model_prior_estimates": [
+        {"disposition": "resolved", "confidence": 0.84, "facts": {"basis": "as_logged", "calories": 78, "protein_g": 2, "carbs_g": 13, "fat_g": 2}, "assumptions": ["synthetic_model_prior_portion"]},
+        {"disposition": "resolved", "confidence": 0.84, "facts": {"basis": "as_logged", "calories": 45, "protein_g": 2, "carbs_g": 4, "fat_g": 3}, "assumptions": ["synthetic_model_prior_portion"]}
+      ]
+    },
+    {
+      "id": "toppables_pb_kraft",
+      "input": "3 toppables PB sandwiches (kraft)",
+      "class": "toppables_pb_sandwich",
+      "recognizable": true,
+      "smoke": true,
+      "expectations": {
+        "estimate_first": {"event_status": "completed", "foods": 1, "exercises": 0, "questions": 0, "rough_foods": 1},
+        "balanced": {"event_status": "completed", "foods": 1, "exercises": 0, "questions": 0, "rough_foods": 1},
+        "strict": {"event_status": "completed", "foods": 1, "exercises": 0, "questions": 0, "rough_foods": 1}
+      },
+      "parse_samples": [
+        {"disposition": "parsed", "confidence": 0.91, "items": [{"type": "food", "name": "Toppables peanut butter cracker sandwiches", "brand": "Kraft", "quantity_text": "3", "unit": "cracker sandwich", "amount": 3}]},
+        {"disposition": "parsed", "confidence": 0.91, "items": [{"type": "food", "name": "Toppables peanut butter cracker sandwiches", "brand": "Kraft", "quantity_text": "3", "unit": "cracker sandwich", "amount": 3}]}
+      ],
+      "model_prior_estimates": [
+        {"disposition": "resolved", "confidence": 0.83, "facts": {"basis": "as_logged", "calories": 210, "protein_g": 6, "carbs_g": 24, "fat_g": 10}, "assumptions": ["synthetic_model_prior_portion"]}
+      ]
+    },
+    {
+      "id": "pb_cracker_sandwich_no_brand",
+      "input": "three peanut butter cracker sandwiches",
+      "class": "toppables_pb_sandwich",
+      "recognizable": true,
+      "smoke": false,
+      "expectations": {
+        "estimate_first": {"event_status": "completed", "foods": 1, "exercises": 0, "questions": 0, "rough_foods": 1},
+        "balanced": {"event_status": "completed", "foods": 1, "exercises": 0, "questions": 0, "rough_foods": 1},
+        "strict": {"event_status": "completed", "foods": 1, "exercises": 0, "questions": 0, "rough_foods": 1}
+      },
+      "parse_samples": [
+        {"disposition": "parsed", "confidence": 0.88, "items": [{"type": "food", "name": "peanut butter cracker sandwiches", "quantity_text": "three", "unit": "cracker sandwich", "amount": 3}]},
+        {"disposition": "parsed", "confidence": 0.88, "items": [{"type": "food", "name": "peanut butter cracker sandwiches", "quantity_text": "three", "unit": "cracker sandwich", "amount": 3}]}
+      ],
+      "model_prior_estimates": [
+        {"disposition": "resolved", "confidence": 0.83, "facts": {"basis": "as_logged", "calories": 210, "protein_g": 6, "carbs_g": 24, "fat_g": 10}, "assumptions": ["synthetic_model_prior_portion"]}
+      ]
+    },
+    {
+      "id": "worded_oatmeal_splash_syrup",
+      "input": "oatmeal with a splash of milk and about a tsp of syrup",
+      "class": "worded_portions",
+      "recognizable": true,
+      "smoke": false,
+      "expectations": {
+        "estimate_first": {"event_status": "completed", "foods": 3, "exercises": 0, "questions": 0, "rough_foods": 3},
+        "balanced": {"event_status": "completed", "foods": 3, "exercises": 0, "questions": 0, "rough_foods": 3},
+        "strict": {"event_status": "completed", "foods": 3, "exercises": 0, "questions": 0, "rough_foods": 3}
+      },
+      "parse_samples": [
+        {"disposition": "parsed", "confidence": 0.86, "items": [
+          {"type": "food", "name": "oatmeal", "quantity_text": "1 serving", "unit": "serving", "amount": 1},
+          {"type": "food", "name": "milk", "quantity_text": "a splash"},
+          {"type": "food", "name": "syrup", "quantity_text": "about a tsp", "unit": "tsp", "amount": 1}
+        ]},
+        {"disposition": "parsed", "confidence": 0.86, "items": [
+          {"type": "food", "name": "oatmeal", "quantity_text": "1 serving", "unit": "serving", "amount": 1},
+          {"type": "food", "name": "milk", "quantity_text": "a splash"},
+          {"type": "food", "name": "syrup", "quantity_text": "about a tsp", "unit": "tsp", "amount": 1}
+        ]}
+      ],
+      "model_prior_estimates": [
+        {"disposition": "resolved", "confidence": 0.82, "facts": {"basis": "as_logged", "calories": 150, "protein_g": 5, "carbs_g": 27, "fat_g": 3}, "assumptions": ["synthetic_model_prior_portion"]},
+        {"disposition": "resolved", "confidence": 0.82, "facts": {"basis": "as_logged", "calories": 15, "protein_g": 1, "carbs_g": 1, "fat_g": 1}, "assumptions": ["synthetic_model_prior_portion"]},
+        {"disposition": "resolved", "confidence": 0.82, "facts": {"basis": "as_logged", "calories": 20, "protein_g": 0, "carbs_g": 5, "fat_g": 0}, "assumptions": ["synthetic_model_prior_portion"]}
+      ]
+    },
+    {
+      "id": "buffalo_wrap_stated_calories",
+      "input": "buffalo chicken wrap 580 cals",
+      "class": "user_stated_nutrition",
+      "recognizable": true,
+      "smoke": true,
+      "expectations": {
+        "estimate_first": {"event_status": "completed", "foods": 1, "exercises": 0, "questions": 0, "user_text_foods": 1},
+        "balanced": {"event_status": "completed", "foods": 1, "exercises": 0, "questions": 0, "user_text_foods": 1},
+        "strict": {"event_status": "completed", "foods": 1, "exercises": 0, "questions": 0, "user_text_foods": 1}
+      },
+      "parse_samples": [
+        {"disposition": "parsed", "confidence": 0.9, "items": [{"type": "food", "name": "buffalo chicken wrap", "quantity_text": "1 wrap", "unit": "wrap", "amount": 1, "stated_calories": 580}]},
+        {"disposition": "parsed", "confidence": 0.9, "items": [{"type": "food", "name": "buffalo chicken wrap", "quantity_text": "1 wrap", "unit": "wrap", "amount": 1, "stated_calories": 580}]}
+      ],
+      "model_prior_estimates": []
+    },
+    {
+      "id": "exercise_only_run",
+      "input": "30 min run",
+      "class": "exercise_only",
+      "recognizable": true,
+      "smoke": true,
+      "expectations": {
+        "estimate_first": {"event_status": "completed", "foods": 0, "exercises": 1, "questions": 0},
+        "balanced": {"event_status": "completed", "foods": 0, "exercises": 1, "questions": 0},
+        "strict": {"event_status": "completed", "foods": 0, "exercises": 1, "questions": 0}
+      },
+      "parse_samples": [
+        {"disposition": "parsed", "confidence": 0.94, "items": [{"type": "exercise", "name": "run", "quantity_text": "30 min", "unit": "min", "amount": 30}]},
+        {"disposition": "parsed", "confidence": 0.94, "items": [{"type": "exercise", "name": "run", "quantity_text": "30 min", "unit": "min", "amount": 30}]}
+      ],
+      "model_prior_estimates": []
+    },
+    {
+      "id": "food_plus_exercise",
+      "input": "oatmeal and a 30 min walk",
+      "class": "food_plus_exercise",
+      "recognizable": true,
+      "smoke": false,
+      "expectations": {
+        "estimate_first": {"event_status": "completed", "foods": 1, "exercises": 1, "questions": 0, "rough_foods": 1},
+        "balanced": {"event_status": "completed", "foods": 1, "exercises": 1, "questions": 0, "rough_foods": 1},
+        "strict": {"event_status": "completed", "foods": 1, "exercises": 1, "questions": 0, "rough_foods": 1}
+      },
+      "parse_samples": [
+        {"disposition": "parsed", "confidence": 0.89, "items": [
+          {"type": "food", "name": "oatmeal", "quantity_text": "1 serving", "unit": "serving", "amount": 1},
+          {"type": "exercise", "name": "walking", "quantity_text": "30 min", "unit": "min", "amount": 30}
+        ]},
+        {"disposition": "parsed", "confidence": 0.89, "items": [
+          {"type": "food", "name": "oatmeal", "quantity_text": "1 serving", "unit": "serving", "amount": 1},
+          {"type": "exercise", "name": "walking", "quantity_text": "30 min", "unit": "min", "amount": 30}
+        ]}
+      ],
+      "model_prior_estimates": [
+        {"disposition": "resolved", "confidence": 0.82, "facts": {"basis": "as_logged", "calories": 150, "protein_g": 5, "carbs_g": 27, "fat_g": 3}, "assumptions": ["synthetic_model_prior_portion"]}
+      ]
+    },
+    {
+      "id": "generic_food_word",
+      "input": "food",
+      "class": "impossible_missing_identity",
+      "recognizable": false,
+      "smoke": true,
+      "expectations": {
+        "estimate_first": {"event_status": "needs_clarification", "foods": 0, "exercises": 0, "questions": 1},
+        "balanced": {"event_status": "needs_clarification", "foods": 0, "exercises": 0, "questions": 1},
+        "strict": {"event_status": "needs_clarification", "foods": 0, "exercises": 0, "questions": 1}
+      },
+      "parse_samples": [
+        {"disposition": "needs_clarification", "confidence": 0.25, "items": [{"type": "food", "name": "food"}], "clarification_questions": [{"text": "Which specific food should be logged?", "options": ["Milk", "Crackers", "Oatmeal"]}]},
+        {"disposition": "needs_clarification", "confidence": 0.25, "items": [{"type": "food", "name": "food"}], "clarification_questions": [{"text": "Which specific food should be logged?", "options": ["Milk", "Crackers", "Oatmeal"]}]}
+      ],
+      "model_prior_estimates": []
+    },
+    {
+      "id": "non_log_text",
+      "input": "write a poem about lunch",
+      "class": "non_log_text",
+      "recognizable": false,
+      "smoke": false,
+      "expectations": {
+        "estimate_first": {"event_status": "failed", "foods": 0, "exercises": 0, "questions": 0},
+        "balanced": {"event_status": "failed", "foods": 0, "exercises": 0, "questions": 0},
+        "strict": {"event_status": "failed", "foods": 0, "exercises": 0, "questions": 0}
+      },
+      "parse_samples": [
+        {"disposition": "unparseable", "confidence": 0.97, "items": [], "reason": "non_log"},
+        {"disposition": "unparseable", "confidence": 0.97, "items": [], "reason": "non_log"}
+      ],
+      "model_prior_estimates": []
+    },
+    {
+      "id": "schema_invalid_output",
+      "input": "schema invalid synthetic log",
+      "class": "unrecoverable_schema_invalid",
+      "recognizable": false,
+      "smoke": false,
+      "expectations": {
+        "estimate_first": {"event_status": "failed", "foods": 0, "exercises": 0, "questions": 0},
+        "balanced": {"event_status": "failed", "foods": 0, "exercises": 0, "questions": 0},
+        "strict": {"event_status": "failed", "foods": 0, "exercises": 0, "questions": 0}
+      },
+      "parse_samples": [
+        {"disposition": "parsed", "confidence": 0.8, "items": [{"type": "snack", "name": "invalid"}]},
+        {"disposition": "parsed", "confidence": 0.8, "items": [{"type": "snack", "name": "invalid"}]}
+      ],
+      "model_prior_estimates": []
+    },
+    {
+      "id": "provider_config_error",
+      "input": "provider unavailable synthetic log",
+      "class": "provider_config_error",
+      "recognizable": false,
+      "smoke": false,
+      "parse_error": "configuration",
+      "expectations": {
+        "estimate_first": {"event_status": "failed", "foods": 0, "exercises": 0, "questions": 0},
+        "balanced": {"event_status": "failed", "foods": 0, "exercises": 0, "questions": 0},
+        "strict": {"event_status": "failed", "foods": 0, "exercises": 0, "questions": 0}
+      },
+      "parse_samples": [],
+      "model_prior_estimates": []
+    }
+  ]
+}
