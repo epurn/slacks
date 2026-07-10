@@ -73,6 +73,7 @@ from app.estimator.fdc import (
     ProductFacts,
     normalize_query,
 )
+from app.estimator.fdc_ranking import is_fdc_description_compatible
 from app.estimator.food_serving import NutritionFacts, resolve_grams, scale_facts
 from app.estimator.off import (
     OFF_SOURCE,
@@ -175,14 +176,37 @@ def _cache_product(session: Session, facts: ProductFacts) -> Product:
     return product
 
 
+def _refresh_product(product: Product, facts: ProductFacts) -> Product:
+    """Overwrite a stale cached row's facts in place from a fresh source lookup.
+
+    The ``(source, query_key)`` uniqueness allows exactly one cache row per
+    query, so replacing a rejected pre-FTY-254 selection means updating that
+    row rather than inserting a sibling. Existing ``evidence_sources`` rows keep
+    their own immutable fact snapshots, so refreshing the cache never rewrites
+    a user's past resolutions.
+    """
+
+    product.source_ref = facts.source_ref
+    product.description = facts.description
+    product.calories_per_100g = facts.facts.calories
+    product.protein_per_100g = facts.facts.protein_g
+    product.carbs_per_100g = facts.facts.carbs_g
+    product.fat_per_100g = facts.facts.fat_g
+    product.default_serving_g = facts.default_serving_g
+    product.content_hash = facts.content_hash
+    return product
+
+
 class FoodResolver:
     """Resolves a generic food name to a cached :class:`Product`, fetching on a miss.
 
     Owns the global ``products`` cache (read + get-or-create) and the external
-    :class:`FoodSource` (USDA FDC). A cache hit avoids any external call; a miss
-    fetches from the source and caches the global facts (no user data) in the session
-    for the worker's commit. New cache rows are flushed so the worker can reference
-    them from the user-owned ``evidence_sources`` it writes on success.
+    :class:`FoodSource` (USDA FDC). A *compatible* cache hit avoids any external
+    call; a miss — or a stale cached row that fails the FTY-254 description
+    compatibility gate — fetches from the source and caches/refreshes the global
+    facts (no user data) in the session for the worker's commit. New cache rows are
+    flushed so the worker can reference them from the user-owned
+    ``evidence_sources`` it writes on success.
     """
 
     def __init__(self, *, session: Session, source: FoodSource) -> None:
@@ -199,8 +223,14 @@ class FoodResolver:
         """Return the cached/fetched product for ``name``, or ``None`` if no match.
 
         Checks the ``products`` cache by normalized name first; on a miss, queries the
-        source and caches the result. Propagates :class:`FdcTransientError` /
-        :class:`FdcResponseError` from the source for the step to route.
+        source and caches the result. A cached row must still pass today's FTY-254
+        compatibility gate (:func:`is_fdc_description_compatible`) — a stale
+        pre-FTY-254 selection (e.g. ``banana`` cached to the dehydrated/powder row,
+        or ``dill pickle hummus`` cached to a pickles row) is not served; it is
+        re-fetched through the ranked source lookup and refreshed in place, or
+        treated as a clean miss when the source has no compatible row. Propagates
+        :class:`FdcTransientError` / :class:`FdcResponseError` from the source for
+        the step to route.
         """
 
         query_key = normalize_query(name)
@@ -210,12 +240,16 @@ class FoodResolver:
         cached = self._session.scalars(
             select(Product).where(Product.source == FDC_SOURCE, Product.query_key == query_key)
         ).one_or_none()
-        if cached is not None:
+        if cached is not None and is_fdc_description_compatible(query_key, cached.description):
             return _ResolvedProduct(product=cached, fetched_at=cached.updated_at)
 
         facts = self._source.lookup(name)
         if facts is None:
             return None
+        if cached is not None:
+            return _ResolvedProduct(
+                product=_refresh_product(cached, facts), fetched_at=datetime.now(UTC)
+            )
         return _ResolvedProduct(
             product=_cache_product(self._session, facts), fetched_at=datetime.now(UTC)
         )

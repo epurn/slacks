@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.db import create_session_factory
 from app.enums import DerivedItemStatus, EstimationJobStatus, LogEventStatus
-from app.estimator.fdc import FDC_SOURCE_TYPE, FdcClient, FdcSettings
+from app.estimator.fdc import FDC_SOURCE, FDC_SOURCE_TYPE, FdcClient, FdcSettings
 from app.estimator.food_step import FoodResolver, FoodResolveStep
 from app.estimator.official_fetch import OfficialFetchSettings
 from app.estimator.official_step import QUANTITY_QUESTION, OfficialSourceResolveStep
@@ -47,7 +47,7 @@ from app.estimator.self_consistency import SELF_CONSISTENCY_FIRST_WINDOW
 from app.llm.errors import LLMError
 from app.llm.providers.fake import FakeProvider
 from app.models.derived import ClarificationQuestion, DerivedFoodItem
-from app.models.food_sources import EvidenceSource
+from app.models.food_sources import EvidenceSource, Product
 
 # ---------------------------------------------------------------------------
 # Fake FDC search results (public USDA SR Legacy per-100g values)
@@ -515,6 +515,122 @@ def test_dill_pickle_hummus_never_resolves_through_the_pickles_row(
     assert evidence.source_ref == MODEL_PRIOR_SOURCE
     assert evidence.source_ref != "usda_fdc:11937"
     # FDC was consulted and its pickles row rejected — not skipped.
+    assert "dill pickle hummus" in transport.queries
+
+
+# ---------------------------------------------------------------------------
+# Upgrade path: stale pre-FTY-254 cache rows must not bypass the ranking gate
+# ---------------------------------------------------------------------------
+
+
+def _seed_stale_cache_row(
+    session: Session, *, query_key: str, description: str, source_ref: str, calories: float
+) -> None:
+    """A global FDC cache row as a pre-FTY-254 resolver would have selected it."""
+
+    session.add(
+        Product(
+            source=FDC_SOURCE,
+            source_ref=source_ref,
+            query_key=query_key,
+            description=description,
+            calories_per_100g=calories,
+            protein_per_100g=1.0,
+            carbs_per_100g=10.0,
+            fat_per_100g=0.5,
+            content_hash=f"stale-{source_ref}",
+        )
+    )
+    session.flush()
+
+
+def test_stale_dehydrated_banana_cache_row_is_replaced_on_upgrade(
+    client: TestClient, session: Session
+) -> None:
+    """An upgraded database that already cached ``banana -> usda_fdc:9041``
+    (dehydrated/powder) must not keep costing 100 g of banana at 346 kcal: the
+    stale row fails the compatibility gate on read, the ranked lookup runs, and
+    the fresh raw-banana row backs the resolution and refreshes the cache row
+    in place."""
+
+    user_id, event_id = _seed_event(client, "fty254-stale-banana@example.com", "100 grams banana")
+    _seed_stale_cache_row(
+        session,
+        query_key="banana",
+        description="Bananas, dehydrated, or banana powder",
+        source_ref="usda_fdc:9041",
+        calories=346.0,
+    )
+    transport = QueryKeyedTransport()
+    pipeline = _pipeline(
+        session,
+        parse_responses=_parsed(
+            [
+                {
+                    "type": "food",
+                    "name": "banana",
+                    "quantity_text": "100 grams",
+                    "unit": "g",
+                    "amount": 100,
+                }
+            ]
+        ),
+        estimates=[],
+        transport=transport,
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.event_status is LogEventStatus.COMPLETED
+    food = _foods(session, event_id)[0]
+    assert food.calories == pytest.approx(89.0)
+    evidence = _evidence_for(session, food)
+    assert evidence.source_type == FDC_SOURCE_TYPE
+    assert evidence.source_ref == "usda_fdc:9040"
+    # The stale cache row was not trusted (FDC was consulted) and was refreshed
+    # in place: still exactly one global row for the key, now the compatible one.
+    assert "banana" in transport.queries
+    rows = session.scalars(
+        select(Product).where(Product.source == FDC_SOURCE, Product.query_key == "banana")
+    ).all()
+    assert [row.source_ref for row in rows] == ["usda_fdc:9040"]
+
+
+def test_stale_pickles_cache_row_for_hummus_falls_to_the_rough_tiers_on_upgrade(
+    client: TestClient, session: Session
+) -> None:
+    """``dill pickle hummus -> usda_fdc:11937`` cached pre-FTY-254 is rejected on
+    read; the fresh lookup returns the same pickles-only list (a clean miss), so
+    the model prior records the estimate — trusted pickle provenance is never
+    re-recorded from the stale cache."""
+
+    user_id, event_id = _seed_event(
+        client, "fty254-stale-hummus@example.com", "1 tbsp dill pickle hummus"
+    )
+    _seed_stale_cache_row(
+        session,
+        query_key="dill pickle hummus",
+        description="Pickles, cucumber, dill or kosher dill",
+        source_ref="usda_fdc:11937",
+        calories=11.0,
+    )
+    transport = QueryKeyedTransport()
+    pipeline = _pipeline(
+        session,
+        parse_responses=_parsed([_hummus_item(None)]),
+        estimates=[_as_logged_estimate(25.0, ["one tablespoon of hummus"])],
+        transport=transport,
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.event_status is LogEventStatus.COMPLETED
+    assert _questions(session, event_id) == []
+    food = _foods(session, event_id)[0]
+    assert food.calories == pytest.approx(25.0)
+    evidence = _evidence_for(session, food)
+    assert evidence.source_type == MODEL_PRIOR_SOURCE_TYPE
+    assert evidence.source_ref != "usda_fdc:11937"
     assert "dill pickle hummus" in transport.queries
 
 

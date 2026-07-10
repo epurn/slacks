@@ -49,7 +49,9 @@ only the flavor tokens is rejected, while plain `dill pickle` still resolves to
 pickles); (b) carry no **density-changing form** the query did not state
 (dehydrated / dried / dry / powder(ed) / flour / concentrate(d) / evaporated /
 condensed / chips / crisps / babyfood — so `banana` never costs as banana
-powder; the `dry roasted` idiom stays eligible; a query stating a form opts
+powder; the `dry roasted` preparation idiom is excused on both sides — a
+dry-roasted row stays eligible, and a `dry roasted ...` query opts into no
+dehydrated/dried/powdered form; a query stating a form opts
 into that form only, directly or via its bounded synonym family —
 dehydrated/dried/dry/powder(ed) is one family, chips/crisps another, since USDA
 names one form several ways in a row (`Bananas, dehydrated, or banana powder`) —
@@ -302,7 +304,11 @@ unstated density-changing form, stated added ingredients present; preferred by
 fewest unstated demoted forms, then query-token coverage, then relevance order —
 see **Version 15**), maps it to canonical per-100g facts, and caches it as a
 `products` row. Rejecting every result is a **miss**, not a wrong-food match. A
-cache hit makes **no** external call.
+**compatible** cache hit makes **no** external call; a cached row that fails
+today's compatibility gate (a stale pre-FTY-254 selection, e.g. `banana` cached
+to the dehydrated/powder row) is never served — it is re-fetched through the
+ranked lookup and the single `(source, query_key)` row is refreshed in place,
+or the resolution is a clean miss when no compatible result exists.
 
 Nutrient mapping: energy kcal (id 1008, **required**), protein (1003), carbohydrate
 (1005), total fat (1004); missing macros default to 0. A result with no energy value
@@ -1161,8 +1167,10 @@ The backend exposes four health-check endpoints, all returning structured JSON w
   policy; `evidence_sources.assumptions` (the `0012` column) already carries the
   new `estimated_common_portion:*` label, and `products`/`evidence_sources`
   shapes, barcode/OFF precedence, and the official/reference/model-prior tiers
-  are unchanged. A previously cached wrong-form `products` row is superseded
-  only by clearing the cache — acceptable pre-v1 (no deployed users).
+  are unchanged. A previously cached wrong-form `products` row does **not**
+  survive an upgrade: the resolver re-checks the cached description against the
+  compatibility gate on every read, so a stale selection is re-fetched and
+  refreshed in place (or becomes a clean miss) without any cache clearing.
 - **FTY-298 / FTY-303 (contract only; no code, no migration in this story).** FTY-298
   bumps the food resolution contract to the rare clarification policy, and FTY-303
   extracts the global mode semantics, allowed last-resort clarification reasons, and

@@ -62,7 +62,11 @@ REJECTED_FORM_TOKENS: Final[frozenset[str]] = frozenset(
 
 #: ``dry`` is density-changing on its own ("Milk, dry, whole" is ~8x fluid
 #: milk) but benign in the ``dry roasted`` preparation idiom (dry-roasted nuts
-#: match raw-nut density) — the idiom keeps the row eligible.
+#: match raw-nut density). The idiom is excused on **both** sides: a
+#: description's ``dry`` next to a roast marker keeps the row eligible, and a
+#: query's ``dry`` next to a roast marker states a preparation, not the
+#: dehydrated/dried/powdered form family — ``dry roasted peanuts`` must not
+#: opt into a dehydrated row.
 _DRY_ROASTED_MARKERS: Final[frozenset[str]] = frozenset({"roasted", "roast"})
 
 #: Synonym families among the rejected form tokens: USDA names one processed
@@ -181,7 +185,9 @@ def is_fdc_description_compatible(query_key: str, description: str) -> bool:
        must not cost as dry milk). A query states a form directly or through
        its synonym family ("banana powder" covers "dehydrated, or banana
        powder"); stating one form never opts into a different one ("banana
-       chips" stays incompatible with the dehydrated/powder row).
+       chips" stays incompatible with the dehydrated/powder row), and the
+       ``dry roasted`` preparation idiom states no form at all ("dry roasted
+       peanuts" stays incompatible with a dehydrated row).
     3. **Added-ingredient gate.** A query token from
        :data:`ADDED_INGREDIENT_QUERY_TOKENS` missing from the description
        rejects the row (plain toast facts do not cover ``buttered toast``).
@@ -199,11 +205,17 @@ def is_fdc_description_compatible(query_key: str, description: str) -> bool:
     if not _contains_token(description_tokens, head_noun):
         return False
 
+    form_query_tokens = query_tokens
+    if "dry" in query_tokens and frozenset(query_tokens) & _DRY_ROASTED_MARKERS:
+        # Query-side "dry roasted ..." is the preparation idiom, not a stated
+        # dehydrated/dried/powdered form: drop "dry" so it opts into nothing.
+        form_query_tokens = tuple(word for word in query_tokens if word != "dry")
+
     rejected = REJECTED_FORM_TOKENS
     if frozenset(description_tokens) & _DRY_ROASTED_MARKERS:
         rejected = rejected - {"dry"}
     for token in frozenset(description_tokens):
-        if token in rejected and not _query_states_form(query_tokens, token):
+        if token in rejected and not _query_states_form(form_query_tokens, token):
             return False
 
     return all(

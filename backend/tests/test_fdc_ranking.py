@@ -43,6 +43,10 @@ _PICKLES_ROW = "Pickles, cucumber, dill or kosher dill"
         # chips are not the dehydrated/powder form, condensed is not dry.
         ("banana chips", "Bananas, dehydrated, or banana powder"),
         ("condensed milk", "Milk, dry, whole, with added vitamin D"),
+        # Query-side "dry roasted" is a preparation idiom, not a stated
+        # dehydrated/dried/powdered form: it opts into no density change.
+        ("dry roasted peanuts", "Peanuts, dehydrated"),
+        ("dry roasted bananas", "Bananas, dehydrated, or banana powder"),
         # A stated added ingredient the row does not carry: plain toast facts
         # materially undercount buttered toast.
         ("buttered toast", "Bread, white, commercially prepared, toasted"),
@@ -73,8 +77,11 @@ def test_incompatible_descriptions_are_rejected(query: str, description: str) ->
         ("eggs", "Eggs, Grade A, Large, egg whole"),
         # An added-ingredient query token present in the row keeps it eligible.
         ("buttered toast", "Bread, toasted, with butter"),
-        # "dry roasted" is a benign preparation idiom, not a dehydrated form.
+        # "dry roasted" is a benign preparation idiom, not a dehydrated form —
+        # on the description side and on the query side alike.
         ("peanuts", "Peanuts, all types, dry-roasted, with salt"),
+        ("dry roasted peanuts", "Peanuts, all types, dry-roasted, with salt"),
+        ("dry roasted peanuts", "Peanuts, all types, raw"),
         # Demoted forms stay *eligible* (preference-ordered, not rejected).
         ("tuna", "Fish, tuna, light, canned in water, drained solids"),
         # Nothing to verify: an empty description cannot be proven foreign.

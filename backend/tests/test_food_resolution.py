@@ -357,6 +357,112 @@ def test_repeated_food_uses_cache_not_source(client: TestClient, session: Sessio
     assert len(session.scalars(select(Product).where(Product.query_key == "white rice")).all()) == 1
 
 
+def _seed_cached_product(
+    session: Session,
+    *,
+    query_key: str,
+    description: str,
+    source_ref: str,
+    calories: float,
+) -> Product:
+    """A pre-existing global FDC cache row, as an upgraded database would hold it."""
+
+    product = Product(
+        source=FDC_SOURCE,
+        source_ref=source_ref,
+        query_key=query_key,
+        description=description,
+        calories_per_100g=calories,
+        protein_per_100g=1.0,
+        carbs_per_100g=10.0,
+        fat_per_100g=0.5,
+        content_hash=f"stale-{source_ref}",
+    )
+    session.add(product)
+    session.flush()
+    return product
+
+
+def test_stale_incompatible_cached_product_is_refreshed_from_the_source(session: Session) -> None:
+    """FTY-254 upgrade path: a database that already cached ``banana`` to the
+    dehydrated/powder row must not keep serving it. The cached row fails today's
+    compatibility gate, the ranked source lookup runs, and the single cache row
+    is refreshed in place with the compatible selection."""
+
+    stale = _seed_cached_product(
+        session,
+        query_key="banana",
+        description="Bananas, dehydrated, or banana powder",
+        source_ref="usda_fdc:9041",
+        calories=346.0,
+    )
+    fresh = ProductFacts(
+        source=FDC_SOURCE,
+        source_ref="usda_fdc:9040",
+        query_key="banana",
+        description="Bananas, raw",
+        facts=NutritionFacts(calories=89.0, protein_g=1.09, carbs_g=22.84, fat_g=0.33),
+        default_serving_g=118.0,
+        content_hash="fresh-banana-hash",
+    )
+    source = FakeFoodSource({"banana": fresh})
+    resolver = FoodResolver(session=session, source=source)
+
+    resolved = resolver.resolve_product("banana")
+
+    assert resolved is not None
+    # The stale row was not trusted: the source was consulted again.
+    assert source.lookups == ["banana"]
+    # Refreshed in place — same row (the (source, query_key) key allows one),
+    # now carrying the compatible fresh-banana facts.
+    assert resolved.product.id == stale.id
+    assert resolved.product.source_ref == "usda_fdc:9040"
+    assert resolved.product.description == "Bananas, raw"
+    assert resolved.product.calories_per_100g == pytest.approx(89.0)
+    assert resolved.product.default_serving_g == pytest.approx(118.0)
+    assert resolved.product.content_hash == "fresh-banana-hash"
+    assert len(session.scalars(select(Product).where(Product.query_key == "banana")).all()) == 1
+
+
+def test_stale_incompatible_cached_product_is_a_miss_without_a_compatible_row(
+    session: Session,
+) -> None:
+    """``dill pickle hummus`` cached to the pickles row pre-FTY-254 is rejected
+    on read; when the source has no compatible row either, the resolution is a
+    clean miss (falling forward to the rough tiers), never the pickles facts."""
+
+    _seed_cached_product(
+        session,
+        query_key="dill pickle hummus",
+        description="Pickles, cucumber, dill or kosher dill",
+        source_ref="usda_fdc:11937",
+        calories=11.0,
+    )
+    source = FakeFoodSource({})
+    resolver = FoodResolver(session=session, source=source)
+
+    assert resolver.resolve_product("dill pickle hummus") is None
+    assert source.lookups == ["dill pickle hummus"]
+
+
+def test_compatible_cached_product_is_served_without_an_external_call(session: Session) -> None:
+    cached = _seed_cached_product(
+        session,
+        query_key="banana",
+        description="Bananas, raw",
+        source_ref="usda_fdc:9040",
+        calories=89.0,
+    )
+    source = FakeFoodSource({})
+    resolver = FoodResolver(session=session, source=source)
+
+    resolved = resolver.resolve_product("banana")
+
+    assert resolved is not None
+    assert resolved.product.id == cached.id
+    assert source.lookups == []
+
+
 def test_transient_source_error_is_retryable(client: TestClient, session: Session) -> None:
     user_id, event_id = _seed_event(client, "food-transient@example.com")
     source = FakeFoodSource(error=FdcTransientError("fdc_transient_error"))
