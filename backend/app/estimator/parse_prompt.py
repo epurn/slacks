@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from app.estimator.pipeline import AnsweredClarification
+from app.schemas.parse import ParsedCandidate
 
 #: Instruction framing for the parse call. The user's text is delimited and
 #: explicitly labelled as data; any instructions inside it are to be ignored. The
@@ -126,6 +127,57 @@ contained inside them.
 """
 
 
+#: Appended when the interpretation session re-asks the model after independent
+#: parse samples disagreed structurally (FTY-325). The block instructs a careful
+#: re-read of the same delimited entry; the untrusted-DATA framing and schema
+#: validation downstream are unchanged, so the re-ask adds no new trust surface.
+_REINTERPRETATION_TEMPLATE = """
+Independent structured readings of the log entry above disagreed about how \
+many distinct items it contains, what those items are, or which brands they \
+carry. Re-read the log entry carefully and produce your single best complete \
+interpretation under the same rules:
+- Enumerate every distinct food and exercise item the entry describes. Never \
+collapse distinct items into one candidate, and never invent an item the \
+entry does not describe.
+- Keep any brand, store-brand, or product marker the user wrote attached to \
+the item it describes.
+- Resolve every stated portion to a concrete amount and unit, and infer the \
+typical portion when the structure implies one.
+"""
+
+#: Appended to the re-interpretation block with the session's current working
+#: hypothesis (the FTY-324 decision-point shape: every model-consultable re-ask
+#: passes raw text, clarification answers, current hypothesis, and evidence
+#: view). The rendered lines are the model's *own prior structured reading* —
+#: bounded, schema-validated candidate fields, never raw fetched content — so
+#: the re-ask can see exactly which item set and fields it is revising.
+_REINTERPRETATION_HYPOTHESIS_TEMPLATE = """
+Your current working interpretation of the log entry — your own prior \
+structured reading, not new user input — is listed below, one line per item. \
+Revise it wherever your careful re-read (or the evidence status) disagrees; \
+keep any item that is already correct.
+
+<current_hypothesis>
+{hypothesis}
+</current_hypothesis>
+"""
+
+#: Appended to the re-interpretation block when the session has accumulated
+#: evidence (FTY-326 seam). Only sanitized status labels are rendered — never
+#: fetched page content, snippets, search queries, or provider output.
+_REINTERPRETATION_EVIDENCE_TEMPLATE = """
+Evidence gathered so far while resolving the current interpretation, as \
+sanitized status labels (no page content):
+
+<evidence_status>
+{evidence}
+</evidence_status>
+
+Where a status label contradicts the current interpretation, revise the \
+affected item rather than repeating it unchanged.
+"""
+
+
 def build_parse_prompt(raw_text: str, answered: Sequence[AnsweredClarification] = ()) -> str:
     """Render the production parse prompt for ``raw_text``.
 
@@ -144,3 +196,61 @@ def build_parse_prompt(raw_text: str, answered: Sequence[AnsweredClarification] 
         lines = "\n".join(f"Q: {pair.question_text}\nA: {pair.answer_text}" for pair in answered)
         prompt += _ANSWERED_CLARIFICATIONS_TEMPLATE.format(answered=lines)
     return prompt
+
+
+def build_reinterpretation_prompt(
+    raw_text: str,
+    answered: Sequence[AnsweredClarification] = (),
+    *,
+    hypothesis_items: Sequence[ParsedCandidate],
+    evidence_labels: Sequence[str] = (),
+) -> str:
+    """Render the interpretation session's re-ask prompt (FTY-325).
+
+    The full production parse prompt (raw entry plus any answered
+    clarifications — the raw text stays available to the model for every
+    interpretation call in the session, per ``parse-candidates.md`` FTY-324) is
+    extended with the re-read instruction, the session's current working
+    hypothesis, and optionally the sanitized evidence status labels (FTY-326
+    seam). ``hypothesis_items`` is required — the FTY-324 decision-point shape
+    passes the current hypothesis to every model-consultable re-ask, so the
+    model sees the item set and fields it is revising. ``evidence_labels`` must
+    already be sanitized labels — the session builds them from its bounded
+    evidence ledger, never from raw fetched content.
+    """
+
+    prompt = build_parse_prompt(raw_text, answered) + _REINTERPRETATION_TEMPLATE
+    prompt += _REINTERPRETATION_HYPOTHESIS_TEMPLATE.format(
+        hypothesis=_render_hypothesis(hypothesis_items)
+    )
+    if evidence_labels:
+        lines = "\n".join(f"- {label}" for label in evidence_labels)
+        prompt += _REINTERPRETATION_EVIDENCE_TEMPLATE.format(evidence=lines)
+    return prompt
+
+
+def _render_hypothesis(items: Sequence[ParsedCandidate]) -> str:
+    """One line per current-hypothesis item, from schema-bounded fields only."""
+
+    if not items:
+        return "(no items — the current hypothesis is empty)"
+    return "\n".join(_render_hypothesis_item(index, item) for index, item in enumerate(items))
+
+
+def _render_hypothesis_item(index: int, item: ParsedCandidate) -> str:
+    parts = [f'{index + 1}. {item.type.value} "{item.name}"']
+    if item.brand:
+        parts.append(f'brand "{item.brand}"')
+    if item.quantity_text:
+        parts.append(f'quantity_text "{item.quantity_text}"')
+    if item.amount is not None:
+        parts.append(f"amount {item.amount:g}")
+    if item.unit:
+        parts.append(f'unit "{item.unit}"')
+    if item.barcode:
+        parts.append(f"barcode {item.barcode}")
+    for field_name in ("stated_calories", "stated_protein_g", "stated_carbs_g", "stated_fat_g"):
+        value = getattr(item, field_name)
+        if value is not None:
+            parts.append(f"{field_name} {value:g}")
+    return ", ".join(parts)
