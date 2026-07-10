@@ -136,6 +136,27 @@ describe("today failed / needs_clarification visual-review EntryRow presets", ()
     }
   });
 
+  it("serves contract-consistent daily summaries: failed is excluded from uncounted_entries, clarify counts one", () => {
+    const summaryCtx = {
+      url: "https://e2e.invalid/daily-summary",
+      method: "GET",
+      pathEnd: "/daily-summary",
+    };
+    const summaryFor = (name: string): { uncounted_entries: number } => {
+      const preset = getVisualReviewPreset(name);
+      const response = preset?.responses?.find((r) => r.match(summaryCtx));
+      expect(response).toBeDefined();
+      return response?.body as { uncounted_entries: number };
+    };
+
+    // daily-summary.md excludes `failed` events (a distinct retry state) from
+    // uncounted_entries; an event-level needs_clarification contributes one.
+    expect(summaryFor(TODAY_FAILED_PRESET_NAME).uncounted_entries).toBe(0);
+    expect(
+      summaryFor(TODAY_NEEDS_CLARIFICATION_PRESET_NAME).uncounted_entries,
+    ).toBe(1);
+  });
+
   it("opens today.failed from the E2E fixture seam and exposes the shared settled marker", async () => {
     jest.useFakeTimers();
     try {

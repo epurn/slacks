@@ -28,7 +28,15 @@ export const TODAY_NEEDS_CLARIFICATION_PRESET_NAME =
 
 const EMPTY_LIST: unknown[] = [];
 
-const UNCOUNTED_SUMMARY: DailySummaryDTO = {
+/**
+ * Summary for the clarify preset: an event-level needs_clarification event
+ * contributes one uncounted unit (`daily-summary.md` → uncounted_entries).
+ * The failed preset serves the plain zero summary instead — the contract
+ * explicitly excludes `failed` events from `uncounted_entries` (a distinct
+ * retry state), so `uncounted_entries: 1` is a shape the backend can never
+ * produce for a failed-only day.
+ */
+const CLARIFY_UNCOUNTED_SUMMARY: DailySummaryDTO = {
   ...E2E_DAILY_SUMMARY,
   uncounted_entries: 1,
 };
@@ -47,7 +55,7 @@ registerVisualReviewPreset({
       body: [{ event: E2E_FAILED_EVENT, items: EMPTY_LIST }],
     },
     { match: get("/log-events"), body: [E2E_FAILED_EVENT] },
-    { match: get("/daily-summary"), body: UNCOUNTED_SUMMARY },
+    { match: get("/daily-summary"), body: E2E_DAILY_SUMMARY },
   ],
 });
 
@@ -61,6 +69,6 @@ registerVisualReviewPreset({
       body: [{ event: E2E_CLARIFY_EVENT, items: EMPTY_LIST }],
     },
     { match: get("/log-events"), body: [E2E_CLARIFY_EVENT] },
-    { match: get("/daily-summary"), body: UNCOUNTED_SUMMARY },
+    { match: get("/daily-summary"), body: CLARIFY_UNCOUNTED_SUMMARY },
   ],
 });
