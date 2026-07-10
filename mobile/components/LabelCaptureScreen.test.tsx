@@ -1,16 +1,18 @@
 /**
- * Tests for LabelCaptureScreen (FTY-064).
+ * Tests for LabelCaptureScreen (FTY-064, generalized in FTY-311).
  *
  * Covers:
- * - Happy path: capture → upload → onUploaded called with the pending event.
- * - Save-photo opt-in: toggling save sends save=true to the upload function.
- * - Default: save=false is sent when the toggle is left off.
- * - Retake: user can retake the photo after preview.
- * - Upload failure: error shown, no image bytes or sensitive content in the message.
- * - Permission-denied handling: rationale shown + path back (via CameraCapture).
- * - Client-side size guard: oversized image rejected before any upload call.
- * - Client-side type guard: non-image content type rejected before any upload call.
- * - Errors/logs never contain image bytes, URIs, or extracted content.
+ * - Permission flows: rationale shown, blocked → Open Settings, granted → camera.
+ * - Capture → preview → retake transitions and capture chrome (framing, flash).
+ * - Submit path: onSubmit receives the captured image URI + save-photo flag; the
+ *   capture component makes no assumption that a LogEventDTO comes back.
+ * - Normal Today host: onSubmit uploads via a label upload and forwards the
+ *   returned event to the confirm-parsed flow (host wiring unchanged).
+ * - Exact-evidence host: onSubmit receives the capture (URI + save flag) without
+ *   creating a log event.
+ * - Save-photo default off + opt-in.
+ * - Submit failure: in-place error, no image bytes/URI/extracted content leaked.
+ * - Client-side size/type guard (pure unit).
  */
 
 import React from "react";
@@ -19,7 +21,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { PermissionStatus } from "expo";
 import type { PermissionResponse } from "expo";
 
-import { LabelCaptureScreen } from "./LabelCaptureScreen";
+import { LabelCaptureScreen, type LabelCapture } from "./LabelCaptureScreen";
 import {
   validateImageGuard,
   MAX_UPLOAD_BYTES,
@@ -28,7 +30,6 @@ import {
   LabelUploadApiError,
 } from "@/api/labelCapture";
 import type { LogEventDTO } from "@/api/logEvents";
-import type { ApiSession } from "@/state/session";
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -74,16 +75,17 @@ jest.mock("expo-symbols", () => {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const SESSION: ApiSession = {
-  baseUrl: "https://api.example.test",
-  token: "test-token",
-  userId: "11111111-1111-1111-1111-111111111111",
-};
+const USER_ID = "11111111-1111-1111-1111-111111111111";
+
+/** A resolving submit handler — the default for tests that don't inspect it. */
+function noopSubmit(): jest.Mock<Promise<void>, [LabelCapture]> {
+  return jest.fn<Promise<void>, [LabelCapture]>().mockResolvedValue(undefined);
+}
 
 function makeEvent(overrides: Partial<LogEventDTO> = {}): LogEventDTO {
   return {
     id: "label-event-1",
-    user_id: SESSION.userId,
+    user_id: USER_ID,
     raw_text: "nutrition label photo",
     status: "pending",
     created_at: "2026-06-27T10:00:00Z",
@@ -159,6 +161,23 @@ function press(tree: ReactTestRenderer, label: string): void {
   });
 }
 
+/** Drive shutter → preview, then toggle save-photo on if requested. */
+async function captureThenPreview(tree: ReactTestRenderer, save = false): Promise<void> {
+  await act(async () => {
+    press(tree, "Take photo");
+  });
+  if (save) {
+    const switchNode = tree.root.find(
+      (n) =>
+        n.props.accessibilityLabel === "Save this photo" &&
+        typeof n.props.onValueChange === "function",
+    );
+    act(() => {
+      switchNode.props.onValueChange(true);
+    });
+  }
+}
+
 // ─── Client-side guard (pure unit tests) ─────────────────────────────────────
 
 describe("validateImageGuard", () => {
@@ -229,8 +248,7 @@ describe("LabelCaptureScreen – permission flows", () => {
     ] as [PermissionResponse, () => Promise<PermissionResponse>, () => Promise<PermissionResponse>];
     const tree = mount(
       <LabelCaptureScreen
-        session={SESSION}
-        onUploaded={jest.fn()}
+        onSubmit={noopSubmit()}
         onClose={jest.fn()}
         permissionsHook={hook}
       />,
@@ -244,8 +262,7 @@ describe("LabelCaptureScreen – permission flows", () => {
   it("gracefully handles permanently blocked permission with an Open Settings path", () => {
     const tree = mount(
       <LabelCaptureScreen
-        session={SESSION}
-        onUploaded={jest.fn()}
+        onSubmit={noopSubmit()}
         onClose={jest.fn()}
         permissionsHook={makeDeniedHook(false)}
       />,
@@ -258,8 +275,7 @@ describe("LabelCaptureScreen – permission flows", () => {
   it("shows the camera viewfinder and shutter when permission is granted", () => {
     const tree = mount(
       <LabelCaptureScreen
-        session={SESSION}
-        onUploaded={jest.fn()}
+        onSubmit={noopSubmit()}
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
       />,
@@ -278,8 +294,7 @@ describe("LabelCaptureScreen – permission flows", () => {
     ] as [PermissionResponse, () => Promise<PermissionResponse>, () => Promise<PermissionResponse>];
     const tree = mount(
       <LabelCaptureScreen
-        session={SESSION}
-        onUploaded={jest.fn()}
+        onSubmit={noopSubmit()}
         onClose={onClose}
         permissionsHook={hook}
       />,
@@ -297,12 +312,10 @@ describe("LabelCaptureScreen – capture and preview", () => {
     const takePhoto = jest.fn().mockResolvedValue(fakePhoto);
     const tree = mount(
       <LabelCaptureScreen
-        session={SESSION}
-        onUploaded={jest.fn()}
+        onSubmit={noopSubmit()}
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
         takePhoto={takePhoto}
-        upload={jest.fn().mockResolvedValue(makeEvent())}
       />,
     );
 
@@ -322,12 +335,10 @@ describe("LabelCaptureScreen – capture and preview", () => {
     const takePhoto = jest.fn().mockResolvedValue(fakePhoto);
     const tree = mount(
       <LabelCaptureScreen
-        session={SESSION}
-        onUploaded={jest.fn()}
+        onSubmit={noopSubmit()}
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
         takePhoto={takePhoto}
-        upload={jest.fn().mockResolvedValue(makeEvent())}
       />,
     );
 
@@ -348,8 +359,7 @@ describe("LabelCaptureScreen – capture chrome", () => {
   it("shows the framing guide hint and a flash toggle in the camera phase", () => {
     const tree = mount(
       <LabelCaptureScreen
-        session={SESSION}
-        onUploaded={jest.fn()}
+        onSubmit={noopSubmit()}
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
       />,
@@ -362,8 +372,7 @@ describe("LabelCaptureScreen – capture chrome", () => {
   it("flash is off by default and toggles enableTorch + accessibility state on tap", () => {
     const tree = mount(
       <LabelCaptureScreen
-        session={SESSION}
-        onUploaded={jest.fn()}
+        onSubmit={noopSubmit()}
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
       />,
@@ -389,12 +398,10 @@ describe("LabelCaptureScreen – capture chrome", () => {
   it("hides the framing guide and flash toggle once in the preview phase", async () => {
     const tree = mount(
       <LabelCaptureScreen
-        session={SESSION}
-        onUploaded={jest.fn()}
+        onSubmit={noopSubmit()}
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
         takePhoto={jest.fn().mockResolvedValue({ uri: "file:///captured-label.jpg" })}
-        upload={jest.fn().mockResolvedValue(makeEvent())}
       />,
     );
 
@@ -409,12 +416,10 @@ describe("LabelCaptureScreen – capture chrome", () => {
   it("turns the torch off when leaving the camera phase even if flash was on", async () => {
     const tree = mount(
       <LabelCaptureScreen
-        session={SESSION}
-        onUploaded={jest.fn()}
+        onSubmit={noopSubmit()}
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
         takePhoto={jest.fn().mockResolvedValue({ uri: "file:///captured-label.jpg" })}
-        upload={jest.fn().mockResolvedValue(makeEvent())}
       />,
     );
 
@@ -443,140 +448,155 @@ describe("LabelCaptureScreen – capture chrome", () => {
   });
 });
 
-// ─── Upload flow ─────────────────────────────────────────────────────────────
+// ─── Submit flow (generic) ───────────────────────────────────────────────────
 
-describe("LabelCaptureScreen – upload", () => {
-  it("calls onUploaded with the created pending event on a successful upload", async () => {
-    const createdEvent = makeEvent({ id: "label-server-1" });
-    const upload = jest.fn().mockResolvedValue(createdEvent);
-    const onUploaded = jest.fn();
+describe("LabelCaptureScreen – submit", () => {
+  it("calls onSubmit with the captured image URI and save-photo off by default", async () => {
+    const onSubmit = noopSubmit();
     const tree = mount(
       <LabelCaptureScreen
-        session={SESSION}
-        onUploaded={onUploaded}
+        onSubmit={onSubmit}
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
         takePhoto={jest.fn().mockResolvedValue({ uri: "file:///label.jpg" })}
-        upload={upload}
       />,
     );
 
-    await act(async () => {
-      press(tree, "Take photo");
-    });
+    await captureThenPreview(tree);
     await act(async () => {
       press(tree, "Upload label");
     });
 
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    // The capture carries the URI and the save flag — no LogEventDTO required.
+    expect(onSubmit).toHaveBeenCalledWith({
+      imageUri: "file:///label.jpg",
+      savePhoto: false,
+    });
+  });
+
+  it("forwards savePhoto=true only when the save-photo toggle is switched on", async () => {
+    const onSubmit = noopSubmit();
+    const tree = mount(
+      <LabelCaptureScreen
+        onSubmit={onSubmit}
+        onClose={jest.fn()}
+        permissionsHook={makeGrantedHook()}
+        takePhoto={jest.fn().mockResolvedValue({ uri: "file:///label.jpg" })}
+      />,
+    );
+
+    await captureThenPreview(tree, /* save */ true);
+    await act(async () => {
+      press(tree, "Upload label");
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      imageUri: "file:///label.jpg",
+      savePhoto: true,
+    });
+  });
+
+  it("normal Today host: onSubmit uploads and forwards the returned event (path unchanged)", async () => {
+    // Models the TodayScreen wiring: onSubmit uploads the label then hands the
+    // returned LogEventDTO to the confirm-parsed flow.
+    const createdEvent = makeEvent({ id: "label-server-1" });
+    const upload = jest.fn().mockResolvedValue(createdEvent);
+    const onUploaded = jest.fn();
+    const onSubmit = jest
+      .fn<Promise<void>, [LabelCapture]>()
+      .mockImplementation(async ({ imageUri, savePhoto }) => {
+        const event = await upload(imageUri, savePhoto);
+        onUploaded(event);
+      });
+
+    const tree = mount(
+      <LabelCaptureScreen
+        onSubmit={onSubmit}
+        onClose={jest.fn()}
+        permissionsHook={makeGrantedHook()}
+        takePhoto={jest.fn().mockResolvedValue({ uri: "file:///label.jpg" })}
+      />,
+    );
+
+    await captureThenPreview(tree);
+    await act(async () => {
+      press(tree, "Upload label");
+    });
+
+    expect(upload).toHaveBeenCalledWith("file:///label.jpg", false);
     expect(onUploaded).toHaveBeenCalledTimes(1);
     expect(onUploaded).toHaveBeenCalledWith(createdEvent);
   });
 
-  it("sends save=false by default (discard-by-default retention)", async () => {
-    const upload = jest.fn().mockResolvedValue(makeEvent());
+  it("exact-evidence host: onSubmit receives the capture without creating a log event", async () => {
+    // The exact-evidence host (FTY-312) just keeps the URI + save flag; it does
+    // not upload or produce a LogEventDTO.
+    const received: LabelCapture[] = [];
+    const onSubmit = jest
+      .fn<Promise<void>, [LabelCapture]>()
+      .mockImplementation(async (capture) => {
+        received.push(capture);
+      });
+
     const tree = mount(
       <LabelCaptureScreen
-        session={SESSION}
-        onUploaded={jest.fn()}
+        onSubmit={onSubmit}
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
-        takePhoto={jest.fn().mockResolvedValue({ uri: "file:///label.jpg" })}
-        upload={upload}
+        takePhoto={jest.fn().mockResolvedValue({ uri: "file:///exact-label.jpg" })}
       />,
     );
 
-    await act(async () => {
-      press(tree, "Take photo");
-    });
+    await captureThenPreview(tree, /* save */ true);
     await act(async () => {
       press(tree, "Upload label");
     });
 
-    // The second argument to upload is savePhoto; defaults to false.
-    expect(upload).toHaveBeenCalledWith("file:///label.jpg", false);
+    expect(received).toEqual([
+      { imageUri: "file:///exact-label.jpg", savePhoto: true },
+    ]);
   });
 
-  it("sends save=true when the save-photo toggle is switched on", async () => {
-    const upload = jest.fn().mockResolvedValue(makeEvent());
-    const tree = mount(
-      <LabelCaptureScreen
-        session={SESSION}
-        onUploaded={jest.fn()}
-        onClose={jest.fn()}
-        permissionsHook={makeGrantedHook()}
-        takePhoto={jest.fn().mockResolvedValue({ uri: "file:///label.jpg" })}
-        upload={upload}
-      />,
-    );
-
-    await act(async () => {
-      press(tree, "Take photo");
-    });
-
-    // Toggle save-photo on.
-    const switchNode = tree.root.find(
-      (n) => n.props.accessibilityLabel === "Save this photo" && typeof n.props.onValueChange === "function",
-    );
-    act(() => {
-      switchNode.props.onValueChange(true);
-    });
-
-    await act(async () => {
-      press(tree, "Upload label");
-    });
-
-    expect(upload).toHaveBeenCalledWith("file:///label.jpg", true);
-  });
-
-  it("shows an error when the upload fails and does not call onUploaded", async () => {
-    const upload = jest
-      .fn()
+  it("shows an in-place error when onSubmit rejects, without leaking sensitive content", async () => {
+    const onSubmit = jest
+      .fn<Promise<void>, [LabelCapture]>()
       .mockRejectedValue(new LabelUploadApiError(500, "We couldn't upload the label (status 500)."));
-    const onUploaded = jest.fn();
     const tree = mount(
       <LabelCaptureScreen
-        session={SESSION}
-        onUploaded={onUploaded}
+        onSubmit={onSubmit}
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
         takePhoto={jest.fn().mockResolvedValue({ uri: "file:///label.jpg" })}
-        upload={upload}
       />,
     );
 
-    await act(async () => {
-      press(tree, "Take photo");
-    });
+    await captureThenPreview(tree);
     await act(async () => {
       press(tree, "Upload label");
     });
 
-    expect(onUploaded).not.toHaveBeenCalled();
     // Error is shown; the message must not contain image bytes or sensitive content.
     const content = textContent(tree);
     expect(content).toContain("couldn't upload");
     expect(content).not.toMatch(/file:|data:|base64/);
   });
 
-  it("upload failure error does not echo image URI or bytes", async () => {
+  it("submit failure does not echo the image URI or bytes", async () => {
     const sensitiveUri = "file:///private/user/captured-private.jpg";
-    const upload = jest
-      .fn()
+    const onSubmit = jest
+      .fn<Promise<void>, [LabelCapture]>()
       .mockRejectedValue(new LabelUploadApiError(500, "We couldn't upload the label (status 500)."));
     const tree = mount(
       <LabelCaptureScreen
-        session={SESSION}
-        onUploaded={jest.fn()}
+        onSubmit={onSubmit}
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
         takePhoto={jest.fn().mockResolvedValue({ uri: sensitiveUri })}
-        upload={upload}
       />,
     );
 
-    await act(async () => {
-      press(tree, "Take photo");
-    });
+    await captureThenPreview(tree);
     await act(async () => {
       press(tree, "Upload label");
     });
@@ -588,35 +608,33 @@ describe("LabelCaptureScreen – upload", () => {
     expect(content).not.toContain("captured-private");
   });
 
-  it("shows the loading indicator during upload", async () => {
-    let resolveUpload!: (e: LogEventDTO) => void;
-    const upload = jest.fn().mockReturnValue(
-      new Promise<LogEventDTO>((resolve) => { resolveUpload = resolve; }),
+  it("shows the loading indicator while onSubmit is in flight", async () => {
+    let resolveSubmit!: () => void;
+    const onSubmit = jest.fn<Promise<void>, [LabelCapture]>().mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveSubmit = resolve;
+      }),
     );
     const tree = mount(
       <LabelCaptureScreen
-        session={SESSION}
-        onUploaded={jest.fn()}
+        onSubmit={onSubmit}
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
         takePhoto={jest.fn().mockResolvedValue({ uri: "file:///label.jpg" })}
-        upload={upload}
       />,
     );
 
-    await act(async () => {
-      press(tree, "Take photo");
-    });
+    await captureThenPreview(tree);
     act(() => {
       press(tree, "Upload label");
     });
 
-    // While upload is in flight, a spinner is shown.
+    // While submit is in flight, a spinner is shown.
     expect(hasA11yLabel(tree, "Uploading label")).toBe(true);
     expect(hasA11yLabel(tree, "Upload label")).toBe(false);
 
     await act(async () => {
-      resolveUpload(makeEvent());
+      resolveSubmit();
     });
   });
 });

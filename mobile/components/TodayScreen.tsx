@@ -284,15 +284,13 @@ export function TodayScreen({
       >
         {apiSession && (
           <LabelCaptureScreen
-            session={apiSession}
-            onUploaded={handleLabelUploaded}
             onClose={() => setLabelCaptureOpen(false)}
-            upload={
-              apiSession
-                ? (imageUri, savePhoto) =>
-                    uploadLabel(apiSession, imageUri, savePhoto)
-                : undefined
-            }
+            onSubmit={async ({ imageUri, savePhoto }) => {
+              // Normal Today path: upload via uploadLabelImage, then open the
+              // confirm-parsed-values flow with the returned label event.
+              const event = await uploadLabel(apiSession, imageUri, savePhoto);
+              handleLabelUploaded(event);
+            }}
             takePhoto={labelTakePhoto}
           />
         )}

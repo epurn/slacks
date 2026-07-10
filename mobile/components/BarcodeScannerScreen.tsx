@@ -11,14 +11,18 @@
  * On a successful read, `onBarcodeScanned` is called with the raw barcode
  * string exactly once. The camera stream is treated as ephemeral: only the
  * string value is extracted; no frames or images are stored on device or sent
- * anywhere. The caller (TodayScreen) is responsible for submitting that string
- * through the existing log-events create path (FTY-030) so the backend
- * FTY-060 pipeline resolves it.
+ * anywhere. The scanner never creates a log event itself — it is a raw barcode
+ * source. Its host decides what to do with the string: the Today composer host
+ * submits it through the existing log-events create path (FTY-030) so the
+ * backend FTY-060 pipeline resolves it; an exact-evidence host (FTY-311/312)
+ * receives the same string to attach as evidence without creating a new event.
  *
  * The "Type it instead" affordance carries no scan data: it calls `onManualEntry`
  * so the host dismisses the scanner and lands the user in the Today composer,
  * pre-filled with an editable starter and focused, to type the product — never
- * any partial/failed scan bytes.
+ * any partial/failed scan bytes. It is optional: a host with no composer to fall
+ * back to (e.g. the exact-evidence correction sheet) omits `onManualEntry` and
+ * the affordance is hidden, leaving the always-present close control as the exit.
  *
  * Security: camera stream ephemeral — no frames, no images, no URIs are
  * captured or sent. Only the barcode string passes through `onBarcodeScanned`.
@@ -59,9 +63,11 @@ export interface BarcodeScannerScreenProps {
   /**
    * The never-a-dead-end escape hatch: called when the user taps "Type it
    * instead". The host dismisses the scanner and focuses the Today composer so
-   * the user can type the product. Carries no scan data.
+   * the user can type the product. Carries no scan data. Optional — when
+   * omitted, the "Type it instead" affordance is hidden for hosts that have no
+   * composer to fall back to (e.g. the exact-evidence correction sheet).
    */
-  onManualEntry: () => void;
+  onManualEntry?: () => void;
   /**
    * Injectable for tests; forwarded to `CameraCapture`.
    */
@@ -145,22 +151,25 @@ export function BarcodeScannerScreen({
             />
           </Pressable>
 
-          {/* "Type it instead" — the never-a-dead-end path to the composer. */}
-          <View
-            style={[styles.manualArea, { bottom: insets.bottom + 32 }]}
-            pointerEvents="box-none"
-          >
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Type it instead"
-              accessibilityHint="Closes the scanner and opens the composer to type the product"
-              onPress={onManualEntry}
-              style={styles.manualButton}
+          {/* "Type it instead" — the never-a-dead-end path to the composer.
+              Hidden when the host provides no composer fallback. */}
+          {onManualEntry && (
+            <View
+              style={[styles.manualArea, { bottom: insets.bottom + 32 }]}
+              pointerEvents="box-none"
             >
-              <AppIcon name="keyboard" size={20} color="#FFFFFF" />
-              <Text style={styles.manualLabel}>Type it instead</Text>
-            </Pressable>
-          </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Type it instead"
+                accessibilityHint="Closes the scanner and opens the composer to type the product"
+                onPress={onManualEntry}
+                style={styles.manualButton}
+              >
+                <AppIcon name="keyboard" size={20} color="#FFFFFF" />
+                <Text style={styles.manualLabel}>Type it instead</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
       )}
     </CameraCapture>
