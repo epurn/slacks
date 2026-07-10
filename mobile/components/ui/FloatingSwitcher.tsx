@@ -1,9 +1,18 @@
 import { BlurView } from 'expo-blur';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Animated,
+  type LayoutChangeEvent,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppIcon, type AppIconName } from './AppIcon';
 import { spacing, radius, useTheme } from '@/theme';
+import { defaultSpring, useReduceMotion } from '@/theme/motion';
 import { typeScale } from '@/theme/typography';
 
 /**
@@ -36,12 +45,20 @@ export function floatingSwitcherClearance(bottomInset: number): number {
   );
 }
 
+/** Measured position/width of a segment within the row, used to slide the
+ *  raised active capsule underneath it. */
+interface SegmentLayout {
+  x: number;
+  width: number;
+}
+
 /**
  * The bottom-left floating glass switcher (FTY-242) — the app's top-level
  * navigation, replacing the old full-width bottom tab bar. Inspired by the iOS 26
  * Photos chrome: a compact segmented pill of translucent blur material, a
  * hairline edge highlight, a restrained shadow, SF Symbols via `AppIcon`, and an
- * unmistakable raised-capsule selected state.
+ * unmistakable raised-capsule selected state that glides between segments
+ * (FTY-323).
  *
  * It is presentational: it takes the segment list, the active key, and an
  * `onSelect` callback. The shell (`app/(tabs)/_layout.tsx`) wires it to the Expo
@@ -64,6 +81,58 @@ export function FloatingSwitcher({
 }) {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const reduceMotion = useReduceMotion();
+
+  // The raised active capsule is a single element that slides under whichever
+  // segment is active, rather than a background style toggled per-segment —
+  // that's what lets it glide (FTY-323) instead of jump-cutting.
+  const [segmentLayouts, setSegmentLayouts] = useState<Record<string, SegmentLayout>>({});
+  const [capsuleX] = useState(() => new Animated.Value(0));
+  const [capsuleWidth] = useState(() => new Animated.Value(0));
+  const hasPositioned = useRef(false);
+  const prevActiveKey = useRef(activeKey);
+
+  const handleSegmentLayout = useCallback((key: string, event: LayoutChangeEvent) => {
+    const { x, width } = event.nativeEvent.layout;
+    setSegmentLayouts((prev) => {
+      const existing = prev[key];
+      if (existing && existing.x === x && existing.width === width) return prev;
+      return { ...prev, [key]: { x, width } };
+    });
+  }, []);
+
+  useEffect(() => {
+    const target = segmentLayouts[activeKey];
+    if (!target) return;
+
+    if (!hasPositioned.current) {
+      // First measurement — snap into place, no animate-in from the origin.
+      capsuleX.setValue(target.x);
+      capsuleWidth.setValue(target.width);
+      hasPositioned.current = true;
+      prevActiveKey.current = activeKey;
+      return;
+    }
+
+    const selectionChanged = prevActiveKey.current !== activeKey;
+    prevActiveKey.current = activeKey;
+
+    if (!selectionChanged || reduceMotion) {
+      // A re-layout of the same segment (Dynamic Type, rotation) snaps in
+      // place; Reduce Motion degrades the selection change to an instant
+      // swap — no spring.
+      capsuleX.setValue(target.x);
+      capsuleWidth.setValue(target.width);
+      return;
+    }
+
+    Animated.spring(capsuleX, { ...defaultSpring, toValue: target.x, useNativeDriver: false }).start();
+    Animated.spring(capsuleWidth, {
+      ...defaultSpring,
+      toValue: target.width,
+      useNativeDriver: false,
+    }).start();
+  }, [activeKey, segmentLayouts, reduceMotion, capsuleX, capsuleWidth]);
 
   return (
     <View
@@ -78,8 +147,12 @@ export function FloatingSwitcher({
         style={[
           styles.pill,
           {
-            borderColor: colors.separator,
+            borderColor: colors.switcherBorder,
             shadowColor: '#000000',
+            // Dark canvas swallows a black shadow almost entirely, so the pill
+            // leans harder on elevation there to keep reading as raised.
+            shadowOpacity: isDark ? 0.45 : 0.16,
+            shadowRadius: isDark ? 18 : 12,
           },
         ]}
       >
@@ -97,6 +170,20 @@ export function FloatingSwitcher({
         />
 
         <View style={styles.row}>
+          <Animated.View
+            testID="floating-switcher-capsule"
+            pointerEvents="none"
+            style={[
+              styles.activeCapsule,
+              {
+                left: capsuleX,
+                width: capsuleWidth,
+                backgroundColor: colors.surfaceRaised,
+                borderColor: colors.switcherBorder,
+                shadowColor: '#000000',
+              },
+            ]}
+          />
           {segments.map((seg) => {
             const active = seg.key === activeKey;
             const tint = active ? colors.tabActive : colors.tabInactive;
@@ -108,15 +195,8 @@ export function FloatingSwitcher({
                 accessibilityState={{ selected: active }}
                 accessibilityLabel={seg.label}
                 onPress={() => onSelect(seg.key)}
-                style={[
-                  styles.segment,
-                  active && {
-                    backgroundColor: colors.surfaceRaised,
-                    borderColor: colors.separator,
-                    shadowColor: '#000000',
-                  },
-                  active ? styles.segmentActive : null,
-                ]}
+                onLayout={(event) => handleSegmentLayout(seg.key, event)}
+                style={({ pressed }) => [styles.segment, pressed && styles.segmentPressed]}
               >
                 <AppIcon name={seg.icon} size={18} color={tint} />
                 <Text
@@ -158,6 +238,21 @@ const styles = StyleSheet.create({
     padding: spacing.xs,
     gap: spacing.xs,
   },
+  // The sliding active-capsule background — positioned absolutely within
+  // `row` and animated to the measured bounds of the active segment, so
+  // selecting the other segment glides the capsule across (FTY-323) instead
+  // of jump-cutting a per-segment background.
+  activeCapsule: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    borderRadius: radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    shadowOpacity: 0.12,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
   segment: {
     minHeight: FLOATING_SWITCHER_HEIGHT - spacing.xs * 2,
     minWidth: 44,
@@ -167,14 +262,11 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     paddingHorizontal: spacing.md,
     borderRadius: radius.full,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'transparent',
   },
-  segmentActive: {
-    shadowOpacity: 0.12,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 2,
+  // Calm pressed feedback — a quiet opacity dim (matches EntryRow/
+  // ItemTimelineRow), never a white flash, scale, or ripple.
+  segmentPressed: {
+    opacity: 0.6,
   },
   label: {
     fontSize: typeScale.footnote,

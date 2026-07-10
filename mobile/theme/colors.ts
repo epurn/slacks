@@ -35,6 +35,12 @@ export interface ColorPalette {
    * weak or unsupported (FTY-242).
    */
   readonly switcherGlass: string;
+  /**
+   * Hairline border for the floating switcher pill and its active capsule —
+   * tuned separately from the general `separator` token so the pill's edge
+   * stays crisp against a blurred, content-varying background (FTY-323).
+   */
+  readonly switcherBorder: string;
 }
 
 export const lightPalette: ColorPalette = {
@@ -55,6 +61,7 @@ export const lightPalette: ColorPalette = {
   // read (FTY-242 review). Shares the AA-verified secondary text tint.
   tabInactive: '#636366',
   switcherGlass: 'rgba(255,255,255,0.7)',
+  switcherBorder: '#E5E5EA',
 };
 
 export const darkPalette: ColorPalette = {
@@ -70,6 +77,16 @@ export const darkPalette: ColorPalette = {
   separator: '#38383A',
   controlBackground: '#3A3A3C',
   tabActive: '#F2F2F7',
-  tabInactive: '#8E8E93',
-  switcherGlass: 'rgba(28,28,30,0.55)',
+  // Brightened from #8E8E93 (FTY-323): the switcher glass fill below was
+  // deepened to separate the pill from the ~#1C1C1E canvas, which raises the
+  // fill's own luminance. #AEAEB2 (shared with `textSecondary`) keeps ≥4.5:1
+  // against the new fill composite — the old value would have dropped below
+  // AA once the fill got lighter.
+  tabInactive: '#AEAEB2',
+  // Denser and visibly lighter than the ~#1C1C1E canvas (FTY-242's
+  // rgba(28,28,30,0.55) was near-identical to the canvas and the pill
+  // disappeared in dark mode — FTY-323). Paired with `switcherBorder` for a
+  // crisp lit edge.
+  switcherGlass: 'rgba(58,58,60,0.82)',
+  switcherBorder: 'rgba(255,255,255,0.34)',
 };
