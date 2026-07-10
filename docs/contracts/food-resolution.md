@@ -546,7 +546,12 @@ rollback, and end-to-end resolution (with a stubbed FDC source) are covered by
 `tests/test_food_migration.py`, and `tests/test_food_resolution.py`. The FTY-254
 common-food ranking, the common-portion defaults, and the dogfood fixture set
 (calorie bands + provenance) are covered by `tests/test_fdc_ranking.py`,
-`tests/test_common_portions.py`, and `tests/test_common_food_resolution.py`.
+`tests/test_common_portions.py`, and `tests/test_common_food_resolution.py`. The
+FTY-315 end-to-end dogfood regression — the exact audited snack phrase plus
+natural-language variants resolving through the FTY-254 rejection, FTY-253
+identity-variant search, FTY-314 snippet fallback, and FTY-252 count math with
+plausible calorie bands, honest provenance, raw-phrase redaction, and a static
+no-special-case scan — is covered by `tests/test_exact_snack_phrase_resolution.py`.
 
 ## User-Stated Resolution (FTY-279)
 
