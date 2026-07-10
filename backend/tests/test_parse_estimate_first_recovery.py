@@ -268,9 +268,14 @@ def test_low_hybrid_with_identity_routes_to_candidates() -> None:
 
 
 def test_low_hybrid_uses_non_representative_recognizable_candidates() -> None:
+    # The identity disagreement across samples triggers one FTY-325
+    # re-interpretation call (the fourth scripted reply). When that re-read
+    # still yields no recognizable identity, the estimate-first policy falls
+    # back to the recognizable non-representative sample, as before FTY-325.
+    generic = _parsed([{"type": "food", "name": "food", "quantity_text": "some"}], confidence=0.95)
     provider = FakeProvider(
         responses=[
-            _parsed([{"type": "food", "name": "food", "quantity_text": "some"}], confidence=0.95),
+            generic,
             _parsed(
                 [{"type": "food", "name": "crackers", "quantity_text": "some"}],
                 confidence=_low(),
@@ -279,6 +284,7 @@ def test_low_hybrid_uses_non_representative_recognizable_candidates() -> None:
                 [{"type": "food", "name": "crackers", "quantity_text": "some"}],
                 confidence=_low(),
             ),
+            generic,
         ]
     )
     context = _context(raw_text="some crackers")
