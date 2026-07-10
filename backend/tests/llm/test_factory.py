@@ -41,6 +41,30 @@ def test_openai_compatible_selected() -> None:
     assert isinstance(provider, OpenAIProvider)
 
 
+def test_recorded_identity_distinguishes_openai_from_compatible() -> None:
+    """Run metadata must tell first-party OpenAI from an OpenRouter/compatible
+    endpoint, plus the configured model string (FTY-255): the 2026-07-09 audit
+    could not, because both selectors recorded ``provider=openai`` and no model.
+    """
+
+    first_party = build_provider(
+        LLMSettings(provider="openai", api_key=SecretStr("k"), model="gpt-4o-mini")
+    )
+    compatible = build_provider(
+        LLMSettings(
+            provider="openai_compatible",
+            api_key=SecretStr("k"),
+            model="deepseek/deepseek-chat-v3",
+            base_url="https://openrouter.ai/api/v1",
+        )
+    )
+
+    assert first_party.name == "openai"
+    assert first_party.model == "gpt-4o-mini"
+    assert compatible.name == "openai_compatible"
+    assert compatible.model == "deepseek/deepseek-chat-v3"
+
+
 def test_anthropic_selected() -> None:
     settings = LLMSettings(provider="anthropic", api_key=SecretStr("k"), model="claude")
 
@@ -64,7 +88,7 @@ def test_claude_code_model_is_passed_through() -> None:
     provider = build_provider(settings)
 
     assert isinstance(provider, ClaudeCodeProvider)
-    assert provider._model == "claude-sonnet-4-5"
+    assert provider.model == "claude-sonnet-4-5"
 
 
 def test_codex_selected_without_key() -> None:
@@ -81,7 +105,7 @@ def test_codex_model_is_passed_through() -> None:
     provider = build_provider(settings)
 
     assert isinstance(provider, CodexProvider)
-    assert provider._model == "gpt-5-codex"
+    assert provider.model == "gpt-5-codex"
 
 
 def test_codex_optional_key_is_passed_to_provider() -> None:

@@ -62,6 +62,7 @@ from sqlalchemy.orm import Session
 
 from app.estimator.branded_routing import is_evidence_brand_compatible
 from app.estimator.common_portions import resolve_common_portion_grams
+from app.estimator.decision_trace import amount_kind
 from app.estimator.detail_signals import has_food_detail, has_stated_nutrition
 from app.estimator.evidence_utils import _record_source_ref
 from app.estimator.fdc import (
@@ -333,12 +334,21 @@ class FoodResolveStep:
             context.record_step(self.name, "ok")
             return
 
-        for candidate in context.food_candidates:
-            self._dispatch(context, candidate)
+        for index, candidate in enumerate(context.food_candidates):
+            # One sanitized intro entry per candidate: structural booleans/labels
+            # only (FTY-255) — never the candidate's name or quantity text.
+            context.record_decision(
+                self.name,
+                "candidate",
+                candidate_index=index,
+                has_brand=_is_official_eligible(candidate),
+                amount_kind=amount_kind(candidate.unit, candidate.amount, candidate.quantity_text),
+            )
+            self._dispatch(context, candidate, index)
 
         context.record_step(self.name, "ok")
 
-    def _dispatch(self, context: EstimationContext, candidate: CandidateDraft) -> None:
+    def _dispatch(self, context: EstimationContext, candidate: CandidateDraft, index: int) -> None:
         """Resolve one candidate, defer it to official source, or leave it unresolved.
 
         A barcode candidate prefers Open Food Facts; a generic candidate uses USDA. On
@@ -352,28 +362,36 @@ class FoodResolveStep:
         barcode_resolver = self.barcode_resolver
 
         if candidate.barcode and barcode_resolver is not None and barcode_resolver.enabled:
-            item = self._try_barcode(context, candidate, barcode_resolver)
+            item = self._try_barcode(context, candidate, barcode_resolver, index)
             if item is not None:
                 context.resolved_food_items.append(item)
                 return
             if _should_defer_after_source_gap(candidate, self.clarify_mode):
+                self._record_deferral(context, index)
                 context.pending_official_candidates.append(candidate)
                 return
             # No match, invalid barcode, or no usable energy value: route
             # deterministically. Never finalized from a guess while OFF is available.
+            context.record_decision(
+                self.name, "outcome", candidate_index=index, outcome="clarified_barcode_unknown"
+            )
             context.clarification_questions = [ClarificationDraft(text=BARCODE_UNKNOWN_QUESTION)]
             raise NeedsClarification("barcode_unknown")
 
         if self.resolver.enabled:
-            item = self._try_generic(context, candidate)
+            item = self._try_generic(context, candidate, index)
             if item is not None:
                 context.resolved_food_items.append(item)
                 return
             # Estimate-first source gaps fall through to rough estimation for any
             # recognized candidate; stricter modes retain the older detail gate.
             if _should_defer_after_source_gap(candidate, self.clarify_mode):
+                self._record_deferral(context, index)
                 context.pending_official_candidates.append(candidate)
                 return
+            context.record_decision(
+                self.name, "outcome", candidate_index=index, outcome="clarified_unknown_food"
+            )
             context.clarification_questions = [ClarificationDraft(text=UNKNOWN_FOOD_QUESTION)]
             raise NeedsClarification("unknown_food")
 
@@ -381,16 +399,35 @@ class FoodResolveStep:
         # barcode/OFF). Estimate-first still gets a shot at reference/model/default
         # rough resolution when the downstream step is wired; otherwise the worker
         # persists it unresolved and completes.
+        context.record_decision(
+            self.name,
+            "source",
+            candidate_index=index,
+            tier=FDC_SOURCE,
+            outcome="source_unavailable",
+        )
         if _should_defer_after_source_gap(candidate, self.clarify_mode):
+            self._record_deferral(context, index)
             context.pending_official_candidates.append(candidate)
             return
+        context.record_decision(
+            self.name, "outcome", candidate_index=index, outcome="unresolved_no_source"
+        )
         context.unresolved_food_candidates.append(candidate)
+
+    def _record_deferral(self, context: EstimationContext, index: int) -> None:
+        """Trace that the candidate fell through to the official/reference step."""
+
+        context.record_decision(
+            self.name, "outcome", candidate_index=index, outcome="deferred_to_web_evidence"
+        )
 
     def _try_barcode(
         self,
         context: EstimationContext,
         candidate: CandidateDraft,
         barcode_resolver: BarcodeResolver,
+        index: int,
     ) -> ResolvedFoodItem | None:
         """Resolve a barcode candidate from Open Food Facts; ``None`` on a miss.
 
@@ -404,25 +441,43 @@ class FoodResolveStep:
         try:
             resolved = barcode_resolver.resolve_product(candidate.barcode or "")
         except OffTransientError as exc:
+            context.record_decision(
+                self.name,
+                "source",
+                candidate_index=index,
+                tier=OFF_SOURCE,
+                outcome="off_transient_error",
+            )
             raise StepError("off_transient_error") from exc
         except OffResponseError as exc:
             # OFF answered unusably; fail closed rather than guess a number.
+            context.record_decision(
+                self.name,
+                "source",
+                candidate_index=index,
+                tier=OFF_SOURCE,
+                outcome="off_response_error",
+            )
             raise StepFailed("off_response_error") from exc
 
         if resolved is None:
+            context.record_decision(
+                self.name, "source", candidate_index=index, tier=OFF_SOURCE, outcome="miss"
+            )
             return None
         return self._build_item(
             context,
             candidate,
             resolved,
             OFF_SOURCE_TYPE,
+            candidate_index=index,
             allow_unresolvable_defer=_should_defer_unresolvable_quantity(
                 candidate, self.clarify_mode
             ),
         )
 
     def _try_generic(
-        self, context: EstimationContext, candidate: CandidateDraft
+        self, context: EstimationContext, candidate: CandidateDraft, index: int
     ) -> ResolvedFoodItem | None:
         """Resolve a generic-food candidate by name from USDA FDC; ``None`` on a miss.
 
@@ -436,12 +491,29 @@ class FoodResolveStep:
         try:
             resolved = self.resolver.resolve_product(candidate.name)
         except FdcTransientError as exc:
+            context.record_decision(
+                self.name,
+                "source",
+                candidate_index=index,
+                tier=FDC_SOURCE,
+                outcome="fdc_transient_error",
+            )
             raise StepError("fdc_transient_error") from exc
         except FdcResponseError as exc:
             # The source answered unusably; fail closed rather than guess a number.
+            context.record_decision(
+                self.name,
+                "source",
+                candidate_index=index,
+                tier=FDC_SOURCE,
+                outcome="fdc_response_error",
+            )
             raise StepFailed("fdc_response_error") from exc
 
         if resolved is None:
+            context.record_decision(
+                self.name, "source", candidate_index=index, tier=FDC_SOURCE, outcome="miss"
+            )
             return None
         if not is_evidence_brand_compatible(
             resolved.product.description, name=candidate.name, brand=candidate.brand
@@ -450,26 +522,39 @@ class FoodResolveStep:
             # candidate, not an authority. A row naming a different product identity
             # (e.g. "DENNY'S, chicken strips" for brand=Compliments) is a miss, so
             # the branded official/reference/model-prior tiers run instead of
-            # completing — or clarifying — from the wrong product.
+            # completing — or clarifying — from the wrong product. The rejected row's
+            # ref and (global, non-user) description are traced so an audit can see
+            # exactly which row was turned away (FTY-255).
+            context.record_decision(
+                self.name,
+                "source",
+                candidate_index=index,
+                tier=FDC_SOURCE,
+                source_ref=resolved.product.source_ref,
+                source_desc=resolved.product.description,
+                outcome="rejected_brand_mismatch",
+            )
             return None
         return self._build_item(
             context,
             candidate,
             resolved,
             _source_type(resolved.product.source),
+            candidate_index=index,
             allow_unresolvable_defer=(
                 _is_official_eligible(candidate)
                 or _should_defer_unresolvable_quantity(candidate, self.clarify_mode)
             ),
         )
 
-    @staticmethod
     def _build_item(
+        self,
         context: EstimationContext,
         candidate: CandidateDraft,
         resolved: _ResolvedProduct,
         source_type: str,
         *,
+        candidate_index: int,
         allow_unresolvable_defer: bool,
     ) -> ResolvedFoodItem | None:
         """Apply deterministic serving math and build the resolved item + provenance."""
@@ -499,7 +584,23 @@ class FoodResolveStep:
                 assumptions = (portion.assumption,)
         if grams is None:
             if allow_unresolvable_defer:
+                context.record_decision(
+                    self.name,
+                    "source",
+                    candidate_index=candidate_index,
+                    tier=product.source,
+                    source_ref=product.source_ref,
+                    outcome="rejected_unresolvable_quantity",
+                )
                 return None
+            context.record_decision(
+                self.name,
+                "outcome",
+                candidate_index=candidate_index,
+                tier=product.source,
+                source_ref=product.source_ref,
+                outcome="clarified_quantity",
+            )
             context.clarification_questions = [ClarificationDraft(text=QUANTITY_QUESTION)]
             raise NeedsClarification("unresolvable_quantity")
 
@@ -512,6 +613,14 @@ class FoodResolveStep:
         scaled = scale_facts(facts, grams)
         # Record the source that actually backed this resolution (covers a cache hit).
         _record_source_ref(context, product.source)
+        context.record_decision(
+            self.name,
+            "source",
+            candidate_index=candidate_index,
+            tier=product.source,
+            source_ref=product.source_ref,
+            outcome="accepted",
+        )
         product_id: uuid.UUID = product.id
 
         return ResolvedFoodItem(

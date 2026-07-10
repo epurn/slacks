@@ -81,4 +81,8 @@ def build_provider(settings: LLMSettings) -> Provider:
         timeout_seconds=settings.timeout_seconds,
         max_retries=settings.max_retries,
         supports_vision=settings.supports_vision,
+        # Record the configured selector, not the shared adapter label: an
+        # ``openai_compatible`` (OpenRouter/local) deployment must be
+        # distinguishable from first-party OpenAI in run metadata (FTY-255).
+        provider_id=settings.provider,
     )

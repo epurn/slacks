@@ -208,8 +208,7 @@ class ClaudeCodeProvider(Provider):
         # ``supports_vision`` is intentionally not threaded through: image input
         # via claude_code is an explicit non-goal, so the base class rejects
         # images before they ever reach this adapter (fail fast, never dropped).
-        super().__init__(timeout_seconds=timeout_seconds, max_retries=max_retries)
-        self._model = model
+        super().__init__(timeout_seconds=timeout_seconds, max_retries=max_retries, model=model)
         self._binary = binary
         self._runner = runner
 
@@ -244,9 +243,9 @@ class ClaudeCodeProvider(Provider):
             "--mcp-config",
             '{"mcpServers":{}}',
         ]
-        if self._model:
+        if self.model:
             # Optional: Claude Code defaults to the session/plan model when empty.
-            argv += ["--model", self._model]
+            argv += ["--model", self.model]
 
         return Invocation(argv=tuple(argv), stdin=_build_stdin(prompt, schema))
 

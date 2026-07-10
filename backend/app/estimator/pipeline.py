@@ -36,6 +36,12 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from app.estimator.decision_trace import (
+    MAX_TRACE_ENTRIES,
+    TRACE_TRUNCATED_DECISION,
+    build_decision_entry,
+)
+
 if TYPE_CHECKING:
     from app.estimator.food_step import BarcodeResolver, FoodResolver
     from app.estimator.label_step import LabelInput
@@ -341,6 +347,25 @@ class EstimationContext:
         """
 
         self.trace.append({"step": name, "status": status})
+
+    def record_decision(self, step: str, decision: str, **fields: object) -> None:
+        """Append a bounded, sanitized structured decision entry (FTY-255).
+
+        Every field passes the :mod:`app.estimator.decision_trace` sanitizers —
+        bounded labels, non-secret source refs, clamped counts — so the trace can
+        explain source routing (which tier saw a candidate, what reference was
+        considered, why it was accepted/rejected/deferred/clarified) without ever
+        carrying raw event text, prompts, page content, or secrets. Once the
+        per-run bound is reached a single ``trace_truncated`` marker is appended
+        and further decisions are dropped.
+        """
+
+        if len(self.trace) >= MAX_TRACE_ENTRIES:
+            last = self.trace[-1]
+            if last.get("decision") != TRACE_TRUNCATED_DECISION:
+                self.trace.append({"step": step, "decision": TRACE_TRUNCATED_DECISION})
+            return
+        self.trace.append(build_decision_entry(step, decision, **fields))
 
 
 @runtime_checkable

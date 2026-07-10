@@ -183,8 +183,8 @@ class CodexProvider(Provider):
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,
             supports_vision=supports_vision,
+            model=model,
         )
-        self._model = model
         self._api_key = api_key
         self._binary = binary
         self._runner = runner
@@ -218,8 +218,8 @@ class CodexProvider(Provider):
             "--output-schema",
             str(schema_path),
         ]
-        if self._model:
-            argv += ["--model", self._model]
+        if self.model:
+            argv += ["--model", self.model]
         for image_path in image_paths or ():
             argv += ["--image", str(image_path)]
         argv.append("-")

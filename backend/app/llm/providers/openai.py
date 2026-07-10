@@ -39,14 +39,21 @@ class OpenAIProvider(Provider):
         timeout_seconds: float,
         max_retries: int,
         supports_vision: bool = False,
+        provider_id: str = "openai",
     ) -> None:
         super().__init__(
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,
             supports_vision=supports_vision,
+            model=model,
         )
+        # One adapter serves two configured selectors (``openai`` and
+        # ``openai_compatible``); the recorded identity must reflect the
+        # operator's actual configuration, not the shared wire format, so an
+        # estimator audit can tell first-party OpenAI from an OpenRouter/local
+        # compatible endpoint (FTY-255).
+        self.name = provider_id
         self._api_key = api_key
-        self._model = model
         self._base_url = base_url.rstrip("/")
 
     def _complete(
@@ -59,7 +66,7 @@ class OpenAIProvider(Provider):
     ) -> dict[str, Any]:
         image_parts = [_image_content_part(image) for image in images or ()]
         payload: dict[str, Any] = {
-            "model": self._model,
+            "model": self.model,
             "messages": build_user_messages(prompt, image_parts),
             "response_format": {
                 "type": "json_schema",

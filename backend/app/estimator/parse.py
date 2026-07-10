@@ -158,7 +158,12 @@ class ParseStep:
 
     def run(self, context: EstimationContext) -> None:
         context.tool_names.append(self.name)
+        # Record the configured provider selector and model string so an
+        # estimator audit can tell exactly which backend produced this run
+        # (first-party vs. OpenAI-compatible/OpenRouter — FTY-255). Both are
+        # operator configuration, never secrets.
         context.provider = self.provider.name
+        context.model = self.provider.model
         context.schema_version = PARSE_SCHEMA_VERSION
 
         raw = context.raw_text.strip()

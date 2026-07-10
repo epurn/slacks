@@ -151,7 +151,10 @@ class LabelResolveStep:
 
     def run(self, context: EstimationContext) -> None:
         context.tool_names.append(self.name)
+        # Configured provider selector + model string, for audit reproducibility
+        # (FTY-255) — operator configuration, never secrets.
         context.provider = self.provider.name
+        context.model = self.provider.model
         context.schema_version = NUTRITION_PANEL_SCHEMA_VERSION
 
         label = context.label_input

@@ -47,12 +47,14 @@ class FakeProvider(Provider):
         max_retries: int = 0,
         supports_vision: bool = False,
         sleep: Callable[[float], None] = time.sleep,
+        model: str = "",
     ) -> None:
         super().__init__(
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,
             supports_vision=supports_vision,
             sleep=sleep,
+            model=model,
         )
         self._responses: deque[dict[str, Any] | LLMError] = deque(responses or [])
         #: Prompts received, in order — for test assertions.

@@ -89,7 +89,11 @@ class Provider(ABC):
     controls cannot be forgotten or implemented inconsistently per provider.
     """
 
-    #: Stable, non-sensitive provider label used in logs.
+    #: Stable, non-sensitive provider label used in logs and recorded on
+    #: estimation runs (FTY-255). Adapters that serve more than one configured
+    #: selector (the OpenAI wire format serves both first-party ``openai`` and
+    #: ``openai_compatible``/OpenRouter) override it per instance so a run's
+    #: recorded identity matches the operator's actual configuration.
     name: str = "provider"
 
     def __init__(
@@ -99,9 +103,15 @@ class Provider(ABC):
         max_retries: int,
         supports_vision: bool = False,
         sleep: Callable[[float], None] = time.sleep,
+        model: str = "",
     ) -> None:
         self._timeout_seconds = timeout_seconds
         self._max_retries = max_retries
+        #: The configured model identifier (``FATTY_LLM_MODEL``), recorded on
+        #: estimation runs for audit reproducibility (FTY-255). Operator config,
+        #: not a secret; may be empty for CLI-session providers that pick their
+        #: own default model.
+        self.model = model
         #: Whether the configured model accepts image input. Declared by config
         #: (``FATTY_LLM_SUPPORTS_VISION``); image input with a non-vision model
         #: fails fast in :meth:`structured_completion` before any provider call.

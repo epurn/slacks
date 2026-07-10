@@ -49,9 +49,9 @@ class AnthropicProvider(Provider):
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,
             supports_vision=supports_vision,
+            model=model,
         )
         self._api_key = api_key
-        self._model = model
         self._base_url = base_url.rstrip("/")
         self._max_tokens = max_tokens
 
@@ -65,7 +65,7 @@ class AnthropicProvider(Provider):
     ) -> dict[str, Any]:
         image_blocks = [_image_block(image) for image in images or ()]
         payload = {
-            "model": self._model,
+            "model": self.model,
             "max_tokens": self._max_tokens,
             "messages": build_user_messages(prompt, image_blocks),
             "tools": [

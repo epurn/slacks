@@ -159,6 +159,26 @@ FetchReference = Callable[[str, ReferenceFetchSettings], str]
 FetchSearchedPage = Callable[[str], str | None]
 BeforeFetch = Callable[[str], None]
 
+#: Optional sanitized decision-trace hook (FTY-255): called with keyword fields
+#: (``decision=…``, plus whitelisted trace fields) for each search / source /
+#: fetch / extract decision in the chain. The caller owns sanitization — the
+#: canonical sink is :meth:`EstimationContext.record_decision`, which bounds and
+#: redacts every value. ``None`` (the default) records nothing, so callers
+#: outside the run-trace surface (e.g. user-text macro estimation) are unchanged.
+ObserveSearchDecision = Callable[..., None]
+
+#: The ``surface`` labels an extract decision carries: the fetched page body vs.
+#: the bounded search-result title+snippet fallback (FTY-314).
+_PAGE_SURFACE = "page"
+_SNIPPET_SURFACE = "snippet"
+
+
+def _observe(observe: ObserveSearchDecision | None, **fields: object) -> None:
+    """Invoke the optional decision-trace hook; a no-op when unset."""
+
+    if observe is not None:
+        observe(**fields)
+
 
 @dataclass(frozen=True)
 class SearchedReferenceFacts:
@@ -204,6 +224,7 @@ def searched_reference_per_100g(  # noqa: PLR0913 - shared provider/fetch/extrac
     before_fetch: BeforeFetch | None = None,
     accept_result: AcceptSearchedReference | None = None,
     allow_count_serving: bool = False,
+    observe: ObserveSearchDecision | None = None,
 ) -> SearchedReferenceFacts | None:
     """Return the first confident, plausible searched-reference per-100g facts.
 
@@ -212,20 +233,41 @@ def searched_reference_per_100g(  # noqa: PLR0913 - shared provider/fetch/extrac
     canonical facts plus provenance, never a resolved item. Per candidate it tries
     the fetched page first; when the fetch fails, returns no usable text, or
     extracts nothing accepted, it falls back to the candidate's bounded
-    title+snippet (FTY-314) before moving to the next result.
+    title+snippet (FTY-314) before moving to the next result. ``observe``, when
+    supplied, receives one sanitized decision per search/source/fetch/extract
+    outcome (FTY-255) — labels and refs only, never query, page, or snippet text.
     """
 
     result = search_provider.search(query)
+    _observe(
+        observe,
+        decision="search",
+        search_status=result.status.value,
+        result_count=len(result.candidates),
+    )
     if result.status is not SearchStatus.SUCCESS:
         return None
 
     for search_candidate in result.candidates:
         source_ref = f"{source_type}:{search_candidate.url}"
         if len(source_ref) > MAX_SOURCE_REF_LEN:
+            _observe(
+                observe,
+                decision="source",
+                source_ref=search_candidate.url,
+                outcome="skipped_long_source_ref",
+            )
             continue
         if before_fetch is not None:
             before_fetch(source_ref)
         text = fetch(search_candidate.url)
+        if text is not None:
+            _observe(
+                observe,
+                decision="fetch",
+                source_ref=source_ref,
+                outcome="fetch_ok" if text.strip() else "fetch_empty_text",
+            )
         found = None
         if text is not None:
             found = _extract_accepted(
@@ -237,6 +279,8 @@ def searched_reference_per_100g(  # noqa: PLR0913 - shared provider/fetch/extrac
                 hash_key=search_candidate.url,
                 allow_count_serving=allow_count_serving,
                 accept_result=accept_result,
+                observe=observe,
+                surface=_PAGE_SURFACE,
             )
         if found is None:
             # FTY-314: the page fetch failed, returned no usable text, or extracted
@@ -256,13 +300,23 @@ def searched_reference_per_100g(  # noqa: PLR0913 - shared provider/fetch/extrac
                     allow_count_serving=allow_count_serving,
                     accept_result=accept_result,
                     assumptions_override=(SNIPPET_ASSUMPTION,),
+                    observe=observe,
+                    surface=_SNIPPET_SURFACE,
+                )
+            else:
+                _observe(
+                    observe,
+                    decision="extract",
+                    source_ref=source_ref,
+                    surface=_SNIPPET_SURFACE,
+                    outcome="snippet_unavailable",
                 )
         if found is not None:
             return found
     return None
 
 
-def _extract_accepted(
+def _extract_accepted(  # noqa: PLR0913 - shared page/snippet extraction seam
     *,
     provider: Provider,
     page_text: str,
@@ -273,16 +327,24 @@ def _extract_accepted(
     allow_count_serving: bool,
     accept_result: AcceptSearchedReference | None,
     assumptions_override: tuple[str, ...] | None = None,
+    observe: ObserveSearchDecision | None = None,
+    surface: str = _PAGE_SURFACE,
 ) -> SearchedReferenceFacts | None:
     """Extract + validate + accept one untrusted text surface; ``None`` if unusable."""
 
-    estimate = _extract(
+    def _note(outcome: str) -> None:
+        _observe(
+            observe, decision="extract", source_ref=source_ref, surface=surface, outcome=outcome
+        )
+
+    estimate, failure = _extract(
         provider=provider,
         page_text=page_text,
         page_kind=page_kind,
         extract_prompt=extract_prompt,
     )
     if estimate is None or estimate.facts is None:
+        _note(failure or "extract_unresolved")
         return None
     # ``assumptions_override`` replaces the provider-stated assumptions wholesale.
     # The snippet fallback passes the fixed ``SNIPPET_ASSUMPTION`` label here: the
@@ -300,9 +362,13 @@ def _extract_accepted(
         allow_count_serving=allow_count_serving,
     )
     if found is None:
+        _note("extract_rejected_facts")
         return None
     if accept_result is not None and not accept_result(found):
+        # The gate itself records the specific rejection reason (it knows which
+        # compatibility check failed); no duplicate entry here.
         return None
+    _note("accepted" if surface == _PAGE_SURFACE else "accepted_snippet")
     return found
 
 
@@ -328,8 +394,14 @@ def _extract(
     page_text: str,
     page_kind: str,
     extract_prompt: str,
-) -> NamedFoodEstimate | None:
-    """Transcribe nutrition facts from inert ``page_text``; ``None`` if not usable."""
+) -> tuple[NamedFoodEstimate | None, str | None]:
+    """Transcribe nutrition facts from inert ``page_text``.
+
+    Returns ``(estimate, None)`` on a usable transcription, else ``(None,
+    outcome_label)`` where the label is one of the sanitized extract-outcome
+    labels (``extract_error`` / ``extract_unresolved`` / ``extract_low_confidence``)
+    the decision trace records (FTY-255).
+    """
 
     prompt = extract_prompt.format(page_kind=page_kind, page_text=page_text[:MAX_PAGE_TEXT_CHARS])
     try:
@@ -340,14 +412,12 @@ def _extract(
         LLMConfigurationError,
         LLMTransientError,
     ):
-        return None
-    if (
-        estimate.disposition is not EstimateDisposition.RESOLVED
-        or estimate.facts is None
-        or estimate.confidence < EXTRACT_CONFIDENCE_THRESHOLD
-    ):
-        return None
-    return estimate
+        return None, "extract_error"
+    if estimate.disposition is not EstimateDisposition.RESOLVED or estimate.facts is None:
+        return None, "extract_unresolved"
+    if estimate.confidence < EXTRACT_CONFIDENCE_THRESHOLD:
+        return None, "extract_low_confidence"
+    return estimate, None
 
 
 def _identity_query(candidate: CandidateDraft) -> str:
@@ -450,6 +520,37 @@ def _searched_reference_from_facts(
         serving_g=default_serving_g,
         per_100g_facts=per_100g,
         product_name=facts.product_name,
+    )
+
+
+def searched_reference_from_estimate(
+    estimate: NamedFoodEstimate, *, source_ref: str, hash_key: str
+) -> SearchedReferenceFacts | None:
+    """Canonicalise a model-prior estimate into the shared raw-facts carrier."""
+
+    if estimate.facts is None:
+        return None
+    if estimate.facts.basis is FactBasis.AS_LOGGED:
+        facts = NutritionFacts(
+            calories=estimate.facts.calories,
+            protein_g=estimate.facts.protein_g,
+            carbs_g=estimate.facts.carbs_g,
+            fat_g=estimate.facts.fat_g,
+        )
+        return SearchedReferenceFacts(
+            facts=facts,
+            source_ref=source_ref,
+            hash_key=hash_key,
+            default_serving_g=None,
+            assumptions=tuple(estimate.assumptions),
+            basis=FactBasis.AS_LOGGED.value,
+        )
+    return _searched_reference_from_facts(
+        estimate.facts,
+        source_ref=source_ref,
+        hash_key=hash_key,
+        assumptions=tuple(estimate.assumptions),
+        allow_count_serving=True,
     )
 
 

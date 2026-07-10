@@ -54,19 +54,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from app.estimator.branded_routing import identity_variants, is_evidence_brand_compatible
+from app.estimator.branded_routing import identity_variants
 from app.estimator.count_serving_resolution import (
-    can_scale_reference,
     has_explicit_amount,
     scale_count_reference,
 )
 from app.estimator.evidence_utils import _content_hash, _record_source_ref
-from app.estimator.food_serving import NutritionFacts, resolve_grams, scale_facts
-from app.estimator.hardened_fetch import (
-    FetchPolicyError,
-    FetchResponseError,
-    FetchTransientError,
-)
+from app.estimator.food_serving import resolve_grams, scale_facts
 from app.estimator.identity_sanitizer import sanitized_identity
 from app.estimator.official_fetch import OfficialFetchSettings, fetch_official_source
 from app.estimator.pipeline import (
@@ -93,8 +87,14 @@ from app.estimator.searched_reference import (
     REFERENCE_SOURCE_TYPE,
     SearchedReferenceFacts,
     _identity_query,
-    _searched_reference_from_facts,
+    searched_reference_from_estimate,
     searched_reference_per_100g,
+)
+from app.estimator.web_evidence_trace import (
+    acceptance_gate,
+    decision_recorder,
+    trace_candidate_index,
+    traced_fetch,
 )
 from app.llm.base import Provider
 from app.llm.errors import (
@@ -185,16 +185,24 @@ class OfficialSourceResolveStep:
         fallback always carries the explicit evidence status that led to it.
         """
 
+        index = trace_candidate_index(context, candidate)
         reasons: list[str] = []
         item = None
         if _has_brand(candidate):
-            item = self._try_official_source(context, candidate, reasons)
+            item = self._try_official_source(context, candidate, reasons, index)
         else:
             reasons.append("generic food (no official page to search)")
+            context.record_decision(
+                self.name,
+                "source",
+                candidate_index=index,
+                tier=OFFICIAL_SOURCE_TYPE,
+                outcome="skipped_generic",
+            )
         if item is None:
-            item = self._try_reference_source(context, candidate, reasons)
+            item = self._try_reference_source(context, candidate, reasons, index)
         if item is None:
-            item = self._model_prior(context, candidate, reasons)
+            item = self._model_prior(context, candidate, reasons, index)
         # Surface the resolution's assumptions on the run too (content-free metadata).
         for assumption in item.assumptions:
             if assumption not in context.assumptions:
@@ -202,7 +210,11 @@ class OfficialSourceResolveStep:
         return item
 
     def _try_official_source(
-        self, context: EstimationContext, candidate: CandidateDraft, reasons: list[str]
+        self,
+        context: EstimationContext,
+        candidate: CandidateDraft,
+        reasons: list[str],
+        index: int | None,
     ) -> ResolvedFoodItem | None:
         """Search + fetch + extract an official page; ``None`` to fall through.
 
@@ -213,14 +225,16 @@ class OfficialSourceResolveStep:
         :class:`NeedsClarification` for the quantity.
         """
 
-        if not self.search_provider.enabled:
-            reasons.append("official_source search disabled")
-            return None
-        if not self.search_provider.available:
-            reasons.append("official_source search unavailable (no search credentials)")
-            return None
-        if not self.fetch_settings.is_available:
-            reasons.append("official_source fetch unconfigured")
+        unavailable = self._tier_unavailability(fetch_available=self.fetch_settings.is_available)
+        if unavailable is not None:
+            reasons.append(f"official_source {unavailable[0]}")
+            context.record_decision(
+                self.name,
+                "source",
+                candidate_index=index,
+                tier=OFFICIAL_SOURCE_TYPE,
+                outcome=unavailable[1],
+            )
             return None
 
         _record_source_ref(context, OFFICIAL_SOURCE)
@@ -229,17 +243,22 @@ class OfficialSourceResolveStep:
             context,
             candidate,
             queries=identity_variants(candidate),
-            fetch=self._fetch_official,
+            fetch_raw=self._fetch_official,
             page_kind=_OFFICIAL_PAGE_KIND,
             source_type=OFFICIAL_SOURCE_TYPE,
             reasons=reasons,
+            candidate_index=index,
         )
         if item is None and len(reasons) == reason_count:
             reasons.append("official_source returned no confident match")
         return item
 
     def _try_reference_source(
-        self, context: EstimationContext, candidate: CandidateDraft, reasons: list[str]
+        self,
+        context: EstimationContext,
+        candidate: CandidateDraft,
+        reasons: list[str],
+        index: int | None,
     ) -> ResolvedFoodItem | None:
         """Search + fetch + extract a public nutrition reference page (FTY-166).
 
@@ -251,14 +270,19 @@ class OfficialSourceResolveStep:
         appending the sanitized reason to ``reasons``.
         """
 
-        if not self.search_provider.enabled:
-            reasons.append("reference_source search disabled")
-            return None
-        if not self.search_provider.available:
-            reasons.append("reference_source search unavailable (no search credentials)")
-            return None
-        if not self.reference_fetch_settings.is_available:
-            reasons.append("reference_source fetch disabled")
+        unavailable = self._tier_unavailability(
+            fetch_available=self.reference_fetch_settings.is_available
+        )
+        if unavailable is not None:
+            reason = "fetch disabled" if unavailable[1] == "fetch_unconfigured" else unavailable[0]
+            reasons.append(f"reference_source {reason}")
+            context.record_decision(
+                self.name,
+                "source",
+                candidate_index=index,
+                tier=REFERENCE_SOURCE_TYPE,
+                outcome=unavailable[1],
+            )
             return None
 
         _record_source_ref(context, REFERENCE_SOURCE)
@@ -269,14 +293,31 @@ class OfficialSourceResolveStep:
             queries=tuple(
                 f"{variant} {REFERENCE_SEARCH_INTENT}" for variant in identity_variants(candidate)
             ),
-            fetch=self._fetch_reference,
+            fetch_raw=self._fetch_reference,
             page_kind=_REFERENCE_PAGE_KIND,
             source_type=REFERENCE_SOURCE_TYPE,
             reasons=reasons,
+            candidate_index=index,
         )
         if item is None and len(reasons) == reason_count:
             reasons.append("reference_source returned no confident match")
         return item
+
+    def _tier_unavailability(self, *, fetch_available: bool) -> tuple[str, str] | None:
+        """The (reason suffix, trace outcome) for an unavailable web-evidence tier.
+
+        ``None`` when search and fetch are both usable. Shared by both tiers so the
+        human-readable reason strings and the sanitized trace outcome labels cannot
+        drift apart.
+        """
+
+        if not self.search_provider.enabled:
+            return "search disabled", "search_disabled"
+        if not self.search_provider.available:
+            return "search unavailable (no search credentials)", "search_unavailable"
+        if not fetch_available:
+            return "fetch unconfigured", "fetch_unconfigured"
+        return None
 
     def _resolve_from_search(
         self,
@@ -284,10 +325,11 @@ class OfficialSourceResolveStep:
         candidate: CandidateDraft,
         *,
         queries: tuple[str, ...],
-        fetch: Callable[[str], str | None],
+        fetch_raw: Callable[[str], str],
         page_kind: str,
         source_type: str,
         reasons: list[str],
+        candidate_index: int | None,
     ) -> ResolvedFoodItem | None:
         """Run one evidence tier: search each bounded query, fetch/extract each result.
 
@@ -298,24 +340,28 @@ class OfficialSourceResolveStep:
         quantity-costability *and* brand/product-compatibility gates, so an earlier
         generic/incompatible evidence candidate is rejected in favor of a later
         compatible one. Returns the first fully supported result, or ``None`` so the
-        caller falls through to the next tier.
+        caller falls through to the next tier. Every search / fetch / extract / gate
+        decision is recorded on the sanitized run trace per query variant (FTY-255).
         """
 
-        def _accept(found: SearchedReferenceFacts) -> bool:
-            return can_scale_reference(candidate, found) and is_evidence_brand_compatible(
-                found.product_name, name=candidate.name, brand=candidate.brand
+        for variant_index, query in enumerate(queries):
+            note = decision_recorder(
+                self.name,
+                context,
+                candidate_index=candidate_index,
+                tier=source_type,
+                query_variant=variant_index,
             )
-
-        for query in queries:
             found = searched_reference_per_100g(
                 provider=self.provider,
                 search_provider=self.search_provider,
-                fetch=fetch,
+                fetch=traced_fetch(fetch_raw, source_type, note),
                 query=query,
                 page_kind=page_kind,
                 source_type=source_type,
                 allow_count_serving=True,
-                accept_result=_accept,
+                accept_result=acceptance_gate(candidate, note),
+                observe=note,
             )
             if found is None:
                 continue
@@ -328,16 +374,26 @@ class OfficialSourceResolveStep:
                 hash_key=found.hash_key,
                 base_assumptions=(),
                 allow_unresolvable_fallthrough=self.clarify_mode == "estimate_first",
+                candidate_index=candidate_index,
             )
             if item is not None:
                 return item
+            note(
+                decision="serving",
+                source_ref=found.source_ref,
+                outcome="rejected_unresolvable_quantity",
+            )
             unscalable = f"{source_type} returned unscalable serving math"
             if unscalable not in reasons:
                 reasons.append(unscalable)
         return None
 
     def _model_prior(
-        self, context: EstimationContext, candidate: CandidateDraft, reasons: list[str]
+        self,
+        context: EstimationContext,
+        candidate: CandidateDraft,
+        reasons: list[str],
+        index: int | None,
     ) -> ResolvedFoodItem:
         """Estimate the named food from model prior, recorded with an explicit status.
 
@@ -348,6 +404,23 @@ class OfficialSourceResolveStep:
         facts) routes to ``needs_clarification`` — still never a silent guess.
         """
 
+        def _record_prior(outcome: str) -> None:
+            context.record_decision(
+                self.name,
+                "source",
+                candidate_index=index,
+                tier=MODEL_PRIOR_SOURCE,
+                outcome=outcome,
+            )
+
+        def _clarify(reason: str) -> NeedsClarification:
+            _record_prior(reason)
+            context.record_decision(
+                self.name, "outcome", candidate_index=index, outcome="clarified_unknown_food"
+            )
+            context.clarification_questions = [ClarificationDraft(text=UNKNOWN_FOOD_QUESTION)]
+            return NeedsClarification(reason)
+
         _record_source_ref(context, MODEL_PRIOR_SOURCE)
         reason = "; ".join([*reasons, "estimated from model prior"])
         estimate = self._estimate_model_prior(candidate)
@@ -356,17 +429,15 @@ class OfficialSourceResolveStep:
             or estimate.disposition is not EstimateDisposition.RESOLVED
             or estimate.confidence < self.model_prior_confidence_floor
         ):
-            context.clarification_questions = [ClarificationDraft(text=UNKNOWN_FOOD_QUESTION)]
-            raise NeedsClarification("model_prior_unavailable")
+            raise _clarify("model_prior_unavailable")
 
-        reference = _searched_reference_from_estimate(
+        reference = searched_reference_from_estimate(
             estimate,
             source_ref=MODEL_PRIOR_SOURCE,
             hash_key=_identity_query(candidate),
         )
         if reference is None:
-            context.clarification_questions = [ClarificationDraft(text=UNKNOWN_FOOD_QUESTION)]
-            raise NeedsClarification("model_prior_unusable")
+            raise _clarify("model_prior_unusable")
 
         item = self._build_item(
             context,
@@ -377,39 +448,45 @@ class OfficialSourceResolveStep:
             hash_key=_identity_query(candidate),
             base_assumptions=(reason,),
             allow_unresolvable_fallthrough=self.clarify_mode == "estimate_first",
+            candidate_index=index,
         )
         if item is None:
             # The estimate was unusable (e.g. per-serving facts with no gram serving
             # size); ask rather than guess the portion.
-            context.clarification_questions = [ClarificationDraft(text=UNKNOWN_FOOD_QUESTION)]
-            raise NeedsClarification("model_prior_unusable")
+            raise _clarify("model_prior_unusable")
+        _record_prior("accepted")
         return item
 
-    def _fetch_official(self, url: str) -> str | None:
-        """Fetch ``url`` through the official hardened fetcher; ``None`` on failure.
+    def _fetch_official(self, url: str) -> str:
+        """Fetch ``url`` through the official hardened fetcher.
 
-        A policy/transport/response failure on one page is not fatal — the resolver
-        tries the next candidate URL or falls through to the next tier. The fetcher's
+        Policy/transport/response failures propagate as the typed hardened-fetch
+        errors; the per-variant traced wrapper (:func:`_traced_fetch`) maps each to
+        a content-free trace outcome and continues non-fatally — the resolver tries
+        the next candidate URL or falls through to the next tier. The fetcher's
         errors are content-free, so nothing about the URL/body is surfaced.
         """
 
-        try:
-            return self.fetch_fn(url, self.fetch_settings)
-        except (FetchPolicyError, FetchTransientError, FetchResponseError):
-            return None
+        return self.fetch_fn(url, self.fetch_settings)
 
-    def _fetch_reference(self, url: str) -> str | None:
-        """Fetch ``url`` through the searched-result fetcher; ``None`` on failure.
+    def _fetch_reference(self, url: str) -> str:
+        """Fetch ``url`` through the searched-result fetcher.
 
-        Same non-fatal mapping as :meth:`_fetch_official`; the searched-result policy
-        (HTTPS-only, public-IP-only, no redirects, bounded, inert text) is enforced
-        inside the injected fetcher.
+        Same typed-error contract as :meth:`_fetch_official`; the searched-result
+        policy (HTTPS-only, public-IP-only, no redirects, bounded, inert text) is
+        enforced inside the injected fetcher.
         """
 
-        try:
-            return self.reference_fetch_fn(url, self.reference_fetch_settings)
-        except (FetchPolicyError, FetchTransientError, FetchResponseError):
-            return None
+        return self.reference_fetch_fn(url, self.reference_fetch_settings)
+
+    def _record_clarified_quantity(
+        self, context: EstimationContext, candidate_index: int | None
+    ) -> None:
+        """Trace that the candidate's terminal route is a quantity clarification."""
+
+        context.record_decision(
+            self.name, "outcome", candidate_index=candidate_index, outcome="clarified_quantity"
+        )
 
     def _estimate_model_prior(self, candidate: CandidateDraft) -> NamedFoodEstimate | None:
         """Ask for a rough estimate from sanitized identity + structured portion."""
@@ -442,6 +519,7 @@ class OfficialSourceResolveStep:
         hash_key: str,
         base_assumptions: tuple[str, ...],
         allow_unresolvable_fallthrough: bool = False,
+        candidate_index: int | None = None,
     ) -> ResolvedFoodItem | None:
         """Apply deterministic serving math and build the resolved item + provenance.
 
@@ -451,8 +529,19 @@ class OfficialSourceResolveStep:
         after rough default/as-logged fallback has been considered.
         """
 
+        def _record_serving(outcome: str) -> None:
+            context.record_decision(
+                self.name,
+                "serving",
+                candidate_index=candidate_index,
+                tier=source_type,
+                source_ref=source_ref,
+                outcome=outcome,
+            )
+
         assumptions = base_assumptions + reference.assumptions
         if reference.basis == FactBasis.AS_LOGGED.value:
+            _record_serving("as_logged_total")
             content_hash = _content_hash(hash_key, reference.facts)
             return ResolvedFoodItem(
                 name=candidate.name,
@@ -484,6 +573,7 @@ class OfficialSourceResolveStep:
             assumptions=assumptions,
         )
         if count_scaled is not None:
+            _record_serving("count_serving_scaled")
             scaled = count_scaled.scaled
             snapshot = count_scaled.snapshot
             assumptions = count_scaled.assumptions
@@ -512,6 +602,7 @@ class OfficialSourceResolveStep:
             )
 
         if reference.count_serving is not None and has_explicit_amount(candidate):
+            _record_serving("rejected_incompatible_serving")
             return None
 
         grams = resolve_grams(
@@ -527,11 +618,14 @@ class OfficialSourceResolveStep:
             if grams is None:
                 if allow_unresolvable_fallthrough:
                     return None
+                self._record_clarified_quantity(context, candidate_index)
                 context.clarification_questions = [ClarificationDraft(text=QUANTITY_QUESTION)]
                 raise NeedsClarification("unresolvable_quantity")
             if not _allows_default_serving_estimate(self.clarify_mode, candidate):
+                self._record_clarified_quantity(context, candidate_index)
                 context.clarification_questions = [ClarificationDraft(text=QUANTITY_QUESTION)]
                 raise NeedsClarification("unresolvable_quantity")
+            _record_serving("default_serving_estimated")
             assumptions = _with_unique_assumptions(
                 assumptions,
                 (
@@ -632,34 +726,3 @@ def _structured_portion_for_prompt(candidate: CandidateDraft) -> str:
         unit = sanitized_identity(candidate.unit or "") or "count"
         return f"amount={candidate.amount:g}; unit={unit}"
     return "amount=unspecified; use one typical serving only if needed"
-
-
-def _searched_reference_from_estimate(
-    estimate: NamedFoodEstimate, *, source_ref: str, hash_key: str
-) -> SearchedReferenceFacts | None:
-    """Canonicalise a model-prior estimate into the shared raw-facts carrier."""
-
-    if estimate.facts is None:
-        return None
-    if estimate.facts.basis is FactBasis.AS_LOGGED:
-        facts = NutritionFacts(
-            calories=estimate.facts.calories,
-            protein_g=estimate.facts.protein_g,
-            carbs_g=estimate.facts.carbs_g,
-            fat_g=estimate.facts.fat_g,
-        )
-        return SearchedReferenceFacts(
-            facts=facts,
-            source_ref=source_ref,
-            hash_key=hash_key,
-            default_serving_g=None,
-            assumptions=tuple(estimate.assumptions),
-            basis=FactBasis.AS_LOGGED.value,
-        )
-    return _searched_reference_from_facts(
-        estimate.facts,
-        source_ref=source_ref,
-        hash_key=hash_key,
-        assumptions=tuple(estimate.assumptions),
-        allow_count_serving=True,
-    )

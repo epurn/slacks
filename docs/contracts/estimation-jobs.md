@@ -35,6 +35,18 @@ estimator / backend-core / contracts lane:
 
 ## Version
 
+4 (FTY-255, additive): estimation runs record a **sanitized structured decision
+trace**. Alongside the coarse step labels, the food-resolution steps append
+bounded, sanitized decision entries to `estimation_runs.trace` — which source
+tier saw each candidate, which non-secret source reference was considered, and
+why the resolver accepted, rejected, deferred, or clarified — so a source-routing
+audit no longer needs product-cache queries or ad hoc search/fetch probes. The
+run `provider`/`model` now record the **configured provider selector and model
+string** (`openai` vs `openai_compatible`/OpenRouter, and e.g.
+`deepseek/deepseek-chat-v3`) rather than a shared adapter label with a blank
+model. No schema change (`trace` is already JSON). See
+[Decision trace](#decision-trace-fty-255).
+
 3 (FTY-278, contract only): the answer-triggered re-estimate under **item-scoped
 partial resolution**. The new first-class `partially_resolved` event status
 (`log-events.md` v6) carries committed `resolved` derived items (the costable
@@ -220,6 +232,61 @@ in the one transaction that persists the `clarification_answers` row:
   that lands, only remaining allowed clarifications after FTY-301's rough-estimate
   fallback carry no committed siblings, so this reduces to the v2 event-level
   re-estimate.
+
+## Decision trace (FTY-255)
+
+`estimation_runs.trace` is a JSON array of two entry shapes:
+
+- **Step entries** (`{"step", "status"}`) — the FTY-040 coarse per-step record,
+  unchanged.
+- **Decision entries** (`{"step", "decision", …}`) — bounded structured records
+  the food-resolution steps (`food_resolve`, `official_source_resolve`) append so
+  a failed or fallen-through estimate is auditable from the run alone. Owned by
+  `backend/app/estimator/decision_trace.py`, which sanitizes every value.
+
+A decision entry carries `step`, `decision`, and a **closed** optional field set
+(unknown fields are a programming error, not an extension channel):
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `decision` | label | What kind of decision: `candidate` (per-candidate intro), `source` (a source tier saw the candidate), `search` (one identity-query variant executed), `fetch` (one result-URL fetch), `extract` (one untrusted-text transcription), `serving` (serving-math routing), `outcome` (the candidate's terminal route), `trace_truncated` (bound marker). |
+| `candidate_index` | int | Position in the parsed food-candidate list — never the candidate's name or text. |
+| `has_brand` | bool | Whether the candidate names a branded product. |
+| `amount_kind` | label | `mass` / `volume` / `count` / `missing` / `unknown` — the parsed quantity's shape without its text. |
+| `tier` | label | Source tier consulted: `usda_fdc`, `open_food_facts`, `official_source`, `reference_source`, `model_prior`. |
+| `query_variant` | int | Which bounded FTY-253 identity-query variant produced this decision. |
+| `search_status` | label | The FTY-079 lookup status (`success`, `partial`, `failed`, …). |
+| `result_count` | int | Candidate URLs the search returned (clamped). |
+| `source_ref` | ref | Non-secret source reference (`usda_fdc:<fdcId>`, `official_source:<url>`); an embedded URL keeps **scheme/host/path only** — query string, fragment, and userinfo are dropped. |
+| `source_desc` | label | Bounded description of a **global** source row (e.g. the rejected FDC description) — global source data, never user text. |
+| `surface` | label | For `extract`: `page` (fetched body) or `snippet` (FTY-314 title+snippet fallback). |
+| `outcome` | label | Sanitized outcome, e.g. `accepted`, `accepted_snippet`, `miss`, `rejected_brand_mismatch`, `rejected_unresolvable_quantity`, `rejected_incompatible_serving`, `deferred_to_web_evidence`, `clarified_quantity`, `clarified_unknown_food`, `clarified_barcode_unknown`, `unresolved_no_source`, `source_unavailable`, `search_disabled`, `search_unavailable`, `fetch_unconfigured`, `skipped_generic`, `skipped_long_source_ref`, `fetch_ok`, `fetch_empty_text`, `fetch_<status>` (HTTP status, e.g. `fetch_403`), `fetch_policy_blocked`, `fetch_transient_error`, `fetch_response_error`, `extract_error`, `extract_unresolved`, `extract_low_confidence`, `extract_rejected_facts`, `snippet_unavailable`, `count_serving_scaled`, `default_serving_estimated`, `as_logged_total`, `model_prior_unavailable`, `model_prior_unusable`. |
+
+Sanitization and bounds (enforced at entry construction, defence in depth over
+the steps' own fixed vocabularies): labels are length-bounded,
+control-character-stripped, and redacted of secret-looking material (`key=…`
+pairs, bearer tokens, long opaque blobs); counts are clamped non-negative; the
+trace is capped per run — once the bound is reached a single
+`trace_truncated` marker is appended and further decisions are dropped. The
+hard FTY-040 rule is unchanged and tested: **no raw event text, prompts,
+provider output, API keys/tokens, fetched pages, snippets, or source payload
+bodies** ever enter `trace`, `error`, or logs. Food identity is deliberately
+excluded from decision entries — candidate drafts are product data persisted to
+their own tables, and the trace carries booleans, refs, and reason labels
+instead. Needs-clarification runs keep their full decision context (the trace is
+written before the terminal status), so the route to a question is explainable
+even though no derived food rows are persisted.
+
+**Provider/model identity.** `estimation_runs.provider` records the configured
+provider **selector** (`openai`, `openai_compatible`, `anthropic`,
+`claude_code`, `codex`, `fake`) — not the shared wire-format adapter label — and
+`estimation_runs.model` records the configured model string
+(`FATTY_LLM_MODEL`; empty only for CLI-session providers using their session
+default). Both are operator configuration, never secrets.
+
+Retention is unchanged: the trace lives on `estimation_runs`, cascades with the
+owning log event / user (see **Privacy and Retention**), and adds no new stored
+surface (`docs/security/data-retention.md`, "Estimation runs").
 
 ## Retry policy
 
