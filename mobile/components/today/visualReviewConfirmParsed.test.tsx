@@ -106,34 +106,51 @@ describe("today.confirm_parsed visual-review preset", () => {
   });
 
   it("reaches the parsed-confirmation sub-state via the initial-state seam — no scripted taps", async () => {
-    setE2E(true);
-    activateVisualReviewPreset(CONFIRM_PARSED_PRESET_NAME, null);
+    // The settled marker's QUIET_MS window is driven by a real setTimeout in
+    // VisualReviewSettleMarker. Fake timers let the test assert the
+    // absent-before/present-after transition at controlled points in virtual
+    // time instead of racing the host scheduler under load (flake fixed by
+    // FTY-318 — see the pre-fix `:127` failure this guards against).
+    jest.useFakeTimers();
+    try {
+      setE2E(true);
+      activateVisualReviewPreset(CONFIRM_PARSED_PRESET_NAME, null);
 
-    const tree = mountToday();
-    await act(async () => {});
+      const tree = mountToday();
+      await act(async () => {
+        await Promise.resolve();
+      });
 
-    // The confirm-parsed-values sheet is open from the first render: its
-    // parsed values, "not yet counted" state, and provenance are visible
-    // without ever pressing "Capture label" / "Take photo" / "Upload label".
-    expect(textContent(tree)).toContain("Granola bar");
-    expect(hasA11yLabel(tree, "Looks right, add it")).toBe(true);
+      // The confirm-parsed-values sheet is open from the first render: its
+      // parsed values, "not yet counted" state, and provenance are visible
+      // without ever pressing "Capture label" / "Take photo" / "Upload label".
+      expect(textContent(tree)).toContain("Granola bar");
+      expect(hasA11yLabel(tree, "Looks right, add it")).toBe(true);
 
-    const marker = `visual-review-settled:${CONFIRM_PARSED_PRESET_NAME}`;
+      const marker = `visual-review-settled:${CONFIRM_PARSED_PRESET_NAME}`;
 
-    // FTY-262 fix: the settled marker respects FTY-247's network-quiet settle
-    // contract — it is NOT emitted on the mid-load frame (the sheet merely
-    // mounting), so screenshot automation cannot capture a mid-load/"Refreshing…"
-    // frame. It stays absent until the QUIET_MS window elapses.
-    expect(hasA11yLabel(tree, marker)).toBe(false);
+      // FTY-262 fix: the settled marker respects FTY-247's network-quiet settle
+      // contract — it is NOT emitted on the mid-load frame (the sheet merely
+      // mounting), so screenshot automation cannot capture a mid-load/"Refreshing…"
+      // frame. It stays absent until the QUIET_MS window elapses. No virtual
+      // time has been advanced yet, so this is asserted before any quiet time
+      // has passed.
+      expect(hasA11yLabel(tree, marker)).toBe(false);
 
-    // Once the network goes quiet the sheet exposes the marker inside its own
-    // modal (accessibilityViewIsModal hides the shared navigator-level
-    // VisualReviewSettleOverlay while it is presented), under the exact same
-    // `visual-review-settled:<preset>` convention Maestro waits on.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, QUIET_MS + 50));
-    });
-    expect(hasA11yLabel(tree, marker)).toBe(true);
+      // Once the network goes quiet the sheet exposes the marker inside its own
+      // modal (accessibilityViewIsModal hides the shared navigator-level
+      // VisualReviewSettleOverlay while it is presented), under the exact same
+      // `visual-review-settled:<preset>` convention Maestro waits on. Advance
+      // virtual time past the settle window and flush the resulting state
+      // update.
+      await act(async () => {
+        jest.advanceTimersByTime(QUIET_MS + 50);
+        await Promise.resolve();
+      });
+      expect(hasA11yLabel(tree, marker)).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("is inert outside isE2EMode() even if the runtime preset were somehow already active", async () => {
