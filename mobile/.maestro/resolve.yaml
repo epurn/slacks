@@ -42,7 +42,7 @@ appId: com.fatty
 # Step 3: Submit "greek yogurt and banana" — the mock returns the stored event as
 #         pending first so the skeleton is visible on-device.
 - tapOn:
-    text: "Log food or exercise"
+    text: "Log food or exercise.*"
 - inputText: "greek yogurt and banana"
 - tapOn:
     text: "Add entry"

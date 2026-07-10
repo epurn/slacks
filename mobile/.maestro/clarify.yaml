@@ -50,7 +50,7 @@ appId: com.fatty
 # Step 3: Submit "coffee" — the mock POST handler transitions to phase 1 and
 #         returns the needs_clarification event.
 - tapOn:
-    text: "Log food or exercise"
+    text: "Log food or exercise.*"
 - inputText: "coffee"
 - tapOn:
     text: "Add entry"

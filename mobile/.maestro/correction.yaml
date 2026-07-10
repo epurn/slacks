@@ -60,7 +60,7 @@ appId: com.fatty
 # Step 2: Type into the composer. The FTY-053 saved-food typeahead debounces the
 #         query and searches the mock, which returns the seeded saved food.
 - tapOn:
-    text: "Log food or exercise"
+    text: "Log food or exercise.*"
 - inputText: "Chicken"
 
 # Step 3: The suggestion chip for the saved food appears (its accessibility

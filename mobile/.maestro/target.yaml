@@ -48,7 +48,7 @@ appId: com.fatty
 # Step 4: Submit a large entry — the mock resolves it straight to a completed
 #         entry whose 2,100-kcal item pushes the day over the 2,000 target.
 - tapOn:
-    text: "Log food or exercise"
+    text: "Log food or exercise.*"
 - inputText: "holiday roast dinner"
 - tapOn:
     text: "Add entry"
