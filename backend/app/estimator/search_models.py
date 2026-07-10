@@ -42,15 +42,20 @@ class SearchStatus(StrEnum):
 
 @dataclass(frozen=True)
 class SearchCandidate:
-    """One candidate official-source result: a fetchable URL and its display title.
+    """One candidate official-source result: a fetchable URL, title, and snippet.
 
     Treated as **untrusted** by the caller: the URL is a candidate for the
-    hardened fetch step (FTY-078), and the title is never trusted as nutrition
-    facts.
+    hardened fetch step (FTY-078), and the title/snippet text is never trusted
+    as nutrition facts — it may only become facts through the same bounded,
+    schema-validated extraction the fetched page goes through (FTY-314).
+    ``snippet`` is the provider's bounded result description (SearXNG
+    ``content`` / Brave ``description``); it is optional, empty when the
+    provider sends none, and never required for :attr:`SearchStatus.SUCCESS`.
     """
 
     url: str
     title: str
+    snippet: str = ""
 
 
 @dataclass(frozen=True)

@@ -18,9 +18,11 @@ from app.estimator.search import (
 )
 from app.estimator.searched_reference import (
     _REFERENCE_PAGE_KIND,
+    MAX_SNIPPET_TEXT_CHARS,
     MAX_SOURCE_REF_LEN,
     REFERENCE_SOURCE,
     REFERENCE_SOURCE_TYPE,
+    SNIPPET_ASSUMPTION,
     searched_reference_per_100g,
 )
 from app.estimator.user_text_step import UserTextMacroEstimator
@@ -218,3 +220,162 @@ def test_user_text_exact_reference_skips_zero_calorie_candidate_and_uses_later_p
     }
     assert fetcher.fetched == [zero, good]
     assert context.source_refs == [REFERENCE_SOURCE]
+
+
+# --- Snippet fallback: bounded, untrusted, fetch-first (FTY-314) ----------------
+
+_SNIPPET_URL = "https://reference.example.com/toppables"
+_SNIPPET = "Serving Size Per 60 g. Calories 120. Fat 3 g. Carbs 18 g. Protein 6 g."
+
+
+def _snippet_candidate(snippet: str = _SNIPPET) -> SearchCandidate:
+    return SearchCandidate(url=_SNIPPET_URL, title="Toppables crackers", snippet=snippet)
+
+
+def _unresolved() -> dict[str, Any]:
+    return {"disposition": "unresolved", "confidence": 0.1}
+
+
+def _search(*candidates: SearchCandidate) -> FakeSearchProvider:
+    return FakeSearchProvider(
+        SearchResult(status=SearchStatus.SUCCESS, candidates=tuple(candidates))
+    )
+
+
+def test_snippet_fallback_used_when_fetch_fails() -> None:
+    search = _search(_snippet_candidate())
+    fetcher = RecordingFetcher({})  # fetch returns None: the page was unusable
+    provider = FakeProvider(responses=[_estimate()])
+
+    found = searched_reference_per_100g(
+        provider=provider,
+        search_provider=search,
+        fetch=fetcher,
+        query="toppables crackers nutrition facts",
+        page_kind=_REFERENCE_PAGE_KIND,
+        source_type=REFERENCE_SOURCE_TYPE,
+    )
+
+    assert found is not None
+    # Provenance stays the search-result URL, plus the snippet-derived label.
+    assert found.source_ref == f"{REFERENCE_SOURCE_TYPE}:{_SNIPPET_URL}"
+    assert found.hash_key == _SNIPPET_URL
+    assert found.assumptions == ("source states one wrap serving", SNIPPET_ASSUMPTION)
+    assert found.facts.calories == pytest.approx(200.0)
+    # The one extraction prompt carried the bounded title+snippet framed as
+    # untrusted search-result text, not the (unfetchable) page.
+    assert len(provider.prompts) == 1
+    prompt = provider.prompts[0]
+    assert "search-result title and snippet" in prompt
+    assert "Toppables crackers" in prompt
+    assert _SNIPPET in prompt
+    assert "UNTRUSTED" in prompt
+
+
+def test_snippet_fallback_used_when_page_extraction_is_unresolved() -> None:
+    search = _search(_snippet_candidate())
+    fetcher = RecordingFetcher({_SNIPPET_URL: "Please enable JavaScript to continue."})
+    provider = FakeProvider(responses=[_unresolved(), _estimate()])
+
+    found = searched_reference_per_100g(
+        provider=provider,
+        search_provider=search,
+        fetch=fetcher,
+        query="toppables crackers nutrition facts",
+        page_kind=_REFERENCE_PAGE_KIND,
+        source_type=REFERENCE_SOURCE_TYPE,
+    )
+
+    assert found is not None
+    assert SNIPPET_ASSUMPTION in found.assumptions
+    # First the fetched shell text, then the snippet fallback.
+    assert len(provider.prompts) == 2
+    assert "Please enable JavaScript" in provider.prompts[0]
+    assert _SNIPPET in provider.prompts[1]
+
+
+def test_empty_snippet_preserves_fetch_only_behavior() -> None:
+    # No snippet → the candidate is exhausted once its fetch fails; the title alone
+    # is never an evidence surface, so no extraction call happens at all.
+    search = _search(SearchCandidate(url=_SNIPPET_URL, title="Toppables crackers"))
+    fetcher = RecordingFetcher({})
+    provider = FakeProvider(responses=[_estimate()])
+
+    found = searched_reference_per_100g(
+        provider=provider,
+        search_provider=search,
+        fetch=fetcher,
+        query="toppables crackers nutrition facts",
+        page_kind=_REFERENCE_PAGE_KIND,
+        source_type=REFERENCE_SOURCE_TYPE,
+    )
+
+    assert found is None
+    assert provider.prompts == []
+    assert fetcher.fetched == [_SNIPPET_URL]
+
+
+def test_successful_page_extraction_never_consults_the_snippet() -> None:
+    search = _search(_snippet_candidate())
+    fetcher = RecordingFetcher({_SNIPPET_URL: "a real nutrition page"})
+    provider = FakeProvider(responses=[_estimate()])
+
+    found = searched_reference_per_100g(
+        provider=provider,
+        search_provider=search,
+        fetch=fetcher,
+        query="toppables crackers nutrition facts",
+        page_kind=_REFERENCE_PAGE_KIND,
+        source_type=REFERENCE_SOURCE_TYPE,
+    )
+
+    assert found is not None
+    assert SNIPPET_ASSUMPTION not in found.assumptions
+    assert len(provider.prompts) == 1
+    assert "a real nutrition page" in provider.prompts[0]
+    assert _SNIPPET not in provider.prompts[0]
+
+
+def test_unresolved_snippet_falls_through_to_the_next_candidate() -> None:
+    good = "https://reference.example.com/other"
+    search = _search(
+        _snippet_candidate(),
+        SearchCandidate(url=good, title="other crackers"),
+    )
+    fetcher = RecordingFetcher({good: "a real nutrition page"})
+    provider = FakeProvider(responses=[_unresolved(), _estimate()])
+
+    found = searched_reference_per_100g(
+        provider=provider,
+        search_provider=search,
+        fetch=fetcher,
+        query="toppables crackers nutrition facts",
+        page_kind=_REFERENCE_PAGE_KIND,
+        source_type=REFERENCE_SOURCE_TYPE,
+    )
+
+    assert found is not None
+    assert found.source_ref == f"{REFERENCE_SOURCE_TYPE}:{good}"
+    assert SNIPPET_ASSUMPTION not in found.assumptions
+    assert fetcher.fetched == [_SNIPPET_URL, good]
+
+
+def test_snippet_text_is_bounded_before_it_reaches_the_prompt() -> None:
+    # Defence in depth: even a hand-built oversized snippet (bypassing the adapter
+    # bound) is truncated before the extraction prompt.
+    oversized = "x" * (MAX_SNIPPET_TEXT_CHARS * 3)
+    search = _search(_snippet_candidate(snippet=oversized))
+    fetcher = RecordingFetcher({})
+    provider = FakeProvider(responses=[_estimate()])
+
+    searched_reference_per_100g(
+        provider=provider,
+        search_provider=search,
+        fetch=fetcher,
+        query="toppables crackers nutrition facts",
+        page_kind=_REFERENCE_PAGE_KIND,
+        source_type=REFERENCE_SOURCE_TYPE,
+    )
+
+    assert len(provider.prompts) == 1
+    assert "x" * (MAX_SNIPPET_TEXT_CHARS + 1) not in provider.prompts[0]

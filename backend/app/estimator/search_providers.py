@@ -41,6 +41,11 @@ _BRAVE_KEY_HEADER = "X-Subscription-Token"
 #: Bound the (untrusted) candidate title we surface from the provider payload.
 _MAX_TITLE_LEN: Final[int] = 300
 
+#: Bound the (untrusted) result snippet we surface from the provider payload
+#: (FTY-314). Real nutrition-facts snippets sit well within this; an oversized or
+#: adversarial description is truncated, never rejected.
+_MAX_SNIPPET_LEN: Final[int] = 500
+
 #: The HTTP status a provider returns to signal a rate-limit / quota exhaustion.
 _RATE_LIMITED_STATUS: Final[int] = 429
 
@@ -49,12 +54,14 @@ _FETCHABLE_SCHEMES: Final[frozenset[str]] = frozenset({"http", "https"})
 
 
 class BraveResult(BaseModel):
-    """A single Brave web result (untrusted; only ``url`` + ``title`` are used)."""
+    """A single Brave web result (untrusted; ``url``, ``title``, ``description``)."""
 
     model_config = ConfigDict(extra="ignore")
 
     url: str = ""
     title: str = ""
+    #: Brave's result snippet field; optional and bounded (FTY-314).
+    snippet: str = Field(default="", alias="description")
 
     @field_validator("title", mode="before")
     @classmethod
@@ -64,6 +71,19 @@ class BraveResult(BaseModel):
         if isinstance(value, str):
             return value[:_MAX_TITLE_LEN]
         return value
+
+    @field_validator("snippet", mode="before")
+    @classmethod
+    def _bound_snippet(cls, value: Any) -> str:
+        """Bound the optional untrusted snippet; non-text degrades to empty.
+
+        A snippet is never required for a usable candidate, so a missing or
+        malformed one must not fail an otherwise usable reply.
+        """
+
+        if isinstance(value, str):
+            return value[:_MAX_SNIPPET_LEN]
+        return ""
 
 
 class BraveWeb(BaseModel):
@@ -83,12 +103,14 @@ class BraveResponse(BaseModel):
 
 
 class SearXNGResult(BaseModel):
-    """A single SearXNG result (untrusted; only ``url`` + ``title`` are used)."""
+    """A single SearXNG result (untrusted; ``url``, ``title``, ``content``)."""
 
     model_config = ConfigDict(extra="ignore")
 
     url: str = ""
     title: str = ""
+    #: SearXNG's result snippet field; optional and bounded (FTY-314).
+    snippet: str = Field(default="", alias="content")
 
     @field_validator("title", mode="before")
     @classmethod
@@ -98,6 +120,15 @@ class SearXNGResult(BaseModel):
         if isinstance(value, str):
             return value[:_MAX_TITLE_LEN]
         return value
+
+    @field_validator("snippet", mode="before")
+    @classmethod
+    def _bound_snippet(cls, value: Any) -> str:
+        """Bound the optional untrusted snippet — same guard as Brave's."""
+
+        if isinstance(value, str):
+            return value[:_MAX_SNIPPET_LEN]
+        return ""
 
 
 class SearXNGResponse(BaseModel):
@@ -337,7 +368,7 @@ def _map_candidates(
         url = result.url.strip()
         if urlsplit(url).scheme.lower() not in _FETCHABLE_SCHEMES:
             continue
-        candidates.append(SearchCandidate(url=url, title=result.title))
+        candidates.append(SearchCandidate(url=url, title=result.title, snippet=result.snippet))
         if len(candidates) >= max_results:
             break
     return candidates

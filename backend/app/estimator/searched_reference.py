@@ -3,7 +3,11 @@
 This module owns the common searched-result chain used by official/reference
 resolution and user-text macro estimation: search candidates, bounded source
 references, hardened caller-provided fetch, schema-validated transcription, and
-plausibility-gated canonicalisation to per-100g facts.
+plausibility-gated canonicalisation to per-100g facts. When a candidate's page
+fetch fails or extracts nothing accepted, the candidate's bounded search-result
+title+snippet is tried as a lower-confidence untrusted text surface through the
+same extraction/validation chain, labelled ``search_result_snippet`` (FTY-314);
+raw snippets are never persisted.
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ from app.estimator.food_serving import (
 )
 from app.estimator.pipeline import CandidateDraft
 from app.estimator.reference_fetch import ReferenceFetchSettings
-from app.estimator.search import SearchProvider, SearchStatus
+from app.estimator.search import SearchCandidate, SearchProvider, SearchStatus
 from app.llm.base import Provider
 from app.llm.errors import (
     LLMConfigurationError,
@@ -72,6 +76,18 @@ EXTRACT_CONFIDENCE_THRESHOLD = 0.5
 #: guarantee is schema validation + the calculators.
 _OFFICIAL_PAGE_KIND = "an official product or restaurant web page"
 _REFERENCE_PAGE_KIND = "a public nutrition reference web page"
+_SNIPPET_KIND = "a public search-result title and snippet"
+
+#: The content-free assumption/provenance label recorded when a result's facts were
+#: transcribed from the search-result title+snippet rather than the fetched page
+#: body (FTY-314). Snippet-derived evidence stays URL-referenced but is explicitly
+#: distinguishable from a fetched-page transcription.
+SNIPPET_ASSUMPTION = "search_result_snippet"
+
+#: The composed title+snippet text is bounded again before it reaches the
+#: extraction prompt — defence in depth over the adapter-level per-field bounds,
+#: so a hand-built or future oversized candidate can never grow the prompt.
+MAX_SNIPPET_TEXT_CHARS = 1_000
 
 #: Extraction framing, parametrized by the page kind (official vs. reference).
 _EXTRACT_PROMPT = (
@@ -193,7 +209,10 @@ def searched_reference_per_100g(  # noqa: PLR0913 - shared provider/fetch/extrac
 
     The caller owns availability checks and source-ref recording semantics. This
     primitive only orchestrates the shared search-candidate loop and returns raw
-    canonical facts plus provenance, never a resolved item.
+    canonical facts plus provenance, never a resolved item. Per candidate it tries
+    the fetched page first; when the fetch fails, returns no usable text, or
+    extracts nothing accepted, it falls back to the candidate's bounded
+    title+snippet (FTY-314) before moving to the next result.
     """
 
     result = search_provider.search(query)
@@ -207,29 +226,92 @@ def searched_reference_per_100g(  # noqa: PLR0913 - shared provider/fetch/extrac
         if before_fetch is not None:
             before_fetch(source_ref)
         text = fetch(search_candidate.url)
-        if text is None:
-            continue
-        estimate = _extract(
-            provider=provider,
-            page_text=text,
-            page_kind=page_kind,
-            extract_prompt=extract_prompt,
-        )
-        if estimate is None or estimate.facts is None:
-            continue
-        found = _searched_reference_from_facts(
-            estimate.facts,
-            source_ref=source_ref,
-            hash_key=search_candidate.url,
-            assumptions=tuple(estimate.assumptions),
-            allow_count_serving=allow_count_serving,
-        )
+        found = None
+        if text is not None:
+            found = _extract_accepted(
+                provider=provider,
+                page_text=text,
+                page_kind=page_kind,
+                extract_prompt=extract_prompt,
+                source_ref=source_ref,
+                hash_key=search_candidate.url,
+                allow_count_serving=allow_count_serving,
+                accept_result=accept_result,
+            )
         if found is None:
-            continue
-        if accept_result is not None and not accept_result(found):
-            continue
-        return found
+            # FTY-314: the page fetch failed, returned no usable text, or extracted
+            # no accepted facts — fall back to the candidate's own bounded
+            # title+snippet before trying the next result. The snippet is the same
+            # untrusted-text surface as a fetched page: bounded, framed as inert
+            # data, schema-validated, and labelled snippet-derived.
+            snippet_text = _snippet_text(search_candidate)
+            if snippet_text:
+                found = _extract_accepted(
+                    provider=provider,
+                    page_text=snippet_text,
+                    page_kind=_SNIPPET_KIND,
+                    extract_prompt=extract_prompt,
+                    source_ref=source_ref,
+                    hash_key=search_candidate.url,
+                    allow_count_serving=allow_count_serving,
+                    accept_result=accept_result,
+                    extra_assumptions=(SNIPPET_ASSUMPTION,),
+                )
+        if found is not None:
+            return found
     return None
+
+
+def _extract_accepted(
+    *,
+    provider: Provider,
+    page_text: str,
+    page_kind: str,
+    extract_prompt: str,
+    source_ref: str,
+    hash_key: str,
+    allow_count_serving: bool,
+    accept_result: AcceptSearchedReference | None,
+    extra_assumptions: tuple[str, ...] = (),
+) -> SearchedReferenceFacts | None:
+    """Extract + validate + accept one untrusted text surface; ``None`` if unusable."""
+
+    estimate = _extract(
+        provider=provider,
+        page_text=page_text,
+        page_kind=page_kind,
+        extract_prompt=extract_prompt,
+    )
+    if estimate is None or estimate.facts is None:
+        return None
+    found = _searched_reference_from_facts(
+        estimate.facts,
+        source_ref=source_ref,
+        hash_key=hash_key,
+        assumptions=tuple(estimate.assumptions) + extra_assumptions,
+        allow_count_serving=allow_count_serving,
+    )
+    if found is None:
+        return None
+    if accept_result is not None and not accept_result(found):
+        return None
+    return found
+
+
+def _snippet_text(candidate: SearchCandidate) -> str:
+    """The bounded inert title+snippet text for snippet-fallback extraction.
+
+    Empty when the candidate carries no snippet — a bare title was never an
+    evidence surface, so a snippet-less candidate keeps the pre-FTY-314
+    fetch-only behavior.
+    """
+
+    snippet = candidate.snippet.strip()
+    if not snippet:
+        return ""
+    title = candidate.title.strip()
+    text = f"{title}\n{snippet}" if title else snippet
+    return text[:MAX_SNIPPET_TEXT_CHARS]
 
 
 def _extract(
