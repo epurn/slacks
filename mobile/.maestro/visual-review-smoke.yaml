@@ -156,6 +156,10 @@ appId: com.fatty
 
 # settings.target_override (FTY-346): target fixture includes a user-source
 # component so the override provenance label is visible without tapping a row.
+# The provenance Text sets an explicit accessibilityLabel ("Set by you — tap
+# Reset to restore the derived value") that iOS folds into the parent row's
+# accessible label, so the visible "✎ set by you" glyph string is not in the
+# accessibility tree — assert the folded label instead (full-string regex).
 - openLink: "fatty://__visual-review?preset=settings.target_override&theme=light"
 - runFlow: common/accept-open-in-fatty.yaml
 - extendedWaitUntil:
@@ -163,7 +167,7 @@ appId: com.fatty
       id: "visual-review-settled:settings.target_override"
     timeout: 20000
 - assertVisible:
-    text: "✎ set by you"
+    text: ".*Set by you.*"
 - takeScreenshot: settings-target-override-light
 
 - openLink: "fatty://__visual-review?preset=settings.target_override&theme=dark"
@@ -173,7 +177,7 @@ appId: com.fatty
       id: "visual-review-settled:settings.target_override"
     timeout: 20000
 - assertVisible:
-    text: "✎ set by you"
+    text: ".*Set by you.*"
 - takeScreenshot: settings-target-override-dark
 
 # settings.formula_edit (FTY-346): the E2E-only initial-state seam opens the
