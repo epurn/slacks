@@ -39,9 +39,10 @@ mobile capture/upload UI (FTY-064), barcode (FTY-060), official-source search
 estimator / backend-core lane: `backend/app/schemas/nutrition_panel.py`,
 `backend/app/estimator/label_step.py`, `backend/app/estimator/food_serving.py`
 (`serving_size_grams`, `per_serving_to_per_100g`), and the label wiring in
-`backend/app/estimator/pipeline.py` (`label_pipeline`) and
-`backend/app/estimator/processing.py` (label pipeline selection, label persistence,
-retention). No new table or migration: it reuses `derived_food_items`,
+`backend/app/estimator/pipeline.py` (`label_pipeline`),
+`backend/app/estimator/processing.py` (label pipeline selection), and
+`backend/app/estimator/persist.py` (label persistence, retention). No new table
+or migration: it reuses `derived_food_items`,
 `evidence_sources` (FTY-044), and `log_attachments` (FTY-077).
 
 ## Version
