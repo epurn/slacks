@@ -309,6 +309,8 @@ def test_env_allowlist_excludes_fatty_secrets(monkeypatch: pytest.MonkeyPatch) -
     }
     for k, v in secret_vars.items():
         monkeypatch.setenv(k, v)
+    monkeypatch.setenv("USER", "fattyuser")
+    monkeypatch.setenv("LOGNAME", "fattyuser")
 
     captured_env, fake_run = _capture_subprocess_env()
     invocation = Invocation(argv=("claude", "--print"), stdin="test")
@@ -318,6 +320,8 @@ def test_env_allowlist_excludes_fatty_secrets(monkeypatch: pytest.MonkeyPatch) -
 
     for key in secret_vars:
         assert key not in captured_env, f"Secret {key!r} must not reach the subprocess"
+    assert captured_env.get("USER") == "fattyuser"
+    assert captured_env.get("LOGNAME") == "fattyuser"
 
 
 def test_env_allowlist_forwards_required_vars(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -326,6 +330,8 @@ def test_env_allowlist_forwards_required_vars(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("HOME", "/home/fattyuser")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/claude-config")
     monkeypatch.setenv("LANG", "en_US.UTF-8")
+    monkeypatch.setenv("USER", "fattyuser")
+    monkeypatch.setenv("LOGNAME", "fattyuser")
 
     captured_env, fake_run = _capture_subprocess_env()
     invocation = Invocation(argv=("claude", "--print"), stdin="test")
@@ -337,12 +343,16 @@ def test_env_allowlist_forwards_required_vars(monkeypatch: pytest.MonkeyPatch) -
     assert captured_env.get("HOME") == "/home/fattyuser"
     assert captured_env.get("CLAUDE_CONFIG_DIR") == "/claude-config"
     assert captured_env.get("LANG") == "en_US.UTF-8"
+    assert captured_env.get("USER") == "fattyuser"
+    assert captured_env.get("LOGNAME") == "fattyuser"
 
 
 def test_env_allowlist_omits_absent_vars(monkeypatch: pytest.MonkeyPatch) -> None:
     # A var in the allowlist that is absent from the parent must not be invented.
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.delenv("TMPDIR", raising=False)
+    monkeypatch.delenv("USER", raising=False)
+    monkeypatch.delenv("LOGNAME", raising=False)
 
     captured_env, fake_run = _capture_subprocess_env()
     invocation = Invocation(argv=("claude", "--print"), stdin="test")
@@ -352,6 +362,8 @@ def test_env_allowlist_omits_absent_vars(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert "CLAUDE_CONFIG_DIR" not in captured_env
     assert "TMPDIR" not in captured_env
+    assert "USER" not in captured_env
+    assert "LOGNAME" not in captured_env
 
 
 def test_env_allowlist_contains_no_fatty_or_postgres_keys() -> None:
@@ -359,6 +371,25 @@ def test_env_allowlist_contains_no_fatty_or_postgres_keys() -> None:
     for key in _ENV_ALLOWLIST:
         assert not key.startswith("FATTY_"), f"{key!r} is a Fatty secret key"
         assert not key.startswith("POSTGRES_"), f"{key!r} is a Postgres secret key"
+
+
+def test_env_allowlist_pinned_key_set() -> None:
+    # Pin the exact expected key set so a future edit that drops a required key
+    # or silently re-adds a secret-bearing one fails this test.
+    expected = frozenset(
+        {
+            "PATH",
+            "HOME",
+            "CLAUDE_CONFIG_DIR",
+            "LANG",
+            "LC_ALL",
+            "LC_CTYPE",
+            "TMPDIR",
+            "USER",
+            "LOGNAME",
+        }
+    )
+    assert expected == _ENV_ALLOWLIST
 
 
 # ---------------------------------------------------------------------------

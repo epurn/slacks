@@ -62,6 +62,11 @@ MAX_STDOUT_BYTES = 1_000_000
 #:   TMPDIR           — runtime temp directory; the Bun-bundled binary creates
 #:                      temp files during execution (macOS default is
 #:                      /var/folders/…, not /tmp, so the var is forwarded).
+#:   USER/LOGNAME     — let the macOS `claude` CLI resolve the current user and
+#:                      read its Keychain-backed login session; absent-safe on
+#:                      Linux/Docker (FTY-088), where the vars are not exported
+#:                      by the container so nothing is forwarded and the
+#:                      mounted-config-file auth path is unaffected.
 _ENV_ALLOWLIST: frozenset[str] = frozenset(
     {
         "PATH",
@@ -71,6 +76,8 @@ _ENV_ALLOWLIST: frozenset[str] = frozenset(
         "LC_ALL",
         "LC_CTYPE",
         "TMPDIR",
+        "USER",
+        "LOGNAME",
     }
 )
 
