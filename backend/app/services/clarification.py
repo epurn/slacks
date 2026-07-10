@@ -1,6 +1,7 @@
-"""Clarification answer (resolve) service — FTY-171, ``log-events.md`` v4.
+"""Clarification answer (resolve) service — FTY-171/FTY-328.
 
 Resolves one clarification question on the caller's own ``needs_clarification``
+or ``partially_resolved``
 event by applying the answer as a **structured detail to the same event** and
 re-estimating it. This is the first-class resolve that replaces the retired v3
 mechanism (re-submitting a combined phrase through the create path), closing the
@@ -15,7 +16,8 @@ audit findings that mechanism produced:
 A fresh, valid answer atomically (one transaction): persists the
 ``clarification_answers`` row, **re-opens** the event's terminal
 ``needs_clarification`` estimation job for the answer-triggered re-estimate
-(``estimation-jobs.md`` v2), and drives ``needs_clarification → processing``
+(``estimation-jobs.md`` v2/v3), and drives ``needs_clarification → processing``
+or ``partially_resolved → processing``
 through the state machine's single mutation path. The caller (router) then
 enqueues the re-estimate — commit first, publish after, matching the create
 path.
@@ -60,7 +62,7 @@ class ClarificationQuestionNotFound(Exception):
 
 
 class NotAwaitingClarification(Exception):
-    """Raised on a fresh answer for an event not in ``needs_clarification``.
+    """Raised on a fresh answer for an event not awaiting clarification.
 
     Nothing is persisted or mutated. Guards the race where the client holds
     questions from an earlier fetch (or a sibling answer lands concurrently) and
@@ -133,7 +135,7 @@ def answer_clarification_question(
         session.commit()  # release the row lock without writing
         return event, False
 
-    if LogEventStatus(event.status) is not LogEventStatus.NEEDS_CLARIFICATION:
+    if LogEventStatus(event.status) not in _ANSWERABLE_EVENT_STATUSES:
         session.rollback()  # release the row lock; nothing persisted or mutated
         raise NotAwaitingClarification("not_awaiting_clarification")
 
@@ -168,6 +170,12 @@ def _find_answer(session: Session, question_id: uuid.UUID) -> ClarificationAnswe
     return session.scalars(
         select(ClarificationAnswer).where(ClarificationAnswer.question_id == question_id)
     ).one_or_none()
+
+
+_ANSWERABLE_EVENT_STATUSES = (
+    LogEventStatus.NEEDS_CLARIFICATION,
+    LogEventStatus.PARTIALLY_RESOLVED,
+)
 
 
 def _reopen_job(session: Session, log_event_id: uuid.UUID) -> None:

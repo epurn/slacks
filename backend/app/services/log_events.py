@@ -50,9 +50,12 @@ from app.timeutils import current_day, day_bounds_utc, user_timezone
 #: - ``pending`` → ``processing`` (estimator picks the event up) or
 #:   ``completed`` (the direct path FTY-030 exercises before the estimator
 #:   exists).
-#: - ``processing`` → ``completed`` / ``failed`` / ``needs_clarification``
-#:   (estimator outcomes, Milestone 4).
+#: - ``processing`` → ``completed`` / ``failed`` / ``needs_clarification`` /
+#:   ``partially_resolved`` (estimator outcomes, including the item-scoped
+#:   partial state).
 #: - ``needs_clarification`` → ``processing`` (re-run after the user clarifies).
+#: - ``partially_resolved`` → ``processing`` (re-run after the user clarifies an
+#:   open component).
 #: - ``completed`` / ``failed`` are terminal.
 LEGAL_TRANSITIONS: dict[LogEventStatus, frozenset[LogEventStatus]] = {
     LogEventStatus.PENDING: frozenset({LogEventStatus.PROCESSING, LogEventStatus.COMPLETED}),
@@ -61,12 +64,20 @@ LEGAL_TRANSITIONS: dict[LogEventStatus, frozenset[LogEventStatus]] = {
             LogEventStatus.COMPLETED,
             LogEventStatus.FAILED,
             LogEventStatus.NEEDS_CLARIFICATION,
+            LogEventStatus.PARTIALLY_RESOLVED,
         }
     ),
     LogEventStatus.NEEDS_CLARIFICATION: frozenset({LogEventStatus.PROCESSING}),
+    LogEventStatus.PARTIALLY_RESOLVED: frozenset({LogEventStatus.PROCESSING}),
     LogEventStatus.COMPLETED: frozenset(),
     LogEventStatus.FAILED: frozenset(),
 }
+
+_FINALIZED_EVENT_STATUSES = (LogEventStatus.COMPLETED, LogEventStatus.PARTIALLY_RESOLVED)
+_CLARIFICATION_EVENT_STATUSES = (
+    LogEventStatus.NEEDS_CLARIFICATION,
+    LogEventStatus.PARTIALLY_RESOLVED,
+)
 
 
 class LogEventForbidden(Exception):
@@ -233,20 +244,20 @@ def list_entries_for_day(
     if not events:
         return []
 
-    completed_event_ids = [
-        event.id for event in events if LogEventStatus(event.status) is LogEventStatus.COMPLETED
+    finalized_event_ids = [
+        event.id for event in events if LogEventStatus(event.status) in _FINALIZED_EVENT_STATUSES
     ]
     items_by_event: dict[uuid.UUID, list[DerivedFoodItemDTO | DerivedExerciseItemDTO]] = (
         defaultdict(list)
     )
-    if not completed_event_ids:
+    if not finalized_event_ids:
         return [LogEventEntry(event=event, items=items_by_event[event.id]) for event in events]
 
     food_items = session.scalars(
         select(DerivedFoodItem)
         .where(
             DerivedFoodItem.user_id == owner_id,
-            DerivedFoodItem.log_event_id.in_(completed_event_ids),
+            DerivedFoodItem.log_event_id.in_(finalized_event_ids),
             DerivedFoodItem.status == DerivedItemStatus.RESOLVED,
             DerivedFoodItem.calories.isnot(None),
         )
@@ -263,7 +274,7 @@ def list_entries_for_day(
         select(DerivedExerciseItem)
         .where(
             DerivedExerciseItem.user_id == owner_id,
-            DerivedExerciseItem.log_event_id.in_(completed_event_ids),
+            DerivedExerciseItem.log_event_id.in_(finalized_event_ids),
             DerivedExerciseItem.status == DerivedItemStatus.RESOLVED,
             DerivedExerciseItem.active_calories.isnot(None),
         )
@@ -367,20 +378,20 @@ def list_clarification_questions(
     these rows (FTY-042); this is purely a read path.
 
     The read is **status-gated, not row-driven** (``log-events.md`` v4):
-    questions are served only while the event is in ``needs_clarification`` — the
-    only status in which a fresh answer can be accepted — so the client never
-    renders a chip whose answer would ``409``. An event in any other status, or
-    one with no unanswered rows, returns an empty list; the cases are
-    indistinguishable (**no status oracle**). An answered question is resolved
-    and not re-served: a fresh clarification round replaces the unanswered rows
-    (FTY-171), so this serves exactly the questions still open.
+    questions are served only while the event is in ``needs_clarification`` or
+    ``partially_resolved`` — the statuses in which a fresh answer can be accepted
+    — so the client never renders a chip whose answer would ``409``. An event in
+    any other status, or one with no unanswered rows, returns an empty list; the
+    cases are indistinguishable (**no status oracle**). An answered question is
+    resolved and not re-served: a fresh clarification round replaces the
+    unanswered rows (FTY-171), so this serves exactly the questions still open.
 
     ``question_text`` is sensitive (tied to the user's log, like ``raw_text``): it
     is returned only to the owner and never written to logs.
     """
 
     event = get_event(session, owner_id, current_user, event_id)
-    if LogEventStatus(event.status) is not LogEventStatus.NEEDS_CLARIFICATION:
+    if LogEventStatus(event.status) not in _CLARIFICATION_EVENT_STATUSES:
         return []
     answered_ids = select(ClarificationAnswer.question_id)
     return list(
