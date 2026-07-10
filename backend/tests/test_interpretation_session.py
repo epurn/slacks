@@ -153,6 +153,26 @@ def test_collapse_case_reinterprets_instead_of_freezing_degenerate_candidate() -
     assert len(session.hypothesis.item_links) == 2  # split lineage: 1 source → 2 items
 
 
+def test_reask_prompt_carries_current_hypothesis_view() -> None:
+    # The FTY-324 decision-point shape: a model-consultable re-ask passes the
+    # raw text, clarification answers, *current hypothesis*, and evidence view
+    # back to the model — the re-ask must see the item set and fields it is
+    # revising, not just the inputs that produced them.
+    provider = _collapse_provider(_TWO_ITEM_REPLY)
+    context = _context("compliments chicken strips and PC dill pickle hummus")
+
+    ParseStep(provider).run(context)
+
+    reask_prompt = provider.prompts[-1]
+    assert "<current_hypothesis>" in reask_prompt
+    # The representative (most self-confident) degenerate sample is the current
+    # hypothesis at re-ask time; its exact item line is shown to the model.
+    assert '1. food "chicken strips with hummus"' in reask_prompt
+    # The initial samples carry no hypothesis block — there is nothing to
+    # revise yet on a first reading.
+    assert all("<current_hypothesis>" not in prompt for prompt in provider.prompts[:-1])
+
+
 def test_collapse_case_trace_and_run_surfaces_carry_no_raw_text() -> None:
     # Redaction (story Security/Privacy): raw diary text, item names, and brands
     # live in provider calls and product data only — never in the sanitized run
@@ -356,6 +376,10 @@ def test_evidence_driven_reinterpret_seam_feeds_sanitized_labels_only() -> None:
     assert "<evidence_status>" in reask_prompt
     assert "usda_fdc: rejected_brand_mismatch (usda_fdc:1)" in reask_prompt
     assert _RAW_SENTINEL in reask_prompt
+    # The evidence-driven re-ask also sees the current hypothesis it is
+    # revising (FTY-324 decision-point shape): the brandless item as held.
+    assert "<current_hypothesis>" in reask_prompt
+    assert '1. food "dill pickle hummus", quantity_text "2 tbsp", amount 2' in reask_prompt
     assert "brand_revised" in _outcomes(context)
     assert session.hypothesis is not None
     assert session.hypothesis.revision == 1

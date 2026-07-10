@@ -367,8 +367,18 @@ class InterpretationSession:
             raise StepFailed("provider_error") from exc
 
     def _revise_from_model(self, context: EstimationContext) -> ParseResult | None:
-        """One budget-capped re-interpretation call; applies the revision."""
+        """One budget-capped re-interpretation call; applies the revision.
 
+        Per the FTY-324 decision-point shape the re-ask passes the raw text,
+        answered clarifications, the *current hypothesis*, and the evidence
+        view back to the model — the model must see the item set and fields it
+        is revising, not just the inputs that produced them.
+        """
+
+        hypothesis = self.hypothesis
+        if hypothesis is None:
+            msg = "interpret_initial has not run"
+            raise RuntimeError(msg)
         if self._revision_calls_used >= self._max_revision_calls:
             context.record_decision(
                 self._step_name, "hypothesis_revision", outcome="revision_truncated"
@@ -378,6 +388,7 @@ class InterpretationSession:
         prompt = build_reinterpretation_prompt(
             self.raw_text,
             self.clarification_answers,
+            hypothesis_items=[item.candidate for item in hypothesis.items],
             evidence_labels=[record.as_label() for record in self.evidence_ledger],
         )
         schema = recoverable_parse_result_schema(self._policy.max_repair_attempts)
