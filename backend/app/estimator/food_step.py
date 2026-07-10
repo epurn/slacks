@@ -61,6 +61,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.estimator.branded_routing import is_evidence_brand_compatible
+from app.estimator.common_portions import resolve_common_portion_grams
 from app.estimator.detail_signals import has_food_detail, has_stated_nutrition
 from app.estimator.evidence_utils import _record_source_ref
 from app.estimator.fdc import (
@@ -71,6 +72,10 @@ from app.estimator.fdc import (
     FoodSource,
     ProductFacts,
     normalize_query,
+)
+from app.estimator.fdc_ranking import (
+    is_fdc_description_compatible,
+    is_fdc_description_rank_stable,
 )
 from app.estimator.food_serving import NutritionFacts, resolve_grams, scale_facts
 from app.estimator.off import (
@@ -174,14 +179,37 @@ def _cache_product(session: Session, facts: ProductFacts) -> Product:
     return product
 
 
+def _refresh_product(product: Product, facts: ProductFacts) -> Product:
+    """Overwrite a stale cached row's facts in place from a fresh source lookup.
+
+    The ``(source, query_key)`` uniqueness allows exactly one cache row per
+    query, so replacing a rejected pre-FTY-254 selection means updating that
+    row rather than inserting a sibling. Existing ``evidence_sources`` rows keep
+    their own immutable fact snapshots, so refreshing the cache never rewrites
+    a user's past resolutions.
+    """
+
+    product.source_ref = facts.source_ref
+    product.description = facts.description
+    product.calories_per_100g = facts.facts.calories
+    product.protein_per_100g = facts.facts.protein_g
+    product.carbs_per_100g = facts.facts.carbs_g
+    product.fat_per_100g = facts.facts.fat_g
+    product.default_serving_g = facts.default_serving_g
+    product.content_hash = facts.content_hash
+    return product
+
+
 class FoodResolver:
     """Resolves a generic food name to a cached :class:`Product`, fetching on a miss.
 
     Owns the global ``products`` cache (read + get-or-create) and the external
-    :class:`FoodSource` (USDA FDC). A cache hit avoids any external call; a miss
-    fetches from the source and caches the global facts (no user data) in the session
-    for the worker's commit. New cache rows are flushed so the worker can reference
-    them from the user-owned ``evidence_sources`` it writes on success.
+    :class:`FoodSource` (USDA FDC). A *compatible* cache hit avoids any external
+    call; a miss — or a stale cached row that fails the FTY-254 description
+    compatibility gate — fetches from the source and caches/refreshes the global
+    facts (no user data) in the session for the worker's commit. New cache rows are
+    flushed so the worker can reference them from the user-owned
+    ``evidence_sources`` it writes on success.
     """
 
     def __init__(self, *, session: Session, source: FoodSource) -> None:
@@ -198,7 +226,12 @@ class FoodResolver:
         """Return the cached/fetched product for ``name``, or ``None`` if no match.
 
         Checks the ``products`` cache by normalized name first; on a miss, queries the
-        source and caches the result. Propagates :class:`FdcTransientError` /
+        source and caches the result. A cached row must still pass today's FTY-254
+        compatibility gate (:func:`is_fdc_description_compatible`), and a compatible
+        but non-rank-stable row (unstated demoted form or incomplete query-token
+        coverage) is re-fetched once so the ranked lookup can replace it when FDC
+        now returns a better match. If the fresh lookup has no replacement, the
+        compatible cache row remains usable. Propagates :class:`FdcTransientError` /
         :class:`FdcResponseError` from the source for the step to route.
         """
 
@@ -209,12 +242,23 @@ class FoodResolver:
         cached = self._session.scalars(
             select(Product).where(Product.source == FDC_SOURCE, Product.query_key == query_key)
         ).one_or_none()
+        cached_is_compatible = False
         if cached is not None:
-            return _ResolvedProduct(product=cached, fetched_at=cached.updated_at)
+            cached_is_compatible = is_fdc_description_compatible(query_key, cached.description)
+            if cached_is_compatible and is_fdc_description_rank_stable(
+                query_key, cached.description
+            ):
+                return _ResolvedProduct(product=cached, fetched_at=cached.updated_at)
 
         facts = self._source.lookup(name)
         if facts is None:
+            if cached is not None and cached_is_compatible:
+                return _ResolvedProduct(product=cached, fetched_at=cached.updated_at)
             return None
+        if cached is not None:
+            return _ResolvedProduct(
+                product=_refresh_product(cached, facts), fetched_at=datetime.now(UTC)
+            )
         return _ResolvedProduct(
             product=_cache_product(self._session, facts), fetched_at=datetime.now(UTC)
         )
@@ -431,12 +475,28 @@ class FoodResolveStep:
         """Apply deterministic serving math and build the resolved item + provenance."""
 
         product = resolved.product
+        assumptions: tuple[str, ...] = ()
         grams = resolve_grams(
             unit=candidate.unit,
             amount=candidate.amount,
             quantity_text=candidate.quantity_text,
             default_serving_g=product.default_serving_g,
         )
+        if grams is None:
+            # FTY-254: a stated count of an everyday food ("one banana", "2 large
+            # eggs") with no source serving size resolves via the documented
+            # common-portion table instead of losing the trusted-database match.
+            # The portion default is recorded as an explicit assumption so the
+            # number stays visibly rough at the portion level and editable.
+            portion = resolve_common_portion_grams(
+                name=candidate.name,
+                unit=candidate.unit,
+                amount=candidate.amount,
+                quantity_text=candidate.quantity_text,
+            )
+            if portion is not None:
+                grams = portion.grams
+                assumptions = (portion.assumption,)
         if grams is None:
             if allow_unresolvable_defer:
                 return None
@@ -473,6 +533,7 @@ class FoodResolveStep:
             protein_per_100g=product.protein_per_100g,
             carbs_per_100g=product.carbs_per_100g,
             fat_per_100g=product.fat_per_100g,
+            assumptions=assumptions,
         )
 
 

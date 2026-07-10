@@ -211,7 +211,9 @@ def test_list_matches_malformed_payload_missing_fdc_id_raises_fdc_response_error
 
 def test_lookup_long_description_truncates_not_rejects() -> None:
     """An over-long FDC description is truncated to 300 chars — the row still resolves."""
-    long_name = "A" * 500
+    # Name the queried food first so the FTY-254 compatibility gate keeps the row;
+    # this test pins truncation behavior, not ranking.
+    long_name = "Rice " + "A" * 500
     overlong_response: dict[str, Any] = {
         "foods": [
             {
@@ -325,14 +327,19 @@ def test_load_fdc_settings_reads_env_prefix() -> None:
 
 
 def _food_response(
-    fdcId: int, energy: float, protein: float = 0.0, carbs: float = 0.0, fat: float = 0.0
+    fdcId: int,
+    energy: float,
+    protein: float = 0.0,
+    carbs: float = 0.0,
+    fat: float = 0.0,
+    description: str = "Test Food",
 ) -> dict[str, Any]:
     """Build a minimal FDC /foods/search reply with the given per-100g nutrient values."""
     return {
         "foods": [
             {
                 "fdcId": fdcId,
-                "description": "Test Food",
+                "description": description,
                 "foodNutrients": [
                     {"nutrientId": 1008, "value": energy},
                     {"nutrientId": 1003, "value": protein},
@@ -360,7 +367,7 @@ def test_lookup_rejects_negative_energy() -> None:
 
 def test_lookup_accepts_zero_energy() -> None:
     """A genuine zero-calorie food (e.g. water) is a costable 0-kcal match, not a non-match."""
-    client, _ = _client(_food_response(fdcId=3, energy=0.0))
+    client, _ = _client(_food_response(fdcId=3, energy=0.0, description="Water, bottled"))
 
     facts = client.lookup("water")
 
@@ -391,7 +398,16 @@ def test_lookup_rejects_negative_fat() -> None:
 
 def test_lookup_no_false_reject_high_fat_food() -> None:
     """Olive oil (~884 kcal/100g, ~100g fat, 0 protein, 0 carbs) still resolves."""
-    client, _ = _client(_food_response(fdcId=7, energy=884.0, protein=0.0, carbs=0.0, fat=100.0))
+    client, _ = _client(
+        _food_response(
+            fdcId=7,
+            energy=884.0,
+            protein=0.0,
+            carbs=0.0,
+            fat=100.0,
+            description="Oil, olive, salad or cooking",
+        )
+    )
 
     facts = client.lookup("olive oil")
 
