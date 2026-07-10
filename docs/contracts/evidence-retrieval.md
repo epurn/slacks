@@ -56,6 +56,20 @@ Adapter — FTY-079 / FTY-164**.
 
 ## Version
 
+5 (FTY-314) admits the **search-result snippet** as a bounded, lower-confidence
+untrusted evidence surface. A search candidate now carries the provider's result
+snippet (SearXNG `content` / Brave `description`) alongside its URL and title —
+optional, length-bounded, empty when the provider sends none, and never required
+for a `success` lookup. In the searched-reference chain the fetched page stays
+first: only when a candidate's page fetch fails, returns no usable text, or
+extracts no accepted facts may that candidate's bounded title+snippet be
+extracted through the **same** untrusted-text framing, `NamedFoodEstimate`
+schema validation, compatibility checks, and deterministic serving math. A
+snippet-derived result keeps the result URL as `source_ref` and records the
+content-free `search_result_snippet` assumption label; the raw snippet is never
+persisted. Confidence rank: **below** a fetched official/reference page, **above**
+pure model prior. See **Search-Result Snippet Evidence — FTY-314**.
+
 4 (FTY-253) allows the official/reference search consumer to send a **bounded,
 deterministic set of item-identity query variants** per lookup instead of exactly
 one query: the `name + brand` base, the quantity-phrase product hint in both token
@@ -502,9 +516,12 @@ expansion); each variant individually satisfies every rule above and passes the
 same chokepoint.
 
 **Response (search provider → estimator).** A bounded list of candidate result
-URLs + titles, treated as **untrusted**. The estimator selects candidate
-official URLs to fetch; result text is never trusted as nutrition facts. Only
-public HTTP(S) result URLs are eligible for the fetch step.
+URLs + titles + optional bounded snippets, treated as **untrusted**. The
+estimator selects candidate official URLs to fetch; result text is never trusted
+as nutrition facts — title/snippet text may become facts only through the same
+bounded, schema-validated extraction a fetched page goes through (FTY-314). Only
+public HTTP(S) result URLs are eligible for the fetch step. A missing or
+malformed snippet is carried as empty and never affects the lookup status.
 
 ## Fetch Request / Response Boundary
 
@@ -573,7 +590,9 @@ body, or response body.
   carry item identity only — never profile, body metrics, goals, history,
   location, or account identifiers.
 - **Evidence, not raw content.** Persist extracted facts + URL + timestamp +
-  content hash; never raw pages, payloads, or OCR by default. Nutrition-label
+  content hash; never raw pages, payloads, OCR, or raw search-result
+  snippets/JSON (FTY-314 — a snippet-derived record keeps only the URL, the
+  validated facts, and the `search_result_snippet` label). Nutrition-label
   images follow `docs/security/data-retention.md` (retain only while needed for
   extraction unless the user explicitly saves the attachment).
 - **No raw diary text in a `user_text` record (FTY-279).** The raw phrase the user
@@ -896,6 +915,63 @@ invariants (`https_only`, `public_ip_only`, `redirects_followed=false`,
 searched public result fetch is enabled **without ever exposing a URL from a user
 entry**.
 
+## Search-Result Snippet Evidence — FTY-314
+
+A search provider often shows the useful nutrition text a human already reads —
+`Serving Size Per 5 crackers (19 g). Calories 90. …` — while the page itself
+answers with HTTP 403 or a JavaScript shell. FTY-314 lets the searched-reference
+chain use that **bounded result snippet** as a last-per-candidate untrusted
+evidence surface instead of dropping it.
+
+### Shape and bounds
+
+- A `SearchCandidate` carries `snippet` alongside `url` and `title`: the
+  provider's result description (SearXNG `content`; Brave `description`),
+  length-bounded at the adapter, empty when missing, degraded to empty when
+  malformed. A snippet is **optional** — it is never required for a `success`
+  lookup and its absence changes nothing.
+- Before extraction the composed title+snippet text is bounded **again**
+  (defence in depth over the adapter bound) and injected into the same
+  transcription prompt as fetched-page text, framed as the untrusted inert text
+  of "a public search-result title and snippet" — data, never instructions.
+
+### Order (fetch-first, snippet fallback, per candidate)
+
+For each search candidate the resolver tries the **fetched page first**. Only
+when that candidate's fetch fails (policy/transport/HTTP error), returns no
+usable text, or extracts no accepted facts (unresolved, low confidence,
+implausible, or rejected by the quantity/brand-compatibility gates) does the
+resolver try the **same candidate's** title+snippet — before moving to the next
+result or falling through to the next tier. An empty snippet preserves the
+pre-FTY-314 fetch-only behavior exactly.
+
+### Trust and provenance
+
+- Snippet text is exactly as adversarial as a fetched page: it becomes facts
+  only through `NamedFoodEstimate` schema validation, the plausibility gate, the
+  compatibility checks, and the deterministic serving math — the model never
+  supplies the stored numbers.
+- Provenance stays the search-result **URL** (`official_source:<url>` /
+  `reference_source:<url>`), plus the content-free **`search_result_snippet`**
+  assumption label recorded on the evidence row, so a snippet-derived number is
+  distinguishable from a fetched-page transcription.
+- Confidence rank: a snippet is a **lower-confidence public reference surface**
+  — below a fetched official or reference page, above pure model prior — usable
+  only when compatible and schema-valid. In the user-stated missing-macro path
+  (the single-source reference fill, which commits the first accepted result), a
+  snippet-derived result must additionally pass the deterministic
+  product-compatibility check (the comparable tier's gate) before its facts may
+  fill macros, and the fill's recorded assumptions carry the
+  `search_result_snippet` label.
+- The **raw snippet is never persisted**: not in `estimation_runs.trace`,
+  `assumptions`, `source_refs`, provider errors, logs, or evidence rows. For a
+  snippet-derived extraction the provider-stated `assumptions` are discarded
+  wholesale — only the fixed content-free `search_result_snippet` label is
+  recorded — so a provider response echoing raw snippet text into its
+  assumptions can never reach evidence/run assumptions.
+- No egress change: snippets arrive on the existing search response; this adds
+  no browser automation, redirects, allowlist widening, or new fetch surface.
+
 ## Item Re-match — FTY-093
 
 The **item re-match** capability is the "Change match" lever of the correction sheet:
@@ -1149,6 +1225,13 @@ cross-user / unknown / unauthenticated fail-closed.
   (`SourceType`), and `GET /healthz/egress` gains the `searched_result_fetch`
   block. The official-source adapter, the search boundary, the status vocabulary,
   and the serving math are unchanged.
+- **FTY-314** adds the bounded search-result **snippet** to the search response
+  shape (`SearchCandidate.snippet`) and the per-candidate snippet-fallback rule
+  to the searched-reference chain (see **Search-Result Snippet Evidence —
+  FTY-314**). It is **additive**: no schema migration (`assumptions` already
+  carries content-free labels), no new provider or egress surface, no status or
+  hierarchy change — only a new lower-confidence evidence surface between a
+  fetched page and the model prior, labelled `search_result_snippet`.
 - FTY-093 adds the **item re-match** capability (`re_match.py` + the thin
   `re-match` router/schemas) and `FdcClient.list_matches`. It is additive with **no
   schema migration**: re-resolve is an in-place `UPDATE` of the existing

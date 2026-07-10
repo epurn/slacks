@@ -97,7 +97,9 @@ from app.estimator.searched_reference import (
     REFERENCE_SEARCH_INTENT,
     REFERENCE_SOURCE,
     REFERENCE_SOURCE_TYPE,
+    SNIPPET_ASSUMPTION,
     FetchReference,
+    SearchedReferenceFacts,
     _identity_query,
     _to_per_100g,
     searched_reference_per_100g,
@@ -313,10 +315,21 @@ class UserTextMacroEstimator:
 
         reference = self._reference_composition(context, candidate)
         if reference is not None:
-            per_100g, source_ref = reference
-            return self._scale_missing(
+            per_100g, source_ref, snippet_derived = reference
+            estimated = self._scale_missing(
                 per_100g, calories, missing, source_ref, tier="reference_source"
             )
+            if snippet_derived and estimated.values:
+                # Snippet-derived reference evidence keeps its content-free
+                # snippet label on the persisted assumptions (FTY-314), so a
+                # macro fill backed by a search-result snippet is always
+                # distinguishable from one backed by a fetched page.
+                estimated = _EstimatedMacros(
+                    values=estimated.values,
+                    source_ref=estimated.source_ref,
+                    assumptions=(*estimated.assumptions, SNIPPET_ASSUMPTION),
+                )
+            return estimated
 
         comparable = self._comparable_aggregate(context, candidate)
         if comparable is not None:
@@ -361,13 +374,18 @@ class UserTextMacroEstimator:
 
     def _reference_composition(
         self, context: EstimationContext, candidate: CandidateDraft
-    ) -> tuple[NutritionFacts, str] | None:
+    ) -> tuple[NutritionFacts, str, bool] | None:
         """Search + fetch + transcribe a public reference page's per-100g composition.
 
         Reuses the FTY-166 searched-result path (sanitized identity + fixed nutrition
         intent → hardened searched-result fetch → schema-validated transcription →
-        plausibility-gated canonicalisation). Returns ``(per_100g_facts, source_ref)``
-        for the first confident, plausible page, or ``None`` to fall through.
+        plausibility-gated canonicalisation). Returns ``(per_100g_facts, source_ref,
+        snippet_derived)`` for the first confident, plausible, accepted result, or
+        ``None`` to fall through. A snippet-derived result (FTY-314) is additionally
+        gated on product compatibility: this single-source path commits the first
+        accepted result, so a snippet whose transcribed product identity does not
+        name a comparable of the item (:func:`compatibility`) is rejected rather
+        than filling the macros from an unrelated search result.
         """
 
         if not (self.search_provider.enabled and self.search_provider.available):
@@ -392,6 +410,20 @@ class UserTextMacroEstimator:
             # source-backed lookup.
             return None
         query = sanitize_query(f"{identity} {REFERENCE_SEARCH_INTENT}")
+
+        def _accept(found: SearchedReferenceFacts) -> bool:
+            if found.facts.calories <= 0:
+                return False
+            if SNIPPET_ASSUMPTION not in found.assumptions:
+                return True
+            # FTY-314 fail-closed gate: a snippet-derived result has no fetched
+            # page behind it, so its transcribed product identity must name a
+            # comparable of the item — the same deterministic check the
+            # comparable tier applies. A snippet whose facts name no product,
+            # a conflicting food form, or no shared content term never fills
+            # missing macros.
+            return compatibility(candidate.name, found.product_name) is not None
+
         found = searched_reference_per_100g(
             provider=self.provider,
             search_provider=self.search_provider,
@@ -400,11 +432,11 @@ class UserTextMacroEstimator:
             page_kind=_REFERENCE_PAGE_KIND,
             source_type=REFERENCE_SOURCE_TYPE,
             before_fetch=lambda _source_ref: _record_source_ref(context, REFERENCE_SOURCE),
-            accept_result=lambda found: found.facts.calories > 0,
+            accept_result=_accept,
         )
         if found is None:
             return None
-        return found.facts, found.source_ref
+        return found.facts, found.source_ref, SNIPPET_ASSUMPTION in found.assumptions
 
     def _comparable_aggregate(
         self, context: EstimationContext, candidate: CandidateDraft

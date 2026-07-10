@@ -933,6 +933,24 @@ unit (`per 3 strips` vs. `2 cups`), the resolver rejects that result and continu
 the next evidence result/tier; only when no usable result remains does policy decide
 whether to ask.
 
+### Search-result snippet fallback (FTY-314)
+
+Both web-evidence tiers keep the **fetched page first**, but a search candidate
+now also carries the provider's bounded result **snippet** (SearXNG `content` /
+Brave `description`). When a candidate's page fetch fails (e.g. HTTP 403),
+returns no usable text (a JavaScript shell), or extracts no accepted facts, the
+resolver extracts from that candidate's bounded **title+snippet** through the
+exact same chain — untrusted-text prompt framing, `NamedFoodEstimate` schema,
+plausibility bound, quantity/brand-compatibility gates, deterministic serving
+math — before moving to the next result or tier. Provenance stays the result URL
+(`official_source:<url>` / `reference_source:<url>`) and the evidence row
+records the content-free `search_result_snippet` assumption label, so a
+snippet-derived number is honestly distinguishable from a fetched-page
+transcription (and ranks below one, above a pure model prior). An empty or
+missing snippet preserves the fetch-only behavior; the raw snippet is never
+persisted in traces, assumptions, source refs, errors, or logs. See
+`evidence-retrieval.md` (**Search-Result Snippet Evidence — FTY-314**).
+
 ### Brand-aware packaged-product routing (FTY-253)
 
 For a **branded** candidate the resolver is allowed to be creative inside a bounded
@@ -980,6 +998,7 @@ policy instead of obeying a rigid first-source-wins sequence:
 | Official page misses (or fails the FTY-115 plausibility bound), reference page resolves (FTY-166) | _(completes)_ | food `resolved` (`reference_source`) + `evidence_sources` (`reference_source:<url>`, no `product_id`) | `processing → completed` |
 | Generic candidate USDA miss, **detail-rich** (FTY-167), reference page resolves (FTY-166) | _(completes; official search skipped)_ | food `resolved` (`reference_source`) | `processing → completed` |
 | A fetched page resolves but its per-100g facts fail the FTY-115 plausibility bound | _(non-match; falls through)_ | nothing for that page | `→ next tier / model-prior` |
+| Page fetch fails (403) or yields no accepted facts, the candidate's compatible snippet resolves (FTY-314) | _(completes)_ | food `resolved` (tier's source type) + `evidence_sources` (URL ref, `search_result_snippet` assumption) | `processing → completed` |
 | Search disabled / unavailable, a tier's fetch off, or no confident match on either tier → model-prior | _(completes)_ | food `resolved` (`model_prior`) + `evidence_sources` (`model_prior`, per-tier assumptions) | `processing → completed` |
 | Model-prior estimate fails the FTY-115 plausibility bound | `NeedsClarification` | clarification question | `processing → needs_clarification` |
 | Branded candidate USDA/OFF **resolves** with a brand-compatible, quantity-costable row (FTY-253) | _(as FTY-044/060)_ | official/reference source not consulted | `processing → completed` |
@@ -998,10 +1017,13 @@ policy instead of obeying a rigid first-source-wins sequence:
   them. Tests prove each fetcher only ever receives a URL the search adapter
   returned.
 - **Untrusted-until-validated.** Fetched/searched/extracted/LLM content — official
-  and reference pages alike — is validated against `NamedFoodEstimate` and recomputed
-  by the deterministic calculators before persistence.
+  and reference pages, and search-result title/snippet text alike (FTY-314) — is
+  validated against `NamedFoodEstimate` and recomputed by the deterministic
+  calculators before persistence; snippet text is bounded before it reaches the
+  prompt and framed as inert data, never instructions.
 - **No-raw-page retention.** `evidence_sources` stores the URL, timestamp, content
-  hash, and extracted per-100g facts only — never the raw page (per `data-retention.md`).
+  hash, and extracted per-100g facts only — never the raw page or the raw
+  search-result snippet (per `data-retention.md`).
 - **Data minimization.** Only item identity (name + brand) crosses the search
   boundary — the reference query adds only the fixed `nutrition facts` intent; no
   personal context, no raw diary text.
