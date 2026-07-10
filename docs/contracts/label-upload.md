@@ -31,6 +31,13 @@ the FTY-061 `label_pipeline`, and the FTY-030 `LogEventDTO`.
 
 ## Version
 
+2 (FTY-306, contract only): the **label exact-upgrade** entry point
+(`food-resolution.md`, **Exact Evidence Upgrade Routing — FTY-306**) reuses this
+boundary's wire shape, fail-closed image validation, and retention semantics to
+attach stronger evidence to an **existing** food item instead of creating a new
+log event. See **Label exact-upgrade — FTY-306** below. The primary capture
+route, validation, confirmation gate, and retention rules are unchanged.
+
 1 (FTY-064).
 
 ## Inputs
@@ -201,6 +208,37 @@ invalid adjusted value returns `422` with a machine-readable error shape
 (`{"error": <code>, "field": <field>}`) that never echoes the value; a
 negative/non-finite value is rejected at the request boundary (`422`).
 
+## Label exact-upgrade — FTY-306
+
+The exact evidence upgrade's **label entry point**
+(`POST /api/users/{user_id}/derived-items/food/{item_id}/exact-upgrade/label?save={bool}`,
+`food-resolution.md` → **Exact Evidence Upgrade Routing — FTY-306**) reuses this
+contract's boundary rather than defining a new one. Contract only; the backend
+implementation is FTY-307–FTY-309.
+
+- **Same wire shape.** Raw image bytes as the body (not multipart, not base64),
+  the declared `Content-Type` header, bearer auth, and the `save` query flag.
+- **Same fail-closed validation.** Size / content-type allowlist / magic-number
+  signature (`validate_upload`) **before** any model call; a failed validation
+  produces no proposal, no attachment, and no mutation (`413` / `415`).
+- **Different target, same retention rule.** The upload targets an **existing**
+  food item and creates **no** new log event; extraction feeds an exact-upgrade
+  **proposal** (`evidence-retrieval.md`) instead of a `LogEventDTO`. The raw
+  image follows the identical FTY-077 rule: **discard by default** after
+  extraction; `save=true` writes exactly one user-owned `log_attachments` row
+  against the **item's owning log event** (`log-attachments.md`), and no image is
+  retained on a failed extraction or a `none` proposal. Because the image is
+  never needed after the in-request extraction, it is likewise never enqueued.
+- **Same content-free posture.** No image bytes, URIs, OCR text, provider
+  output, or nutrition values in logs or error messages; ownership on
+  `{user_id}` + `{item_id}` fails closed `404` with no existence oracle.
+
+The proposal preview/apply semantics — including the explicit confirm before the
+item changes, mirroring this contract's capture-then-confirm stance — are owned by
+`evidence-retrieval.md` and `food-resolution.md`; the FTY-196 confirmation gate
+above is unchanged and applies only to the primary capture flow's new-event
+proposals.
+
 Backend coverage: `backend/tests/test_label_upload_endpoint.py` (happy path,
 discard-vs-save retention, `413`/`415` data-boundary rejection, `404`/`401`
 ownership, and "never enqueues"). Client coverage:
@@ -224,3 +262,10 @@ content-free error mapping).
   `proposed` one is a **pre-v1 breaking change** (no production consumers). The
   daily-summary finalized-state filter is **unchanged** — the exclusion is by
   construction.
+- **FTY-306 (contract only; no code or migration in this story).** The label
+  exact-upgrade entry point (**Label exact-upgrade — FTY-306**) is an additive
+  reuse of this boundary against an existing food item: same wire shape,
+  validation, `save` flag, and discard-by-default retention; no new table,
+  retention surface, or change to the primary capture route. Backend
+  implementation is **FTY-307–FTY-309**; mobile consumption is
+  **FTY-310–FTY-313**.

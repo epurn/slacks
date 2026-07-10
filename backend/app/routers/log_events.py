@@ -295,9 +295,10 @@ def get_log_event_clarification(
     clarifications carry options; deterministic backend-raised questions may
     carry an empty list, in which case the client shows free-text only.
 
-    The read is status-gated (``log-events.md`` v4): only a
-    ``needs_clarification`` event serves questions, and only its **unanswered**
-    ones, so a served question is always freshly answerable. Ownership is
+    The read is status-gated (``log-events.md`` v6): only a
+    ``needs_clarification`` or ``partially_resolved`` event serves questions, and
+    only its **unanswered** ones, so a served question is always freshly
+    answerable. Ownership is
     fail-closed (FTY-030): a cross-user or nonexistent ``event_id`` is
     indistinguishable as ``404`` (no existence oracle); a wrong-status event and
     one with no rows both return an empty list (no status oracle). The question
@@ -336,9 +337,10 @@ def answer_log_event_clarification(
 
     The answer — a tapped quick-pick option's value or free text — is applied as
     a structured detail to the **same** event, which is re-estimated with every
-    detail answered so far (``needs_clarification → processing``; the client
-    polls as usual). The raw phrase is never mutated and no second event is ever
-    created (audit findings A3/A5); an empty/whitespace answer is rejected
+    detail answered so far (``needs_clarification → processing`` or
+    ``partially_resolved → processing``; the client polls as usual). The raw
+    phrase is never mutated and no second event is ever created (audit findings
+    A3/A5); an empty/whitespace answer is rejected
     ``422`` at the request boundary before any work.
 
     A fresh resolve returns ``201`` and enqueues the re-estimate only after the

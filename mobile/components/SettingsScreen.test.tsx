@@ -1288,6 +1288,47 @@ describe("Visual-review seam — Settings edit sub-states (FTY-267)", () => {
     expect(textContent(tree)).toContain("New weight (kg)");
   });
 
+  it("settings.formula_edit opens the formula editor via the seam with the loaded formula selected", async () => {
+    enterE2EMode();
+    activateVisualReviewPreset("settings.formula_edit", null);
+
+    const tree = renderMounted();
+    await act(async () => {});
+
+    expect(
+      tree.root.findAll((n) => n.props.testID === "formula-edit-card").length,
+    ).toBeGreaterThan(0);
+    const selectedFormula = tree.root.findAll(
+      (n) =>
+        n.props.accessibilityRole === "radio" &&
+        n.props.accessibilityState?.selected === true &&
+        typeof n.props.accessibilityLabel === "string" &&
+        n.props.accessibilityLabel.includes("Mifflin-St Jeor"),
+    );
+    expect(selectedFormula.length).toBeGreaterThan(0);
+    expect(textContent(tree)).toContain("Mifflin-St Jeor");
+  });
+
+  it("settings.target_override fixture renders the user override provenance without a tap", async () => {
+    enterE2EMode();
+    activateVisualReviewPreset("settings.target_override", null);
+
+    const tree = renderMounted({
+      getTargetFn: jest.fn().mockResolvedValue(OVERRIDDEN_CALORIE_TARGET),
+    });
+    await act(async () => {});
+
+    expect(textContent(tree)).toContain("✎ set by you");
+    expect(
+      tree.root.findAll(
+        (n) =>
+          n.props.accessibilityLabel ===
+            "Reset Calories to derived value of 1800 kcal" &&
+          typeof n.props.onPress === "function",
+      ),
+    ).toHaveLength(1);
+  });
+
   it("settings.appearance scrolls to the Preferences section via the seam", async () => {
     enterE2EMode();
     activateVisualReviewPreset("settings.appearance", null);
@@ -1327,6 +1368,10 @@ describe("Visual-review seam — Settings edit sub-states (FTY-267)", () => {
     expect(
       tree.root.findAll((n) => n.props.testID === "body-metric-edit-card"),
     ).toHaveLength(0);
+    expect(
+      tree.root.findAll((n) => n.props.testID === "formula-edit-card"),
+    ).toHaveLength(0);
+    expect(textContent(tree)).not.toContain("✎ set by you");
 
     const preferencesWrapper = tree.root.findAll(
       (n) => typeof n.props.onLayout === "function",
@@ -1354,5 +1399,24 @@ describe("Visual-review seam — Settings edit sub-states (FTY-267)", () => {
     expect(
       tree.root.findAll((n) => n.props.testID === "goal-edit-card"),
     ).toHaveLength(0);
+  });
+
+  it("is inert outside E2E mode for the target override and formula editor presets", async () => {
+    gThis["__DEV__"] = false;
+    activateVisualReviewPreset("settings.formula_edit", null);
+
+    let tree = renderMounted();
+    await act(async () => {});
+    expect(
+      tree.root.findAll((n) => n.props.testID === "formula-edit-card"),
+    ).toHaveLength(0);
+    act(() => tree.unmount());
+    mounted = null;
+
+    activateVisualReviewPreset("settings.target_override", null);
+    tree = renderMounted();
+    mounted = tree;
+    await act(async () => {});
+    expect(textContent(tree)).not.toContain("✎ set by you");
   });
 });

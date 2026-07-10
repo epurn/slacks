@@ -145,7 +145,12 @@ trust-and-correct wedge.
   Every sheet shows the source label & icon and matched entry name (e.g. "🔍 USDA ·
   Turkey breast, roasted", "📷 Label scan", "✎ You edited"), plus the user's original
   phrase quoted. A rough estimate is treated distinctly ("≈ Rough estimate" + an
-  explicit "Make it exact" nudge into Change-match). Compact and calm — honest about
+  explicit "Make it exact" nudge). "Make it exact" is its own lever, distinct from
+  Change match: Change match fixes a *wrong* source by search, while Make it exact
+  asks the user for *product evidence* — a barcode or a nutrition-label photo — and,
+  after a preview the user confirms, applies the resulting source (or a plainly
+  labelled lower-trust fallback) to the item in place (FTY-306,
+  `docs/contracts/evidence-retrieval.md`). Compact and calm — honest about
   origin, and it actively lifts the lowest-trust items rather than hiding them.
 - **Clarify-mode (for "needs a detail"): Slacks' question + quick-pick chips +
   free-text fallback.** The specific question ("What milk?") with likely answers as

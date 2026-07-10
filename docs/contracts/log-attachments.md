@@ -30,6 +30,13 @@ security-privacy / backend-core lane: `backend/app/models/attachments.py`,
 
 ## Version
 
+2 (FTY-306, contract only): the **label exact-upgrade** upload
+(`label-upload.md` → **Label exact-upgrade — FTY-306**) is a new consumer of this
+table's retention rule, not a change to it — discard by default; an explicit
+`save=true` writes exactly one user-owned row whose `log_event_id` is the
+targeted food item's **owning log event** (no new event is created). No schema,
+constraint, or retention change.
+
 1 (FTY-077): introduces the `log_attachments` table, the discard-by-default
 retention behaviour, and the fail-closed upload constraints. No HTTP endpoint or
 extraction logic yet.
@@ -138,3 +145,11 @@ ingest_upload(session, owner_id=uid, current_user=user,
 - FTY-061 (extraction) consumes the validated upload and writes extracted facts to
   `evidence_sources`; it reuses this table for the explicit-save case rather than
   redefining it.
+- **FTY-306 (contract only; no migration).** The label **exact-upgrade** upload
+  (`label-upload.md` → **Label exact-upgrade — FTY-306**) reuses `ingest_upload`
+  and this retention rule unchanged for an image supplied against an **existing**
+  food item: default discard after extraction, explicit `save=true` persisting
+  exactly one user-owned row keyed to the item's owning log event, fail-closed
+  size/type/signature validation, and no row on a failed extraction. It adds no
+  new table, column, or retention surface. Backend implementation is
+  **FTY-307–FTY-309**.
