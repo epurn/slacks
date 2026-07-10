@@ -240,8 +240,10 @@ in the one transaction that persists the `clarification_answers` row:
 - **Step entries** (`{"step", "status"}`) — the FTY-040 coarse per-step record,
   unchanged.
 - **Decision entries** (`{"step", "decision", …}`) — bounded structured records
-  the food-resolution steps (`food_resolve`, `official_source_resolve`) append so
-  a failed or fallen-through estimate is auditable from the run alone. Owned by
+  the food-resolution steps (`food_resolve`, `official_source_resolve`) and the
+  parse/interpretation step (`parse`, FTY-325) append so a failed or
+  fallen-through estimate — or a degenerate interpretation hypothesis — is
+  auditable from the run alone. Owned by
   `backend/app/estimator/decision_trace.py`, which sanitizes every value.
 
 A decision entry carries `step`, `decision`, and a **closed** optional field set
@@ -249,14 +251,14 @@ A decision entry carries `step`, `decision`, and a **closed** optional field set
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `decision` | label | What kind of decision: `candidate` (per-candidate intro), `source` (a source tier saw the candidate), `search` (one identity-query variant executed), `fetch` (one result-URL fetch), `extract` (one untrusted-text transcription), `serving` (serving-math routing), `outcome` (the candidate's terminal route), `trace_truncated` (bound marker). |
+| `decision` | label | What kind of decision: `candidate` (per-candidate intro), `source` (a source tier saw the candidate), `search` (one identity-query variant executed), `fetch` (one result-URL fetch), `extract` (one untrusted-text transcription), `serving` (serving-math routing), `outcome` (the candidate's terminal route), `hypothesis_revision` (an interpretation-hypothesis event on the parse step — FTY-324/FTY-325; its `outcome` labels are the sanitized hypothesis-revision vocabulary pinned in `parse-candidates.md`, e.g. `initial_hypothesis`, `item_split`, `item_added`, `brand_revised`, `hypothesis_kept`, `revision_truncated`, `deterministic_gate_failed`, `clarification_needed`), `trace_truncated` (bound marker). |
 | `candidate_index` | int | Position in the parsed food-candidate list — never the candidate's name or text. |
 | `has_brand` | bool | Whether the candidate names a branded product. |
 | `amount_kind` | label | `mass` / `volume` / `count` / `missing` / `unknown` — the parsed quantity's shape without its text. |
 | `tier` | label | Source tier consulted: `usda_fdc`, `open_food_facts`, `official_source`, `reference_source`, `model_prior`. |
 | `query_variant` | int | Which bounded FTY-253 identity-query variant produced this decision. |
 | `search_status` | label | The FTY-079 lookup status (`success`, `partial`, `failed`, …). |
-| `result_count` | int | Candidate URLs the search returned (clamped). |
+| `result_count` | int | Candidate URLs the search returned (clamped); on a `hypothesis_revision` entry, the hypothesis candidate count. |
 | `source_ref` | ref | Non-secret source reference (`usda_fdc:<fdcId>`, `official_source:<url>`); an embedded URL keeps **scheme/host/path only** — query string, fragment, and userinfo are dropped, and each remaining hostname label and path segment is redacted of secret-looking material (`key=…` pairs, provider-key prefixes, long opaque token blobs), so a token embedded in an untrusted result URL's subdomain or path never persists. |
 | `source_desc` | label | Bounded description of a **global** source row (e.g. the rejected FDC description) — global source data, never user text. |
 | `surface` | label | For `extract`: `page` (fetched body) or `snippet` (FTY-314 title+snippet fallback). |
