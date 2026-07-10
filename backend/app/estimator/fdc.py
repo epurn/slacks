@@ -41,6 +41,7 @@ from pydantic import (
 )
 
 from app.estimator.evidence_utils import _content_hash
+from app.estimator.fdc_ranking import fdc_preference_key, is_fdc_description_compatible
 from app.estimator.food_serving import NutritionFacts, nutrition_facts_plausible
 from app.estimator.hardened_fetch import (
     FetchPolicyError,
@@ -291,11 +292,13 @@ class FdcClient:
         return self._settings.is_configured
 
     def lookup(self, query: str) -> ProductFacts | None:
-        """Search FDC for ``query`` and return the first energy-bearing match.
+        """Search FDC for ``query`` and return the best-ranked compatible match.
 
         Only the sanitized food name is sent. Returns ``None`` when the source is
-        disabled or no result carries an energy value. Maps transport/policy failures
-        to :class:`FdcTransientError` / :class:`FdcResponseError`.
+        disabled, no result carries an energy value, or no result names the queried
+        food in a compatible form (FTY-254 — see :mod:`app.estimator.fdc_ranking`).
+        Maps transport/policy failures to :class:`FdcTransientError` /
+        :class:`FdcResponseError`.
         """
 
         response = self._search(query)
@@ -311,7 +314,9 @@ class FdcClient:
         ``max_results`` page bound — so the re-match capability can surface alternative
         source matches beyond the resolver's first pick. Only the sanitized food name is
         sent; energy-less results are excluded (a fact set with no energy is not an
-        offerable match). Returns ``[]`` when the source is disabled or nothing matches.
+        offerable match). Unlike :meth:`lookup`, no FTY-254 compatibility ranking is
+        applied — re-match deliberately surfaces every alternative for the user to
+        choose from. Returns ``[]`` when the source is disabled or nothing matches.
         Maps transport/policy failures to :class:`FdcTransientError` /
         :class:`FdcResponseError`, exactly like :meth:`lookup`.
         """
@@ -376,13 +381,30 @@ class FdcClient:
 
     @staticmethod
     def _first_match(query_key: str, response: FdcSearchResponse) -> ProductFacts | None:
-        """Map the first energy-bearing FDC food to :class:`ProductFacts`, or ``None``."""
+        """Select the best-ranked compatible energy-bearing FDC food, or ``None``.
 
-        for food in response.foods:
+        FTY-254: a trusted-database match must be the queried food in a
+        compatible form, not merely USDA's top lexical hit. Each energy-bearing,
+        plausible row must pass :func:`is_fdc_description_compatible` (head-noun
+        identity, no unstated density-changing form, stated added ingredients
+        present); the survivors are ordered by :func:`fdc_preference_key`
+        (common/fresh/simple forms first, then query-token coverage), with the
+        source's own relevance order as the tie-break. Rejecting every row is a
+        clean miss, so the resolver falls forward to the rough-estimate tiers
+        instead of costing the wrong food.
+        """
+
+        ranked: list[tuple[tuple[int, int], int, ProductFacts]] = []
+        for index, food in enumerate(response.foods):
             facts = _food_to_facts(query_key, food)
-            if facts is not None:
-                return facts
-        return None
+            if facts is None:
+                continue
+            if not is_fdc_description_compatible(query_key, food.description):
+                continue
+            ranked.append((fdc_preference_key(query_key, food.description), index, facts))
+        if not ranked:
+            return None
+        return min(ranked)[2]
 
 
 def _food_to_facts(query_key: str, food: FdcFood) -> ProductFacts | None:

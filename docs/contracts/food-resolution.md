@@ -39,6 +39,39 @@ estimator / contracts / backend-core / security-privacy lane:
 
 ## Version
 
+15 (FTY-254) adds **common-food FDC candidate ranking and common-portion
+defaults**. A `trusted_nutrition_database` match now means trusted nutrition
+facts for a **compatible food**, not USDA's first lexical hit
+(`backend/app/estimator/fdc_ranking.py`): an energy-bearing, plausible FDC row
+must also (a) name the query's **head noun** — the food identity (`hummus` in
+`dill pickle hummus`; a `Pickles, cucumber, dill or kosher dill` row matching
+only the flavor tokens is rejected, while plain `dill pickle` still resolves to
+pickles); (b) carry no **density-changing form** the query did not state
+(dehydrated / dried / dry / powder(ed) / flour / concentrate(d) / evaporated /
+condensed / chips / crisps / babyfood — so `banana` never costs as banana
+powder; the `dry roasted` idiom stays eligible, and a query stating such a form
+opts into the processed rows); and (c) name any **added ingredient** the query
+states (`buttered` toast is not plain toast). Surviving rows are ordered by
+fewest unstated *demoted* forms (canned / pickled / sweetened / smoked / cured /
+frozen / juice / syrup), then query-token coverage (`Egg, whole, cooked,
+scrambled` beats a raw-egg row for `scrambled eggs`), then USDA relevance order;
+rejecting every row is a clean miss that falls forward per the existing routing.
+`FdcClient.list_matches` (re-match alternatives) is deliberately unranked.
+Separately, a **stated count of an everyday food** whose selected source row
+lacks a serving size resolves through a closed, documented **common-portion
+table** (`backend/app/estimator/common_portions.py`: banana small/medium/large
+101/118/136 g, egg small→jumbo 38–63 g defaulting to the US large 50 g,
+bread slice 30 g, toast slice 25 g, butter pat 5 g / stick 113 g — published
+USDA household weights), recorded as an explicit
+`estimated_common_portion:<food> <cue> <grams> g` evidence assumption so the
+portion default stays visible and editable while the per-100g facts keep their
+trusted-database provenance; anything not matching the table keeps the existing
+routing. A bare, genuinely ambiguous item (`coffee`) resolves as an explicit
+rough model-prior default under `estimate_first` (never the generic no-option
+quantity question), and an item needing clarification (`curry`) asks an
+item-specific, optioned question per `parse-candidates.md`. No migration; no
+DTO change.
+
 14 (FTY-253) adds **brand-aware packaged-product routing**. For a **branded**
 candidate (non-blank `brand`), a generic USDA FDC hit is a *candidate source, not an
 automatic authority*: it is accepted only when the selected row is **compatible with
@@ -259,8 +292,12 @@ history, or any other personal context.
 The food name is normalized (lower-cased, whitespace-collapsed) into a `query_key`.
 Resolution checks the global `products` cache by `(source, query_key)` first; on a
 miss it calls FDC `/foods/search` (data types `Foundation` / `SR Legacy`, whose
-nutrient values are **per 100 g**), takes the first result carrying an energy (kcal)
-value, maps it to canonical per-100g facts, and caches it as a `products` row. A
+nutrient values are **per 100 g**), selects the **best-ranked compatible**
+energy-bearing result (FTY-254, `fdc_ranking.py` — head-noun identity match, no
+unstated density-changing form, stated added ingredients present; preferred by
+fewest unstated demoted forms, then query-token coverage, then relevance order —
+see **Version 15**), maps it to canonical per-100g facts, and caches it as a
+`products` row. Rejecting every result is a **miss**, not a wrong-food match. A
 cache hit makes **no** external call.
 
 Nutrient mapping: energy kcal (id 1008, **required**), protein (1003), carbohydrate
@@ -319,7 +356,13 @@ quantity to grams, v1-simple per the story scope:
 5. otherwise scan `quantity_text` for a leading `<number> <mass|volume unit>`.
 
 Returns `None` when none apply — e.g. a count with no known serving size, or an
-unrecognised/absent quantity. The active shared policy ([estimator-policy.md](estimator-policy.md))
+unrecognised/absent quantity. Before that gap routes onward, a **stated count of
+an everyday common food** (FTY-254 — banana, egg, bread/toast slice, butter
+pat/stick, with small/medium/large/jumbo size cues read from the parse) resolves
+via the documented common-portion table (`common_portions.py`, published USDA
+household weights), keeping the trusted-source facts and recording an explicit
+`estimated_common_portion:<food> <cue> <grams> g` assumption on the evidence row.
+Otherwise the active shared policy ([estimator-policy.md](estimator-policy.md))
 determines whether that gap falls forward to rough default-serving/reference/
 model-prior estimation or asks for more detail. Calories/macros then scale per-100g
 facts by `grams / 100`, rounded to 0.1 when grams are resolved; count-serving facts
@@ -490,7 +533,10 @@ parsed food candidate: name "crackers", quantity_text "", unit null, amount null
 See the worked example above. The serving math, FDC mapping, SSRF policy, migration
 rollback, and end-to-end resolution (with a stubbed FDC source) are covered by
 `tests/test_food_serving.py`, `tests/test_fdc_client.py`, `tests/test_hardened_fetch.py`,
-`tests/test_food_migration.py`, and `tests/test_food_resolution.py`.
+`tests/test_food_migration.py`, and `tests/test_food_resolution.py`. The FTY-254
+common-food ranking, the common-portion defaults, and the dogfood fixture set
+(calorie bands + provenance) are covered by `tests/test_fdc_ranking.py`,
+`tests/test_common_portions.py`, and `tests/test_common_food_resolution.py`.
 
 ## User-Stated Resolution (FTY-279)
 
@@ -1102,6 +1148,17 @@ The backend exposes four health-check endpoints, all returning structured JSON w
   (`backend/app/estimator/branded_routing.py`); `evidence_sources` shapes, the
   serving math, the search/fetch boundaries, generic-food FDC resolution, and
   barcode/OFF precedence are unchanged.
+- **FTY-254 (common-food FDC ranking + common portions).** A deliberate pre-v1
+  breaking change to generic-food FDC selection: `FdcClient.lookup` now selects
+  the best-ranked *compatible* result (`fdc_ranking.py`) instead of the first
+  energy-bearing one, and the food step resolves stated counts of everyday foods
+  through the documented common-portion table (`common_portions.py`) with an
+  explicit evidence assumption. **No migration**: both are pure routing/serving
+  policy; `evidence_sources.assumptions` (the `0012` column) already carries the
+  new `estimated_common_portion:*` label, and `products`/`evidence_sources`
+  shapes, barcode/OFF precedence, and the official/reference/model-prior tiers
+  are unchanged. A previously cached wrong-form `products` row is superseded
+  only by clearing the cache — acceptable pre-v1 (no deployed users).
 - **FTY-298 / FTY-303 (contract only; no code, no migration in this story).** FTY-298
   bumps the food resolution contract to the rare clarification policy, and FTY-303
   extracts the global mode semantics, allowed last-resort clarification reasons, and

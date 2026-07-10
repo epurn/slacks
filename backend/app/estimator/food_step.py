@@ -61,6 +61,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.estimator.branded_routing import is_evidence_brand_compatible
+from app.estimator.common_portions import resolve_common_portion_grams
 from app.estimator.detail_signals import has_food_detail, has_stated_nutrition
 from app.estimator.evidence_utils import _record_source_ref
 from app.estimator.fdc import (
@@ -431,12 +432,28 @@ class FoodResolveStep:
         """Apply deterministic serving math and build the resolved item + provenance."""
 
         product = resolved.product
+        assumptions: tuple[str, ...] = ()
         grams = resolve_grams(
             unit=candidate.unit,
             amount=candidate.amount,
             quantity_text=candidate.quantity_text,
             default_serving_g=product.default_serving_g,
         )
+        if grams is None:
+            # FTY-254: a stated count of an everyday food ("one banana", "2 large
+            # eggs") with no source serving size resolves via the documented
+            # common-portion table instead of losing the trusted-database match.
+            # The portion default is recorded as an explicit assumption so the
+            # number stays visibly rough at the portion level and editable.
+            portion = resolve_common_portion_grams(
+                name=candidate.name,
+                unit=candidate.unit,
+                amount=candidate.amount,
+                quantity_text=candidate.quantity_text,
+            )
+            if portion is not None:
+                grams = portion.grams
+                assumptions = (portion.assumption,)
         if grams is None:
             if allow_unresolvable_defer:
                 return None
@@ -473,6 +490,7 @@ class FoodResolveStep:
             protein_per_100g=product.protein_per_100g,
             carbs_per_100g=product.carbs_per_100g,
             fat_per_100g=product.fat_per_100g,
+            assumptions=assumptions,
         )
 
 
