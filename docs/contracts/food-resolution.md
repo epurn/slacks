@@ -39,6 +39,22 @@ estimator / contracts / backend-core / security-privacy lane:
 
 ## Version
 
+17 (FTY-306, contract only): adds **exact evidence upgrade routing** for an
+**existing** low-trust/incomplete food item — the correction sheet's
+`Make it exact` lever. Two source-specific proposal entry points (a typed or
+scanned **barcode**, and a **label image** upload carrying the existing `save`
+privacy flag) target an existing `derived_food_items` row through the existing
+hardened OFF and label-extraction paths, produce a server-held **proposal**
+(`exact` / `fallback` / `none` — `evidence-retrieval.md`, **Exact Evidence
+Upgrade — FTY-306**), and an **apply** operation replaces the item's source in
+place with re-match semantics after explicit preview/confirm. The current amount
+is preserved by default, an optional amount adjustment applies before costing,
+and an uncostable amount requires user action (`422`) instead of a guess; a
+fallback is never presented as exact. No schema, migration, endpoint code, or
+estimator change in this story; backend implementation is FTY-307–FTY-309,
+mobile consumption FTY-310–FTY-313. See **Exact Evidence Upgrade Routing —
+FTY-306** below.
+
 16 (FTY-324, contract only): redefines food resolution's source tiers as
 bounded **tools available to the `InterpretationSession`**, not a one-way
 fall-through keyed on the first parsed candidate fields. The model owns tier
@@ -1153,6 +1169,103 @@ metadata blocked, redirects refused, oversized and non-text bodies rejected, ine
 text, fail-closed off switch). `tests/test_food_migration.py` applies/rolls back the
 `0012` `assumptions` migration.
 
+## Exact Evidence Upgrade Routing — FTY-306
+
+The **exact evidence upgrade** re-aims an **existing** low-trust/incomplete food
+item at exact product evidence the user supplies — a barcode or a nutrition-label
+photo — through a **preview → explicit apply** flow. The proposal taxonomy,
+eligibility, quality semantics, and source-replacement write semantics are owned
+by `evidence-retrieval.md` (**Exact Evidence Upgrade — FTY-306**); this section
+fixes how the two evidence kinds route against an existing item, how the current
+amount is handled, and the no-silent-exact / no-silent-guess rules. Contract only:
+the backend routes are **FTY-307–FTY-309**, the mobile flow **FTY-310–FTY-313**.
+
+### Entry points (source-specific, existing item)
+
+Both entry points target an eligible existing `derived_food_items` row (food only;
+eligibility per `evidence-retrieval.md`) and produce a proposal read — **no item
+mutation on propose**:
+
+- **Barcode** —
+  `POST /api/users/{user_id}/derived-items/food/{item_id}/exact-upgrade/barcode`
+  with `{ "barcode": "<string>" }` (`extra="forbid"`). The barcode may be typed or
+  scanned; it is untrusted input, normalized to digits and length-checked
+  (GTIN 8/12/13/14) exactly as the **Barcode Source (FTY-060)** path does, and
+  looked up **server-side** through the same hardened OFF client, `products`
+  cache, per-100g canonicalisation, and plausibility bound. No other candidate
+  fields, no nutrition facts, no free text.
+- **Label** —
+  `POST /api/users/{user_id}/derived-items/food/{item_id}/exact-upgrade/label?save={bool}`
+  with the raw image bytes as the body and the declared `Content-Type`, exactly
+  the `label-upload.md` wire shape. The image is validated as **data** fail-closed
+  (size / content-type allowlist / magic number, `validate_upload`) before any
+  model call, then runs the existing schema-validated extraction
+  (`label-extraction.md`). The `save` query flag is the existing FTY-077 retention
+  choice: default `false` discards the image after extraction; `save=true` writes
+  one user-owned `log_attachments` row against the **item's owning log event**
+  (`label-upload.md`, **Label exact-upgrade — FTY-306**).
+
+Either entry point resolves to one proposal outcome — `exact`, `fallback`, or
+`none` — per the quality semantics in `evidence-retrieval.md`. A `fallback`
+proposal (exact evidence failed; a lower-trust reference / comparable-reference /
+model-prior estimate over the evidence's product identity is offered instead)
+carries its rough provenance and a `failure_reason` and is **never presented as
+exact**; a `none` outcome is a clear failure read, not an error status. A
+transient source failure during propose is surfaced honestly (retryable error,
+not an empty `none`), mirroring the re-match listing posture.
+
+### Amount preservation and costability
+
+- The item's **current amount is preserved by default**: propose costs the
+  preview at the item's current `amount`, and apply keeps that amount unless the
+  user adjusts it. Fixing the source does not touch the user's portion choice
+  (the FTY-092 stance, reused).
+- An **optional amount adjustment** may accompany apply
+  (`{ "proposal_ref": "...", "amount"?: number }`, `extra="forbid"` — no
+  nutrition facts). When present it is validated like a quantity edit
+  (positive, finite, bounded — `corrections.md`) and applied **before** costing,
+  so the applied values are the new source's facts at the adjusted amount.
+- **Costability is explicit, never guessed.** The proposal carries
+  `can_cost_current_amount`. When the proposal's source cannot cost the current
+  amount (serving math unresolvable — e.g. a count amount with no usable serving
+  relation) and the user supplied no adjusted amount, apply **fails closed** with
+  `422 {"error": "amount_required"}` — no silent default portion, consistent
+  with the re-match needs-clarification posture. The client asks the user for an
+  amount from the preview instead.
+
+### Apply (in-place source replacement)
+
+`POST /api/users/{user_id}/derived-items/food/{item_id}/exact-upgrade/apply`
+accepts **only** the opaque server-generated `proposal_ref` plus the optional
+`amount`. It re-derives the facts server-side from the server-held proposal
+(no fresh evidence egress, no client-supplied facts), recomputes with the
+FTY-044 serving math at the preserved or adjusted amount, rewrites the item's
+`evidence_sources` provenance in place, re-snapshots `*_estimated`, and appends
+one `re_match` correction row — the full source-replacement semantics of
+`evidence-retrieval.md` and the audit semantics of `corrections.md`. The item
+keeps its `id`, `log_event_id`, name slot, and timeline position; the applied
+item reads `is_edited = false` until a later manual override. Applying a
+`fallback` proposal writes its honest low-trust provenance
+(`reference_source` / `model_prior` / `comparable_reference` marker), so the
+item stays visibly rough and remains exact-upgrade-eligible.
+
+### Errors (contract-level)
+
+| Condition | Result |
+| --- | --- |
+| Cross-user or unknown user/item id (any operation) | `404`, fail-closed, no mutation, no existence disclosure. |
+| Item whose parent log event is voided (FTY-321 soft void) | `404`, same shape as unknown — no void oracle, no mutation (the corrections/re-match boundary precheck, `corrections.md`). |
+| Item not eligible (already source-backed, or an exercise item) | `422` `{ "error": "not_upgradeable" }`; nothing mutates. |
+| Invalid barcode shape (non-GTIN after normalization) | A `none`/`fallback` proposal with `failure_reason = barcode_invalid` — user input, not a transport error. |
+| Invalid label image (size / type / signature) | `413` / `415` fail-closed before any model call (`label-upload.md`); no proposal, no attachment. |
+| `proposal_ref` unknown, expired, or not held for this user + item | `422` `{ "error": "proposal_not_resolvable" }`; nothing mutates. |
+| Apply body carries nutrition facts / extra keys | `422` (request validation, `extra="forbid"`). |
+| Uncostable current amount and no user-adjusted amount | `422` `{ "error": "amount_required" }`; no guessed portion, nothing mutates. |
+| Transient source/provider failure during propose | Retryable error (`503`-family), surfaced honestly — never disguised as a `none` proposal. |
+
+Error shapes carry stable codes and field names only — never nutrition values,
+image data, OCR text, provider output, or URLs.
+
 ## Liveness & Diagnostics
 
 The backend exposes four health-check endpoints, all returning structured JSON with no external calls:
@@ -1316,3 +1429,13 @@ The backend exposes four health-check endpoints, all returning structured JSON w
   settings, or runtime change; it preserves the FTY-298 policy modes, the FTY-278
   item-scoped output shape, and every existing privacy/egress/provenance boundary.
   FTY-325/FTY-326 implement the interpreter core and tool orchestration.
+- **FTY-306 (contract only; no code or migration in this story).** Adds the
+  **Exact Evidence Upgrade Routing** section: barcode/label proposal entry points
+  targeting an existing food item, the preserved-amount / optional-adjustment /
+  `amount_required` costability rules, and the apply operation's in-place source
+  replacement. It reuses the FTY-060 hardened OFF path, the FTY-061/FTY-064
+  label validation/extraction boundary and `save` retention flag, the FTY-044
+  serving math, and the FTY-093 re-match write semantics unchanged — no new
+  source tier, no schema change (`evidence_sources` shapes and `corrections`
+  strings already carry everything). Backend implementation is
+  **FTY-307–FTY-309**; mobile consumption is **FTY-310–FTY-313**.

@@ -86,6 +86,16 @@ persistence and no migration — the same computed read over existing (already-n
 macro columns; the `user_text` source system is `evidence-retrieval.md`'s, and it is
 **numerically inert until the FTY-280 estimator follow-up** first writes such an item.
 
+7 (FTY-306, contract only) aligns the `source` descriptor's rough-estimate nudge
+wording with the **exact evidence upgrade** eligibility
+(`evidence-retrieval.md` → **Exact Evidence Upgrade — FTY-306**): the
+"≈ rough estimate · make it exact" treatment renders for `model_prior`,
+`reference_source`, and an incomplete `user_text` item (a `null` macro fact or a
+non-null `estimate_basis`) — not for `model_prior` alone. A pure documentation
+alignment over fields this read already contracts: no new persistence, no DTO
+shape change, no migration. Backend proposal/apply implementation is
+FTY-307–FTY-309; mobile nudge consumption is FTY-310–FTY-313.
+
 ## Inputs
 
 ### HTTP request
@@ -339,10 +349,10 @@ exercise items (burn comes from MET tables, not an evidence row).
 
 | Field | Meaning |
 | --- | --- |
-| `source_type` | The `evidence-retrieval.md` hierarchy enum on the item's `evidence_sources` row: `trusted_nutrition_database`, `product_database`, `official_source`, `user_label`, `user_text` (FTY-279), `reference_source`, `model_prior`. A `model_prior` value is the client's signal to render the "≈ rough estimate · make it exact" treatment (ux-design §4a); a `user_text` item's headline (its calories) is a **user-stated** value, and any macro estimated to fill a gap carries `field_provenance = estimated` for the detail sheet. |
+| `source_type` | The `evidence-retrieval.md` hierarchy enum on the item's `evidence_sources` row: `trusted_nutrition_database`, `product_database`, `official_source`, `user_label`, `user_text` (FTY-279), `reference_source`, `model_prior`. The "≈ rough estimate · make it exact" treatment (ux-design §4a) renders exactly for the **exact-upgrade-eligible** states (FTY-306, `evidence-retrieval.md` → **Exact Evidence Upgrade**; mobile consumption FTY-310–FTY-313): `model_prior`, `reference_source`, and a `user_text` item whose macros are incomplete — a macro fact `null` in this read shape, or a non-null `estimate_basis` below. The already source-backed types (`user_label`, `product_database`, `trusted_nutrition_database`, `official_source`) never show it. A `user_text` item's headline (its calories) is a **user-stated** value; a macro estimated to fill a gap is recorded `field_provenance = estimated` on the evidence row (`evidence-retrieval.md`), and this read shape surfaces that fill only through `estimate_basis` below. |
 | `label` | A human, display-ready string mapped deterministically from `source_type` / `ref`: `trusted_nutrition_database` → "USDA", `product_database` → "Open Food Facts", `user_label` → "Label scan", `user_text` → "You logged" (FTY-279), `official_source` → the URL host, `reference_source` → the page host, `model_prior` → "Rough estimate". |
 | `ref` | The stable `source_ref` (`usda_fdc:<id>`, `open_food_facts:<barcode>`, `official_source:<url>`, `user_label:<hash>`, `user_text:<hash>` (FTY-279), `reference_source:<url>`, `model_prior`) for the sheet's deeper provenance line. For an `official_source` / `reference_source` item this is the **URL only** (no headers, body, or query secrets); for a `user_text` item it is the hash of the extracted facts, **never the raw diary phrase**. |
-| `estimate_basis` | *(FTY-281, optional)* How a `user_text` item's **missing** macros were filled, when a rough comparable-reference aggregate backs them: `comparable_reference`, else `null` (the common case). Derived at read time from the item's own `evidence_sources.assumptions` marker — no new persisted column. The item's `source_type` stays `user_text` (its calories are the user's stated number); only the gap-filling macro estimate carries this secondary basis, so a client can distinguish it from a plain user-stated item whose macros are simply unknown. |
+| `estimate_basis` | *(FTY-281, optional)* How a `user_text` item's **missing** macros were filled, when a rough comparable-reference aggregate backs them: `comparable_reference`, else `null` (the common case). Derived at read time from the item's own `evidence_sources.assumptions` marker — no new persisted column. The item's `source_type` stays `user_text` (its calories are the user's stated number); only the gap-filling macro estimate carries this secondary basis, so a client can distinguish it from a plain user-stated item whose macros are simply unknown. A non-null value is one of the exact-upgrade nudge signals (FTY-306, `source_type` row above). |
 
 The descriptor is **derived at read time** from the existing `evidence_sources` row
 — no new persisted provenance column, no de-normalization, and only the owner's own
@@ -496,3 +506,13 @@ curl -s ':8000/api/users/<uid>/daily-summary/range?from=2025-01-01&to=2026-06-01
   nothing to any total and `uncounted_entries` still counts one per event-level
   `needs_clarification` event (the FTY-223 baseline). The consumer contract
   (FTY-188 Trends) is unchanged.
+- **FTY-306 (contract only; no schema/code in this story).** Broadens the
+  `source` descriptor's rough-estimate nudge wording from `model_prior`-only to
+  the full **exact-upgrade-eligible** set (`evidence-retrieval.md` → **Exact
+  Evidence Upgrade**): `model_prior`, `reference_source`, and an incomplete
+  `user_text` item (a `null` macro fact or a non-null `estimate_basis`). Purely
+  a documentation alignment over fields this read shape **already contracts** —
+  no new table, column, DTO field, or endpoint change; the descriptor stays a
+  derived read of the item's `evidence_sources` row. Backend proposal/apply
+  implementation is FTY-307–FTY-309; mobile nudge consumption is
+  FTY-310–FTY-313.
