@@ -39,7 +39,7 @@ appId: com.fatty
 # Step 3: Submit a log — the mock returns it pending first so the same
 #         skeleton→value resolve path runs under Reduce Motion.
 - tapOn:
-    text: "Log food or exercise"
+    text: "Log food or exercise.*"
 - inputText: "greek yogurt and banana"
 - tapOn:
     text: "Add entry"

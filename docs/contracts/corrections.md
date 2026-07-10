@@ -83,7 +83,7 @@ The estimated value is captured **exactly once** and never mutated afterward:
 
 - **At creation** — the estimator persists a resolved item with each `*_estimated`
   column set to the value it just computed (the preferred path; see
-  `app/estimator/processing.py`).
+  `app/estimator/persist.py`).
 - **On first edit (safety net)** — if an `*_estimated` column is still `NULL`
   (e.g. an item created before this migration), the edit snapshots the prior
   current value into it before applying the change.

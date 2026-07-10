@@ -1,4 +1,4 @@
-import { StyleSheet } from 'react-native';
+import { Animated, StyleSheet } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -10,6 +10,11 @@ import {
   type FloatingSwitcherSegment,
 } from './FloatingSwitcher';
 import { spacing, ThemeProvider } from '@/theme';
+import {
+  cleanupReactTestRenderers,
+  trackReactTestRenderer,
+} from '@/testUtils/reactTestRenderer';
+import { mockReduceMotion } from '@/testUtils/reduceMotion';
 
 // Stub the native blur so the pill renders without the native module; expose the
 // tint so the light/dark material can be asserted.
@@ -41,6 +46,17 @@ const SEGMENTS: readonly FloatingSwitcherSegment[] = [
   { key: 'trends', label: 'Trends', icon: 'chart.line.uptrend.xyaxis' },
 ];
 
+// Reduce Motion off by default so the capsule takes its spring path; specific
+// tests below override this to exercise the Reduce Motion branch.
+beforeEach(() => {
+  mockReduceMotion(false);
+});
+
+afterEach(() => {
+  cleanupReactTestRenderers();
+  jest.restoreAllMocks();
+});
+
 function renderSwitcher(
   override: 'light' | 'dark',
   activeKey: string,
@@ -48,7 +64,36 @@ function renderSwitcher(
 ): ReactTestRenderer {
   let tree!: ReactTestRenderer;
   act(() => {
-    tree = create(
+    tree = trackReactTestRenderer(
+      create(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 390, height: 844 },
+            insets: { top: 47, left: 0, right: 0, bottom: 34 },
+          }}
+        >
+          <ThemeProvider override={override}>
+            <FloatingSwitcher segments={SEGMENTS} activeKey={activeKey} onSelect={onSelect} />
+          </ThemeProvider>
+        </SafeAreaProvider>,
+      ),
+    );
+  });
+  return tree;
+}
+
+function segment(tree: ReactTestRenderer, key: string) {
+  return tree.root.find((n) => n.props.testID === `floating-switcher-${key}`);
+}
+
+function updateSwitcher(
+  tree: ReactTestRenderer,
+  override: 'light' | 'dark',
+  activeKey: string,
+  onSelect: (key: string) => void = jest.fn(),
+): void {
+  act(() => {
+    tree.update(
       <SafeAreaProvider
         initialMetrics={{
           frame: { x: 0, y: 0, width: 390, height: 844 },
@@ -61,11 +106,22 @@ function renderSwitcher(
       </SafeAreaProvider>,
     );
   });
-  return tree;
 }
 
-function segment(tree: ReactTestRenderer, key: string) {
-  return tree.root.find((n) => n.props.testID === `floating-switcher-${key}`);
+// react-test-renderer never fires real `onLayout` events, so tests that need
+// measured segment bounds (the sliding capsule) trigger them by hand with
+// synthetic — but realistically shaped — layout rectangles.
+function layoutSegments(tree: ReactTestRenderer): void {
+  act(() => {
+    segment(tree, 'index').props.onLayout({
+      nativeEvent: { layout: { x: 4, y: 4, width: 92, height: 44 } },
+    });
+  });
+  act(() => {
+    segment(tree, 'trends').props.onLayout({
+      nativeEvent: { layout: { x: 100, y: 4, width: 98, height: 44 } },
+    });
+  });
 }
 
 describe('FloatingSwitcher (FTY-242)', () => {
@@ -86,8 +142,9 @@ describe('FloatingSwitcher (FTY-242)', () => {
       );
       expect(text).toBeTruthy();
 
-      // ≥44pt accessible press target.
-      const flat = StyleSheet.flatten(node.props.style) as {
+      // ≥44pt accessible press target. `style` is the pressed-state function
+      // form (FTY-323); resolve it for the unpressed state to get the layout.
+      const flat = StyleSheet.flatten(node.props.style({ pressed: false })) as {
         minHeight?: number;
         minWidth?: number;
       };
@@ -169,5 +226,101 @@ describe('floatingSwitcherClearance', () => {
   it('is a positive number equal to the footprint when there is no home indicator', () => {
     expect(floatingSwitcherClearance(0)).toBe(footprint);
     expect(floatingSwitcherClearance(0)).toBeGreaterThan(0);
+  });
+});
+
+describe('FloatingSwitcher — pressed feedback (FTY-323)', () => {
+  it('dims the pressed segment with a calm opacity — no white flash, scale, or ripple', () => {
+    const tree = renderSwitcher('light', 'index');
+    const node = segment(tree, 'trends');
+
+    // `style` is the pressed-state function form; RN never invokes it in
+    // react-test-renderer, so the test calls it directly with both states.
+    expect(typeof node.props.style).toBe('function');
+    const rest = StyleSheet.flatten(node.props.style({ pressed: false })) as Record<
+      string,
+      unknown
+    >;
+    const pressed = StyleSheet.flatten(node.props.style({ pressed: true })) as Record<
+      string,
+      unknown
+    >;
+
+    expect(pressed.opacity).toBeLessThan(1);
+    expect(rest.opacity).not.toBe(pressed.opacity);
+    // No scale transform, no background swap, no Android ripple — a quiet dim
+    // is the whole effect, matching EntryRow/ItemTimelineRow's pressed idiom.
+    expect(pressed.transform).toBeUndefined();
+    expect(pressed.backgroundColor).toBeUndefined();
+    expect(node.props.android_ripple).toBeUndefined();
+  });
+});
+
+describe('FloatingSwitcher — active capsule motion (FTY-323)', () => {
+  const FAKE_ANIM = {
+    start: (cb?: (r: { finished: boolean }) => void) => cb?.({ finished: true }),
+    stop: () => {},
+  };
+  let springSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    springSpy = jest.spyOn(Animated, 'spring').mockReturnValue(FAKE_ANIM as never);
+  });
+
+  it('snaps into place on initial layout — no spring on mount', () => {
+    const tree = renderSwitcher('light', 'index');
+    layoutSegments(tree);
+
+    expect(springSpy).not.toHaveBeenCalled();
+
+    const capsule = tree.root.find((n) => n.props.testID === 'floating-switcher-capsule');
+    const flat = StyleSheet.flatten(capsule.props.style) as { left?: unknown; width?: unknown };
+    expect((flat.left as { __getValue?: () => number }).__getValue?.()).toBe(4);
+    expect((flat.width as { __getValue?: () => number }).__getValue?.()).toBe(92);
+  });
+
+  it('animates the capsule across with Animated.spring when the active segment changes', () => {
+    const tree = renderSwitcher('light', 'index');
+    layoutSegments(tree);
+    springSpy.mockClear();
+
+    updateSwitcher(tree, 'light', 'trends');
+
+    expect(springSpy).toHaveBeenCalled();
+    // Both axes (position and width) animate, since the two labels differ in width.
+    expect(springSpy.mock.calls.some((call) => call[1]?.toValue === 100)).toBe(true);
+    expect(springSpy.mock.calls.some((call) => call[1]?.toValue === 98)).toBe(true);
+    // Springs the raised capsule with useNativeDriver: false (left/width can't
+    // run on the native driver) using the shared short-spring config.
+    expect(springSpy.mock.calls.every((call) => call[1]?.useNativeDriver === false)).toBe(true);
+  });
+
+  it('a re-layout of the still-active segment (Dynamic Type) snaps without a spring', () => {
+    const tree = renderSwitcher('light', 'index');
+    layoutSegments(tree);
+    springSpy.mockClear();
+
+    act(() => {
+      segment(tree, 'index').props.onLayout({
+        nativeEvent: { layout: { x: 4, y: 4, width: 110, height: 44 } },
+      });
+    });
+
+    expect(springSpy).not.toHaveBeenCalled();
+  });
+
+  it('Reduce Motion: swaps the capsule position instantly instead of springing', () => {
+    mockReduceMotion(true);
+    const tree = renderSwitcher('light', 'index');
+    layoutSegments(tree);
+    springSpy.mockClear();
+
+    updateSwitcher(tree, 'light', 'trends');
+
+    expect(springSpy).not.toHaveBeenCalled();
+    const capsule = tree.root.find((n) => n.props.testID === 'floating-switcher-capsule');
+    const flat = StyleSheet.flatten(capsule.props.style) as { left?: unknown; width?: unknown };
+    expect((flat.left as { __getValue?: () => number }).__getValue?.()).toBe(100);
+    expect((flat.width as { __getValue?: () => number }).__getValue?.()).toBe(98);
   });
 });

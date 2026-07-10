@@ -507,3 +507,61 @@ describe("BarcodeScannerScreen – scan chrome", () => {
     expect(hasA11yLabel(tree, "Type it instead")).toBe(true);
   });
 });
+
+// ─── Reusable raw source: exact-evidence host (FTY-311) ───────────────────────
+
+describe("BarcodeScannerScreen – reusable as a raw barcode source", () => {
+  const granted = () =>
+    makePermission({ status: PermissionStatus.GRANTED, granted: true });
+
+  it("hides 'Type it instead' when no onManualEntry is provided", () => {
+    // An exact-evidence host has no composer to fall back to, so it omits
+    // onManualEntry; the affordance is hidden but the close control remains.
+    const tree = mount(
+      <BarcodeScannerScreen
+        onBarcodeScanned={jest.fn()}
+        onClose={jest.fn()}
+        permissionsHook={makePermissionsHook(granted())}
+      />,
+    );
+
+    expect(hasA11yLabel(tree, "Type it instead")).toBe(false);
+    // Still a live scanner with an exit.
+    expect(hasA11yLabel(tree, "Camera viewfinder")).toBe(true);
+    expect(hasA11yLabel(tree, "Close scanner")).toBe(true);
+  });
+
+  it("still keeps 'Type it instead' for the normal composer host", () => {
+    const tree = mount(
+      <BarcodeScannerScreen
+        onBarcodeScanned={jest.fn()}
+        onClose={jest.fn()}
+        onManualEntry={jest.fn()}
+        permissionsHook={makePermissionsHook(granted())}
+      />,
+    );
+
+    expect(hasA11yLabel(tree, "Type it instead")).toBe(true);
+  });
+
+  it("delivers the scanned string to an exact-evidence host with no manual-entry path", () => {
+    const onBarcodeScanned = jest.fn();
+    mount(
+      <BarcodeScannerScreen
+        onBarcodeScanned={onBarcodeScanned}
+        onClose={jest.fn()}
+        permissionsHook={makePermissionsHook(granted())}
+      />,
+    );
+
+    act(() => {
+      mockTriggerScan?.("5901234123457");
+    });
+
+    // The scanner is a pure source: it hands over the string and creates nothing
+    // else. Exactly one string argument, no image/URI/blob.
+    expect(onBarcodeScanned).toHaveBeenCalledTimes(1);
+    expect(onBarcodeScanned).toHaveBeenCalledWith("5901234123457");
+    expect(onBarcodeScanned.mock.calls[0]).toHaveLength(1);
+  });
+});

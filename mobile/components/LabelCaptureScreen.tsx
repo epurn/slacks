@@ -7,17 +7,31 @@
  * capture.
  *
  * Flow:
- *   camera → (shutter) → preview → (upload) → done (calls onUploaded)
+ *   camera → (shutter) → preview → (submit) → done (host handles the capture)
  *                               → (retake)  → camera
  *
- * The "save this photo" toggle defaults to off (discard-by-default per FTY-077).
- * When on, the `save` flag is forwarded to the label-upload endpoint, which
- * persists the raw image as a `log_attachment`; when off, the backend discards it
- * after extraction.
+ * The component is a reusable label-capture surface (FTY-311): it owns the
+ * camera, preview, save-photo toggle, and the loading/error phases, but it does
+ * not assume what happens on submit. The single `onSubmit` handler receives the
+ * captured image URI and the save-photo flag and decides the outcome:
+ *   - the normal Today host uploads via `uploadLabelImage` and opens the
+ *     confirm-parsed-values flow;
+ *   - an exact-evidence host (FTY-312) receives the same capture to attach as
+ *     evidence, without the capture component assuming a `LogEventDTO` comes
+ *     back.
+ * A rejected `onSubmit` surfaces the in-place error state; the mapping of known
+ * label-upload errors to friendly copy stays here so the normal host keeps its
+ * error UX for free.
  *
- * Security: the captured image is not retained on-device beyond this flow.
- * Errors carry only HTTP status — never image bytes, URIs, or extracted content.
- * Camera permission is handled by CameraCapture (FTY-063), reused without changes.
+ * The "save this photo" toggle defaults to off (discard-by-default per FTY-077).
+ * When on, the `savePhoto` flag is forwarded to the submit handler; the normal
+ * host passes it to the label-upload endpoint, which persists the raw image as a
+ * `log_attachment`; when off, the backend discards it after extraction.
+ *
+ * Security: the captured image is not retained on-device beyond this flow — the
+ * URI is handed only to the caller-provided `onSubmit`. Errors carry only HTTP
+ * status — never image bytes, URIs, or extracted content. Camera permission is
+ * handled by CameraCapture (FTY-063), reused without changes.
  */
 
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -36,7 +50,6 @@ import {
   LabelUploadApiError,
   LabelUploadInvalidTypeError,
   LabelUploadTooLargeError,
-  uploadLabelImage as uploadLabelImageApi,
 } from "@/api/labelCapture";
 import { useTheme } from "@/theme/ThemeContext";
 import { typeScale } from "@/theme/typography";
@@ -46,8 +59,6 @@ import {
   CameraCapture,
   type CameraCaptureProps,
 } from "@/components/CameraCapture";
-import type { ApiSession } from "@/state/session";
-import type { LogEventDTO } from "@/api/logEvents";
 
 const RATIONALE =
   "Fatty uses the camera to photograph nutrition labels so you can log packaged foods accurately.";
@@ -61,16 +72,28 @@ interface CapturedPhoto {
   uri: string;
 }
 
-export interface LabelCaptureScreenProps {
-  /** Called after a successful upload with the resulting log event. */
-  onUploaded: (event: LogEventDTO) => void;
-  onClose: () => void;
-  session: ApiSession;
+/** A captured label handed to the submit handler. */
+export interface LabelCapture {
   /**
-   * Injectable upload function for tests. Defaults to `uploadLabelImage`.
-   * Receives the image URI, the save flag, and returns the resulting event.
+   * Local file URI of the captured label image. Ephemeral: it exists only long
+   * enough for `onSubmit` to consume it and is never persisted by this
+   * component.
    */
-  upload?: (imageUri: string, savePhoto: boolean) => Promise<LogEventDTO>;
+  imageUri: string;
+  /** Whether the user opted to keep the photo. Defaults off (discard-by-default). */
+  savePhoto: boolean;
+}
+
+export interface LabelCaptureScreenProps {
+  /**
+   * Handles a captured label. Receives the image URI and the save-photo flag.
+   * The normal Today host uploads via `uploadLabelImage` and opens the
+   * confirm-parsed-values flow; an exact-evidence host (FTY-312) receives the
+   * capture for its own use. Reject to surface the in-place error state. Must
+   * not persist or log the URI beyond its own handling.
+   */
+  onSubmit: (capture: LabelCapture) => Promise<void>;
+  onClose: () => void;
   /**
    * Injectable photo capture for tests. Defaults to calling
    * `cameraRef.current.takePictureAsync`. Receives no arguments and returns
@@ -95,10 +118,8 @@ function messageFor(error: unknown): string {
  * label-upload endpoint. Use inside a Modal from TodayScreen.
  */
 export function LabelCaptureScreen({
-  onUploaded,
+  onSubmit,
   onClose,
-  session,
-  upload,
   takePhoto,
   permissionsHook,
 }: LabelCaptureScreenProps) {
@@ -111,12 +132,6 @@ export function LabelCaptureScreen({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [torchOn, setTorchOn] = useState(false);
 
-  const defaultUpload = useCallback(
-    (imageUri: string, save: boolean) =>
-      uploadLabelImageApi(session, imageUri, save),
-    [session],
-  );
-
   const defaultTakePhoto = useCallback(async (): Promise<CapturedPhoto> => {
     const result = await cameraRef.current?.takePictureAsync({ quality: 0.8 });
     if (!result) {
@@ -126,7 +141,6 @@ export function LabelCaptureScreen({
   }, []);
 
   const doTakePhoto = takePhoto ?? defaultTakePhoto;
-  const doUpload = upload ?? defaultUpload;
 
   // The flash control only exists in the camera/error phases, so gate the torch
   // to those phases: once the user leaves (preview/uploading), the torch turns
@@ -157,14 +171,16 @@ export function LabelCaptureScreen({
     setPhase("uploading");
     setUploadError(null);
     try {
-      const event = await doUpload(photo.uri, savePhoto);
-      onUploaded(event);
+      // The host decides the outcome (upload + confirm-parsed, or attach as
+      // exact evidence). On success it advances/closes; this component adds no
+      // further state so there is no update after a possible unmount.
+      await onSubmit({ imageUri: photo.uri, savePhoto });
     } catch (error) {
       // Error message must not contain image bytes, URIs, or extracted content.
       setUploadError(messageFor(error));
       setPhase("error");
     }
-  }, [photo, savePhoto, doUpload, onUploaded]);
+  }, [photo, savePhoto, onSubmit]);
 
   return (
     <CameraCapture

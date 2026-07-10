@@ -75,9 +75,9 @@
     },
     {
       "direction": "estimator_to_backend",
-      "path": "backend/app/estimator/processing.py",
+      "path": "backend/app/estimator/persist.py",
       "module": "app.services.attachments",
-      "reason": "Existing worker ingestion dependency at FTY-200 baseline."
+      "reason": "Existing worker ingestion dependency at FTY-200 baseline; re-homed from processing.py to persist.py in FTY-331 when the persistence layer (incl. _retain_label_image) was extracted."
     },
     {
       "direction": "estimator_to_backend",

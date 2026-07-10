@@ -40,7 +40,7 @@ appId: com.fatty
 # Step 3: Submit "oatmeal" — the mock resolves it straight to a completed entry
 #         with a real derived item on the by-date feed.
 - tapOn:
-    text: "Log food or exercise"
+    text: "Log food or exercise.*"
 - inputText: "oatmeal"
 - tapOn:
     text: "Add entry"
