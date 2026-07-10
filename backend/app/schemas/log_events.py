@@ -118,12 +118,13 @@ class ClarificationQuestionDTO(BaseModel):
 
 
 class ClarificationResponse(BaseModel):
-    """Response body for the owner-scoped clarification read (FTY-152, FTY-170).
+    """Response body for the owner-scoped clarification read.
 
-    Carries a ``needs_clarification`` event's **unanswered** clarification
-    questions ordered by ``position``. The read is status-gated: an owned event
-    in any other status — or one with no unanswered rows — yields an empty list,
-    and the two cases are indistinguishable (no status oracle).
+    Carries a ``needs_clarification`` or ``partially_resolved`` event's
+    **unanswered** clarification questions ordered by ``position``. The read is
+    status-gated: an owned event in any other status — or one with no unanswered
+    rows — yields an empty list, and the two cases are indistinguishable (no
+    status oracle).
     """
 
     questions: list[ClarificationQuestionDTO]

@@ -141,9 +141,10 @@ class LogEventStatus(StrEnum):
 
     This is the canonical v1 status vocabulary for the log-event state machine.
     A new event starts at :attr:`PENDING`; the estimator pipeline (Milestone 4)
-    drives it through :attr:`PROCESSING` to a terminal :attr:`COMPLETED`,
-    :attr:`FAILED`, or :attr:`NEEDS_CLARIFICATION`. The legal transitions between
-    these statuses are the named state-machine contract in
+    drives it through :attr:`PROCESSING` to :attr:`COMPLETED`, :attr:`FAILED`,
+    :attr:`NEEDS_CLARIFICATION`, or the item-scoped partial
+    :attr:`PARTIALLY_RESOLVED`. The legal transitions between these statuses are
+    the named state-machine contract in
     :mod:`app.services.log_events`; later stories extend that map rather than
     redefining the vocabulary here.
 
@@ -157,6 +158,7 @@ class LogEventStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     NEEDS_CLARIFICATION = "needs_clarification"
+    PARTIALLY_RESOLVED = "partially_resolved"
 
 
 class EstimationJobStatus(StrEnum):
