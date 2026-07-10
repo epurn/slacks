@@ -1037,8 +1037,13 @@ The write operation takes the existing item plus a **chosen candidate reference*
    than fabricate a number (consistent with FTY-044 routing).
 3. **Rewrite provenance to the new source.** The item's `evidence_sources` row is
    updated **in place** (`source_type`, `source_ref`, `content_hash`, `fetched_at`, the
-   immutable per-100g facts snapshot, `product_id` link, `assumptions`). The item keeps
-   its `id`, `log_event_id`, name slot, and timeline position.
+   immutable per-100g facts snapshot, `product_id` link, `assumptions`). The chosen
+   candidate is always a `Product`, whose density facts are always per-100g, so
+   `basis` is **reset to `per_100g`** and `field_provenance` is **reset to `null`**
+   (a single database source gives every fact field a homogeneous origin) — the
+   rewrite never leaves a stale `as_logged` / `per_serving` basis or a stale per-field
+   origin map over the new per-100g snapshot (FTY-316). The item keeps its `id`,
+   `log_event_id`, name slot, and timeline position.
 4. **Re-snapshot `*_estimated` to the newly computed values.** A re-match is a fresh
    source-backed estimate, not a manual override, so the estimated/original snapshot is
    **reset** to the new source's computed values and the item is **not** marked

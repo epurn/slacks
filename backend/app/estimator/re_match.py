@@ -422,7 +422,13 @@ class ReMatchCapability:
         the item keeps a single provenance record now pointing at the new source: the
         ``source_type`` / ``source_ref`` / ``content_hash`` / ``fetched_at`` / immutable
         per-100g snapshot / ``product_id`` link. ``assumptions`` is cleared — a re-match
-        to a database source carries none.
+        to a database source carries none. ``basis`` is reset to ``per_100g`` — the
+        chosen candidate is always a :class:`Product`, whose density facts are always
+        per-100g, so the basis label must agree with the snapshot this rewrite writes
+        (FTY-316) rather than carry over a stale ``as_logged``/``per_serving`` basis.
+        ``field_provenance`` is reset to ``None`` — a single database source gives every
+        field a homogeneous origin, so a stale per-field origin map must not survive
+        onto the new snapshot.
         """
 
         evidence = self.session.scalars(
@@ -443,10 +449,12 @@ class ReMatchCapability:
         evidence.source_ref = product.source_ref
         evidence.content_hash = product.content_hash
         evidence.fetched_at = datetime.now(UTC)
+        evidence.basis = PER_100G_BASIS
         evidence.calories_per_100g = product.calories_per_100g
         evidence.protein_per_100g = product.protein_per_100g
         evidence.carbs_per_100g = product.carbs_per_100g
         evidence.fat_per_100g = product.fat_per_100g
+        evidence.field_provenance = None
         evidence.assumptions = None
 
     def _record_re_match(

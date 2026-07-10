@@ -90,6 +90,8 @@ def seed_evidence(
     source_type: str,
     source_ref: str,
     assumptions: list[str] | None = None,
+    basis: str = "per_100g",
+    field_provenance: dict[str, str] | None = None,
 ) -> uuid.UUID:
     """Insert a user-owned ``evidence_sources`` row for a derived food item.
 
@@ -97,6 +99,9 @@ def seed_evidence(
     that an amount adjust leaves this snapshot untouched. Reuses the item's owning
     ``log_event_id`` so ownership cascades stay consistent. ``assumptions`` seeds the
     stored provenance list (e.g. to exercise the FTY-281 ``estimate_basis`` derivation).
+    ``basis``/``field_provenance`` default to the ordinary database-source shape; pass
+    non-default values to seed a stale ``as_logged``/heterogeneous row (e.g. for
+    re-match provenance-reset tests).
     """
 
     factory = create_session_factory(db_engine)
@@ -111,6 +116,8 @@ def seed_evidence(
             source_type=source_type,
             source_ref=source_ref,
             assumptions=assumptions,
+            basis=basis,
+            field_provenance=field_provenance,
             content_hash="0" * 64,
             fetched_at=datetime.now(UTC),
             calories_per_100g=130.0,

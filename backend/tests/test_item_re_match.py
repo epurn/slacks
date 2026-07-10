@@ -385,6 +385,85 @@ def test_re_resolve_recomputes_rewrites_provenance_and_resnapshots(
     )
 
 
+def test_re_resolve_resets_a_stale_as_logged_basis_to_per_100g(
+    client: TestClient, db_engine: Engine, session: Session
+) -> None:
+    """FTY-316: a re-match to a database Product always resets basis + field_provenance.
+
+    The prior evidence row is a FTY-279/301 ``as_logged`` user-text/model-prior row with
+    a heterogeneous per-field origin map. A re-match target is always a per-100g
+    ``Product``, so the rewritten row must honestly read ``per_100g`` over the new
+    snapshot, not carry the stale ``as_logged`` label and origin map over it.
+    """
+
+    user_id, _auth = register(client, "rematch-basis-reset@example.com")
+    item_id = seed_food_item(db_engine, user_id, amount=2.0, calories=300.0)
+    seed_evidence(
+        db_engine,
+        user_id,
+        item_id,
+        source_type="user_text",
+        source_ref="user_text:stale",
+        basis="as_logged",
+        field_provenance={"calories": "user_stated", "protein_g": "estimated"},
+    )
+    _add_candidate_product(session, source_ref="usda_fdc:NEW", calories_per_100g=120.0)
+
+    item = _capability(session, FakeListSource([])).re_resolve(
+        owner_id=uuid.UUID(user_id),
+        current_user=_user(session, user_id),
+        item_id=item_id,
+        source_ref="usda_fdc:NEW",
+    )
+
+    evidence = session.scalars(
+        select(EvidenceSource).where(EvidenceSource.derived_food_item_id == item_id)
+    ).all()
+    assert len(evidence) == 1
+    assert evidence[0].basis == "per_100g"
+    assert evidence[0].field_provenance is None
+    assert evidence[0].source_ref == "usda_fdc:NEW"
+    assert evidence[0].calories_per_100g == pytest.approx(120.0)
+    assert evidence[0].assumptions is None
+    # Recompute/headline behaviour is unaffected by the basis reset.
+    assert item.calories == pytest.approx(360.0)
+
+
+def test_re_resolve_leaves_an_already_per_100g_basis_unchanged(
+    client: TestClient, db_engine: Engine, session: Session
+) -> None:
+    """Regression: a re-match of an already-``per_100g`` item is unaffected by FTY-316."""
+
+    user_id, _auth = register(client, "rematch-basis-noop@example.com")
+    item_id = seed_food_item(db_engine, user_id, amount=2.0, calories=300.0)
+    seed_evidence(
+        db_engine,
+        user_id,
+        item_id,
+        source_type="trusted_nutrition_database",
+        source_ref="usda_fdc:OLD",
+        basis="per_100g",
+        field_provenance=None,
+    )
+    _add_candidate_product(session, source_ref="usda_fdc:NEW", calories_per_100g=120.0)
+
+    _capability(session, FakeListSource([])).re_resolve(
+        owner_id=uuid.UUID(user_id),
+        current_user=_user(session, user_id),
+        item_id=item_id,
+        source_ref="usda_fdc:NEW",
+    )
+
+    evidence = session.scalars(
+        select(EvidenceSource).where(EvidenceSource.derived_food_item_id == item_id)
+    ).all()
+    assert len(evidence) == 1
+    assert evidence[0].basis == "per_100g"
+    assert evidence[0].field_provenance is None
+    assert evidence[0].source_ref == "usda_fdc:NEW"
+    assert evidence[0].calories_per_100g == pytest.approx(120.0)
+
+
 def test_re_resolve_appends_a_re_match_audit_row(
     client: TestClient, db_engine: Engine, session: Session
 ) -> None:
