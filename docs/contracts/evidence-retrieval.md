@@ -1205,9 +1205,9 @@ Only **low-trust or incomplete** food items are eligible for the entry point:
 
 - **`model_prior`** items — rough/default-prior estimates, including `as_logged`
   rough totals (FTY-301);
-- **`user_text`** items with missing or estimated fields — a user-stated calorie
-  total whose macros are `unknown`/`null` or gap-filled
-  (`field_provenance = estimated`, including the `comparable_reference` aggregate
+- **`user_text`** items with missing or roughly gap-filled macros — a user-stated
+  calorie total whose macros are `unknown`/`null` in the read shape, or carry a
+  non-null `estimate_basis` (today only the `comparable_reference` aggregate
   basis, FTY-281);
 - **`reference_source`** items — rough estimates transcribed from searched
   public reference pages, including snippet-derived records (FTY-314).
@@ -1215,9 +1215,21 @@ Only **low-trust or incomplete** food items are eligible for the entry point:
 Already source-backed items — `user_label`, `product_database`,
 `trusted_nutrition_database`, `official_source` — keep the normal correction
 levers (amount stepper, Change match, manual value override) and **do not** show
-the exact-upgrade nudge. Eligibility is derived from the item's existing
-`source_type` / `field_provenance` / `estimate_basis` read model — no new
-persisted flag, and no new source-hierarchy tier.
+the exact-upgrade nudge. Eligibility is derived from fields the **public read
+model already contracts** (`daily-summary.md` → **`source` descriptor**): the
+descriptor's `source_type` and `estimate_basis` plus the item's nullable macro
+facts — no new persisted flag, no new read-model field, and no new
+source-hierarchy tier. `daily-summary.md` contracts the matching client-side
+nudge signal in the same terms, and the propose route evaluates the same rule
+server-side from the item's `evidence_sources` row (rejecting an ineligible
+target with `not_upgradeable`, `food-resolution.md`), so the rendered nudge and
+the server-validated eligibility can never disagree. One deliberate boundary: a
+`user_text` macro gap-filled by a single-source reference lookup or a
+model-prior cold-pass records `field_provenance = estimated` only on the
+evidence row and surfaces **no** `estimate_basis` in the read shape today, so
+such an item keeps the normal correction levers; if a later story surfaces those
+fills through the existing `estimate_basis` seam, they become eligible under
+this same rule with no new contract surface.
 
 ### Proposal (read shape)
 
