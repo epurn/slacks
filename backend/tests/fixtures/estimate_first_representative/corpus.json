@@ -348,6 +348,42 @@
       },
       "parse_samples": [],
       "model_prior_estimates": []
+    },
+    {
+      "id": "compliments_brand_chicken_strips",
+      "input": "compliments brand chicken strips (i had 4)",
+      "class": "branded_packaged_product",
+      "recognizable": true,
+      "smoke": true,
+      "expectations": {
+        "estimate_first": {"event_status": "completed", "foods": 1, "exercises": 0, "questions": 0, "rough_foods": 1},
+        "balanced": {"event_status": "completed", "foods": 1, "exercises": 0, "questions": 0, "rough_foods": 1},
+        "strict": {"event_status": "completed", "foods": 1, "exercises": 0, "questions": 0, "rough_foods": 1}
+      },
+      "parse_samples": [
+        {
+          "disposition": "parsed",
+          "confidence": 0.9,
+          "items": [
+            {"type": "food", "name": "chicken strips", "brand": "Compliments", "quantity_text": "i had 4", "unit": "strips", "amount": 4}
+          ]
+        },
+        {
+          "disposition": "parsed",
+          "confidence": 0.9,
+          "items": [
+            {"type": "food", "name": "chicken strips", "brand": "Compliments", "quantity_text": "i had 4", "unit": "strips", "amount": 4}
+          ]
+        }
+      ],
+      "model_prior_estimates": [
+        {
+          "disposition": "resolved",
+          "confidence": 0.85,
+          "facts": {"basis": "as_logged", "calories": 320, "protein_g": 16, "carbs_g": 28, "fat_g": 16},
+          "assumptions": ["synthetic_model_prior_portion"]
+        }
+      ]
     }
   ]
 }

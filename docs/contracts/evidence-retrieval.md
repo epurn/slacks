@@ -56,6 +56,20 @@ Adapter — FTY-079 / FTY-164**.
 
 ## Version
 
+4 (FTY-253) allows the official/reference search consumer to send a **bounded,
+deterministic set of item-identity query variants** per lookup instead of exactly
+one query: the `name + brand` base, the quantity-phrase product hint in both token
+orders (for parses that strand product tokens in `quantity_text`), and a static
+private-label/retailer alias expansion (e.g. Compliments ↔ Sobeys). Each variant is
+still **item identity only**, composed from parsed candidate fields, sanitized
+through the identity sanitizer where it derives from the quantity phrase, and
+passed through the same `sanitize_query` chokepoint; the set is deduplicated and
+hard-capped, never open-ended. Evidence candidates for a **branded** item must also
+pass a deterministic brand/product-compatibility check before they may back the
+item (see `food-resolution.md` **Brand-aware packaged-product routing**). The
+search request/response shapes, status vocabulary, and fetch boundaries are
+unchanged.
+
 3 (FTY-252) adds **count-serving named-food evidence** to the normalized estimate
 shape used by official-source, reference-source, and model-prior resolution. A
 fact set may include `serving_count = {amount, unit}` for facts stated per counted
@@ -481,7 +495,11 @@ a result cap. The query is built from the **item identity only** — product /
 restaurant / dish name, brand, and barcode digits. It **must not** contain the
 user's profile, body metrics, goals, food/exercise history, free-text message
 beyond the item phrase, location, or account identifiers. Queries are
-length-bounded and stripped of control characters before egress.
+length-bounded and stripped of control characters before egress. A consumer may
+issue a **bounded, deterministic set of identity-query variants** for one item
+(FTY-253 — the name+brand base, product-hint token orders, static retailer alias
+expansion); each variant individually satisfies every rule above and passes the
+same chokepoint.
 
 **Response (search provider → estimator).** A bounded list of candidate result
 URLs + titles, treated as **untrusted**. The estimator selects candidate

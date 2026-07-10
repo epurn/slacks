@@ -327,6 +327,9 @@ def test_count_serving_without_gram_size_not_scaled_as_per_100g(
         fetcher=RecordingFetcher(),
         reference_settings=ReferenceFetchSettings(enabled=False),
         estimates=[
+            # One transcription per bounded identity variant (FTY-253: the base
+            # query plus the static Compliments -> Sobeys alias expansion).
+            {"disposition": "resolved", "confidence": 0.9, "facts": _COUNT_STRIP_FACTS},
             {"disposition": "resolved", "confidence": 0.9, "facts": _COUNT_STRIP_FACTS},
             {
                 "disposition": "resolved",
@@ -374,6 +377,9 @@ def test_incompatible_count_serving_falls_through_instead_of_scaling(
         fetcher=RecordingFetcher(),
         reference_settings=ReferenceFetchSettings(enabled=False),
         estimates=[
+            # One transcription per bounded identity variant (FTY-253: the base
+            # query plus the static Compliments -> Sobeys alias expansion).
+            {"disposition": "resolved", "confidence": 0.9, "facts": _COUNT_STRIP_FACTS},
             {"disposition": "resolved", "confidence": 0.9, "facts": _COUNT_STRIP_FACTS},
             {
                 "disposition": "resolved",

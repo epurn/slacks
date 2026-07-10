@@ -9,7 +9,11 @@ and costs them from web evidence, deterministically, in explicit tier order:
    item identity (name + brand, no personal context) through the pluggable search
    adapter (FTY-079), fetch each candidate result URL through the hardened,
    allowlisted official fetcher (FTY-078), and transcribe the facts the page
-   states.
+   states. Since FTY-253 each tier searches a bounded, deterministic set of
+   identity-query variants (:func:`~app.estimator.branded_routing.identity_variants`
+   — the ``name + brand`` base, product-hint token orders lifted from the quantity
+   phrase, and a static retailer alias expansion), and every evidence candidate
+   must pass a brand/product-compatibility gate before it may back a branded item.
 2. **Reference source** (FTY-166, branded *and* detail-rich generic candidates):
    when official sources miss (or do not apply — a generic food has no brand
    page), search the sanitized item identity **plus a fixed nutrition intent**
@@ -50,6 +54,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from app.estimator.branded_routing import identity_variants, is_evidence_brand_compatible
 from app.estimator.count_serving_resolution import (
     can_scale_reference,
     has_explicit_amount,
@@ -223,7 +228,7 @@ class OfficialSourceResolveStep:
         item = self._resolve_from_search(
             context,
             candidate,
-            query=_identity_query(candidate),
+            queries=identity_variants(candidate),
             fetch=self._fetch_official,
             page_kind=_OFFICIAL_PAGE_KIND,
             source_type=OFFICIAL_SOURCE_TYPE,
@@ -261,7 +266,9 @@ class OfficialSourceResolveStep:
         item = self._resolve_from_search(
             context,
             candidate,
-            query=f"{_identity_query(candidate)} {REFERENCE_SEARCH_INTENT}",
+            queries=tuple(
+                f"{variant} {REFERENCE_SEARCH_INTENT}" for variant in identity_variants(candidate)
+            ),
             fetch=self._fetch_reference,
             page_kind=_REFERENCE_PAGE_KIND,
             source_type=REFERENCE_SOURCE_TYPE,
@@ -276,45 +283,58 @@ class OfficialSourceResolveStep:
         context: EstimationContext,
         candidate: CandidateDraft,
         *,
-        query: str,
+        queries: tuple[str, ...],
         fetch: Callable[[str], str | None],
         page_kind: str,
         source_type: str,
         reasons: list[str],
     ) -> ResolvedFoodItem | None:
-        """Run one evidence tier: search ``query``, then fetch/extract each result.
+        """Run one evidence tier: search each bounded query, fetch/extract each result.
 
         The shared search → fetch → extract → recompute chain both web-evidence tiers
-        use; only the query, the fetcher, the prompt framing, and the recorded
-        ``source_type`` differ. Returns the first result page that yields confident,
-        schema-valid, plausible facts, or ``None`` so the caller falls through.
+        use; only the queries, the fetcher, the prompt framing, and the recorded
+        ``source_type`` differ. ``queries`` is the bounded identity-variant set
+        (FTY-253): variants are tried in order and each result must pass the
+        quantity-costability *and* brand/product-compatibility gates, so an earlier
+        generic/incompatible evidence candidate is rejected in favor of a later
+        compatible one. Returns the first fully supported result, or ``None`` so the
+        caller falls through to the next tier.
         """
 
-        found = searched_reference_per_100g(
-            provider=self.provider,
-            search_provider=self.search_provider,
-            fetch=fetch,
-            query=query,
-            page_kind=page_kind,
-            source_type=source_type,
-            allow_count_serving=True,
-            accept_result=lambda found: can_scale_reference(candidate, found),
-        )
-        if found is None:
-            return None
-        item = self._build_item(
-            context,
-            candidate,
-            found,
-            source_type=source_type,
-            source_ref=found.source_ref,
-            hash_key=found.hash_key,
-            base_assumptions=(),
-            allow_unresolvable_fallthrough=self.clarify_mode == "estimate_first",
-        )
-        if item is None:
-            reasons.append(f"{source_type} returned unscalable serving math")
-        return item
+        def _accept(found: SearchedReferenceFacts) -> bool:
+            return can_scale_reference(candidate, found) and is_evidence_brand_compatible(
+                found.product_name, name=candidate.name, brand=candidate.brand
+            )
+
+        for query in queries:
+            found = searched_reference_per_100g(
+                provider=self.provider,
+                search_provider=self.search_provider,
+                fetch=fetch,
+                query=query,
+                page_kind=page_kind,
+                source_type=source_type,
+                allow_count_serving=True,
+                accept_result=_accept,
+            )
+            if found is None:
+                continue
+            item = self._build_item(
+                context,
+                candidate,
+                found,
+                source_type=source_type,
+                source_ref=found.source_ref,
+                hash_key=found.hash_key,
+                base_assumptions=(),
+                allow_unresolvable_fallthrough=self.clarify_mode == "estimate_first",
+            )
+            if item is not None:
+                return item
+            unscalable = f"{source_type} returned unscalable serving math"
+            if unscalable not in reasons:
+                reasons.append(unscalable)
+        return None
 
     def _model_prior(
         self, context: EstimationContext, candidate: CandidateDraft, reasons: list[str]

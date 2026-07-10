@@ -39,6 +39,30 @@ estimator / contracts / backend-core / security-privacy lane:
 
 ## Version
 
+14 (FTY-253) adds **brand-aware packaged-product routing**. For a **branded**
+candidate (non-blank `brand`), a generic USDA FDC hit is a *candidate source, not an
+automatic authority*: it is accepted only when the selected row is **compatible with
+the branded product identity** (a deterministic token check — the row names the
+brand or a static retailer alias, or carries only the item's own name tokens plus
+benign preparation descriptors) **and** its serving information can cost the logged
+quantity. An incompatible row (e.g. `DENNY'S, chicken strips` for
+`brand=Compliments`) is a **miss**: it must not complete the event and must not
+raise the generic quantity question — the candidate defers to the branded
+official/reference/model-prior tiers. Those web-evidence tiers now search a
+**bounded, deterministic set of item-identity query variants** per tier: the
+`name + brand` base, the quantity-phrase **product hint** in both token orders
+(covering parses that strand product tokens in `quantity_text`, e.g.
+`4 toppabales brand crackers` → `name="crackers"`), and a **static
+private-label/retailer alias expansion** (e.g. Compliments ↔ Sobeys, PC →
+President's Choice/Loblaws). Every evidence candidate a tier considers must also
+pass the same brand/product-compatibility gate, so an earlier generic/incompatible
+result is rejected in favor of a later compatible one. Hint tokens pass through the
+identity sanitizer and every query still egresses through the search adapter's
+`sanitize_query` chokepoint; the expansion is capped, never open-ended browsing.
+Generic (unbranded) candidates keep the FTY-044 first-match FDC behavior, and
+barcode/OFF precedence is unchanged. Owner module:
+`backend/app/estimator/branded_routing.py`.
+
 13 (FTY-252) adds **count-serving facts for named foods** to the official /
 reference / model-prior estimate schema (`official_source/v2`). A validated
 `NamedFoodEstimate` can now state facts per counted serving (`serving_count`, e.g.
@@ -738,7 +762,9 @@ empty for a generic food (`"white rice"`). A candidate carrying a non-blank `bra
   (identity plus a usable amount — FTY-167), and under `estimate_first` a recognizable
   amountless generic candidate is deferred to rough reference/model/default-prior
   estimation before any question. `balanced`/`strict` may still ask the older amount
-  question. A branded item USDA/OFF **does** resolve never reaches this step.
+  question. A branded item USDA/OFF resolves with a **brand-compatible,
+  quantity-costable** row (FTY-253) never reaches this step; an incompatible or
+  un-costable hit is treated as a miss and deferred here.
 - The model never supplies a `brand` it was not given, and `brand` is stored as data,
   never interpreted.
 
@@ -759,8 +785,12 @@ match; estimated from model prior"`). The result always carries its explicit
 For each deferred candidate, the step resolves in order, all egress through the
 injected adapters (the step itself opens no socket):
 
-1. **Search** the sanitized **item identity only** (name + brand — never profile,
-   weight, history, or event metadata) through the FTY-079 adapter.
+1. **Search** the sanitized **item identity only** (never profile, weight, history,
+   or event metadata) through the FTY-079 adapter. Since FTY-253 each tier tries a
+   bounded, deterministic set of identity-query variants — the `name + brand` base,
+   the quantity-phrase product hint in both token orders, and the static retailer
+   alias expansion (see **Brand-aware packaged-product routing** below) — in order,
+   stopping at the first fully supported result.
 2. **Fetch** each candidate result URL through the FTY-078 hardened fetcher, taking
    back sanitized, active-content-stripped inert text.
 3. **Extract** the nutrition facts the page states by sending that inert text to the
@@ -847,6 +877,45 @@ unit (`per 3 strips` vs. `2 cups`), the resolver rejects that result and continu
 the next evidence result/tier; only when no usable result remains does policy decide
 whether to ask.
 
+### Brand-aware packaged-product routing (FTY-253)
+
+For a **branded** candidate the resolver is allowed to be creative inside a bounded
+policy instead of obeying a rigid first-source-wins sequence:
+
+- **A generic FDC hit is a candidate, not an authority.** The food step accepts the
+  row only when it passes the deterministic **brand/product-compatibility gate**
+  (`branded_routing.is_evidence_brand_compatible`: the description names the brand
+  or a static retailer alias, or carries only the item's own name/brand tokens plus
+  benign preparation descriptors) *and* its serving information can cost the logged
+  quantity. Otherwise the hit is a miss and the candidate defers to the
+  official/reference/model-prior tiers — it never completes from the wrong product
+  and never raises the generic quantity question for a supplied count. (This
+  replaces the former "a branded item USDA resolves never reaches the official
+  step" invariant: USDA may still win, but only when compatible **and** costable.)
+- **Bounded identity-variant search.** Each web-evidence tier searches, in order:
+  the `name + brand` base query; when the parser stranded product tokens in
+  `quantity_text`, the sanitized **product hint** in both token orders
+  (`name + hint` and the user-stated `hint + name`, so
+  `4 toppabales brand crackers` parsed as `name="crackers"` still searches
+  `toppabales brand crackers`); and a **static** private-label/retailer alias
+  expansion (`branded_routing.RETAILER_BRAND_ALIASES`, e.g. Compliments ↔ Sobeys,
+  PC → President's Choice/Loblaws). The set is deduplicated and hard-capped
+  (`MAX_IDENTITY_VARIANTS`); the reference tier appends the fixed `nutrition facts`
+  intent per variant.
+- **Every evidence candidate is gated.** A fetched page's transcribed
+  `product_name` must pass the same compatibility gate (plus the FTY-252
+  quantity-costability check) before it may back the item, so the resolver
+  considers multiple candidates and rejects an earlier generic/incompatible one in
+  favor of a later compatible branded/reference one.
+- **Clarification is the last resort** for a branded product with a supplied count:
+  when sources are unavailable or fail, an explicitly labelled rough/model-prior
+  estimate is preferred over asking the user to restate the amount (per the shared
+  estimate-first policy).
+- **Security.** Hints are extracted through the identity sanitizer, variants are
+  composed from parsed fields only, and every query passes the existing
+  `sanitize_query` chokepoint — item identity only, deterministic, bounded; no
+  open-ended agentic browsing and no new fetch surface.
+
 ### Routing
 
 | Condition | Pipeline signal | Persisted | Event transition |
@@ -857,7 +926,8 @@ whether to ask.
 | A fetched page resolves but its per-100g facts fail the FTY-115 plausibility bound | _(non-match; falls through)_ | nothing for that page | `→ next tier / model-prior` |
 | Search disabled / unavailable, a tier's fetch off, or no confident match on either tier → model-prior | _(completes)_ | food `resolved` (`model_prior`) + `evidence_sources` (`model_prior`, per-tier assumptions) | `processing → completed` |
 | Model-prior estimate fails the FTY-115 plausibility bound | `NeedsClarification` | clarification question | `processing → needs_clarification` |
-| Branded candidate USDA/OFF **resolves** | _(as FTY-044/060)_ | official/reference source not consulted | `processing → completed` |
+| Branded candidate USDA/OFF **resolves** with a brand-compatible, quantity-costable row (FTY-253) | _(as FTY-044/060)_ | official/reference source not consulted | `processing → completed` |
+| Branded candidate, USDA hit **incompatible** with the brand/product identity or unable to cost the amount (FTY-253) | _(miss; defers)_ | nothing from that row | `→ official/reference/model-prior tiers` |
 | Generic candidate USDA miss, **no usable amount**, `estimate_first` | _(falls forward)_ | reference/model/default-prior rough evidence + assumptions | `processing → completed` |
 | Generic candidate USDA miss, **no usable amount**, `balanced`/`strict` asks | `NeedsClarification` | clarification question | `processing → needs_clarification` |
 | Usable facts but unresolvable quantity, `estimate_first` | _(falls forward)_ | default-serving/reference/model-prior rough evidence + assumptions | `processing → completed` |
@@ -1023,6 +1093,15 @@ The backend exposes four health-check endpoints, all returning structured JSON w
   **FTY-278 implementation follow-up** (reads/answer flow: `daily-summary.md`,
   `log-events.md` v6, `estimation-jobs.md` v3); the FTY-275 (v8) baseline ships until
   then.
+- **FTY-253 (brand-aware packaged-product routing).** A deliberate pre-v1 breaking
+  change to branded-candidate routing: the food step now applies the
+  brand/product-compatibility gate to generic FDC hits for branded candidates, and
+  the official/reference tiers search the bounded identity-variant set with the
+  same gate on each evidence candidate (see **Brand-aware packaged-product
+  routing** above). **No migration**: the gate and variants are pure routing policy
+  (`backend/app/estimator/branded_routing.py`); `evidence_sources` shapes, the
+  serving math, the search/fetch boundaries, generic-food FDC resolution, and
+  barcode/OFF precedence are unchanged.
 - **FTY-298 / FTY-303 (contract only; no code, no migration in this story).** FTY-298
   bumps the food resolution contract to the rare clarification policy, and FTY-303
   extracts the global mode semantics, allowed last-resort clarification reasons, and

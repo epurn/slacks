@@ -39,8 +39,7 @@ from sqlalchemy.orm import Session
 
 from app.db import create_session_factory
 from app.enums import DerivedItemStatus, EstimationJobStatus, LogEventStatus
-from app.estimator.fdc import FDC_SOURCE, ProductFacts
-from app.estimator.food_serving import NutritionFacts
+from app.estimator.fdc import ProductFacts
 from app.estimator.food_step import FoodResolver, FoodResolveStep
 from app.estimator.official_fetch import OfficialFetchSettings
 from app.estimator.official_step import QUANTITY_QUESTION, OfficialSourceResolveStep
@@ -670,37 +669,10 @@ def test_amountless_generic_miss_resolves_from_reference_source(
     assert fetcher.fetched == [_BIG_MAC_URL]
 
 
-def test_branded_food_resolved_by_usda_skips_official(client: TestClient, session: Session) -> None:
-    # When USDA resolves a branded item, the official step is the *last* resort and is
-    # never consulted (only after a USDA/OFF miss).
-    user_id, event_id = _seed_event(client, "official-usda@example.com", "a Big Mac")
-    facts = ProductFacts(
-        source=FDC_SOURCE,
-        source_ref="usda_fdc:1",
-        query_key="big mac",
-        description="Big Mac",
-        facts=NutritionFacts(calories=250.0, protein_g=10.0, carbs_g=30.0, fat_g=9.0),
-        default_serving_g=219.0,
-        content_hash="bigmachash",
-    )
-    search = FakeSearchProvider(_success_result())
-    fetcher = RecordingFetcher()
-    pipeline = _pipeline(
-        session,
-        food_source=FakeFoodSource({"big mac": facts}),
-        parsed_item=_branded_item(),
-        search_provider=search,
-        fetcher=fetcher,
-        estimates=[{"disposition": "resolved", "confidence": 0.9, "facts": _PAGE_FACTS}],
-    )
-
-    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
-
-    assert result.event_status is LogEventStatus.COMPLETED
-    evidence = _evidence(session, event_id)
-    assert evidence.source_type == "trusted_nutrition_database"
-    assert search.queries == []  # USDA resolved it; official source not consulted
-    assert fetcher.fetched == []
+# The former test_branded_food_resolved_by_usda_skips_official invariant is replaced
+# by FTY-253: USDA wins for a branded item only when the selected row is
+# brand-compatible AND can cost the quantity. Both directions are covered in
+# tests/test_brand_aware_packaged_routing.py.
 
 
 def test_disabled_provider_falls_through_to_model_prior(
@@ -973,7 +945,8 @@ def test_zero_calorie_food_resolves_successfully(client: TestClient, session: Se
     user_id, event_id = _seed_event(client, "official-zerocal@example.com", "a Big Mac")
     zero_cal_facts = {
         "basis": "per_100g",
-        "product_name": "Zero Cal Food",
+        # The page names the branded product itself (brand-compatible, FTY-253).
+        "product_name": "Big Mac",
         "calories": 0.0,
         "protein_g": 0.0,
         "carbs_g": 0.0,

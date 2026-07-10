@@ -32,7 +32,12 @@ Routing follows FTY-042/043 conventions:
 - **branded candidate USDA/OFF cannot resolve** → deferred to the official-source
   step (FTY-062) via ``pending_official_candidates`` instead of clarifying: a named
   restaurant/manufacturer/packaged product falls through to search + hardened fetch,
-  then a model-prior estimate.
+  then a model-prior estimate. For a branded candidate a generic FDC hit is a
+  *candidate*, not an authority (FTY-253): a row naming a different product identity
+  fails the brand/product-compatibility gate
+  (:func:`~app.estimator.branded_routing.is_evidence_brand_compatible`) and is
+  treated as a miss, so brand-aware web/reference/model-prior resolution runs
+  instead of completing or clarifying from the wrong product.
 - **no confident source match for a generic food** (incl. a barcode OFF cannot
   resolve while OFF is available) / **unresolvable quantity** → under the default
   estimate-first mode, defer to the reference/model/default rough estimator before
@@ -55,6 +60,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.estimator.branded_routing import is_evidence_brand_compatible
 from app.estimator.detail_signals import has_food_detail, has_stated_nutrition
 from app.estimator.evidence_utils import _record_source_ref
 from app.estimator.fdc import (
@@ -393,13 +399,23 @@ class FoodResolveStep:
 
         if resolved is None:
             return None
+        if not is_evidence_brand_compatible(
+            resolved.product.description, name=candidate.name, brand=candidate.brand
+        ):
+            # FTY-253: for a branded packaged product, a generic database hit is a
+            # candidate, not an authority. A row naming a different product identity
+            # (e.g. "DENNY'S, chicken strips" for brand=Compliments) is a miss, so
+            # the branded official/reference/model-prior tiers run instead of
+            # completing — or clarifying — from the wrong product.
+            return None
         return self._build_item(
             context,
             candidate,
             resolved,
             _source_type(resolved.product.source),
-            allow_unresolvable_defer=_should_defer_unresolvable_quantity(
-                candidate, self.clarify_mode
+            allow_unresolvable_defer=(
+                _is_official_eligible(candidate)
+                or _should_defer_unresolvable_quantity(candidate, self.clarify_mode)
             ),
         )
 

@@ -29,7 +29,7 @@ from app.estimator.fdc import FDC_SOURCE, FDC_SOURCE_TYPE, FdcTransientError, Pr
 from app.estimator.food_serving import NutritionFacts
 from app.estimator.food_step import FoodResolver, FoodResolveStep
 from app.estimator.parse import ParseStep
-from app.estimator.pipeline import Pipeline
+from app.estimator.pipeline import CandidateDraft, EstimationContext, Pipeline
 from app.estimator.processing import process_estimation
 from app.estimator.self_consistency import SELF_CONSISTENCY_FIRST_WINDOW
 from app.llm.providers.fake import FakeProvider
@@ -48,6 +48,20 @@ def _rice_facts() -> ProductFacts:
         facts=NutritionFacts(calories=130.0, protein_g=2.0, carbs_g=28.0, fat_g=0.2),
         default_serving_g=158.0,
         content_hash="ricehash",
+    )
+
+
+def _compliments_strips_facts(*, default_serving_g: float | None) -> ProductFacts:
+    """Brand-compatible packaged-product FDC row for FoodResolveStep routing tests."""
+
+    return ProductFacts(
+        source=FDC_SOURCE,
+        source_ref="usda_fdc:compliments-strips",
+        query_key="chicken strips",
+        description="Compliments Chicken Strips",
+        facts=NutritionFacts(calories=250.0, protein_g=12.0, carbs_g=20.0, fat_g=11.0),
+        default_serving_g=default_serving_g,
+        content_hash="compliments-strip-hash",
     )
 
 
@@ -243,6 +257,77 @@ def test_unresolvable_quantity_completes_unresolved_without_rough_step(
     foods = _foods(session, event_id)
     assert len(foods) == 1
     assert foods[0].status == DerivedItemStatus.UNRESOLVED
+
+
+def test_strict_branded_fdc_quantity_gap_defers_instead_of_clarifying(
+    session: Session,
+) -> None:
+    # FTY-253: even in strict mode, a branded database hit is accepted only when
+    # it is both brand-compatible and quantity-costable. A compatible row with no
+    # serving grams for "4 strips" is a miss for routing, so the branded
+    # official/reference/model-prior tiers get the candidate instead of the
+    # generic quantity question.
+    candidate = CandidateDraft(
+        name="chicken strips",
+        brand="Compliments",
+        quantity_text="i had 4",
+        unit="strips",
+        amount=4,
+    )
+    context = EstimationContext(
+        log_event_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        raw_text="compliments brand chicken strips (i had 4)",
+        food_candidates=[candidate],
+    )
+    source = FakeFoodSource({"chicken strips": _compliments_strips_facts(default_serving_g=None)})
+    step = FoodResolveStep(
+        FoodResolver(session=session, source=source),
+        clarify_mode="strict",
+    )
+
+    step.run(context)
+
+    assert source.lookups == ["chicken strips"]
+    assert context.resolved_food_items == []
+    assert context.pending_official_candidates == [candidate]
+    assert context.clarification_questions == []
+
+
+def test_branded_fdc_match_must_be_costable_before_it_skips_official(
+    session: Session,
+) -> None:
+    # The replacement for the former "branded USDA skips official" invariant:
+    # USDA still wins when the row matches the branded identity and can cost the
+    # logged amount. Otherwise the previous test proves it defers.
+    candidate = CandidateDraft(
+        name="chicken strips",
+        brand="Compliments",
+        quantity_text="i had 4",
+        unit="strips",
+        amount=4,
+    )
+    context = EstimationContext(
+        log_event_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        raw_text="compliments brand chicken strips (i had 4)",
+        food_candidates=[candidate],
+    )
+    source = FakeFoodSource({"chicken strips": _compliments_strips_facts(default_serving_g=95.0)})
+    step = FoodResolveStep(
+        FoodResolver(session=session, source=source),
+        clarify_mode="strict",
+    )
+
+    step.run(context)
+
+    assert context.pending_official_candidates == []
+    assert context.clarification_questions == []
+    [item] = context.resolved_food_items
+    assert item.source_type == FDC_SOURCE_TYPE
+    assert item.source_ref == "usda_fdc:compliments-strips"
+    assert item.grams == 380.0
+    assert item.calories == 950.0
 
 
 def test_repeated_food_uses_cache_not_source(client: TestClient, session: Session) -> None:

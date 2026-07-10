@@ -167,6 +167,10 @@ class SearchedReferenceFacts:
     count_serving: CountServing | None = None
     serving_g: float | None = None
     per_100g_facts: NutritionFacts | None = None
+    #: The (bounded, schema-validated) product name the source stated, when it stated
+    #: one. Read by brand-aware routing (FTY-253) to check an evidence candidate's
+    #: compatibility with a branded item identity; never a stored fact.
+    product_name: str | None = None
 
 
 AcceptSearchedReference = Callable[[SearchedReferenceFacts], bool]
@@ -338,6 +342,7 @@ def _searched_reference_from_facts(
             count_serving=count_serving,
             serving_g=serving_g,
             per_100g_facts=per_100g,
+            product_name=facts.product_name,
         )
 
     canonical = _to_per_100g(facts)
@@ -354,6 +359,7 @@ def _searched_reference_from_facts(
         count_serving=count_serving,
         serving_g=default_serving_g,
         per_100g_facts=per_100g,
+        product_name=facts.product_name,
     )
 
 

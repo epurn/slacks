@@ -50,8 +50,12 @@ phrase in quantity_text; only fill unit/amount when you are confident.
 never invent or guess one.
 - Set brand only for a specific branded/named product — a restaurant item, a \
 manufacturer product, or a named packaged food (e.g. name "Big Mac" brand \
-"McDonald's"). Leave brand empty for a generic food (e.g. "white rice", "an \
-apple"). Never invent a brand the user did not name.
+"McDonald's"). When the user tags an item with a brand or store-brand marker — \
+"compliments brand chicken strips", "dill pickle hummus (PC - Loblaws store \
+brand)" — extract that marker into brand (name "chicken strips", brand \
+"Compliments") instead of leaving it in the name or the quantity phrase. Leave \
+brand empty for a generic food (e.g. "white rice", "an apple"). Never invent a \
+brand the user did not name.
 - Do not invent calories, macros, or energy values — later steps resolve those. \
 BUT when the user *explicitly states* a nutrition fact for an item — a calorie total \
 ("580 cals", "580 calories", "580 kcal", "about 580 cals") and/or macro grams ("35g \
