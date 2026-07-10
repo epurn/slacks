@@ -15,6 +15,14 @@
  * semantics (each segment announced with its label + selected state), and
  * light/dark. No `tintColor`/font overrides: the point is to stop styling the
  * system control, so it stays the adaptive platform default.
+ *
+ * The one theming input we do drive is `appearance` (FTY-343): the native
+ * `UISegmentedControl` otherwise paints for the *device* scheme, so when the app
+ * renders dark on a light device (or via the `ColorSchemeOverride` seam) the
+ * control shows in light appearance against the dark `colors.surface` and the
+ * unselected label loses contrast (fails WCAG AA). Feeding the resolved
+ * `useTheme()` scheme into the library's own `appearance` prop keeps it the
+ * adaptive platform control while making it track the app's theme, not the OS's.
  */
 
 import RNSegmentedControl from '@react-native-segmented-control/segmented-control';
@@ -57,7 +65,7 @@ export function SegmentedControl<T extends string>({
   testID?: string;
   style?: StyleProp<ViewStyle>;
 }) {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
 
   const selectedIndex = Math.max(
     0,
@@ -76,6 +84,10 @@ export function SegmentedControl<T extends string>({
       <RNSegmentedControl
         testID={testID}
         accessibilityLabel={accessibilityLabel}
+        // Render in the app's resolved theme, not the raw device scheme, so an
+        // app-dark / device-light mismatch no longer paints a light control on
+        // the dark surface and greys out the unselected label (FTY-343).
+        appearance={scheme}
         values={options.map((o) => o.label)}
         selectedIndex={selectedIndex}
         onChange={(event) => {

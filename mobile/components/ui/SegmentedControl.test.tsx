@@ -8,10 +8,16 @@
  * site (Settings units/appearance/cadence/goal, Trends range) relies on.
  */
 
-import { StyleSheet, View } from "react-native";
+import { StyleSheet, View, useColorScheme } from "react-native";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
+import { ThemeProvider } from "@/theme";
 import { SegmentedControl } from "./SegmentedControl";
+
+// jest-expo's preset already mocks useColorScheme as a jest.fn() returning 'light'.
+const mockUseColorScheme = useColorScheme as jest.MockedFunction<
+  typeof useColorScheme
+>;
 
 type Units = "metric" | "imperial";
 
@@ -202,4 +208,65 @@ it("keeps the bare control accessibility label unchanged (additive)", () => {
   // so FTY-186 call sites keep their exact accessibility label.
   const tree = renderPace(PACE_OPTIONS, "steady");
   expect(findPace(tree).props.accessibilityLabel).toBe("Goal pace");
+});
+
+// ─── Native appearance tracks the resolved theme (FTY-343) ───────────────────
+
+/**
+ * Mount inside a ThemeProvider so the wrapper resolves a concrete scheme from
+ * `useTheme()`. `override` drives the app theme; the device `useColorScheme`
+ * mock lets us reproduce the app-dark / device-light mismatch that painted a
+ * light control on the dark surface and greyed out the unselected label.
+ */
+function renderThemed(
+  override: "light" | "dark" | "system",
+): ReactTestRenderer {
+  let tree!: ReactTestRenderer;
+  act(() => {
+    tree = create(
+      <ThemeProvider override={override}>
+        <SegmentedControl<Units>
+          testID="units"
+          accessibilityLabel="Units preference"
+          options={OPTIONS}
+          selected="metric"
+          onSelect={jest.fn()}
+        />
+      </ThemeProvider>,
+    );
+  });
+  return tree;
+}
+
+describe("native appearance follows the resolved theme (FTY-343)", () => {
+  afterEach(() => {
+    mockUseColorScheme.mockReturnValue("light");
+  });
+
+  it("paints the control dark when the app resolves to dark", () => {
+    mockUseColorScheme.mockReturnValue("dark");
+    const tree = renderThemed("system");
+    expect(findControl(tree).props.appearance).toBe("dark");
+  });
+
+  it("paints the control light when the app resolves to light", () => {
+    mockUseColorScheme.mockReturnValue("light");
+    const tree = renderThemed("system");
+    expect(findControl(tree).props.appearance).toBe("light");
+  });
+
+  it("tracks an app-dark override even when the device reports light", () => {
+    // The reported reproduction: app dark, device light. The native control must
+    // follow the resolved app theme, not the device scheme, so the unselected
+    // label stays legible on the dark surface.
+    mockUseColorScheme.mockReturnValue("light");
+    const tree = renderThemed("dark");
+    expect(findControl(tree).props.appearance).toBe("dark");
+  });
+
+  it("tracks an app-light override even when the device reports dark", () => {
+    mockUseColorScheme.mockReturnValue("dark");
+    const tree = renderThemed("light");
+    expect(findControl(tree).props.appearance).toBe("light");
+  });
 });
