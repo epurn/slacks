@@ -238,6 +238,40 @@ def get_log_event(
     return LogEventDTO.model_validate(event)
 
 
+@router.delete(
+    "/{user_id}/log-events/{event_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def void_log_event(
+    user_id: uuid.UUID,
+    event_id: uuid.UUID,
+    current_user: CurrentUser,
+    session: Annotated[Session, Depends(get_session)],
+) -> Response:
+    """Void (soft-delete) one of the caller's own log events (FTY-321).
+
+    Voiding removes a mislogged entry from the day: the event and every derived
+    item hanging off it stop appearing in the log-event list / by-date / single
+    GETs, drop out of the derived-item read models, and no longer count toward
+    the daily summary totals. The underlying rows are **retained** (soft void)
+    so the append-only audit/provenance stance is preserved — this is a status
+    marker, not a hard row deletion.
+
+    Voiding works regardless of the event's status (``completed`` /
+    ``needs_clarification`` / ``failed`` / …). It is **idempotent**: repeating
+    the ``DELETE`` on an already-voided event succeeds identically (``204``).
+    Ownership fails closed like every other route — an unknown id or another
+    user's event is indistinguishable as ``404`` (no existence oracle) and
+    mutates nothing.
+    """
+
+    try:
+        log_event_service.void_event(session, user_id, current_user, event_id)
+    except (LogEventForbidden, LogEventNotFound) as exc:
+        raise _NOT_FOUND from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get(
     "/{user_id}/log-events/{event_id}/clarification",
     response_model=ClarificationResponse,

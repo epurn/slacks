@@ -234,6 +234,16 @@ Object-level, on every edit, **failing closed**:
   (`CorrectionImmutableError`), proven by a tamper test. Account/user deletion
   still removes a user's rows via the database `ON DELETE CASCADE` (a retention
   requirement, intentionally outside the application-edit guard).
+- **Log-event void is a status, not a deletion (FTY-321).** A user removing a
+  mislogged entry (`DELETE .../log-events/{id}`, `log-events.md`) is a **soft
+  void**: it sets a `voided_at` marker on the `log_events` row and **retains**
+  the event, its derived items, corrections, and evidence — no application-code
+  row deletion occurs, so this append-only / immutable stance is fully
+  preserved. A voided entry's rows simply stop appearing in read models and
+  totals; the correction history hanging off a voided event stays intact and
+  untouched (the ORM `UPDATE`/`DELETE` guards still hold). Only true account/user
+  deletion removes correction rows, via the database `ON DELETE CASCADE` as
+  above.
 - **Retention.** `corrections` and the snapshot columns are user-owned derived data
   retained until the owning derived item, log event, user, or account is deleted
   (`ON DELETE CASCADE`), per `docs/security/data-retention.md`.

@@ -3091,6 +3091,67 @@
       }
     },
     "/api/users/{user_id}/log-events/{event_id}": {
+      "delete": {
+        "description": "Void (soft-delete) one of the caller's own log events (FTY-321).\n\nVoiding removes a mislogged entry from the day: the event and every derived\nitem hanging off it stop appearing in the log-event list / by-date / single\nGETs, drop out of the derived-item read models, and no longer count toward\nthe daily summary totals. The underlying rows are **retained** (soft void)\nso the append-only audit/provenance stance is preserved \u2014 this is a status\nmarker, not a hard row deletion.\n\nVoiding works regardless of the event's status (``completed`` /\n``needs_clarification`` / ``failed`` / \u2026). It is **idempotent**: repeating\nthe ``DELETE`` on an already-voided event succeeds identically (``204``).\nOwnership fails closed like every other route \u2014 an unknown id or another\nuser's event is indistinguishable as ``404`` (no existence oracle) and\nmutates nothing.",
+        "operationId": "void_log_event_api_users__user_id__log_events__event_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Void Log Event",
+        "tags": [
+          "log-events"
+        ]
+      },
       "get": {
         "description": "Return one of the caller's own events by id, or ``404`` otherwise.",
         "operationId": "get_log_event_api_users__user_id__log_events__event_id__get",

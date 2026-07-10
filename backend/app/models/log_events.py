@@ -60,6 +60,13 @@ class LogEvent(Base):
     updated_at: Mapped[datetime] = mapped_column(
         UtcDateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )
+    #: Soft-void marker (FTY-321). ``NULL`` for a live event; set **once** to the
+    #: void instant when the user deletes the entry. A voided event — and every
+    #: derived item, correction, and evidence row hanging off it — is **retained**
+    #: (the append-only audit/provenance stance is preserved), but the event is
+    #: excluded from every read model and from the daily-summary totals, so it
+    #: disappears from the day. Void is terminal: there is no un-void.
+    voided_at: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True, default=None)
 
     user: Mapped[User] = relationship()
 

@@ -8,12 +8,17 @@ This module owns three contracts:
    router renders as ``404`` so the API never confirms another user's data exists.
 
 2. **Finalized-state filtering.** The exact filter predicate, kept explicit so
-   the rule is auditable: ``log_events.status == 'completed' AND derived_items.status
-   == 'resolved' AND current_value IS NOT NULL``. Items on ``pending`` /
-   ``processing`` / ``failed`` / ``needs_clarification`` events and any
-   ``unresolved`` (uncosted) item are excluded so pending/failed work never
-   inflates a total. Only ``completed`` events carry committed resolved items
-   (FTY-043/FTY-044 commit items in the same transaction as the terminal status).
+   the rule is auditable: ``log_events.voided_at IS NULL AND log_events.status ==
+   'completed' AND derived_items.status == 'resolved' AND current_value IS NOT
+   NULL``. Items on ``pending`` / ``processing`` / ``failed`` /
+   ``needs_clarification`` events and any ``unresolved`` (uncosted) item are
+   excluded so pending/failed work never inflates a total. Only ``completed``
+   events carry committed resolved items (FTY-043/FTY-044 commit items in the
+   same transaction as the terminal status). A **voided** event (FTY-321) is
+   excluded outright — a mislogged entry no longer counts toward the day — even
+   though its rows are retained; the same ``voided_at IS NULL`` clause gates the
+   ``uncounted_entries`` predicates so a voided clarification/proposal drops from
+   that count too.
 
 3. **Day / timezone resolution.** ``day`` is interpreted in the user's profile
    timezone (falling back to UTC). Items are attributed to a day by their owning
@@ -203,6 +208,7 @@ def _food_window_conditions(
     return (
         DerivedFoodItem.user_id == owner_id,
         LogEvent.user_id == owner_id,
+        LogEvent.voided_at.is_(None),
         LogEvent.status == LogEventStatus.COMPLETED,
         DerivedFoodItem.status == DerivedItemStatus.RESOLVED,
         DerivedFoodItem.calories.isnot(None),
@@ -219,6 +225,7 @@ def _exercise_window_conditions(
     return (
         DerivedExerciseItem.user_id == owner_id,
         LogEvent.user_id == owner_id,
+        LogEvent.voided_at.is_(None),
         LogEvent.status == LogEventStatus.COMPLETED,
         DerivedExerciseItem.status == DerivedItemStatus.RESOLVED,
         DerivedExerciseItem.active_calories.isnot(None),
@@ -249,6 +256,7 @@ def _needs_clarification_window_conditions(
 
     return (
         LogEvent.user_id == owner_id,
+        LogEvent.voided_at.is_(None),
         LogEvent.status == LogEventStatus.NEEDS_CLARIFICATION,
         LogEvent.created_at >= start_utc,
         LogEvent.created_at < end_utc,
@@ -269,6 +277,7 @@ def _proposed_food_window_conditions(
     return (
         DerivedFoodItem.user_id == owner_id,
         LogEvent.user_id == owner_id,
+        LogEvent.voided_at.is_(None),
         DerivedFoodItem.status == DerivedItemStatus.PROPOSED,
         LogEvent.created_at >= start_utc,
         LogEvent.created_at < end_utc,

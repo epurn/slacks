@@ -24,7 +24,7 @@ from __future__ import annotations
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -185,6 +185,7 @@ def list_events_for_day(
             select(LogEvent)
             .where(
                 LogEvent.user_id == owner_id,
+                LogEvent.voided_at.is_(None),
                 LogEvent.created_at >= start_utc,
                 LogEvent.created_at < end_utc,
             )
@@ -263,11 +264,51 @@ def list_entries_for_day(
 def get_event(
     session: Session, owner_id: uuid.UUID, current_user: User, event_id: uuid.UUID
 ) -> LogEvent:
-    """Return a single event by id, enforcing that the caller owns it.
+    """Return a single **live** event by id, enforcing that the caller owns it.
 
     The query is scoped to ``owner_id`` so a cross-user id is indistinguishable
     from a missing one (no existence oracle); both raise
     :class:`LogEventNotFound`, which the router renders as ``404``.
+
+    A **voided** event (FTY-321) is treated as not-found: it is excluded here so
+    every read path built on :func:`get_event` — the single get-by-id, the
+    clarification read, and the clarification answer — fails closed with ``404``
+    once the entry is voided. :func:`void_event` uses its own loader that still
+    sees voided rows so re-voiding stays idempotent.
+    """
+
+    _authorize(owner_id, current_user)
+    event = session.scalars(
+        select(LogEvent).where(
+            LogEvent.id == event_id,
+            LogEvent.user_id == owner_id,
+            LogEvent.voided_at.is_(None),
+        )
+    ).one_or_none()
+    if event is None:
+        raise LogEventNotFound("log event not found")
+    return event
+
+
+def void_event(
+    session: Session, owner_id: uuid.UUID, current_user: User, event_id: uuid.UUID
+) -> LogEvent:
+    """Soft-void one of ``owner_id``'s events, idempotently (FTY-321).
+
+    Sets ``voided_at`` once, so the event — and every derived item, correction,
+    and evidence row hanging off it — is **retained** (the append-only
+    audit/provenance stance is preserved) while disappearing from every read
+    model and the daily-summary totals. Voiding works from **any** status
+    (``pending`` / ``processing`` / ``completed`` / ``failed`` /
+    ``needs_clarification``); void is terminal (there is no un-void).
+
+    Idempotent: an already-voided event keeps its original ``voided_at`` and is
+    returned unchanged, so a repeated ``DELETE`` succeeds identically. The loader
+    is scoped to ``owner_id`` **and** deliberately includes voided rows (unlike
+    :func:`get_event`) so the re-void is a no-op rather than a ``404``. A
+    cross-user or unknown id is indistinguishable from a missing one — both raise
+    :class:`LogEventNotFound` (rendered ``404``, no existence oracle) and mutate
+    nothing.
     """
 
     _authorize(owner_id, current_user)
@@ -276,6 +317,11 @@ def get_event(
     ).one_or_none()
     if event is None:
         raise LogEventNotFound("log event not found")
+    if event.voided_at is None:
+        event.voided_at = datetime.now(UTC)
+        session.add(event)
+        session.commit()
+        session.refresh(event)
     return event
 
 
