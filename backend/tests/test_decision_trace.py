@@ -131,6 +131,21 @@ class TestSourceRefSanitization:
         assert "TOPSECRET9" not in ref
         assert ref.endswith("/p/hummus")
 
+    def test_provider_key_hostname_label_is_redacted(self) -> None:
+        ref = sanitize_trace_source_ref(
+            "reference_source:https://sk-live0123456789abc.evil.example/p/hummus"
+        )
+        assert "sk-live0123456789abc" not in ref
+        assert ref.endswith(".evil.example/p/hummus")
+
+    def test_opaque_token_hostname_label_is_redacted(self) -> None:
+        # A 48-char token-shaped label, lowercase because urlsplit lowercases
+        # the hostname — an uppercase blob would "pass" on case alone.
+        blob = "a1b2" * 12
+        ref = sanitize_trace_source_ref(f"https://{blob}.evil.example:8443/p/hummus")
+        assert blob not in ref
+        assert ref.endswith(".evil.example:8443/p/hummus")
+
     def test_ordinary_product_path_is_preserved(self) -> None:
         ref = "official_source:https://www.example.com/products/pc-blue-menu-hummus"
         assert sanitize_trace_source_ref(ref) == ref

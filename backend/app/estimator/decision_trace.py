@@ -14,8 +14,9 @@ payload bodies (security baseline + ``docs/security/data-retention.md``):
 - **labels** are length-bounded, control-character-stripped, and redacted of
   secret-looking material (``key=…`` pairs, bearer tokens, long opaque blobs);
 - **source refs** keep only the source prefix plus a URL's scheme/host/path — the
-  query string, fragment, and userinfo are dropped so a credential-bearing result
-  URL cannot leak through the trace;
+  query string, fragment, and userinfo are dropped, and hostname labels and path
+  segments are secret-redacted, so a credential-bearing result URL cannot leak
+  through the trace;
 - **counts** are clamped to a small non-negative range;
 - the entry **keys are a closed set** — an unknown field is a programming error,
   not a new channel.
@@ -127,10 +128,10 @@ def sanitize_trace_source_ref(ref: object) -> str:
     A plain source id (``usda_fdc:12345``, ``model_prior``) passes through with
     control characters stripped. A reference embedding a URL (``official_source:
     https://…`` or a bare URL) keeps only the scheme, host, and path: the query
-    string, fragment, and userinfo are dropped, and each remaining path segment
-    is redacted of secret-looking material (an untrusted result URL can carry a
-    token in its path, not just its query string). The result is truncated to
-    :data:`MAX_TRACE_REF_LEN`.
+    string, fragment, and userinfo are dropped, and each remaining hostname
+    label and path segment is redacted of secret-looking material (an untrusted
+    result URL can carry a token in a subdomain or its path, not just its query
+    string). The result is truncated to :data:`MAX_TRACE_REF_LEN`.
     """
 
     text = _CONTROL_CHARS.sub("", str(ref)).strip()
@@ -141,11 +142,14 @@ def sanitize_trace_source_ref(ref: object) -> str:
         prefix = text[: prefix_end + 1] if prefix_end != -1 else ""
         url = text[prefix_end + 1 :] if prefix_end != -1 else text
         parts = urlsplit(url)
-        host = parts.hostname or ""
+        # Redact hostname labels and path segments one at a time: the
+        # opaque-blob pattern must see one label/segment, or any ≥40-char host
+        # or path would match as a single "."/"/"-joined blob — and an
+        # untrusted result URL can carry a token as a subdomain label just as
+        # easily as a path segment.
+        host = ".".join(_redact_secrets(label) for label in (parts.hostname or "").split("."))
         if parts.port is not None:
             host = f"{host}:{parts.port}"
-        # Redact per segment: the opaque-blob pattern must see one segment at a
-        # time, or any ≥40-char path would match as a single "/"-joined blob.
         path = "/".join(_redact_secrets(segment) for segment in parts.path.split("/"))
         text = _redact_secrets(prefix) + urlunsplit((parts.scheme, host, path, "", ""))
     else:
