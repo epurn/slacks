@@ -18,10 +18,13 @@
  * registration runs before the `__visual-review` deep link can ever look these
  * names up, with no additional wiring in any shared or other-screen file.
  *
- * All three presets reuse the same route/settledPath as `settings.list` and the
- * same default E2E fixtures (no `responses` overrides) — the sub-state itself
- * comes from `useSettingsVisualReviewSubState`, which the settings controller and
- * screen read to decide what to open.
+ * The edit-state presets reuse the same route/settledPath as `settings.list`
+ * and the same default E2E fixtures (no `responses` overrides) — the sub-state
+ * itself comes from `useSettingsVisualReviewSubState`, which the settings
+ * controller and screen read to decide what to open. The target-override preset
+ * stays at the top-level list but overrides only `GET /target` with a synthetic
+ * user-source target so the user-override provenance label is visible without a
+ * scripted tap.
  *
  * The read is a one-shot snapshot taken at mount (a plain `getVisualReviewCore()`
  * call inside a `useState` initializer), not a live subscription: "initial-state
@@ -34,19 +37,39 @@
 import { useState } from 'react';
 
 import { registerVisualReviewPreset } from '@/e2e/visualReview';
+import type { VisualReviewFetchContext } from '@/e2e/visualReview';
 import { getVisualReviewCore } from '@/e2e/visualReview/session';
 import { isE2EMode } from '@/e2e/launchMode';
+import { E2E_TARGET } from '@/e2e/fixtures';
 
 /** The settings sub-state a visual-review preset can request. */
-export type SettingsVisualReviewSubState = 'goal_edit' | 'body_edit' | 'appearance';
+export type SettingsVisualReviewSubState =
+  | 'goal_edit'
+  | 'body_edit'
+  | 'formula_edit'
+  | 'appearance';
 
 const SETTINGS_ROUTE = '/profile';
 
 const SUBSTATE_BY_PRESET: Readonly<Record<string, SettingsVisualReviewSubState>> = {
   'settings.goal_edit': 'goal_edit',
   'settings.body_edit': 'body_edit',
+  'settings.formula_edit': 'formula_edit',
   'settings.appearance': 'appearance',
 };
+
+const E2E_TARGET_WITH_USER_OVERRIDE = {
+  ...E2E_TARGET,
+  calories: {
+    ...E2E_TARGET.calories,
+    effective: E2E_TARGET.calories.derived + 150,
+    source: 'user' as const,
+  },
+};
+
+function get(suffix: string): (ctx: VisualReviewFetchContext) => boolean {
+  return (ctx) => ctx.method === 'GET' && ctx.pathEnd.endsWith(suffix);
+}
 
 for (const name of Object.keys(SUBSTATE_BY_PRESET)) {
   registerVisualReviewPreset({
@@ -55,6 +78,13 @@ for (const name of Object.keys(SUBSTATE_BY_PRESET)) {
     settledPath: SETTINGS_ROUTE,
   });
 }
+
+registerVisualReviewPreset({
+  name: 'settings.target_override',
+  route: SETTINGS_ROUTE,
+  settledPath: SETTINGS_ROUTE,
+  responses: [{ match: get('/target'), body: E2E_TARGET_WITH_USER_OVERRIDE }],
+});
 
 /**
  * The settings sub-state the active visual-review preset requested at the

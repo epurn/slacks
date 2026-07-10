@@ -138,7 +138,7 @@
         "type": "object"
       },
       "ClarificationResponse": {
-        "description": "Response body for the owner-scoped clarification read (FTY-152, FTY-170).\n\nCarries a ``needs_clarification`` event's **unanswered** clarification\nquestions ordered by ``position``. The read is status-gated: an owned event\nin any other status \u2014 or one with no unanswered rows \u2014 yields an empty list,\nand the two cases are indistinguishable (no status oracle).",
+        "description": "Response body for the owner-scoped clarification read.\n\nCarries a ``needs_clarification`` or ``partially_resolved`` event's\n**unanswered** clarification questions ordered by ``position``. The read is\nstatus-gated: an owned event in any other status \u2014 or one with no unanswered\nrows \u2014 yields an empty list, and the two cases are indistinguishable (no\nstatus oracle).",
         "properties": {
           "questions": {
             "items": {
@@ -1069,13 +1069,14 @@
         "type": "object"
       },
       "LogEventStatus": {
-        "description": "Lifecycle status of a raw log event (FTY-030).\n\nThis is the canonical v1 status vocabulary for the log-event state machine.\nA new event starts at :attr:`PENDING`; the estimator pipeline (Milestone 4)\ndrives it through :attr:`PROCESSING` to a terminal :attr:`COMPLETED`,\n:attr:`FAILED`, or :attr:`NEEDS_CLARIFICATION`. The legal transitions between\nthese statuses are the named state-machine contract in\n:mod:`app.services.log_events`; later stories extend that map rather than\nredefining the vocabulary here.\n\nFTY-030 implements creation at :attr:`PENDING` and the\n``PENDING \u2192 COMPLETED`` transition only; the remaining transitions are\nreserved for the estimator stories.",
+        "description": "Lifecycle status of a raw log event (FTY-030).\n\nThis is the canonical v1 status vocabulary for the log-event state machine.\nA new event starts at :attr:`PENDING`; the estimator pipeline (Milestone 4)\ndrives it through :attr:`PROCESSING` to :attr:`COMPLETED`, :attr:`FAILED`,\n:attr:`NEEDS_CLARIFICATION`, or the item-scoped partial\n:attr:`PARTIALLY_RESOLVED`. The legal transitions between these statuses are\nthe named state-machine contract in\n:mod:`app.services.log_events`; later stories extend that map rather than\nredefining the vocabulary here.\n\nFTY-030 implements creation at :attr:`PENDING` and the\n``PENDING \u2192 COMPLETED`` transition only; the remaining transitions are\nreserved for the estimator stories.",
         "enum": [
           "pending",
           "processing",
           "completed",
           "failed",
-          "needs_clarification"
+          "needs_clarification",
+          "partially_resolved"
         ],
         "title": "LogEventStatus",
         "type": "string"
@@ -3223,7 +3224,7 @@
     },
     "/api/users/{user_id}/log-events/{event_id}/clarification": {
       "get": {
-        "description": "Return the open clarification questions for one of the caller's events.\n\nThe mobile clarify sheet (FTY-153) fetches this lazily when it opens, so the\nToday list/poll DTO stays lean. Questions are ordered by ``position`` and\ncarry their stable ``id`` (the key an answer submission references), their\n``text``, and their quick-pick ``options``. Model-raised parse\nclarifications carry options; deterministic backend-raised questions may\ncarry an empty list, in which case the client shows free-text only.\n\nThe read is status-gated (``log-events.md`` v4): only a\n``needs_clarification`` event serves questions, and only its **unanswered**\nones, so a served question is always freshly answerable. Ownership is\nfail-closed (FTY-030): a cross-user or nonexistent ``event_id`` is\nindistinguishable as ``404`` (no existence oracle); a wrong-status event and\none with no rows both return an empty list (no status oracle). The question\ntext, like raw text, is never logged.",
+        "description": "Return the open clarification questions for one of the caller's events.\n\nThe mobile clarify sheet (FTY-153) fetches this lazily when it opens, so the\nToday list/poll DTO stays lean. Questions are ordered by ``position`` and\ncarry their stable ``id`` (the key an answer submission references), their\n``text``, and their quick-pick ``options``. Model-raised parse\nclarifications carry options; deterministic backend-raised questions may\ncarry an empty list, in which case the client shows free-text only.\n\nThe read is status-gated (``log-events.md`` v6): only a\n``needs_clarification`` or ``partially_resolved`` event serves questions, and\nonly its **unanswered** ones, so a served question is always freshly\nanswerable. Ownership is\nfail-closed (FTY-030): a cross-user or nonexistent ``event_id`` is\nindistinguishable as ``404`` (no existence oracle); a wrong-status event and\none with no rows both return an empty list (no status oracle). The question\ntext, like raw text, is never logged.",
         "operationId": "get_log_event_clarification_api_users__user_id__log_events__event_id__clarification_get",
         "parameters": [
           {
@@ -3293,7 +3294,7 @@
     },
     "/api/users/{user_id}/log-events/{event_id}/clarification/answers": {
       "post": {
-        "description": "Resolve one clarification question on the caller's own event (FTY-171).\n\nThe answer \u2014 a tapped quick-pick option's value or free text \u2014 is applied as\na structured detail to the **same** event, which is re-estimated with every\ndetail answered so far (``needs_clarification \u2192 processing``; the client\npolls as usual). The raw phrase is never mutated and no second event is ever\ncreated (audit findings A3/A5); an empty/whitespace answer is rejected\n``422`` at the request boundary before any work.\n\nA fresh resolve returns ``201`` and enqueues the re-estimate only after the\nanswer, the re-opened job, and the transition are committed \u2014 the worker\nnever races an unpersisted resolve. An idempotent replay of an\nalready-answered question returns ``200`` with the event's current DTO and\nenqueues nothing. A fresh answer for an event that has since moved on\nreturns ``409 {\"error\": \"not_awaiting_clarification\"}`` and mutates nothing.\nOwnership fails closed (``404``, no existence oracle) for a cross-user or\nnonexistent event or a question that is not the event's own. The answer\ntext, like raw text, is never logged.",
+        "description": "Resolve one clarification question on the caller's own event (FTY-171).\n\nThe answer \u2014 a tapped quick-pick option's value or free text \u2014 is applied as\na structured detail to the **same** event, which is re-estimated with every\ndetail answered so far (``needs_clarification \u2192 processing`` or\n``partially_resolved \u2192 processing``; the client polls as usual). The raw\nphrase is never mutated and no second event is ever created (audit findings\nA3/A5); an empty/whitespace answer is rejected\n``422`` at the request boundary before any work.\n\nA fresh resolve returns ``201`` and enqueues the re-estimate only after the\nanswer, the re-opened job, and the transition are committed \u2014 the worker\nnever races an unpersisted resolve. An idempotent replay of an\nalready-answered question returns ``200`` with the event's current DTO and\nenqueues nothing. A fresh answer for an event that has since moved on\nreturns ``409 {\"error\": \"not_awaiting_clarification\"}`` and mutates nothing.\nOwnership fails closed (``404``, no existence oracle) for a cross-user or\nnonexistent event or a question that is not the event's own. The answer\ntext, like raw text, is never logged.",
         "operationId": "answer_log_event_clarification_api_users__user_id__log_events__event_id__clarification_answers_post",
         "parameters": [
           {
