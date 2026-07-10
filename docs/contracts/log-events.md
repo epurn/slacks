@@ -62,7 +62,11 @@ any status (`completed` / `needs_clarification` / `failed` / …); a cross-user 
 unknown id fails closed as `404` (no existence oracle), matching every other
 log-event route. `voided_at` is an orthogonal marker, **not** a new
 `LogEventStatus` value, so the event keeps its pre-void estimation status for
-audit and the state-machine map is unchanged.
+audit and the state-machine map is unchanged. Void does **not** cancel an
+in-flight or queued estimation (the estimator is void-agnostic;
+`estimation-jobs.md` unchanged): derived rows a late estimation writes onto a
+voided event are retained-and-excluded by the read-time parent-`voided_at`
+join.
 
 7 (FTY-282): relocates the clarify-loop **endpoint contract** — the
 clarification read and the clarification answer (resolve), and their
@@ -411,7 +415,20 @@ mistaken or unwanted logged entry. It is a **soft void**, not a hard delete:
   `voided_at` is orthogonal to `status`, and the event keeps its pre-void status
   for audit.
 - **Idempotent.** Repeating the delete on an already-voided event returns `204`
-  identically and does **not** move `voided_at`; the marker is write-once.
+  identically and does **not** move `voided_at`; the marker is write-once,
+  **first-write-wins** — enforced database-side (the void is a conditional
+  `UPDATE … WHERE voided_at IS NULL`), so even concurrent deletes cannot
+  re-stamp an already-set marker.
+- **Void does not cancel estimation.** A void is a read-model concern, not a
+  pipeline stop: it does **not** cancel an in-flight or queued estimation job,
+  and the estimator is void-agnostic (`estimation-jobs.md` is unchanged). A
+  late estimation that completes after the void is expected and is not an
+  error: any derived rows it writes onto the voided event are
+  **retained-and-excluded** — persisted like any other derived rows, but never
+  surfaced or counted, because every derived-item and daily-summary read joins
+  each row to its parent event and drops rows whose parent has `voided_at`
+  set. Exclusion happens at read time, so it holds regardless of when the rows
+  were written.
 - **Ownership fails closed.** The event is loaded scoped to the authenticated
   owner. A cross-user or unknown `event_id` is indistinguishable as `404` (no
   existence oracle) and mutates nothing — the same convention as get-by-id.

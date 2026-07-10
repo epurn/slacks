@@ -7,9 +7,11 @@ counting toward the daily summary, while the underlying rows are **retained**
 
 These tests prove the acceptance criteria: read-model exclusion (list / by-date /
 single GET / derived items / daily totals), void from any status, clarify-on-void
-fails closed, idempotency, the ``404`` fail-closed cases (unknown / cross-user),
-no hard deletion, and the exact-contribution drop in daily totals — exercised
-against SQLite and (opt-in) Postgres.
+fails closed, idempotency, set-once first-write-wins under a concurrent DELETE,
+the ``404`` fail-closed cases (unknown / cross-user), no hard deletion,
+retained-and-excluded derived rows written by a late estimation after the void,
+and the exact-contribution drop in daily totals — exercised against SQLite and
+(opt-in) Postgres.
 """
 
 from __future__ import annotations
@@ -357,6 +359,45 @@ def test_void_is_idempotent(client: TestClient, db_engine: Engine) -> None:
     assert second_voided_at == first_voided_at
 
 
+def test_void_set_once_under_concurrent_delete(client: TestClient, db_engine: Engine) -> None:
+    """A racing DELETE holding a stale row snapshot cannot move an already-set marker.
+
+    Simulates two concurrent DELETEs: session A loads the event while it is
+    still live (its identity map caches ``voided_at = None``), session B then
+    wins the race and voids it, and A's void proceeds against that stale
+    snapshot. The database-side conditional UPDATE (``WHERE voided_at IS
+    NULL``) must match zero rows, so the first ``voided_at`` stands —
+    first-write-wins.
+    """
+
+    user_id, _auth = _register(client, "void-race@example.com")
+    event_id = _seed_event(db_engine, user_id, created_at=datetime(2026, 6, 20, 12, 0, tzinfo=UTC))
+    owner_uuid = uuid.UUID(user_id)
+
+    factory = create_session_factory(db_engine)
+    with factory() as session_a, factory() as session_b:
+        owner_a = session_a.get(User, owner_uuid)
+        assert owner_a is not None
+        stale = session_a.get(LogEvent, event_id)
+        assert stale is not None
+        assert stale.voided_at is None
+
+        owner_b = session_b.get(User, owner_uuid)
+        assert owner_b is not None
+        winner = log_event_service.void_event(session_b, owner_uuid, owner_b, event_id)
+        first_voided_at = winner.voided_at
+        assert first_voided_at is not None
+
+        loser = log_event_service.void_event(session_a, owner_uuid, owner_a, event_id)
+        # The losing writer's stale snapshot must not re-stamp the marker.
+        assert loser.voided_at == first_voided_at
+
+    with factory() as session:
+        event = session.get(LogEvent, event_id)
+        assert event is not None
+        assert event.voided_at == first_voided_at
+
+
 def test_void_unknown_id_is_not_found(client: TestClient) -> None:
     user_id, auth = _register(client, "void-unknown@example.com")
 
@@ -425,6 +466,58 @@ def test_void_retains_rows_no_hard_deletion(client: TestClient, db_engine: Engin
         assert event.voided_at is not None
         # The event keeps its pre-void status; void is an orthogonal marker.
         assert event.status == LogEventStatus.COMPLETED
+        assert session.get(DerivedFoodItem, food_id) is not None
+        assert session.get(DerivedExerciseItem, exercise_id) is not None
+
+
+def test_late_estimation_rows_on_voided_event_stay_excluded(
+    client: TestClient, db_engine: Engine
+) -> None:
+    """Derived rows written *after* the void are retained but never surfaced.
+
+    Simulates an in-flight estimation that completes after the user deletes the
+    entry: the derived rows are inserted at the data layer onto an
+    already-voided event (the estimator itself is void-agnostic and is not
+    involved). The read-time parent-``voided_at`` join must exclude them from
+    the day-listing items and the daily totals regardless of write ordering,
+    while the rows themselves remain in storage.
+    """
+
+    user_id, auth = _register(client, "void-late@example.com")
+    keep_event = _seed_event(db_engine, user_id, created_at=datetime(2026, 6, 20, 9, 0, tzinfo=UTC))
+    _seed_food_item(db_engine, user_id, keep_event, calories=100.0)
+    late_event = _seed_event(
+        db_engine, user_id, created_at=datetime(2026, 6, 20, 12, 0, tzinfo=UTC)
+    )
+
+    client.delete(
+        f"/api/users/{user_id}/log-events/{late_event}", headers={"Authorization": auth}
+    ).raise_for_status()
+
+    # The "late" estimation lands its rows only after the void is already set.
+    food_id = _seed_food_item(db_engine, user_id, late_event, calories=205.0)
+    exercise_id = _seed_exercise_item(db_engine, user_id, late_event)
+
+    by_date = client.get(
+        f"/api/users/{user_id}/log-events/by-date",
+        headers={"Authorization": auth},
+        params={"day": "2026-06-20"},
+    )
+    entries = by_date.json()
+    # Only the surviving event appears, and no entry carries the late items.
+    assert [entry["event"]["id"] for entry in entries] == [str(keep_event)]
+    assert all(
+        item["log_event_id"] != str(late_event) for entry in entries for item in entry["items"]
+    )
+
+    summary = _daily_intake(client, user_id, auth, "2026-06-20")
+    # Only the surviving entry counts; the late 205 kcal / 120 active kcal never do.
+    assert summary["intake"]["calories"] == 100.0
+    assert summary["exercise"]["active_calories"] == 0.0
+
+    # Retained-and-excluded: the late rows still exist in storage.
+    factory = create_session_factory(db_engine)
+    with factory() as session:
         assert session.get(DerivedFoodItem, food_id) is not None
         assert session.get(DerivedExerciseItem, exercise_id) is not None
 

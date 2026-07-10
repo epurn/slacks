@@ -26,7 +26,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -302,13 +302,17 @@ def void_event(
     (``pending`` / ``processing`` / ``completed`` / ``failed`` /
     ``needs_clarification``); void is terminal (there is no un-void).
 
-    Idempotent: an already-voided event keeps its original ``voided_at`` and is
-    returned unchanged, so a repeated ``DELETE`` succeeds identically. The loader
-    is scoped to ``owner_id`` **and** deliberately includes voided rows (unlike
-    :func:`get_event`) so the re-void is a no-op rather than a ``404``. A
-    cross-user or unknown id is indistinguishable from a missing one — both raise
-    :class:`LogEventNotFound` (rendered ``404``, no existence oracle) and mutate
-    nothing.
+    Idempotent and **set-once, first-write-wins**: an already-voided event keeps
+    its original ``voided_at`` and is returned unchanged, so a repeated
+    ``DELETE`` succeeds identically. The marker is stamped by a database-side
+    conditional ``UPDATE`` (``WHERE voided_at IS NULL``) rather than a
+    read-then-write, so a repeat or **concurrent** ``DELETE`` — even one holding
+    a stale in-memory snapshot of the row — matches zero rows and cannot move a
+    marker another writer already set. The loader is scoped to ``owner_id``
+    **and** deliberately includes voided rows (unlike :func:`get_event`) so the
+    re-void is a no-op rather than a ``404``. A cross-user or unknown id is
+    indistinguishable from a missing one — both raise :class:`LogEventNotFound`
+    (rendered ``404``, no existence oracle) and mutate nothing.
     """
 
     _authorize(owner_id, current_user)
@@ -317,11 +321,18 @@ def void_event(
     ).one_or_none()
     if event is None:
         raise LogEventNotFound("log event not found")
-    if event.voided_at is None:
-        event.voided_at = datetime.now(UTC)
-        session.add(event)
-        session.commit()
-        session.refresh(event)
+    session.execute(
+        update(LogEvent)
+        .where(
+            LogEvent.id == event_id,
+            LogEvent.user_id == owner_id,
+            LogEvent.voided_at.is_(None),
+        )
+        .values(voided_at=datetime.now(UTC))
+        .execution_options(synchronize_session=False)
+    )
+    session.commit()
+    session.refresh(event)
     return event
 
 
