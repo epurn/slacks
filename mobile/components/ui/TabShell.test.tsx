@@ -4,6 +4,11 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import TabLayout from '@/app/(tabs)/_layout';
 import { ThemeProvider } from '@/theme';
+import {
+  cleanupReactTestRenderers,
+  trackReactTestRenderer,
+} from '@/testUtils/reactTestRenderer';
+import { mockReduceMotion } from '@/testUtils/reduceMotion';
 
 // ---------------------------------------------------------------------------
 // Capture the props the layout hands to expo-router's `Tabs` — the global
@@ -74,10 +79,12 @@ function renderLayout(): void {
   capturedTabBar = undefined;
   mockRegisteredScreens = [];
   act(() => {
-    create(
-      <ThemeProvider override="light">
-        <TabLayout />
-      </ThemeProvider>,
+    trackReactTestRenderer(
+      create(
+        <ThemeProvider override="light">
+          <TabLayout />
+        </ThemeProvider>,
+      ),
     );
   });
 }
@@ -99,21 +106,32 @@ function renderSwitcher(
   };
   let tree!: ReactTestRenderer;
   act(() => {
-    tree = create(
-      <SafeAreaProvider
-        initialMetrics={{
-          frame: { x: 0, y: 0, width: 390, height: 844 },
-          insets: { top: 47, left: 0, right: 0, bottom: 34 },
-        }}
-      >
-        <ThemeProvider override="light">
-          {capturedTabBar!({ state, navigation }) as React.ReactElement}
-        </ThemeProvider>
-      </SafeAreaProvider>,
+    tree = trackReactTestRenderer(
+      create(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 390, height: 844 },
+            insets: { top: 47, left: 0, right: 0, bottom: 34 },
+          }}
+        >
+          <ThemeProvider override="light">
+            {capturedTabBar!({ state, navigation }) as React.ReactElement}
+          </ThemeProvider>
+        </SafeAreaProvider>,
+      ),
     );
   });
   return tree;
 }
+
+beforeEach(() => {
+  mockReduceMotion(false);
+});
+
+afterEach(() => {
+  cleanupReactTestRenderers();
+  jest.restoreAllMocks();
+});
 
 describe('TabLayout shell (FTY-242 floating switcher)', () => {
   it('suppresses the native header globally', () => {
