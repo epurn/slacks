@@ -1,0 +1,84 @@
+# FTY-241 reproduction flow (evidence artifact — not a product/CI test).
+#
+# To reproduce the six committed screenshots: build/run the E2E debug binary
+# (EXPO_PUBLIC_FATTY_E2E=true) and place this file at
+# `mobile/.maestro/capture-audit.yaml` (so `common/accept-open-in-fatty.yaml`
+# resolves), then:
+#
+#   cd mobile && maestro --udid <sim-udid> test .maestro/capture-audit.yaml
+#
+# It opens each FTY-268 capture sub-state preset (via the FTY-247 visual-review
+# deep link) in both light and dark, waits for each `visual-review-settled:*`
+# marker, and screenshots the settled frame. Same running binary + Metro across
+# all six frames; theme forced at runtime by the `&theme=` param.
+appId: com.fatty
+---
+- launchApp:
+    clearState: false
+
+# ---- capture.barcode_granted ----
+- openLink: "fatty://__visual-review?preset=capture.barcode_granted&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:capture.barcode_granted"
+    timeout: 25000
+- assertVisible:
+    id: barcode-reticle
+- takeScreenshot: capture-barcode-granted-light
+
+- openLink: "fatty://__visual-review?preset=capture.barcode_granted&theme=dark"
+- runFlow: common/accept-open-in-fatty.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:capture.barcode_granted"
+    timeout: 25000
+- assertVisible:
+    id: barcode-reticle
+- takeScreenshot: capture-barcode-granted-dark
+
+# ---- capture.label_guidance ----
+- openLink: "fatty://__visual-review?preset=capture.label_guidance&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:capture.label_guidance"
+    timeout: 25000
+- assertVisible:
+    text: "Fit the nutrition label inside the frame"
+- takeScreenshot: capture-label-guidance-light
+
+- openLink: "fatty://__visual-review?preset=capture.label_guidance&theme=dark"
+- runFlow: common/accept-open-in-fatty.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:capture.label_guidance"
+    timeout: 25000
+- assertVisible:
+    text: "Fit the nutrition label inside the frame"
+- takeScreenshot: capture-label-guidance-dark
+
+# ---- capture.confirm_parsed ----
+- openLink: "fatty://__visual-review?preset=capture.confirm_parsed&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:capture.confirm_parsed"
+    timeout: 25000
+- assertVisible:
+    text: "Granola bar"
+- assertVisible:
+    text: "Not yet counted"
+- takeScreenshot: capture-confirm-parsed-light
+
+- openLink: "fatty://__visual-review?preset=capture.confirm_parsed&theme=dark"
+- runFlow: common/accept-open-in-fatty.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:capture.confirm_parsed"
+    timeout: 25000
+- assertVisible:
+    text: "Granola bar"
+- assertVisible:
+    text: "Not yet counted"
+- takeScreenshot: capture-confirm-parsed-dark
