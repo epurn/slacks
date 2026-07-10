@@ -152,7 +152,12 @@ export function useSettingsController({
   const [goalSaving, setGoalSaving] = useState(false);
 
   const [editingBodyMetric, setEditingBodyMetric] = useState<BodyMetric | null>(
-    () => (visualReviewSubState === 'body_edit' ? 'weight' : null),
+    () =>
+      visualReviewSubState === 'body_edit'
+        ? 'weight'
+        : visualReviewSubState === 'formula_edit'
+          ? 'formula'
+          : null,
   );
   const [bodyEditValue, setBodyEditValue] = useState('');
   // Imperial height is captured as feet (bodyEditValue) + inches (this) so the
@@ -218,6 +223,16 @@ export function useSettingsController({
         if (visualReviewSubState === 'goal_edit') {
           setEditDirection(goal?.direction ?? 'loss');
           setEditPace(goal?.pace ?? 'steady');
+        } else if (visualReviewSubState === 'formula_edit') {
+          setBodyEditFormula(
+            (prof.metabolic_formula as MetabolicFormula | string) ===
+              'mifflin_st_jeor_plus5'
+              ? 'mifflin_st_jeor_plus5'
+              : (prof.metabolic_formula as MetabolicFormula | string) ===
+                  'mifflin_st_jeor_minus161'
+                ? 'mifflin_st_jeor_minus161'
+                : null,
+          );
         }
       })
       .catch(() => {

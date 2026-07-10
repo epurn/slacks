@@ -44,8 +44,8 @@
     "mobile/components/SettingsScreen.test.tsx": {
       "kind": "test",
       "lane": "mobile",
-      "lines": 1358,
-      "reason": "Existing over-threshold first-party test file at FTY-200 baseline; +33 in FTY-186 for the native-segmented-control selectSegment/segmentValues helpers that drive units/appearance/cadence/goal segments via the platform onChange instead of per-pill onPress; +171 in FTY-267 for the visual-review seam coverage (goal_edit/body_edit/appearance sub-states opened via the E2E-only initial-state seam, plus the release/non-E2E inertness proof)."
+      "lines": 1422,
+      "reason": "Existing over-threshold first-party test file at FTY-200 baseline; +33 in FTY-186 for the native-segmented-control selectSegment/segmentValues helpers that drive units/appearance/cadence/goal segments via the platform onChange instead of per-pill onPress; +171 in FTY-267 for the visual-review seam coverage (goal_edit/body_edit/appearance sub-states opened via the E2E-only initial-state seam, plus the release/non-E2E inertness proof). +64 in FTY-346 for the carved Settings visual-review accent seams: formula_edit opens the formula editor with a selected formula, target_override renders a user-source target fixture, and both are proven inert outside E2E mode."
     },
     "mobile/components/TrendsScreen.test.tsx": {
       "kind": "test",
