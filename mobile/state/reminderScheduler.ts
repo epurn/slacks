@@ -1,7 +1,13 @@
 /**
  * Weigh-in reminder scheduling for FTY-101.
  *
- * Cadence: Weekly · Every 2 weeks · Monthly · Off. Default: Weekly.
+ * Cadence: Weekly · Biweekly · Monthly · Off. Default: Weekly.
+ *
+ * The display labels are kept short and equal-length-ish so the four segments
+ * fit the native equal-width `UISegmentedControl` without ellipsis on the
+ * narrowest supported phone (FTY-347). "Biweekly" sits between Weekly and
+ * Monthly, which disambiguates it as *every two weeks*. Only the `label` is
+ * cosmetic — `value` and `days` are the contract surface and never change.
  *
  * The reminder is due-only: exactly one notification fires at
  * `last_weigh_in + cadence_interval`. It is never a daily or repeating
@@ -28,7 +34,7 @@ export interface CadenceOption {
 
 export const CADENCE_OPTIONS: readonly CadenceOption[] = [
   { label: "Weekly", value: "weekly", days: 7 },
-  { label: "Every 2 weeks", value: "biweekly", days: 14 },
+  { label: "Biweekly", value: "biweekly", days: 14 },
   { label: "Monthly", value: "monthly", days: 30 },
   { label: "Off", value: "off", days: null },
 ];

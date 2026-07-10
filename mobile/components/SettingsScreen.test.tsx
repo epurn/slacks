@@ -683,13 +683,30 @@ describe("PREFERENCES persistence", () => {
     expect(onAppearanceChange).toHaveBeenCalledWith("dark");
   });
 
+  it("renders the four short cadence labels that fit the equal-width segments (FTY-347)", async () => {
+    const tree = renderSettings({});
+    await act(async () => {});
+
+    // Short, ellipsis-free labels for the native equal-width UISegmentedControl.
+    expect(segmentValues(tree, "cadence-segmented-control")).toEqual([
+      "Weekly",
+      "Biweekly",
+      "Monthly",
+      "Off",
+    ]);
+    // The long form that overflowed the segment is gone.
+    expect(segmentValues(tree, "cadence-segmented-control")).not.toContain(
+      "Every 2 weeks",
+    );
+  });
+
   it("persists cadence on-device via cadenceStore.setCadence", async () => {
     const cadenceStore = mockCadenceStore("weekly");
     const tree = renderSettings({ cadenceStore });
     await act(async () => {});
 
     await act(async () => {
-      selectSegment(tree, "Every 2 weeks");
+      selectSegment(tree, "Biweekly");
     });
 
     expect(cadenceStore.setCadence).toHaveBeenCalledWith("biweekly");
@@ -719,7 +736,7 @@ describe("PREFERENCES persistence", () => {
 
     // Changing to biweekly should call cancelAll before scheduling (if any)
     await act(async () => {
-      selectSegment(tree, "Every 2 weeks");
+      selectSegment(tree, "Biweekly");
     });
 
     // cancelAll is NOT called — applyReminderSettings returns early when there is no lastWeighInDate
