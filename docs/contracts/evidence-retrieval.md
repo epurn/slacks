@@ -56,6 +56,14 @@ Adapter — FTY-079 / FTY-164**.
 
 ## Version
 
+6 (FTY-324, contract cross-reference): reclassifies source tiers as bounded
+evidence tools available to the `InterpretationSession` defined in
+[parse-candidates.md](parse-candidates.md) and
+[food-resolution.md](food-resolution.md). The source hierarchy, lookup statuses,
+normalized fact schema, sanitized search boundary, hardened fetch boundary,
+retention rules, and provenance vocabulary are unchanged; raw log text still never
+egresses to search/fetch providers or persisted evidence metadata.
+
 5 (FTY-314) admits the **search-result snippet** as a bounded, lower-confidence
 untrusted evidence surface. A search candidate now carries the provider's result
 snippet (SearXNG `content` / Brave `description`) alongside its URL and title —
@@ -193,6 +201,19 @@ estimate-first and rough-provenance semantics are defined in
 `field_provenance`, `estimate_basis`, `assumptions`, status, and retention shapes that
 make exact/product-backed, official/reference-backed, comparable aggregate, and
 model/default-prior estimates distinguishable in persistence and read models.
+
+**Evidence tools inside the interpretation loop (FTY-324).** Source tiers remain
+ordered by the hierarchy above, but they are tools the
+`InterpretationSession` may consult with the current hypothesis and evidence view
+instead of a blind one-way fall-through from the initial parse. A non-success
+lookup status, rejected compatibility check, fetch/extraction failure, unusable
+serving basis, or snippet-only success feeds back into interpretation as a
+sanitized status label. It does not authorize raw text egress, provenance-free
+averaging, source-order bypass, or model-prior finalization while an applicable
+source remains usable. Deterministic code still owns every lookup status,
+egress/fetch gate, fact-schema validation, serving math, budget cap, and persisted
+provenance field; the model may only interpret which bounded tool result describes
+the user's item.
 
 **User-stated facts and the fallback rule (FTY-279).** A nutrition fact the user
 stated in the entry text (`user_text`) is the **highest-preference** source for
@@ -589,6 +610,13 @@ body, or response body.
 - **Data minimization at the provider boundary.** Search queries and lookups
   carry item identity only — never profile, body metrics, goals, history,
   location, or account identifiers.
+- **Raw log text remains model-only.** The raw diary/log sentence and accumulated
+  clarification answers may be shown to the configured LLM provider for
+  interpretation, but they must not be copied into search queries, fetch requests,
+  source refs, assumptions, traces, logs, diagnostics, provider errors, evidence
+  rows, or global caches. Evidence tools receive sanitized item identity, bounded
+  amount/unit fields, explicit source refs, inert fetched text/snippets, and
+  content-free lookup status labels only.
 - **Evidence, not raw content.** Persist extracted facts + URL + timestamp +
   content hash; never raw pages, payloads, OCR, or raw search-result
   snippets/JSON (FTY-314 — a snippet-derived record keeps only the URL, the
@@ -1257,3 +1285,10 @@ cross-user / unknown / unauthenticated fail-closed.
   distinction between exact/product-backed, official/reference-backed, comparable
   aggregate, and model/default-prior estimates. FTY-301 adds runtime fallback only:
   existing `model_prior`, `basis`, and assumptions carry the rough provenance.
+- **FTY-324 (contract cross-reference only; no schema/code in this story).** The
+  evidence hierarchy is now referenced as the bounded tool surface for the
+  `InterpretationSession`. The lookup-status vocabulary, source hierarchy,
+  normalized fact schema, search/fetch boundaries, retention rules, source refs,
+  assumptions, and rough-provenance labels remain unchanged. FTY-325/FTY-326 wire
+  source misses/rejections back into the interpreter without adding providers or
+  widening egress.

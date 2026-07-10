@@ -8,12 +8,17 @@ This module owns three contracts:
    router renders as ``404`` so the API never confirms another user's data exists.
 
 2. **Finalized-state filtering.** The exact filter predicate, kept explicit so
-   the rule is auditable: ``log_events.status == 'completed' AND derived_items.status
-   == 'resolved' AND current_value IS NOT NULL``. Items on ``pending`` /
-   ``processing`` / ``failed`` / ``needs_clarification`` events and any
-   ``unresolved`` (uncosted) item are excluded so pending/failed work never
-   inflates a total. Only ``completed`` events carry committed resolved items
-   (FTY-043/FTY-044 commit items in the same transaction as the terminal status).
+   the rule is auditable: ``log_events.voided_at IS NULL AND log_events.status IN
+   ('completed', 'partially_resolved') AND derived_items.status == 'resolved' AND
+   current_value IS NOT NULL``. Items on ``pending`` / ``processing`` / ``failed`` /
+   ``needs_clarification`` events and any ``unresolved`` (uncosted) item are
+   excluded so pending/failed work never inflates a total. Only ``completed``
+   events carry committed resolved items (FTY-043/FTY-044 commit items in the
+   same transaction as the terminal status). A **voided** event (FTY-321) is
+   excluded outright — a mislogged entry no longer counts toward the day — even
+   though its rows are retained; the same ``voided_at IS NULL`` clause gates the
+   ``uncounted_entries`` predicates so a voided clarification/proposal drops from
+   that count too.
 
 3. **Day / timezone resolution.** ``day`` is interpreted in the user's profile
    timezone (falling back to UTC). Items are attributed to a day by their owning
@@ -46,7 +51,12 @@ from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 
 from app.enums import DerivedItemStatus, LogEventStatus
-from app.models.derived import DerivedExerciseItem, DerivedFoodItem
+from app.models.derived import (
+    ClarificationAnswer,
+    ClarificationQuestion,
+    DerivedExerciseItem,
+    DerivedFoodItem,
+)
 from app.models.identity import User
 from app.models.log_events import LogEvent
 from app.models.targets import DailyTarget, Goal
@@ -69,6 +79,8 @@ _ROUND_DECIMALS = 1
 MAX_RANGE_DAYS = 366
 
 _UTC = ZoneInfo("UTC")
+
+_FINALIZED_EVENT_STATUSES = (LogEventStatus.COMPLETED, LogEventStatus.PARTIALLY_RESOLVED)
 
 
 class DailySummaryForbidden(Exception):
@@ -190,9 +202,10 @@ def _authorize(owner_id: uuid.UUID, current_user: User) -> None:
 #
 # Both the single-day and range read paths build their queries from these helpers
 # so the documented finalized filter is defined exactly once. The predicate:
-# ``log_events.status == 'completed'`` AND ``derived_*_items.status == 'resolved'``
-# AND the costed-value column ``IS NOT NULL``, windowed by the owning log event's
-# ``created_at`` over ``[start, end)``. Day attribution is the event's ``created_at``.
+# ``log_events.status IN ('completed', 'partially_resolved')`` AND
+# ``derived_*_items.status == 'resolved'`` AND the costed-value column
+# ``IS NOT NULL``, windowed by the owning log event's ``created_at`` over
+# ``[start, end)``. Day attribution is the event's ``created_at``.
 
 
 def _food_window_conditions(
@@ -203,7 +216,8 @@ def _food_window_conditions(
     return (
         DerivedFoodItem.user_id == owner_id,
         LogEvent.user_id == owner_id,
-        LogEvent.status == LogEventStatus.COMPLETED,
+        LogEvent.voided_at.is_(None),
+        LogEvent.status.in_(_FINALIZED_EVENT_STATUSES),
         DerivedFoodItem.status == DerivedItemStatus.RESOLVED,
         DerivedFoodItem.calories.isnot(None),
         LogEvent.created_at >= start_utc,
@@ -219,7 +233,8 @@ def _exercise_window_conditions(
     return (
         DerivedExerciseItem.user_id == owner_id,
         LogEvent.user_id == owner_id,
-        LogEvent.status == LogEventStatus.COMPLETED,
+        LogEvent.voided_at.is_(None),
+        LogEvent.status.in_(_FINALIZED_EVENT_STATUSES),
         DerivedExerciseItem.status == DerivedItemStatus.RESOLVED,
         DerivedExerciseItem.active_calories.isnot(None),
         LogEvent.created_at >= start_utc,
@@ -231,10 +246,13 @@ def _exercise_window_conditions(
 #
 # An entry is *uncounted* when it exists but has not yet been counted toward
 # ``intake`` because it awaits a user action. Two disjoint kinds, summed:
-#   1. ``needs_clarification`` LOG EVENTS — the estimator asked a question and is
-#      waiting on the user (counted as events; a clarification event has no
-#      committed items). Attributed by the event's own ``created_at``.
-#   2. ``proposed`` DERIVED FOOD ITEMS (FTY-196) — a costed-but-unconfirmed label
+#   1. ``needs_clarification`` LOG EVENTS — event-level clarification with no
+#      committed items, counted once per event. Attributed by the event's own
+#      ``created_at``.
+#   2. unanswered ITEM-SCOPED QUESTIONS on ``partially_resolved`` events — one per
+#      unresolved component that owns an open question; resolved siblings count in
+#      intake instead.
+#   3. ``proposed`` DERIVED FOOD ITEMS (FTY-196) — a costed-but-unconfirmed label
 #      parse, excluded from every finalized read by construction. Attributed by the
 #      owning event's ``created_at`` (the same day rule ``intake`` uses).
 # Deliberately excluded: ``pending`` / ``processing`` events (the estimator is
@@ -249,7 +267,26 @@ def _needs_clarification_window_conditions(
 
     return (
         LogEvent.user_id == owner_id,
+        LogEvent.voided_at.is_(None),
         LogEvent.status == LogEventStatus.NEEDS_CLARIFICATION,
+        LogEvent.created_at >= start_utc,
+        LogEvent.created_at < end_utc,
+    )
+
+
+def _partial_question_window_conditions(
+    owner_id: uuid.UUID, start_utc: datetime, end_utc: datetime
+) -> tuple[ColumnElement[bool], ...]:
+    """WHERE conditions selecting open item-scoped questions on partial events."""
+
+    answered_ids = select(ClarificationAnswer.question_id)
+    return (
+        ClarificationQuestion.user_id == owner_id,
+        LogEvent.user_id == owner_id,
+        LogEvent.voided_at.is_(None),
+        LogEvent.status == LogEventStatus.PARTIALLY_RESOLVED,
+        ClarificationQuestion.derived_food_item_id.isnot(None),
+        ClarificationQuestion.id.not_in(answered_ids),
         LogEvent.created_at >= start_utc,
         LogEvent.created_at < end_utc,
     )
@@ -269,6 +306,7 @@ def _proposed_food_window_conditions(
     return (
         DerivedFoodItem.user_id == owner_id,
         LogEvent.user_id == owner_id,
+        LogEvent.voided_at.is_(None),
         DerivedFoodItem.status == DerivedItemStatus.PROPOSED,
         LogEvent.created_at >= start_utc,
         LogEvent.created_at < end_utc,
@@ -417,10 +455,11 @@ def _aggregate_uncounted_entries(
 ) -> int:
     """Count the day's logged-but-not-yet-counted entries (single-day path).
 
-    The sum of the user's ``needs_clarification`` log events and ``proposed`` food
-    items attributed to the window — the entries awaiting a user action. Returns
-    ``0`` for a day with no such entries. Two bounded ``COUNT`` queries; every item
-    in ``[start_utc, end_utc)`` belongs to the single requested day so no per-day
+    The sum of the user's event-level ``needs_clarification`` log events, open
+    item-scoped questions on ``partially_resolved`` events, and ``proposed`` food
+    items attributed to the window — the units awaiting a user action. Returns
+    ``0`` for a day with no such entries. Bounded ``COUNT`` queries; every item in
+    ``[start_utc, end_utc)`` belongs to the single requested day so no per-day
     bucketing is needed here.
     """
 
@@ -429,6 +468,15 @@ def _aggregate_uncounted_entries(
             select(func.count())
             .select_from(LogEvent)
             .where(*_needs_clarification_window_conditions(owner_id, start_utc, end_utc))
+        )
+        or 0
+    )
+    partial_question_count = (
+        session.scalar(
+            select(func.count())
+            .select_from(ClarificationQuestion)
+            .join(LogEvent, ClarificationQuestion.log_event_id == LogEvent.id)
+            .where(*_partial_question_window_conditions(owner_id, start_utc, end_utc))
         )
         or 0
     )
@@ -441,7 +489,7 @@ def _aggregate_uncounted_entries(
         )
         or 0
     )
-    return needs_clarification_count + proposed_count
+    return needs_clarification_count + partial_question_count + proposed_count
 
 
 def _aggregate_uncounted_entries_by_day(
@@ -453,10 +501,11 @@ def _aggregate_uncounted_entries_by_day(
 ) -> dict[date, int]:
     """Bucket logged-but-not-yet-counted entries across a window into per-day counts.
 
-    Two windowed queries (``needs_clarification`` events and ``proposed`` items),
-    bucketed in Python by the owning event's local day — the same attribution rule
-    as the single-day path, computed once for the range. Days with no uncounted
-    entries are simply absent (the caller renders them ``0``).
+    Windowed queries (``needs_clarification`` events, open partial questions, and
+    ``proposed`` items), bucketed in Python by the owning event's local day — the
+    same attribution rule as the single-day path, computed once for the range.
+    Days with no uncounted entries are simply absent (the caller renders them
+    ``0``).
     """
 
     counts: dict[date, int] = defaultdict(int)
@@ -467,6 +516,15 @@ def _aggregate_uncounted_entries_by_day(
         )
     ).all()
     for (created_at,) in needs_clarification_rows:
+        counts[_to_local_date(created_at, tz)] += 1
+
+    partial_question_rows = session.execute(
+        select(LogEvent.created_at)
+        .select_from(ClarificationQuestion)
+        .join(LogEvent, ClarificationQuestion.log_event_id == LogEvent.id)
+        .where(*_partial_question_window_conditions(owner_id, start_utc, end_utc))
+    ).all()
+    for (created_at,) in partial_question_rows:
         counts[_to_local_date(created_at, tz)] += 1
 
     proposed_rows = session.execute(

@@ -39,6 +39,16 @@ estimator / contracts / backend-core / security-privacy lane:
 
 ## Version
 
+16 (FTY-324, contract only): redefines food resolution's source tiers as
+bounded **tools available to the `InterpretationSession`**, not a one-way
+fall-through keyed on the first parsed candidate fields. The model owns tier
+selection, source acceptance, ambiguity resolution, and hypothesis revision with
+the raw text plus gathered evidence in view; deterministic code keeps authority
+over source/fetch gates, plausibility validators, serving math, scaling math,
+provenance, privacy, budgets, and persistence. No schema, migration, provider,
+settings, endpoint, or estimator behavior changes land in this documentation
+story; FTY-325/FTY-326 implement the target loop.
+
 15 (FTY-254) adds **common-food FDC candidate ranking and common-portion
 defaults**. A `trusted_nutrition_database` match now means trusted nutrition
 facts for a **compatible food**, not USDA's first lexical hit
@@ -291,6 +301,94 @@ parser supplies **no** nutrition facts; only the food **name** (sanitized,
 normalized) is sent to FDC — never the stated facts, the user's profile, weight,
 history, or any other personal context.
 
+### Interpretation loop and evidence tools (FTY-324)
+
+Food resolution consumes the `InterpretationSession` defined in
+[parse-candidates.md](parse-candidates.md), not a frozen one-shot parse. A
+`CandidateDraft` entering food resolution is the current
+`InterpretationHypothesis` item. Its `name`, `brand`, `quantity_text`, `unit`,
+`amount`, `barcode`, and `stated_*` fields are hypothesis features that
+deterministic code may validate, sanitize, query, scale, and persist, but they
+are not final authority over what the user meant.
+
+The normative division of labour is:
+
+- **Model-owned interpretation:** decide which source tier/tool is applicable,
+  decide whether evidence describes the item the user meant, revise item
+  identities/brands/amounts/splits/merges when evidence contradicts the current
+  hypothesis, and conclude "genuinely indeterminate" only after the allowed
+  FTY-298 policy path is exhausted.
+- **Deterministic-owned execution:** enforce source enablement and egress
+  boundaries, `sanitize_query`, allowlists, public-IP/HTTPS/fetch caps, provider
+  retry/budget caps, schema validation, nutrition plausibility validators,
+  brand/product compatibility checks that bound evidence acceptance, serving and
+  count-scaling math, as-logged/user-text validation, provenance labels, object
+  ownership, retention, and persistence.
+
+The evidence tiers are therefore **tools** the interpretation loop may call in a
+bounded order, with deterministic code enforcing the caps and preconditions for
+each call:
+
+| Tool | Structured input allowed | Deterministic boundary |
+| --- | --- | --- |
+| `user_text` | Explicit `stated_*` facts extracted from the raw text for the current item. | Finite/non-negative/as-logged abuse cap and Atwater consistency before persistence. |
+| `user_label` | User-provided label facts or image extraction owned by `label-extraction.md`. | Label schema validation, serving math, ownership, and label retention rules. |
+| `open_food_facts` | Barcode digits explicitly supplied by the user plus item identity for fallback context. | Barcode normalization, OFF enablement, HTTPS/allowlisted fetch, per-100g plausibility, serving math. |
+| `usda_fdc` | Sanitized item identity for trusted-database lookup. | FDC enablement/API key boundary, ranked compatibility, per-100g plausibility, common-portion table, serving math. |
+| `official_source` | Bounded sanitized identity variants for named/branded items. | Search/fetch/provider caps, host allowlist, active-content stripping, `NamedFoodEstimate` validation, compatibility and serving gates. |
+| `reference_source` | Bounded sanitized identity variants plus fixed `nutrition facts` intent. | Search/fetch caps, searched-result hardened fetch, snippet bounds, extraction validation, compatibility and plausibility gates. |
+| `model_prior` | Sanitized item identity plus bounded quantity/unit fields and content-free tier-miss reasons. | Provider schema validation, calibrated/cold-pass agreement where required, plausibility bounds, serving math, rough provenance. |
+
+Tier order remains evidence-first: source-backed evidence is tried before pure
+model prior whenever an applicable provider is configured and available. FTY-324
+changes **who may reinterpret** between tiers, not the privacy or safety posture.
+A failed or rejected read feeds the evidence view for re-interpretation:
+
+- OFF/USDA miss, disabled/unavailable source, incompatible branded hit, or
+  uncostable serving may trigger a revised brand/product/amount hypothesis before
+  the next tool is chosen.
+- Search miss, fetch failure, snippet-only evidence, extraction
+  `unresolved`/low-confidence, compatibility rejection, or implausible facts feed
+  back as sanitized evidence-status labels; they do not silently erase the user's
+  raw detail or force the remaining tiers to keep the stale item shape.
+- A model-prior unavailable/unusable result is a feedback signal. It may lead to a
+  revised hypothesis, an item-scoped clarification when allowed, or a fail-closed
+  deterministic outcome; it is never persisted as trusted-looking nutrition.
+
+The **re-interpretation trigger points** for food resolution are:
+
+| Trigger | Required interpreter action |
+| --- | --- |
+| `source_gap` | When an applicable source is disabled, unavailable, misses, or returns no usable energy, consult the current hypothesis plus tier status before selecting the next tool. |
+| `identity_incompatible` | When a database row/page/snippet/product name fails compatibility, decide whether to revise the item identity/brand or reject the evidence and continue. |
+| `serving_uncostable` | When facts are plausible but cannot cost the logged quantity, decide whether to revise the amount/unit/count relation or continue to a rough/default/as-logged path. |
+| `evidence_conflict` | When two evidence surfaces point at different items or nutrition bases, revise/split/merge the hypothesis or reject one source before persistence. |
+| `rough_fallback` | Before `model_prior` or default-serving rough estimation finalizes, ensure source-backed tools that apply have been tried or recorded unavailable. |
+| `clarification_last_resort` | Ask only if the interpretation loop concludes the remaining item is genuinely indeterminate under the active FTY-298 mode, or if deterministic gates independently require clarification/failure. |
+
+When a mixed multi-item entry contains both costable and still-indeterminate
+components, the required output shape remains FTY-278 item-scoped partial
+resolution: resolved siblings are committed and counted, while each remaining
+allowed question belongs to its specific unresolved component. FTY-324 does not
+reopen that contract.
+
+#### Tool budgets and fail-closed gates
+
+Implementations of this contract must keep the existing deterministic authority
+intact:
+
+- bounded candidate count, query-variant count, search-result count, fetch size,
+  timeout, content-type, retry, parse-repair, and trace-entry caps;
+- all network egress through the configured search/fetch adapters only;
+- no open-ended browser, crawling, filesystem, shell, email, calendar, or broad
+  personal tools in the estimator;
+- source/fact validation and serving math before persistence;
+- rough estimates marked with rough/model/default/reference provenance and kept
+  editable;
+- deterministic plausibility, contradiction, abuse, schema, and egress gates may
+  clarify or fail closed on their own authority, even if the model would prefer to
+  estimate.
+
 ## Outputs
 
 ### Source lookup and caching
@@ -503,6 +601,13 @@ loaded the event scoped to the job's `user_id`; see `estimation-jobs.md`).
   non-allowlisted target fails closed.
 - **No personal context leaves the system.** Only the normalized food name is sent;
   no profile, weight, history, or event metadata.
+- **Raw text stays at the LLM interpretation boundary.** The
+  `InterpretationSession` may show the raw log text and accumulated clarification
+  answers to the configured LLM provider, but food-resolution tools must not send
+  that raw text to USDA, OFF, search, fetch, official/reference pages, or evidence
+  persistence. Search queries are sanitized item identity only; fetch requests are
+  selected URLs only; traces, assumptions, source refs, errors, and logs carry only
+  bounded sanitized labels, source ids, and safe source refs.
 - **Key safety.** The FDC key is env-only, never sent to clients, never logged, and
   carried in the `X-Api-Key` header so it never appears in a URL; fetch error
   messages never include the URL, headers, request body, or response body.
@@ -1204,3 +1309,10 @@ The backend exposes four health-check endpoints, all returning structured JSON w
   rough-provenance requirements to [estimator-policy.md](estimator-policy.md). This
   contract keeps the source lookup, serving math, item routing, fallback behavior, and
   food evidence persistence rules. FTY-301 needs no migration or DTO change.
+- **FTY-324 (contract only; no code or migration in this story).** Food evidence
+  tiers are now specified as bounded tools inside the `InterpretationSession`, with
+  source gaps/rejections feeding re-interpretation instead of locking the run to a
+  stale parsed candidate. This story adds no schema, endpoint, migration, provider,
+  settings, or runtime change; it preserves the FTY-298 policy modes, the FTY-278
+  item-scoped output shape, and every existing privacy/egress/provenance boundary.
+  FTY-325/FTY-326 implement the interpreter core and tool orchestration.

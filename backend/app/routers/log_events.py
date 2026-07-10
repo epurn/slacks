@@ -13,7 +13,8 @@ FTY-096 makes create safe-to-retry for an offline outbox: an optional opaque
 ``idempotency_key`` dedups a submit per user. A fresh keyed (or unkeyed) create
 returns ``201`` and enqueues one job; a replay of an already-submitted key
 returns ``200`` with the existing event at its current status and enqueues
-nothing. See ``docs/contracts/log-events.md``.
+nothing — unless that stored event has been voided (FTY-321), in which case the
+replay fails closed as ``404``. See ``docs/contracts/log-events.md``.
 
 FTY-064 adds the nutrition-label upload path: a captured label image is posted as
 the raw request body and resolved synchronously in-request (the raw image is
@@ -105,6 +106,9 @@ def create_log_event(
     With an ``idempotency_key`` the submit is safe to retry (FTY-096): a fresh
     create returns ``201`` and enqueues one job; an idempotent replay returns
     ``200`` with the existing event at its current status and enqueues nothing.
+    A keyed replay whose stored event has been **voided** (FTY-321) fails closed
+    as ``404`` — the replay is a read, so it never returns a voided event as a
+    live DTO; the key stays consumed and no replacement row is created.
     """
 
     try:
@@ -115,7 +119,7 @@ def create_log_event(
             payload.raw_text,
             idempotency_key=payload.idempotency_key,
         )
-    except LogEventForbidden as exc:
+    except (LogEventForbidden, LogEventNotFound) as exc:
         raise _NOT_FOUND from exc
     if created:
         enqueue(log_event_id=event.id, user_id=event.user_id)
@@ -238,6 +242,40 @@ def get_log_event(
     return LogEventDTO.model_validate(event)
 
 
+@router.delete(
+    "/{user_id}/log-events/{event_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def void_log_event(
+    user_id: uuid.UUID,
+    event_id: uuid.UUID,
+    current_user: CurrentUser,
+    session: Annotated[Session, Depends(get_session)],
+) -> Response:
+    """Void (soft-delete) one of the caller's own log events (FTY-321).
+
+    Voiding removes a mislogged entry from the day: the event and every derived
+    item hanging off it stop appearing in the log-event list / by-date / single
+    GETs, drop out of the derived-item read models, and no longer count toward
+    the daily summary totals. The underlying rows are **retained** (soft void)
+    so the append-only audit/provenance stance is preserved — this is a status
+    marker, not a hard row deletion.
+
+    Voiding works regardless of the event's status (``completed`` /
+    ``needs_clarification`` / ``failed`` / …). It is **idempotent**: repeating
+    the ``DELETE`` on an already-voided event succeeds identically (``204``).
+    Ownership fails closed like every other route — an unknown id or another
+    user's event is indistinguishable as ``404`` (no existence oracle) and
+    mutates nothing.
+    """
+
+    try:
+        log_event_service.void_event(session, user_id, current_user, event_id)
+    except (LogEventForbidden, LogEventNotFound) as exc:
+        raise _NOT_FOUND from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get(
     "/{user_id}/log-events/{event_id}/clarification",
     response_model=ClarificationResponse,
@@ -257,9 +295,10 @@ def get_log_event_clarification(
     clarifications carry options; deterministic backend-raised questions may
     carry an empty list, in which case the client shows free-text only.
 
-    The read is status-gated (``log-events.md`` v4): only a
-    ``needs_clarification`` event serves questions, and only its **unanswered**
-    ones, so a served question is always freshly answerable. Ownership is
+    The read is status-gated (``log-events.md`` v6): only a
+    ``needs_clarification`` or ``partially_resolved`` event serves questions, and
+    only its **unanswered** ones, so a served question is always freshly
+    answerable. Ownership is
     fail-closed (FTY-030): a cross-user or nonexistent ``event_id`` is
     indistinguishable as ``404`` (no existence oracle); a wrong-status event and
     one with no rows both return an empty list (no status oracle). The question
@@ -298,9 +337,10 @@ def answer_log_event_clarification(
 
     The answer — a tapped quick-pick option's value or free text — is applied as
     a structured detail to the **same** event, which is re-estimated with every
-    detail answered so far (``needs_clarification → processing``; the client
-    polls as usual). The raw phrase is never mutated and no second event is ever
-    created (audit findings A3/A5); an empty/whitespace answer is rejected
+    detail answered so far (``needs_clarification → processing`` or
+    ``partially_resolved → processing``; the client polls as usual). The raw
+    phrase is never mutated and no second event is ever created (audit findings
+    A3/A5); an empty/whitespace answer is rejected
     ``422`` at the request boundary before any work.
 
     A fresh resolve returns ``201`` and enqueues the re-estimate only after the

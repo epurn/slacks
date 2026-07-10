@@ -41,6 +41,7 @@ from app.enums import CandidateType, CorrectionSource
 from app.models.corrections import Correction
 from app.models.derived import DerivedExerciseItem, DerivedFoodItem
 from app.models.identity import User
+from app.models.log_events import LogEvent
 
 #: Either kind of editable derived item.
 DerivedItem = DerivedFoodItem | DerivedExerciseItem
@@ -115,13 +116,16 @@ def edit_derived_item(
 ) -> EditResult:
     """Apply a single field edit to one of ``owner_id``'s derived items.
 
-    Enforces ownership, snapshots the original, applies the override (or the
-    servings rescale), appends the correction row(s), and commits atomically so
-    the item update and its audit rows land together.
+    Enforces ownership, refuses an item whose parent log event is voided
+    (FTY-321; :func:`ensure_parent_event_not_voided`), snapshots the original,
+    applies the override (or the servings rescale), appends the correction
+    row(s), and commits atomically so the item update and its audit rows land
+    together.
     """
 
     _authorize(owner_id, current_user)
     item = _load_owned(session, item_type, item_id, owner_id)
+    ensure_parent_event_not_voided(session, item_type, item_id, owner_id)
 
     corrections = _apply_edit(owner_id, item_type, item, field, value)
 
@@ -298,6 +302,36 @@ def _make_correction(
         new_value=new_value,
         source=source,
     )
+
+
+def ensure_parent_event_not_voided(
+    session: Session,
+    item_type: CandidateType,
+    item_id: uuid.UUID,
+    owner_id: uuid.UUID,
+) -> None:
+    """Fail closed when the derived item's parent log event is voided (FTY-321).
+
+    The boundary precheck for the single-item **mutation** endpoints — the
+    correction edit here and the re-match candidate-list / re-resolve routes —
+    which return or mutate their target row directly and so bypass the
+    read-time parent-``voided_at`` join that excludes voided events from every
+    read model. Raises :class:`DerivedItemNotFound` (rendered ``404``, the same
+    shape as an unknown item — no void oracle) when ``owner_id``'s item exists
+    and its parent event carries ``voided_at``. A missing or cross-user item is
+    left to the caller's own loader, so this adds no second existence path.
+    """
+
+    model: type[DerivedItem] = (
+        DerivedFoodItem if item_type is CandidateType.FOOD else DerivedExerciseItem
+    )
+    voided_at = session.execute(
+        select(LogEvent.voided_at)
+        .join(model, model.log_event_id == LogEvent.id)
+        .where(model.id == item_id, model.user_id == owner_id)
+    ).scalar_one_or_none()
+    if voided_at is not None:
+        raise DerivedItemNotFound("derived item not found")
 
 
 def _authorize(owner_id: uuid.UUID, current_user: User) -> None:

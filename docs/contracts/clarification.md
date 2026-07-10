@@ -29,6 +29,16 @@ answer/resolve, `answer_clarification_question`; `backend/app/schemas/log_events
 
 ## Version
 
+2 (FTY-321): both endpoints **fail closed (`404`) against a voided event**.
+The soft-void operation (`log-events.md` v8) excludes a voided event from
+every read, and the clarify loop resolves its event through the same
+voided-excluding loader as get-by-id — so the clarification read, a fresh
+answer, **and** the idempotent replay of an already-answered question all
+return `404` once the event is voided (void takes precedence over the `200`
+replay and the `409` status guard; nothing is persisted or mutated). The `404`
+matches the unknown/cross-user shape, so there is no void oracle. Non-voided
+behaviour is byte-for-byte unchanged.
+
 1 (FTY-282): relocates the clarify-loop endpoint contract out of
 `log-events.md` into its own page — a **verbatim move, no semantic change**.
 The read/answer shapes, status gating, idempotency, and privacy rules are
@@ -137,6 +147,11 @@ statuses in which a fresh answer can be accepted (see the `409` rule under
   a completing re-estimate leaves them permanently unserved.
 - **Cross-user or nonexistent `event_id`** → `404`, reusing get-by-id's
   fail-closed scoping (no existence oracle).
+- **Voided event (FTY-321)** → `404`, same shape as unknown/cross-user (no
+  void oracle). The read resolves the event through the same voided-excluding
+  loader as get-by-id (`log-events.md`, soft-void), so a voided event's
+  persisted question rows are retained but never served — the "excluded from
+  every read" rule.
 
 An answered question is resolved and is not re-served. When a re-estimate
 raises a fresh clarification round, the new round's questions **replace** the
@@ -231,12 +246,16 @@ FTY-096 create semantics with the question id in the role of the key:
 - **Question not yet answered** (event `needs_clarification` or
   `partially_resolved`) → persist the answer, drive the transition, re-estimate.
   Returns `201`.
-- **Question already answered** → `200` with the event's **current** DTO —
-  no new answer row, no second transition, no double re-estimate. A re-sent
-  identical answer thus converges to the one resolved entry, and the replay
-  reflects the event's current status (`processing`, `completed`, or a fresh
-  `needs_clarification` round) so the client reconciles rather than
-  resetting it.
+- **Question already answered** (event not voided) → `200` with the event's
+  **current** DTO — no new answer row, no second transition, no double
+  re-estimate. A re-sent identical answer thus converges to the one resolved
+  entry, and the replay reflects the event's current status (`processing`,
+  `completed`, or a fresh `needs_clarification` round) so the client
+  reconciles rather than resetting it. Once the event is **voided** (FTY-321)
+  this replay no longer returns `200`: like every read of a voided event it
+  fails closed with `404` — the replay is a read of the stored event and obeys
+  the same "excluded from every read" rule as get-by-id and the keyed
+  create-replay (`log-events.md`, soft-void).
 - **Body mismatch is not an error.** A replay carrying a different `answer`
   under an already-answered `question_id` returns the stored outcome; the
   divergent body is ignored (the FTY-096 rule). Changing a resolved detail
@@ -257,6 +276,16 @@ Because the clarification read is status-gated, a client that fetches fresh
 never renders a chip that would `409`; the `409` guards the race where the
 client holds questions from an earlier fetch (or a sibling answer lands
 concurrently) and the event has since moved on.
+
+**Voided event (FTY-321)** → `404`, fail closed, nothing persisted or
+mutated — for a fresh answer **and** for the replay of an already-answered
+question alike. The answer flow resolves the event through the same
+voided-excluding loader as get-by-id before any question lookup or status
+check, so the void `404` takes precedence over both the `200` replay and the
+`409` status guard, and the `404` matches the unknown/cross-user shape (no
+void oracle). Answering a question against a voided event can never
+re-estimate it or resurface it as a live DTO. Behaviour on non-voided events
+is unchanged.
 
 **Answer persistence (implemented by FTY-171).** One row per answered question
 in `clarification_answers`: `id` (UUID PK), `question_id` (UUID, FK →

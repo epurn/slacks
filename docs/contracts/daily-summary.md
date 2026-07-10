@@ -226,9 +226,18 @@ read path.)
 The exact predicate (documented for auditability — never relaxed without updating
 this contract):
 
-> `log_events.status IN ('completed', 'partially_resolved')`
+> `log_events.voided_at IS NULL`
+> AND `log_events.status IN ('completed', 'partially_resolved')`
 > AND `derived_{food,exercise}_items.status == 'resolved'`
 > AND `current_value IS NOT NULL`
+
+- **Voided events are excluded (FTY-321).** A user who deletes a mislogged entry
+  soft-voids its `log_events` row (`voided_at` set; `log-events.md`); the
+  `voided_at IS NULL` clause drops the event and all its derived items from
+  `intake` / `exercise` immediately, so the day no longer counts its
+  kcal/macros/burn even though the rows are retained. The same clause gates the
+  `uncounted_entries` predicates below, so a voided `needs_clarification` event
+  or `proposed` item stops inflating that count too.
 
 - Items on `pending` / `processing` / `failed` events are excluded: a `pending` or
   `processing` event has no committed terminal items (the estimator is still
@@ -465,6 +474,13 @@ curl -s ':8000/api/users/<uid>/daily-summary/range?from=2025-01-01&to=2026-06-01
   yields only the known macros — the unknown ones add no grams. The `user_text` source
   (label "You logged") is surfaced by the read-model. Still a pure computed read over
   existing (now-writable) rows; no daily-summary DTO or endpoint change.
+- **FTY-321 (soft-void; no migration here).** Adds the `log_events.voided_at IS
+  NULL` clause to the finalized-state filter and to the `uncounted_entries`
+  predicates, so a soft-voided entry (`log-events.md`) stops counting toward
+  `intake` / `exercise` / `uncounted_entries` while its rows are retained. Still
+  a **pure computed read** — the `voided_at` column and its `0019` migration are
+  owned by `log-events.md`; this endpoint gains no new table, column, or DTO
+  field. Numerically inert until a user actually voids an entry.
 - **FTY-278 (contract only; no migration).** Relaxes the finalized-state filter's
   event-status clause to `IN ('completed', 'partially_resolved')` and re-bases
   `uncounted_entries` onto the unresolved **component** (one per open item-scoped
