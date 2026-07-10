@@ -39,6 +39,13 @@ estimator / contracts / backend-core / security-privacy lane:
 
 ## Version
 
+18 (FTY-348, contract only): the global FTY-324 interpretation-session semantics
+(the model-owned/deterministic-owned division of labour and the
+evidence-tiers-as-tools framing) move to
+[interpretation-session.md](interpretation-session.md); this page links there and
+keeps its page-local per-tier tool table, routing, serving math, source hierarchy,
+and food outcome tables. No normative change.
+
 17 (FTY-306, contract only): adds **exact evidence upgrade routing** for an
 **existing** low-trust/incomplete food item — the correction sheet's
 `Make it exact` lever. Two source-specific proposal entry points (a typed or
@@ -319,31 +326,18 @@ history, or any other personal context.
 
 ### Interpretation loop and evidence tools (FTY-324)
 
-Food resolution consumes the `InterpretationSession` defined in
-[parse-candidates.md](parse-candidates.md), not a frozen one-shot parse. A
-`CandidateDraft` entering food resolution is the current
-`InterpretationHypothesis` item. Its `name`, `brand`, `quantity_text`, `unit`,
-`amount`, `barcode`, and `stated_*` fields are hypothesis features that
-deterministic code may validate, sanitize, query, scale, and persist, but they
-are not final authority over what the user meant.
+Food resolution runs inside the `InterpretationSession` defined in
+[interpretation-session.md](interpretation-session.md), not a frozen one-shot
+parse. A `CandidateDraft` entering food resolution is the current
+`InterpretationHypothesis` item; its `name`, `brand`, `quantity_text`, `unit`,
+`amount`, `barcode`, and `stated_*` fields are hypothesis features deterministic
+code may validate, sanitize, query, scale, and persist, but not final authority
+over what the user meant. The model-owned/deterministic-owned division of labour
+and the general evidence-tiers-as-tools contract are defined there; this page owns
+the concrete per-tier tools, routing, serving math, and food outcome tables below.
 
-The normative division of labour is:
-
-- **Model-owned interpretation:** decide which source tier/tool is applicable,
-  decide whether evidence describes the item the user meant, revise item
-  identities/brands/amounts/splits/merges when evidence contradicts the current
-  hypothesis, and conclude "genuinely indeterminate" only after the allowed
-  FTY-298 policy path is exhausted.
-- **Deterministic-owned execution:** enforce source enablement and egress
-  boundaries, `sanitize_query`, allowlists, public-IP/HTTPS/fetch caps, provider
-  retry/budget caps, schema validation, nutrition plausibility validators,
-  brand/product compatibility checks that bound evidence acceptance, serving and
-  count-scaling math, as-logged/user-text validation, provenance labels, object
-  ownership, retention, and persistence.
-
-The evidence tiers are therefore **tools** the interpretation loop may call in a
-bounded order, with deterministic code enforcing the caps and preconditions for
-each call:
+The evidence tiers are the **tools** the interpretation loop may call in a bounded
+order, with deterministic code enforcing the caps and preconditions for each call:
 
 | Tool | Structured input allowed | Deterministic boundary |
 | --- | --- | --- |
@@ -1422,13 +1416,17 @@ The backend exposes four health-check endpoints, all returning structured JSON w
   rough-provenance requirements to [estimator-policy.md](estimator-policy.md). This
   contract keeps the source lookup, serving math, item routing, fallback behavior, and
   food evidence persistence rules. FTY-301 needs no migration or DTO change.
-- **FTY-324 (contract only; no code or migration in this story).** Food evidence
-  tiers are now specified as bounded tools inside the `InterpretationSession`, with
-  source gaps/rejections feeding re-interpretation instead of locking the run to a
-  stale parsed candidate. This story adds no schema, endpoint, migration, provider,
-  settings, or runtime change; it preserves the FTY-298 policy modes, the FTY-278
-  item-scoped output shape, and every existing privacy/egress/provenance boundary.
-  FTY-325/FTY-326 implement the interpreter core and tool orchestration.
+- **FTY-324 / FTY-348 (contract only; no code or migration in this story).** Food
+  evidence tiers are specified as bounded tools inside the `InterpretationSession`,
+  with source gaps/rejections feeding re-interpretation instead of locking the run
+  to a stale parsed candidate (FTY-324); FTY-348 relocated the global
+  session/hypothesis contract to
+  [interpretation-session.md](interpretation-session.md) with no normative change,
+  leaving this page the per-tier tool/routing/serving-math owner. No schema,
+  endpoint, migration, provider, settings, or runtime change; the FTY-298 policy
+  modes, the FTY-278 item-scoped output shape, and every existing
+  privacy/egress/provenance boundary are preserved. FTY-325/FTY-326 implement the
+  interpreter core and tool orchestration.
 - **FTY-306 (contract only; no code or migration in this story).** Adds the
   **Exact Evidence Upgrade Routing** section: barcode/label proposal entry points
   targeting an existing food item, the preserved-amount / optional-adjustment /
