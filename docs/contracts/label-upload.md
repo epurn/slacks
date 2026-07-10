@@ -145,6 +145,13 @@ A photographed label is **capture-then-confirm**: the parse lands as an uncounte
 nonexistent `event_id` is `404` with no existence oracle, mirroring `log-events.md` /
 `daily-summary.md` — and neither logs the nutrition values.
 
+A **voided** event (FTY-321 soft void, `log-events.md`) is likewise `404` on both
+endpoints: ownership/existence resolve through the void-aware single-event read,
+so once the user deletes the owning entry the proposal can no longer be read
+(`404`, not `proposal: null`) or confirmed (the refused confirm mutates nothing —
+the retained `proposed` row stays uncounted). The `404` matches the
+unknown/cross-user shape, so there is no void oracle.
+
 **Read the proposed values.**
 
 ```
@@ -161,7 +168,8 @@ provenance): the parsed values enriched with the `user_label` `source` descripto
 (`label: "Label scan"`) and `is_edited`. It is `null` when the event has no
 uncounted proposal — never had one (a `needs_clarification` / `failed` disposition,
 or a non-label event) or already confirmed. There is **no status oracle**: those
-cases are indistinguishable.
+cases are indistinguishable. A **voided** event is not among them — it is `404`,
+like an unknown id (see above).
 
 **Confirm the proposal (commits it → counted).**
 

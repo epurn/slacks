@@ -8,7 +8,7 @@ pending raw log event and read their Today events back. This gives the mobile
 timeline (FTY-031) and polling (FTY-032) a real backend, and gives the estimator
 (Milestone 4) the row it later processes.
 
-This contract covers five things:
+This contract covers six things:
 
 1. the `log_events` persistence schema and its migration;
 2. the **event status state machine** — the full v1 status vocabulary and the
@@ -22,12 +22,20 @@ This contract covers five things:
    doc gates by owning the status state machine those endpoints drive;
 5. the **day-listing read** (FTY-198) — an owner-scoped, Today-feed-shaped read
    for an arbitrary calendar day, returning each event plus the shared derived
-   item read-model (`source` provenance + `is_edited`).
+   item read-model (`source` provenance + `is_edited`);
+6. the **soft-void (delete) operation** (FTY-321) — `DELETE .../log-events/{id}`
+   removes a mislogged entry from the day by setting a terminal `voided_at`
+   marker, excluding the event and its derived items from every read model and
+   the daily totals **without** hard-deleting any row (the append-only
+   audit/provenance stance is preserved).
 
 It deliberately excludes estimation, job enqueue, and worker processing
-(FTY-040+); editing or deleting events (later stories); and new derived-item
-persistence. The day-listing read composes the existing derived food/exercise
-item read-model without changing its storage contract. Saved image attachments are owned by their own contract
+(FTY-040+); editing an event's derived items (`corrections.md`); and new
+derived-item persistence. **Deleting** an event is now in scope as the
+soft-void operation (FTY-321, item 6 above): a void is a status marker, not a
+hard row deletion, so no derived-item, correction, or evidence row is ever
+removed by application code. The day-listing read composes the existing derived
+food/exercise item read-model without changing its storage contract. Saved image attachments are owned by their own contract
 (`log-attachments.md`, FTY-077): a `log_attachments` row references a log event but
 is written only when the user explicitly saves an uploaded image.
 
@@ -38,6 +46,31 @@ backend-core / contracts lane (`backend/app/models/log_events.py`,
 `backend/app/routers/log_events.py`, `backend/alembic/`).
 
 ## Version
+
+8 (FTY-321): adds the **soft-void (delete) operation** — `DELETE
+/api/users/{user_id}/log-events/{event_id}` — and a nullable `voided_at`
+timestamptz on `log_events` (migration `0019`). Voiding is the user removing a
+mislogged entry: it sets `voided_at` **once** (a terminal status; there is no
+un-void), which excludes the event **and every derived item hanging off it**
+from the list / by-date / single GET, the clarification read/answer, the
+day-listing items, and the daily-summary intake/exercise/`uncounted_entries`
+totals — so the entry disappears from the day. The **keyed create-replay** and
+the **single-item mutation endpoints** (correction edit, re-match
+candidate-list / re-resolve) **fail closed (`404`)** against a voided event via
+backend-core boundary prechecks, since they return/mutate their target row
+directly and bypass the read-time join. **No row is hard-deleted**: the
+event, its derived items, corrections, and evidence are all retained, preserving
+the append-only audit/provenance stance (`corrections.md` reconciled). The
+delete is **idempotent** (repeating it returns `204` identically) and works from
+any status (`completed` / `needs_clarification` / `failed` / …); a cross-user or
+unknown id fails closed as `404` (no existence oracle), matching every other
+log-event route. `voided_at` is an orthogonal marker, **not** a new
+`LogEventStatus` value, so the event keeps its pre-void estimation status for
+audit and the state-machine map is unchanged. Void does **not** cancel an
+in-flight or queued estimation (the estimator is void-agnostic;
+`estimation-jobs.md` unchanged): derived rows a late estimation writes onto a
+voided event are retained-and-excluded by the read-time parent-`voided_at`
+join.
 
 7 (FTY-282): relocates the clarify-loop **endpoint contract** — the
 clarification read and the clarification answer (resolve), and their
@@ -154,9 +187,16 @@ The `0003` migration creates:
 - **`log_events`** — a user-owned raw log entry. Columns: `id` (UUID, PK),
   `user_id` (UUID, FK → `users.id`, `ON DELETE CASCADE`, indexed), `raw_text`
   (text, not null), `status` (string, not null), `idempotency_key` (string,
-  **nullable**), `created_at` (timestamptz, not null, indexed), `updated_at`
+  **nullable**), `voided_at` (timestamptz, **nullable**, added by the `0019`
+  migration), `created_at` (timestamptz, not null, indexed), `updated_at`
   (timestamptz, not null). `created_at` is indexed because the Today timeline
   queries events by day.
+- **`voided_at`** (FTY-321) is the **soft-void marker**: `NULL` for a live
+  event, set **once** to the void instant when the user deletes the entry. It is
+  orthogonal to `status` (the event keeps its pre-void estimation status), and
+  every read model filters `voided_at IS NULL` so a voided event and its derived
+  rows are retained but never surfaced or counted. Void is terminal — there is
+  no un-void, no un-set.
 - A composite **unique index** `(user_id, idempotency_key)`
   (`uq_log_events_user_idempotency_key`, added by the `0015` migration) makes the
   key namespace per-user and the database the dedup authority. NULL keys are
@@ -185,7 +225,15 @@ authenticated user's own `{user_id}`.
   `GET .../log-events?day=` apply. `day` is optional and defaults to the current
   day in that timezone.
 - `GET /api/users/{user_id}/log-events/{event_id}` — returns one of the user's
-  events by id (for polling).
+  events by id (for polling). A **voided** event is treated as not-found (`404`).
+- `DELETE /api/users/{user_id}/log-events/{event_id}` — **soft-voids** the event
+  (FTY-321). Sets `voided_at` once and returns `204 No Content` with an empty
+  body. Voids the event **regardless of its status** (`pending` / `processing` /
+  `completed` / `failed` / `needs_clarification`). **Idempotent**: repeating the
+  delete on an already-voided event returns `204` identically (the marker is not
+  re-stamped). No request body. Ownership-scoped like every other route — a
+  cross-user or unknown id returns `404` (no existence oracle) and mutates
+  nothing. See [Soft-void (delete)](#soft-void-delete-fty-321).
 - `GET /api/users/{user_id}/log-events/{event_id}/clarification` and
   `POST /api/users/{user_id}/log-events/{event_id}/clarification/answers` — the
   clarify-loop read and answer (resolve) endpoints for a `needs_clarification`
@@ -210,7 +258,9 @@ clarification answer):
 
 - **Create (fresh)** → `201` with the event DTO at `status: "pending"`.
 - **Create (idempotent replay)** → `200` with the **existing** event's DTO at its
-  current status (see [Idempotent create](#idempotent-create-201-vs-200)).
+  current status; a replay whose stored event has been **voided** (FTY-321) fails
+  closed with `404` instead (see
+  [Idempotent create](#idempotent-create-201-vs-200)).
 - **List-today** → `200` with a JSON array of event DTOs, ordered oldest-first.
 - **Day-listing read** → `200` with a JSON array of entry DTOs, ordered
   oldest-first by the owning event:
@@ -281,7 +331,9 @@ clarification read (its open question names the component in the question
 uncosted placeholder row. (After FTY-301, recognizable amountless components
 usually rough-estimate and complete; if a remaining allowed clarification occurs
 before the FTY-278 follow-up, it is still event-level and returns `items: []`.)
-- **Get-by-id** → `200` with the event DTO.
+- **Get-by-id** → `200` with the event DTO. A voided event is not-found (`404`).
+- **Delete (void)** → `204 No Content` with an empty body, on both the first
+  void and every idempotent repeat.
 
 The DTO does **not** echo `idempotency_key`: it is a write-only request token with
 no consumer need in the response (a client already holds the key it sent).
@@ -308,6 +360,14 @@ every backend regardless of whether the driver preserves the offset on read.
   **existing** event's current DTO, create **no** new row, enqueue **no** second
   job. Returns `200`. The `201`/`200` distinction lets the client tell a fresh
   create from a replay.
+- **Key supplied, the stored event is voided** (FTY-321) → **fail closed with
+  `404`**. The replay is a **read** of the stored event, so it obeys the same
+  "excluded from every read" rule as every other read path: a voided event is
+  never resurfaced as a live DTO. The key stays **consumed**
+  (first-write-wins) — the stored row keeps the key, so no replacement row is
+  created and no second job is enqueued. A client that voids an entry and later
+  flushes a stale outbox replay of it treats the `404` as expected, exactly as
+  it does for get-by-id.
 
 Replay reflects the event's **current** status: if the original has advanced to
 `processing` or `completed` before the retry arrives, the replay returns that
@@ -347,6 +407,76 @@ and drive (see [State machine](#state-machine), below), plus the shared
 validation, authorization, privacy, and error rules those endpoints follow
 alongside every other endpoint on this resource.
 
+### Soft-void (delete) (FTY-321)
+
+`DELETE /api/users/{user_id}/log-events/{event_id}` lets a user remove a
+mistaken or unwanted logged entry. It is a **soft void**, not a hard delete:
+
+- **Marker, not deletion.** The event's `voided_at` is set once (a terminal
+  status; there is no un-void). The event row, its derived food/exercise items,
+  its corrections, its evidence rows, and any saved label-image attachment
+  (`log-attachments.md`) are all **retained** — nothing is hard-deleted, and no
+  `ON DELETE CASCADE` fires (a void deletes no row) — so the append-only
+  audit/provenance stance holds (`corrections.md`,
+  `docs/security/data-retention.md`).
+- **Full read-model exclusion.** A voided event disappears from the day: it is
+  omitted from list-today, the day-listing (`by-date`) read, and the single
+  get-by-id (which returns `404`); its derived items are omitted from the
+  day-listing item rows; and its kcal/macros/burn no longer count toward the
+  daily summary `intake` / `exercise`, nor does it count toward
+  `uncounted_entries` (`daily-summary.md`). The clarification read and answer
+  fail closed (`404`) for a voided event.
+- **Single-item surfaces fail closed (`404`).** The endpoints that return or
+  mutate a specific stored row **directly** — and so never pass through the
+  read-time exclusion join above — each refuse a voided target with `404`,
+  making the exclusion exhaustive across the surface:
+  - the **keyed create-replay** (`POST .../log-events` with an
+    `idempotency_key` whose stored event is voided) — see
+    [Idempotent create](#idempotent-create-201-vs-200); the key stays consumed
+    and no replacement row is created;
+  - the **clarification read and answer** (`clarification.md`), as above;
+  - the **correction edit**
+    (`PATCH .../derived-items/{item_type}/{item_id}`, `corrections.md`) on an
+    item whose parent event is voided;
+  - the **re-match candidate-list and re-resolve**
+    (`POST .../derived-items/food/{item_id}/source-candidates` and
+    `.../re-resolve`, `corrections.md`) on an item whose parent event is voided;
+  - the **label-proposal read and confirm**
+    (`GET`/`POST .../log-events/{event_id}/label-proposal[/confirm]`,
+    `label-upload.md`) on a voided event — the refused confirm mutates nothing,
+    so the retained `proposed` row stays uncounted.
+
+  These are backend-core route/service boundary prechecks (each loads the
+  target's parent event and rejects when `voided_at` is set); the estimator
+  re-match capability and the worker stay void-agnostic. The `404` matches the
+  unknown-item/unknown-event shape, so there is no void oracle.
+- **Any status.** Voiding works whatever the event's estimation status
+  (`pending`, `processing`, `completed`, `failed`, `needs_clarification`) —
+  `voided_at` is orthogonal to `status`, and the event keeps its pre-void status
+  for audit.
+- **Idempotent.** Repeating the delete on an already-voided event returns `204`
+  identically and does **not** move `voided_at`; the marker is write-once,
+  **first-write-wins** — enforced database-side (the void is a conditional
+  `UPDATE … WHERE voided_at IS NULL`), so even concurrent deletes cannot
+  re-stamp an already-set marker.
+- **Void does not cancel estimation.** A void is a read-model concern, not a
+  pipeline stop: it does **not** cancel an in-flight or queued estimation job,
+  and the estimator is void-agnostic (`estimation-jobs.md` is unchanged). A
+  late estimation that completes after the void is expected and is not an
+  error: any derived rows it writes onto the voided event are
+  **retained-and-excluded** — persisted like any other derived rows, but never
+  surfaced or counted, because every derived-item and daily-summary read joins
+  each row to its parent event and drops rows whose parent has `voided_at`
+  set. Exclusion happens at read time, so it holds regardless of when the rows
+  were written.
+- **Ownership fails closed.** The event is loaded scoped to the authenticated
+  owner. A cross-user or unknown `event_id` is indistinguishable as `404` (no
+  existence oracle) and mutates nothing — the same convention as get-by-id.
+
+The delete adds no un-void/undo endpoint, no bulk delete, and no retention/purge
+job (those are out of scope). Because a voided event is excluded from get-by-id,
+a client that voids an entry treats a subsequent `404` on that id as expected.
+
 ## State machine
 
 `status` is a `LogEventStatus`. The legal transitions are the named contract in
@@ -383,6 +513,13 @@ path already uses (`food-resolution.md`). Answering the item-scoped question dri
 answer round-trip, generalized to the new source status). The `needs_clarification`
 transitions are unchanged.
 
+**FTY-321 does not add a status value.** The soft-void (delete) operation is an
+orthogonal `voided_at` marker on the row, not a member of `LogEventStatus`, so
+this transition map is unchanged: a voided event keeps its pre-void status for
+audit, and read models simply filter `voided_at IS NULL` on top of the
+finalized-state predicate. Void is terminal at the marker level (write-once, no
+un-void).
+
 This is the **event** status vocabulary. The separate **derived-item** status
 vocabulary (`DerivedItemStatus`: `unresolved` / `resolved`, plus `proposed` added
 by FTY-196 for an uncounted, confirmation-required nutrition-label parse) is owned
@@ -415,11 +552,13 @@ label event still reaches terminal `completed`; only its food item is held
 
 - Authentication: every endpoint requires a valid, unexpired bearer token;
   otherwise `401`.
-- Object-level authorization: a user may create, list, and read **only their
-  own** events. `{user_id}` must equal the authenticated user's id, and
-  get-by-id is scoped to the owner so a cross-user id is indistinguishable from a
-  missing one. A mismatch fails closed as `404` (no existence oracle). Negative
-  tests prove create, list, get-by-id, and the day-listing read all fail closed.
+- Object-level authorization: a user may create, list, read, and **void** (delete)
+  **only their own** events. `{user_id}` must equal the authenticated user's id, and
+  get-by-id and delete are scoped to the owner so a cross-user id is
+  indistinguishable from a missing one. A mismatch fails closed as `404` (no
+  existence oracle). Negative tests prove create, list, get-by-id, the
+  day-listing read, and delete all fail closed. Voiding another user's event is a
+  `404` that mutates nothing, so a user can never delete data they do not own.
 - The clarification read reuses the same object-level scoping: a cross-user or
   nonexistent `event_id` returns `404` with no existence oracle, proven by a
   cross-user negative test.
@@ -460,7 +599,7 @@ label event still reaches terminal `completed`; only its food item is held
 | Status | When |
 | --- | --- |
 | `401` | Missing/invalid/expired bearer token. |
-| `404` | Creating, listing, day-listing, or reading events for an account the caller does not own; a get-by-id, clarification read, or clarification answer whose event does not exist for the owner; an answer whose `question_id` is not one of the owned event's questions (all fail closed). |
+| `404` | Creating, listing, day-listing, or reading events for an account the caller does not own; a get-by-id, **delete (void)**, clarification read, or clarification answer whose event does not exist for the owner (a voided event is not-found for get-by-id and the clarify endpoints); an answer whose `question_id` is not one of the owned event's questions (all fail closed). |
 | `409` | A fresh (non-replay) answer for an event not in `needs_clarification` or `partially_resolved` — `{"error": "not_awaiting_clarification"}`; nothing persisted or mutated. |
 | `422` | Empty/whitespace/oversized `raw_text`, empty/whitespace/oversized/wrong-type `idempotency_key`, unknown body key, malformed `day`, missing/malformed `question_id`, or empty/whitespace/oversized/wrong-type `answer`. |
 
@@ -497,6 +636,14 @@ curl -s ':8000/api/users/<uid>/log-events/by-date?day=2026-06-26' \
 # Poll one event
 curl -s :8000/api/users/<uid>/log-events/<event_id> -H 'authorization: Bearer <t>'
 # → 200 { "id": "...", "status": "pending", ... }
+
+# Void (soft-delete) a mislogged entry, then a safe idempotent retry
+curl -sX DELETE :8000/api/users/<uid>/log-events/<event_id> -H 'authorization: Bearer <t>'
+# → 204 (no body); the event and its items vanish from every read and the day's totals
+curl -sX DELETE :8000/api/users/<uid>/log-events/<event_id> -H 'authorization: Bearer <t>'
+# → 204   # idempotent: already voided, voided_at unchanged
+curl -s :8000/api/users/<uid>/log-events/<event_id> -H 'authorization: Bearer <t>'
+# → 404   # a voided event is not-found for get-by-id
 ```
 
 Clarify-loop examples (reading and answering an event's clarification
@@ -532,6 +679,13 @@ questions) live in `clarification.md`.
   `[]` for existing deterministic questions. It applies on top of `0016` and
   rolls back cleanly (`alembic downgrade 0016`), verified by an
   apply/rollback test.
+- The `0019` migration (FTY-321) is **additive**: it adds the nullable
+  `voided_at` timestamptz column to `log_events` with no backfill (existing rows
+  keep `voided_at = NULL` and stay live). It applies on top of `0018` and rolls
+  back cleanly (`alembic downgrade 0018`), verified by an apply/rollback test
+  and exercised against Postgres by the FTY-143 migration guard. Retention is
+  unchanged — the column lives on `log_events` and is removed by the existing
+  `ON DELETE CASCADE` on account deletion.
 - **FTY-170 (breaking, pre-v1, no shim).** The clarification read's
   per-question shape changes from `{ text }` to `{ id, text, options }`, the
   read is scoped to unanswered questions, and the clarification answer

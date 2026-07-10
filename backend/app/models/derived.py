@@ -25,12 +25,15 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import JSON, Float, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import JSON, Float, ForeignKey, Integer, String, Text, Uuid, event, select
+from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, UtcDateTime
 from app.enums import DerivedItemStatus
+from app.models.log_events import LogEvent
 
 
 def _utcnow() -> datetime:
@@ -158,6 +161,17 @@ class ClarificationQuestion(Base):
     #: Display-only quick-pick answer candidates. Free text is always allowed by
     #: the answer endpoint; these are stored as bounded data, never an enum.
     options: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    #: Internal item-scoped partial-resolution carrier (FTY-278): the unresolved
+    #: food component this question owns. Event-level questions leave it ``NULL``.
+    #: The API never exposes this link; it is consumed by the answer-triggered
+    #: estimator to re-cost only that component. ``SET NULL`` preserves answered
+    #: question history if a referenced derived item is ever removed.
+    derived_food_item_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("derived_food_items.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -206,3 +220,44 @@ class ClarificationAnswer(Base):
     updated_at: Mapped[datetime] = mapped_column(
         UtcDateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )
+
+
+_RAW_DIARY_ECHO_MIN_LENGTH = 12
+
+
+def _normalized_for_raw_echo(value: str) -> str:
+    """Normalize text enough to detect an echoed full diary phrase."""
+
+    return " ".join(value.casefold().split())
+
+
+def _question_echoes_raw_diary_text(question_text: str, raw_text: str) -> bool:
+    """Return whether ``question_text`` contains the full raw diary phrase.
+
+    Component labels can legitimately match a short one-word raw entry ("milk"),
+    so this guard targets the privacy failure the contract forbids: persisting a
+    substantial full diary phrase in the question row.
+    """
+
+    normalized_raw = _normalized_for_raw_echo(raw_text)
+    if len(normalized_raw) < _RAW_DIARY_ECHO_MIN_LENGTH or " " not in normalized_raw:
+        return False
+    return normalized_raw in _normalized_for_raw_echo(question_text)
+
+
+@event.listens_for(ClarificationQuestion, "before_insert")
+@event.listens_for(ClarificationQuestion, "before_update")
+def _reject_raw_diary_text_in_question(
+    _mapper: Any,
+    connection: Connection,
+    target: ClarificationQuestion,
+) -> None:
+    """Fail closed if a persisted question echoes the full raw diary phrase."""
+
+    if target.derived_food_item_id is None:
+        return
+    raw_text = connection.execute(
+        select(LogEvent.raw_text).where(LogEvent.id == target.log_event_id)
+    ).scalar_one_or_none()
+    if raw_text is not None and _question_echoes_raw_diary_text(target.question_text, raw_text):
+        raise ValueError("clarification question text must not echo raw diary text")

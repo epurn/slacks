@@ -6,10 +6,10 @@ Retention defaults should minimize stored personal data while preserving user va
 
 - Account data: retained until account deletion.
 - Profile data: retained until edited or account deletion.
-- Food and exercise logs: retained until user deletion or account deletion. A log event may carry an optional, opaque client `idempotency_key` (FTY-096) used to dedup a safe-to-retry offline submit — stored verbatim on `log_events`, never parsed, never logged, and never returned to the client. It adds no new retention surface: it lives on the owning event and is removed with it by the existing `ON DELETE CASCADE` on user/account deletion.
+- Food and exercise logs: retained until user deletion or account deletion. A log event may carry an optional, opaque client `idempotency_key` (FTY-096) used to dedup a safe-to-retry offline submit — stored verbatim on `log_events`, never parsed, never logged, and never returned to the client. It adds no new retention surface: it lives on the owning event and is removed with it by the existing `ON DELETE CASCADE` on user/account deletion. A user-deleted log event (FTY-321) is a **soft void**, not a row deletion: a nullable, set-once `voided_at` timestamp on `log_events` (a bare timestamp, no PII, never logged) marks the event, the event row and its derived rows (derived items, clarification questions, evidence sources, corrections, saved label-image attachments) are retained in storage, and every read model excludes them (`docs/contracts/log-events.md`). The marker adds no new retention surface: it lives on the owning event and the retained rows are hard-removed only by the existing user/account-deletion cascades.
 - Body weight entries: retained until user deletion or account deletion.
 - Saved foods, recipes, aliases, and memories: retained until user deletion or account deletion.
-- Nutrition label images (`log_attachments`, FTY-077): discard by default — an uploaded image is retained only while needed for extraction and discarded afterward unless the user explicitly saves it. An explicit save writes exactly one user-owned `log_attachments` row (the image bytes plus the content-type, byte size, and content hash needed to retrieve and delete it); the default flow persists no raw image. Uploads are size- and content-type limited and rejected fail-closed before storage. The row is `ON DELETE CASCADE` from both the user and the owning log event, so a saved image is removed on log-event, user, or account deletion. It never stores model output (that is `evidence_sources`).
+- Nutrition label images (`log_attachments`, FTY-077): discard by default — an uploaded image is retained only while needed for extraction and discarded afterward unless the user explicitly saves it. An explicit save writes exactly one user-owned `log_attachments` row (the image bytes plus the content-type, byte size, and content hash needed to retrieve and delete it); the default flow persists no raw image. Uploads are size- and content-type limited and rejected fail-closed before storage. The row is `ON DELETE CASCADE` from both the user and the owning log event, so a saved image is hard-removed whenever either owning row is actually deleted (user or account deletion). The user-initiated log-event delete (FTY-321) is a **soft void**, not a row deletion — it does not fire the cascade, so a saved image on a voided event is retained (like the event's other derived rows) until the user/account-deletion cascades remove it. It never stores model output (that is `evidence_sources`).
 - Raw OCR text: avoid long-term retention unless needed for evidence; prefer extracted facts plus source metadata.
 - Fetched web pages: do not store raw pages by default; store source URL, fetched timestamp, content hash, and extracted facts.
 - Estimation runs: store model/provider, schema version, tool names, source references, assumptions, validation errors, and sanitized traces. The trace's structured decision entries (FTY-255, `docs/contracts/estimation-jobs.md` "Decision trace") hold bounded sanitized labels, clamped counts, and non-secret source references only — an embedded URL keeps scheme/host/path with the query string, fragment, and userinfo dropped and its hostname labels and path segments secret-redacted; labels are control-character-stripped and redacted of secret-looking material; the entry count is capped per run. No raw event text, prompts, provider output, fetched pages, search snippets, or keys/tokens are ever stored; a global source row's bounded description may appear (global source data, not user data). The recorded provider/model are the configured selector and model string — operator configuration, not secrets. Runs remain user-tied rows and follow the owning log event's retention (`ON DELETE CASCADE`).
@@ -63,7 +63,7 @@ event where applicable), so deleting a user or a parent record removes the
 dependent rows.
 
 **Required — direct user-initiated deletion** of individual items:
-- Food and exercise log entries (cascading to derived items, clarification questions, evidence sources, and corrections).
+- Food and exercise log entries — delivered as a soft void (FTY-321): the entry and its derived items, clarification questions, evidence sources, corrections, and saved label-image attachments are excluded from every read but retained in storage until the user/account-deletion cascades remove them (see the as-built status below).
 - Body weight entries.
 - Saved foods, recipes, aliases, and portion memories.
 - Attachments (nutrition label images).
@@ -72,11 +72,19 @@ dependent rows.
 entries, saved foods, memories, attachments, corrections, weight history,
 evidence) and the user and auth identity.
 
-As-built status: only body weight entries currently expose a deletion endpoint
-(`DELETE /api/users/{user_id}/weight-entries/{entry_id}`, FTY-070). The remaining
-direct-deletion endpoints and the account-deletion endpoint are required for
-release but **not yet implemented**; the schema-level cascades above are already
-in place to support them. By design there is no per-item `DELETE` for individual
+As-built status: body weight entries expose a hard-deletion endpoint
+(`DELETE /api/users/{user_id}/weight-entries/{entry_id}`, FTY-070), and food and
+exercise log entries expose a user-initiated delete
+(`DELETE /api/users/{user_id}/log-events/{event_id}`, FTY-321) implemented as a
+**soft void**: it sets the set-once `voided_at` marker and excludes the event
+and all its derived rows (derived items, clarification questions, evidence
+sources, corrections, saved label-image attachments) from every read model —
+including derived summaries — but
+retains the rows in storage, consistent with append-only storage; the retained
+rows are hard-removed only through the user/account-deletion cascades. The
+remaining direct-deletion endpoints and the account-deletion endpoint are
+required for release but **not yet implemented**; the schema-level cascades
+above are already in place to support them. By design there is no per-item `DELETE` for individual
 `evidence_sources` or `clarification_questions` — they are removed only as cascade
 consequences of deleting the parent log event, user, or account. Global source
 facts (`products`, cached USDA/OFF data) remain after user deletion since they

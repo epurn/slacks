@@ -21,6 +21,14 @@ the public contracts that consume this policy ([parse-candidates.md](parse-candi
 
 ## Version
 
+3 (FTY-324, contract cross-reference): clarifies that the active FTY-298 modes are
+consumed by the `InterpretationSession` defined in
+[parse-candidates.md](parse-candidates.md) and
+[food-resolution.md](food-resolution.md). Only that interpretation loop may conclude
+"genuinely indeterminate" for an otherwise recognizable food/exercise item; the
+deterministic safety gates still clarify or fail closed on their own authority.
+No env var, mode, threshold, DTO, schema, provider, or runtime behavior changes.
+
 2 (FTY-304, wording clarification): defines
 `FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS` as the shared cap for parse-step
 pre-validation provider-output repair, with phase-specific mechanics and failure
@@ -56,6 +64,24 @@ closed at application config load instead of falling back to an unintended
 policy.
 
 ## Outputs
+
+### Interpretation-loop clarification boundary (FTY-324)
+
+The active mode is evaluated inside the `InterpretationSession`, whose current
+candidate set is a revisable hypothesis rather than frozen parse output. For a
+recognizable item, "genuinely indeterminate" is an interpretation-loop conclusion
+made with the raw text, accumulated clarification answers, current hypothesis, and
+gathered evidence statuses in view. It is not a deterministic shortcut from one
+missing field such as `has_brand = false`, `amount_kind = missing`, a generic
+`name`, or an unrecognized `unit`.
+
+This does **not** relax fail-closed behavior. Deterministic schema validation,
+plausibility validators, contradiction checks, source/fetch policy gates, abuse
+caps, serving-math failures under modes that allow asking, and provider/tool
+unavailability may still raise clarification or failure according to their step
+contracts. The modes below decide when an otherwise safe, recognizable hypothesis
+estimates first versus asks; they do not authorize silent guesses, raw-confidence
+gates, or provenance-free persistence.
 
 ### Clarification modes
 
@@ -189,6 +215,8 @@ event.raw_text = "stuff"
 ## Migration / Compatibility
 
 FTY-303 is documentation-only extraction. FTY-304 is a documentation-only
-wording clarification for an existing FTY-300 setting. Neither introduces a
-migration, compatibility shim, endpoint change, DTO change, schema change,
-provider change, prompt change, or estimator behavior change.
+wording clarification for an existing FTY-300 setting. FTY-324 is a
+documentation-only cross-reference from the policy modes into the new
+interpretation-session contracts. None introduces a migration, compatibility shim,
+endpoint change, DTO change, schema change, provider change, prompt change, or
+estimator behavior change.

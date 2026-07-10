@@ -69,13 +69,30 @@ describe('settings sub-state preset registration', () => {
     for (const name of [
       'settings.goal_edit',
       'settings.body_edit',
+      'settings.formula_edit',
       'settings.appearance',
+      'settings.target_override',
     ]) {
       const preset = getVisualReviewPreset(name);
       expect(preset).toBeDefined();
       expect(preset?.route).toBe('/profile');
       expect(preset?.settledPath).toBe('/profile');
     }
+  });
+
+  it('registers settings.target_override with a synthetic user-source target fixture', () => {
+    const response = getVisualReviewPreset('settings.target_override')?.responses?.find((r) =>
+      r.match({
+        url: 'https://api.example.test/api/target',
+        method: 'GET',
+        pathEnd: '/target',
+      }),
+    );
+
+    expect(response).toBeDefined();
+    expect((response?.body as { calories?: { source?: string } }).calories?.source).toBe(
+      'user',
+    );
   });
 });
 
@@ -90,6 +107,12 @@ describe('useSettingsVisualReviewSubState', () => {
     enterE2EMode();
     activateVisualReviewPreset('settings.body_edit', null);
     expect(readSubState()).toBe('body_edit');
+  });
+
+  it('maps settings.formula_edit to formula_edit', () => {
+    enterE2EMode();
+    activateVisualReviewPreset('settings.formula_edit', null);
+    expect(readSubState()).toBe('formula_edit');
   });
 
   it('maps settings.appearance to appearance', () => {
@@ -109,13 +132,19 @@ describe('useSettingsVisualReviewSubState', () => {
     expect(readSubState()).toBeNull();
   });
 
+  it('is null for settings.target_override because that preset only installs a target fixture', () => {
+    enterE2EMode();
+    activateVisualReviewPreset('settings.target_override', null);
+    expect(readSubState()).toBeNull();
+  });
+
   it('is inert outside E2E mode, even with a matching preset active (release-build proof)', () => {
     // A preset can be activated directly (this call itself carries no E2E gate —
     // only the deep-link route and this hook do), so this proves the hook's own
     // `isE2EMode()` check is load-bearing rather than piggybacking on some other
     // gate.
     exitE2EMode();
-    activateVisualReviewPreset('settings.goal_edit', null);
+    activateVisualReviewPreset('settings.formula_edit', null);
     expect(readSubState()).toBeNull();
   });
 });

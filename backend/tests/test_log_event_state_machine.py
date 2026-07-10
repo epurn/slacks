@@ -37,7 +37,9 @@ def test_terminal_statuses_have_no_outgoing_transitions() -> None:
         (LogEventStatus.PROCESSING, LogEventStatus.COMPLETED),
         (LogEventStatus.PROCESSING, LogEventStatus.FAILED),
         (LogEventStatus.PROCESSING, LogEventStatus.NEEDS_CLARIFICATION),
+        (LogEventStatus.PROCESSING, LogEventStatus.PARTIALLY_RESOLVED),
         (LogEventStatus.NEEDS_CLARIFICATION, LogEventStatus.PROCESSING),
+        (LogEventStatus.PARTIALLY_RESOLVED, LogEventStatus.PROCESSING),
     ],
 )
 def test_legal_transitions(current: LogEventStatus, target: LogEventStatus) -> None:
@@ -52,6 +54,8 @@ def test_legal_transitions(current: LogEventStatus, target: LogEventStatus) -> N
         (LogEventStatus.COMPLETED, LogEventStatus.PENDING),
         (LogEventStatus.COMPLETED, LogEventStatus.PROCESSING),
         (LogEventStatus.FAILED, LogEventStatus.PROCESSING),
+        (LogEventStatus.PARTIALLY_RESOLVED, LogEventStatus.COMPLETED),
+        (LogEventStatus.PARTIALLY_RESOLVED, LogEventStatus.NEEDS_CLARIFICATION),
         (LogEventStatus.PENDING, LogEventStatus.PENDING),
     ],
 )

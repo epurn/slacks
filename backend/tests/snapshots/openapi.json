@@ -138,7 +138,7 @@
         "type": "object"
       },
       "ClarificationResponse": {
-        "description": "Response body for the owner-scoped clarification read (FTY-152, FTY-170).\n\nCarries a ``needs_clarification`` event's **unanswered** clarification\nquestions ordered by ``position``. The read is status-gated: an owned event\nin any other status \u2014 or one with no unanswered rows \u2014 yields an empty list,\nand the two cases are indistinguishable (no status oracle).",
+        "description": "Response body for the owner-scoped clarification read.\n\nCarries a ``needs_clarification`` or ``partially_resolved`` event's\n**unanswered** clarification questions ordered by ``position``. The read is\nstatus-gated: an owned event in any other status \u2014 or one with no unanswered\nrows \u2014 yields an empty list, and the two cases are indistinguishable (no\nstatus oracle).",
         "properties": {
           "questions": {
             "items": {
@@ -1069,13 +1069,14 @@
         "type": "object"
       },
       "LogEventStatus": {
-        "description": "Lifecycle status of a raw log event (FTY-030).\n\nThis is the canonical v1 status vocabulary for the log-event state machine.\nA new event starts at :attr:`PENDING`; the estimator pipeline (Milestone 4)\ndrives it through :attr:`PROCESSING` to a terminal :attr:`COMPLETED`,\n:attr:`FAILED`, or :attr:`NEEDS_CLARIFICATION`. The legal transitions between\nthese statuses are the named state-machine contract in\n:mod:`app.services.log_events`; later stories extend that map rather than\nredefining the vocabulary here.\n\nFTY-030 implements creation at :attr:`PENDING` and the\n``PENDING \u2192 COMPLETED`` transition only; the remaining transitions are\nreserved for the estimator stories.",
+        "description": "Lifecycle status of a raw log event (FTY-030).\n\nThis is the canonical v1 status vocabulary for the log-event state machine.\nA new event starts at :attr:`PENDING`; the estimator pipeline (Milestone 4)\ndrives it through :attr:`PROCESSING` to :attr:`COMPLETED`, :attr:`FAILED`,\n:attr:`NEEDS_CLARIFICATION`, or the item-scoped partial\n:attr:`PARTIALLY_RESOLVED`. The legal transitions between these statuses are\nthe named state-machine contract in\n:mod:`app.services.log_events`; later stories extend that map rather than\nredefining the vocabulary here.\n\nFTY-030 implements creation at :attr:`PENDING` and the\n``PENDING \u2192 COMPLETED`` transition only; the remaining transitions are\nreserved for the estimator stories.",
         "enum": [
           "pending",
           "processing",
           "completed",
           "failed",
-          "needs_clarification"
+          "needs_clarification",
+          "partially_resolved"
         ],
         "title": "LogEventStatus",
         "type": "string"
@@ -2386,7 +2387,7 @@
     },
     "/api/users/{user_id}/derived-items/food/{item_id}/re-resolve": {
       "post": {
-        "description": "Re-resolve the caller's own food item to a chosen candidate reference.\n\nRecomputes calories/macros from the chosen source at the item's current portion,\nrewrites its provenance to the new source, and re-snapshots the estimated\noriginals \u2014 the item is **not** marked edited. The response carries the new\nper-item ``source`` descriptor (FTY-092). Cross-user or unknown items fail closed\nas ``404``; a reference the server cannot re-derive, or a re-match the new source\ncannot cost, returns ``422`` with a clear error shape.",
+        "description": "Re-resolve the caller's own food item to a chosen candidate reference.\n\nRecomputes calories/macros from the chosen source at the item's current portion,\nrewrites its provenance to the new source, and re-snapshots the estimated\noriginals \u2014 the item is **not** marked edited. The response carries the new\nper-item ``source`` descriptor (FTY-092). Cross-user or unknown items \u2014 and items\nwhose parent log event is voided (FTY-321) \u2014 fail closed as ``404``; a reference\nthe server cannot re-derive, or a re-match the new source cannot cost, returns\n``422`` with a clear error shape.",
         "operationId": "re_resolve_item_api_users__user_id__derived_items_food__item_id__re_resolve_post",
         "parameters": [
           {
@@ -2466,7 +2467,7 @@
     },
     "/api/users/{user_id}/derived-items/food/{item_id}/source-candidates": {
       "post": {
-        "description": "List alternative source candidates for the caller's own food item.\n\nRuns the existing resolution providers in list-candidates mode over the item's\nidentity (or the sanitized ``query`` override) and returns a bounded list of\nenergy-bearing matches. Cross-user or unknown items fail closed as ``404``; a\ntransient or unusable candidate-source failure returns ``503`` (retryable) rather\nthan a misleading empty list.",
+        "description": "List alternative source candidates for the caller's own food item.\n\nRuns the existing resolution providers in list-candidates mode over the item's\nidentity (or the sanitized ``query`` override) and returns a bounded list of\nenergy-bearing matches. Cross-user or unknown items \u2014 and items whose parent\nlog event is voided (FTY-321) \u2014 fail closed as ``404``; a transient or unusable\ncandidate-source failure returns ``503`` (retryable) rather than a misleading\nempty list.",
         "operationId": "list_source_candidates_api_users__user_id__derived_items_food__item_id__source_candidates_post",
         "parameters": [
           {
@@ -2851,7 +2852,7 @@
         ]
       },
       "post": {
-        "description": "Create a ``pending`` log event and enqueue its estimation job.\n\nThe event is committed first; only then is the job published, so the worker\nnever races ahead of a persisted event. The payload carries ids only \u2014 never\nthe raw text.\n\nWith an ``idempotency_key`` the submit is safe to retry (FTY-096): a fresh\ncreate returns ``201`` and enqueues one job; an idempotent replay returns\n``200`` with the existing event at its current status and enqueues nothing.",
+        "description": "Create a ``pending`` log event and enqueue its estimation job.\n\nThe event is committed first; only then is the job published, so the worker\nnever races ahead of a persisted event. The payload carries ids only \u2014 never\nthe raw text.\n\nWith an ``idempotency_key`` the submit is safe to retry (FTY-096): a fresh\ncreate returns ``201`` and enqueues one job; an idempotent replay returns\n``200`` with the existing event at its current status and enqueues nothing.\nA keyed replay whose stored event has been **voided** (FTY-321) fails closed\nas ``404`` \u2014 the replay is a read, so it never returns a voided event as a\nlive DTO; the key stays consumed and no replacement row is created.",
         "operationId": "create_log_event_api_users__user_id__log_events_post",
         "parameters": [
           {
@@ -3091,6 +3092,67 @@
       }
     },
     "/api/users/{user_id}/log-events/{event_id}": {
+      "delete": {
+        "description": "Void (soft-delete) one of the caller's own log events (FTY-321).\n\nVoiding removes a mislogged entry from the day: the event and every derived\nitem hanging off it stop appearing in the log-event list / by-date / single\nGETs, drop out of the derived-item read models, and no longer count toward\nthe daily summary totals. The underlying rows are **retained** (soft void)\nso the append-only audit/provenance stance is preserved \u2014 this is a status\nmarker, not a hard row deletion.\n\nVoiding works regardless of the event's status (``completed`` /\n``needs_clarification`` / ``failed`` / \u2026). It is **idempotent**: repeating\nthe ``DELETE`` on an already-voided event succeeds identically (``204``).\nOwnership fails closed like every other route \u2014 an unknown id or another\nuser's event is indistinguishable as ``404`` (no existence oracle) and\nmutates nothing.",
+        "operationId": "void_log_event_api_users__user_id__log_events__event_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Void Log Event",
+        "tags": [
+          "log-events"
+        ]
+      },
       "get": {
         "description": "Return one of the caller's own events by id, or ``404`` otherwise.",
         "operationId": "get_log_event_api_users__user_id__log_events__event_id__get",
@@ -3162,7 +3224,7 @@
     },
     "/api/users/{user_id}/log-events/{event_id}/clarification": {
       "get": {
-        "description": "Return the open clarification questions for one of the caller's events.\n\nThe mobile clarify sheet (FTY-153) fetches this lazily when it opens, so the\nToday list/poll DTO stays lean. Questions are ordered by ``position`` and\ncarry their stable ``id`` (the key an answer submission references), their\n``text``, and their quick-pick ``options``. Model-raised parse\nclarifications carry options; deterministic backend-raised questions may\ncarry an empty list, in which case the client shows free-text only.\n\nThe read is status-gated (``log-events.md`` v4): only a\n``needs_clarification`` event serves questions, and only its **unanswered**\nones, so a served question is always freshly answerable. Ownership is\nfail-closed (FTY-030): a cross-user or nonexistent ``event_id`` is\nindistinguishable as ``404`` (no existence oracle); a wrong-status event and\none with no rows both return an empty list (no status oracle). The question\ntext, like raw text, is never logged.",
+        "description": "Return the open clarification questions for one of the caller's events.\n\nThe mobile clarify sheet (FTY-153) fetches this lazily when it opens, so the\nToday list/poll DTO stays lean. Questions are ordered by ``position`` and\ncarry their stable ``id`` (the key an answer submission references), their\n``text``, and their quick-pick ``options``. Model-raised parse\nclarifications carry options; deterministic backend-raised questions may\ncarry an empty list, in which case the client shows free-text only.\n\nThe read is status-gated (``log-events.md`` v6): only a\n``needs_clarification`` or ``partially_resolved`` event serves questions, and\nonly its **unanswered** ones, so a served question is always freshly\nanswerable. Ownership is\nfail-closed (FTY-030): a cross-user or nonexistent ``event_id`` is\nindistinguishable as ``404`` (no existence oracle); a wrong-status event and\none with no rows both return an empty list (no status oracle). The question\ntext, like raw text, is never logged.",
         "operationId": "get_log_event_clarification_api_users__user_id__log_events__event_id__clarification_get",
         "parameters": [
           {
@@ -3232,7 +3294,7 @@
     },
     "/api/users/{user_id}/log-events/{event_id}/clarification/answers": {
       "post": {
-        "description": "Resolve one clarification question on the caller's own event (FTY-171).\n\nThe answer \u2014 a tapped quick-pick option's value or free text \u2014 is applied as\na structured detail to the **same** event, which is re-estimated with every\ndetail answered so far (``needs_clarification \u2192 processing``; the client\npolls as usual). The raw phrase is never mutated and no second event is ever\ncreated (audit findings A3/A5); an empty/whitespace answer is rejected\n``422`` at the request boundary before any work.\n\nA fresh resolve returns ``201`` and enqueues the re-estimate only after the\nanswer, the re-opened job, and the transition are committed \u2014 the worker\nnever races an unpersisted resolve. An idempotent replay of an\nalready-answered question returns ``200`` with the event's current DTO and\nenqueues nothing. A fresh answer for an event that has since moved on\nreturns ``409 {\"error\": \"not_awaiting_clarification\"}`` and mutates nothing.\nOwnership fails closed (``404``, no existence oracle) for a cross-user or\nnonexistent event or a question that is not the event's own. The answer\ntext, like raw text, is never logged.",
+        "description": "Resolve one clarification question on the caller's own event (FTY-171).\n\nThe answer \u2014 a tapped quick-pick option's value or free text \u2014 is applied as\na structured detail to the **same** event, which is re-estimated with every\ndetail answered so far (``needs_clarification \u2192 processing`` or\n``partially_resolved \u2192 processing``; the client polls as usual). The raw\nphrase is never mutated and no second event is ever created (audit findings\nA3/A5); an empty/whitespace answer is rejected\n``422`` at the request boundary before any work.\n\nA fresh resolve returns ``201`` and enqueues the re-estimate only after the\nanswer, the re-opened job, and the transition are committed \u2014 the worker\nnever races an unpersisted resolve. An idempotent replay of an\nalready-answered question returns ``200`` with the event's current DTO and\nenqueues nothing. A fresh answer for an event that has since moved on\nreturns ``409 {\"error\": \"not_awaiting_clarification\"}`` and mutates nothing.\nOwnership fails closed (``404``, no existence oracle) for a cross-user or\nnonexistent event or a question that is not the event's own. The answer\ntext, like raw text, is never logged.",
         "operationId": "answer_log_event_clarification_api_users__user_id__log_events__event_id__clarification_answers_post",
         "parameters": [
           {

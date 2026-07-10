@@ -154,6 +154,54 @@ appId: com.fatty
     id: "appearance-segmented-control"
 - takeScreenshot: settings-appearance-light
 
+# settings.target_override (FTY-346): target fixture includes a user-source
+# component so the override provenance label is visible without tapping a row.
+# The provenance Text sets an explicit accessibilityLabel ("Set by you — tap
+# Reset to restore the derived value") that iOS folds into the parent row's
+# accessible label, so the visible "✎ set by you" glyph string is not in the
+# accessibility tree — assert the folded label instead (full-string regex).
+- openLink: "fatty://__visual-review?preset=settings.target_override&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:settings.target_override"
+    timeout: 20000
+- assertVisible:
+    text: ".*Set by you.*"
+- takeScreenshot: settings-target-override-light
+
+- openLink: "fatty://__visual-review?preset=settings.target_override&theme=dark"
+- runFlow: common/accept-open-in-fatty.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:settings.target_override"
+    timeout: 20000
+- assertVisible:
+    text: ".*Set by you.*"
+- takeScreenshot: settings-target-override-dark
+
+# settings.formula_edit (FTY-346): the E2E-only initial-state seam opens the
+# calculation-preference editor with the loaded formula selected.
+- openLink: "fatty://__visual-review?preset=settings.formula_edit&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:settings.formula_edit"
+    timeout: 20000
+- assertVisible:
+    id: formula-edit-card
+- takeScreenshot: settings-formula-edit-light
+
+- openLink: "fatty://__visual-review?preset=settings.formula_edit&theme=dark"
+- runFlow: common/accept-open-in-fatty.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:settings.formula_edit"
+    timeout: 20000
+- assertVisible:
+    id: formula-edit-card
+- takeScreenshot: settings-formula-edit-dark
+
 # today.confirm_parsed (FTY-262, light): a Today-owned sub-state preset — no
 # route param opens the parsed-confirmation sheet, so Today's own E2E-only
 # initial-state seam (useLabelProposal) opens it on mount instead. Proves the

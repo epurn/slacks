@@ -51,13 +51,12 @@ def test_derived_tables_carry_user_ownership(tmp_path: Path, table: str) -> None
         assert {"id", "log_event_id", "user_id", "created_at", "updated_at"} <= columns
 
         # Object-level ownership + cascade from both the user and the log event.
-        referred = {fk["referred_table"] for fk in inspector.get_foreign_keys(table)}
-        assert referred == {"users", "log_events"}
-        ondeletes = {
-            fk.get("options", {}).get("ondelete", "").upper()
-            for fk in inspector.get_foreign_keys(table)
-        }
-        assert ondeletes == {"CASCADE"}
+        fks = inspector.get_foreign_keys(table)
+        referred = {fk["referred_table"] for fk in fks}
+        assert {"users", "log_events"} <= referred
+        for fk in fks:
+            if fk["referred_table"] in {"users", "log_events"}:
+                assert fk.get("options", {}).get("ondelete", "").upper() == "CASCADE"
     finally:
         engine.dispose()
 
@@ -87,6 +86,35 @@ def test_clarification_questions_options_migration_applies_and_rolls_back(
         downgrade(engine, "0016")
         rolled_back = {c["name"] for c in inspect(engine).get_columns("clarification_questions")}
         assert "options" not in rolled_back
+    finally:
+        engine.dispose()
+
+
+def test_clarification_question_item_carrier_migration_applies_and_rolls_back(
+    tmp_path: Path,
+) -> None:
+    """FTY-278 carrier: questions can point at one derived food component."""
+
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'question-carrier.db'}")
+    try:
+        upgrade(engine, "head")
+        inspector = inspect(engine)
+        columns = {c["name"]: c for c in inspector.get_columns("clarification_questions")}
+        assert "derived_food_item_id" in columns
+        assert columns["derived_food_item_id"]["nullable"]
+
+        indexes = {idx["name"] for idx in inspector.get_indexes("clarification_questions")}
+        assert "ix_clarification_questions_derived_food_item_id" in indexes
+
+        fks = inspector.get_foreign_keys("clarification_questions")
+        item_fk = next(fk for fk in fks if fk["referred_table"] == "derived_food_items")
+        assert item_fk["constrained_columns"] == ["derived_food_item_id"]
+        assert item_fk["referred_columns"] == ["id"]
+        assert item_fk.get("options", {}).get("ondelete", "").upper() == "SET NULL"
+
+        downgrade(engine, "0019")
+        rolled_back = {c["name"] for c in inspect(engine).get_columns("clarification_questions")}
+        assert "derived_food_item_id" not in rolled_back
     finally:
         engine.dispose()
 

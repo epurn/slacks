@@ -97,8 +97,13 @@ client string.
   writes no row.
 - **User-owned + deletable:** the row carries the content-type, byte size, and
   content hash needed to retrieve and delete the saved image; `ON DELETE CASCADE`
-  from both the user and the owning log event removes it on log-event, user, or
-  account deletion.
+  from both the user and the owning log event removes it whenever either owning
+  **row** is actually deleted (user or account deletion). The user-initiated
+  log-event delete (FTY-321, `log-events.md`) is a **soft void** that retains the
+  event row, so it does not fire the cascade: a saved image on a voided event is
+  retained-and-excluded like the event's other derived rows and is hard-removed
+  only through the user/account-deletion cascades
+  (`docs/security/data-retention.md`).
 - The table never stores model output (that is evidence, `evidence_sources`); the
   stored bytes are untrusted input, validated as data and never logged.
 
