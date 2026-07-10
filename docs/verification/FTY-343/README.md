@@ -3,7 +3,8 @@
 Running-app visual evidence that the shared native `SegmentedControl`
 (`mobile/components/ui/SegmentedControl.tsx`) now renders in the app's **resolved**
 theme, so the **unselected** segment label is legible (WCAG AA) against the dark
-app surface — the reported SignInScreen "Create account" defect from PR #294.
+app surface — both reported reproductions: the SignInScreen "Create account"
+defect from PR #294, and the onboarding goal screen's Direction/Pace controls.
 
 ## The fix
 
@@ -36,12 +37,28 @@ label washed out. It stays the adaptive platform control — no hand-rolled rest
 | `signin-light.png` | `today.signed_out` · light | Light mode unchanged — unselected "Create account" is dark text on the light control. |
 | `settings-controls-dark.png` | `settings.list` · dark (device light) | No regression at the Settings call sites: Units, Appearance, and Weigh-in reminder controls all paint dark with every unselected label (Imperial / Light / Dark / Every 2 weeks / Monthly / Off) legible white. |
 | `settings-controls-light.png` | `settings.list` · light | Settings call sites unchanged in light mode. |
+| `goal-dark-direction-lose-pace-steady.png` | `onboarding.goal` · dark (device light) | Second reported case, default state. Direction "Lose" selected → **Maintain and Gain unselected**, legible white; Pace "Steady" selected → **Gentle and Faster unselected**, legible white. FTY-222 caption ("~0.5% of bodyweight / week — recommended") renders below the pace control. |
+| `goal-dark-direction-gain.png` | `onboarding.goal` · dark (device light) | Direction "Gain" selected → **Lose and Maintain unselected**, legible; the gain pace options (Gentle/Steady) render with "Gentle" unselected. |
+| `goal-dark-direction-maintain.png` | `onboarding.goal` · dark (device light) | Direction "Maintain" selected → **Lose and Gain unselected**, legible (Pace hidden by design for maintain). |
+| `goal-dark-pace-gentle.png` | `onboarding.goal` · dark (device light) | Pace "Gentle" selected → **Steady unselected**, legible. |
+| `goal-dark-pace-faster.png` | `onboarding.goal` · dark (device light) | Loss pace, "Faster" selected → **Gentle and Steady unselected**, legible on the 3-segment control. |
+| `goal-light.png` | `onboarding.goal` · light | Onboarding GoalStep unchanged in light mode — unselected Direction/Pace labels are dark text on the light control. |
+| `trends-range-dark.png` | `trends.populated` · dark (device light) | No regression at the Trends call site: the range control paints dark with "1 month" selected and **3 months / 6 months unselected**, legible white. |
+| `trends-range-light.png` | `trends.populated` · light | Trends range control unchanged in light mode. |
+
+Every segment of both GoalStep controls appears as the unselected one across the
+dark captures: Direction — Lose (`…gain.png`, `…maintain.png`), Maintain
+(`…lose-pace-steady.png`, `…gain.png`), Gain (`…lose-pace-steady.png`,
+`…maintain.png`); Pace — Gentle (`…lose-pace-steady.png`, `…pace-faster.png`),
+Steady (`…pace-gentle.png`, `…pace-faster.png`), Faster
+(`…lose-pace-steady.png`).
 
 ## Verdict
 
 In dark mode the native control renders in the system's dark segmented-control
 style: unselected titles are the platform's near-white label colour on the dark
 segment fill (contrast well above the 4.5:1 AA normal-text bar), where before the
-light-appearance control put a dark label on the dark surface. Both segments were
-checked as the unselected one. Light mode and the Settings / Trends / onboarding
-call sites are visually unchanged.
+light-appearance control put a dark label on the dark surface. Every segment of
+the SignIn toggle and the onboarding Direction/Pace controls was checked as the
+unselected one. Light mode and the Settings / Trends / onboarding call sites are
+visually unchanged.
