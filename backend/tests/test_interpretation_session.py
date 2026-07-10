@@ -387,6 +387,53 @@ def test_evidence_driven_reinterpret_seam_feeds_sanitized_labels_only() -> None:
     assert session.hypothesis.items[0].hypothesis_item_id == 1
 
 
+def test_evidence_labels_are_sanitized_before_provider_egress() -> None:
+    # FTY-325 security requirement: provider calls may include raw diary text
+    # but nothing else raw. Evidence-ledger fields pass through the
+    # decision-trace sanitizers at the prompt seam, so a URL-bearing source_ref
+    # sheds its query string, fragment, and secret-looking material before the
+    # model sees it.
+    unanimous = _parsed(
+        [{"type": "food", "name": "dill pickle hummus", "quantity_text": "2 tbsp", "amount": 2}]
+    )
+    revised = _parsed(
+        [
+            {
+                "type": "food",
+                "name": "dill pickle hummus",
+                "quantity_text": "2 tbsp",
+                "amount": 2,
+                "brand": "PC",
+            }
+        ]
+    )
+    provider = FakeProvider(responses=[unanimous, unanimous, revised])
+    context = _context("PC dill pickle hummus")
+    session = _session(provider, context.raw_text)
+
+    session.interpret_initial(context)
+    session.add_evidence(
+        EvidenceRecord(
+            tier="official_web",
+            outcome="rejected_nutrition_mismatch",
+            source_ref=(
+                "official_source:https://brand.example.com/nutrition"
+                "?api_key=sk-live1234567890abcdef#frag"
+            ),
+        )
+    )
+    session.reinterpret(context)
+
+    reask_prompt = provider.prompts[-1]
+    assert (
+        "official_web: rejected_nutrition_mismatch"
+        " (official_source:https://brand.example.com/nutrition)"
+    ) in reask_prompt
+    assert "api_key" not in reask_prompt
+    assert "sk-live" not in reask_prompt
+    assert "#frag" not in reask_prompt
+
+
 # --- trace observability for every run ----------------------------------------------
 
 
@@ -428,6 +475,52 @@ def test_every_run_traces_candidate_count_and_per_candidate_labels() -> None:
     assert session is not None
     assert session.policy_view.mode == "estimate_first"
     assert session.policy_view.samples_used == 2
+
+
+def test_blank_brand_is_traced_as_brandless() -> None:
+    # The parse contract tells the model to leave generic brands empty and the
+    # schema accepts "" — a blank (or whitespace-only) brand must trace
+    # has_brand=False so candidate brand state is diagnosable from the labels.
+    provider = FakeProvider(
+        responses=[
+            _parsed(
+                [
+                    {
+                        "type": "food",
+                        "name": "banana",
+                        "quantity_text": "1",
+                        "amount": 1,
+                        "brand": "",
+                    },
+                    {
+                        "type": "food",
+                        "name": "toast",
+                        "quantity_text": "1 slice",
+                        "amount": 1,
+                        "brand": " ",
+                    },
+                    {
+                        "type": "food",
+                        "name": "big mac",
+                        "quantity_text": "1",
+                        "amount": 1,
+                        "brand": "McDonald's",
+                    },
+                ]
+            )
+        ]
+        * 2
+    )
+    context = _context("a banana, toast, and a big mac")
+
+    ParseStep(provider).run(context)
+
+    per_candidate = [e for e in _revision_entries(context) if "candidate_index" in e]
+    assert [(e["candidate_index"], e["has_brand"]) for e in per_candidate] == [
+        (0, False),
+        (1, False),
+        (2, True),
+    ]
 
 
 def test_deterministic_gate_failure_is_traced_as_validator_outcome() -> None:

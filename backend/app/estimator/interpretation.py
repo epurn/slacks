@@ -45,7 +45,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from app.enums import CandidateType
-from app.estimator.decision_trace import amount_kind
+from app.estimator.decision_trace import (
+    amount_kind,
+    sanitize_trace_label,
+    sanitize_trace_source_ref,
+)
 from app.estimator.parse_prompt import build_reinterpretation_prompt
 from app.estimator.parse_recovery import recoverable_parse_result_schema
 from app.estimator.pipeline import (
@@ -146,10 +150,20 @@ class EvidenceRecord:
     source_ref: str | None = None
 
     def as_label(self) -> str:
-        """Render the record as one sanitized evidence-status prompt line."""
+        """Render the record as one sanitized evidence-status prompt line.
 
-        base = f"{self.tier}: {self.outcome}"
-        return f"{base} ({self.source_ref})" if self.source_ref else base
+        Provider calls may carry raw diary text but nothing else raw (FTY-325
+        security requirement), so every field passes through the decision-trace
+        sanitizers here — at the egress seam — rather than trusting the caller:
+        a ``source_ref`` embedding a URL keeps only scheme/host/path with
+        secret-looking material redacted, and labels are bounded and redacted.
+        """
+
+        base = f"{sanitize_trace_label(self.tier)}: {sanitize_trace_label(self.outcome)}"
+        if self.source_ref is None:
+            return base
+        ref = sanitize_trace_source_ref(self.source_ref)
+        return f"{base} ({ref})" if ref else base
 
 
 @dataclass(frozen=True)
@@ -539,7 +553,9 @@ class InterpretationSession:
             "hypothesis_revision",
             outcome=outcome,
             candidate_index=index,
-            has_brand=item.brand is not None,
+            # The parse contract keeps generic brands empty ("" is schema-valid),
+            # so only a non-blank brand counts as branded in the trace.
+            has_brand=bool(item.brand and item.brand.strip()),
             amount_kind=amount_kind(item.unit, item.amount, item.quantity_text),
             result_count=count,
         )
