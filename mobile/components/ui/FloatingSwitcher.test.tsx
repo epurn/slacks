@@ -10,6 +10,10 @@ import {
   type FloatingSwitcherSegment,
 } from './FloatingSwitcher';
 import { spacing, ThemeProvider } from '@/theme';
+import {
+  cleanupReactTestRenderers,
+  trackReactTestRenderer,
+} from '@/testUtils/reactTestRenderer';
 import { mockReduceMotion } from '@/testUtils/reduceMotion';
 
 // Stub the native blur so the pill renders without the native module; expose the
@@ -49,6 +53,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanupReactTestRenderers();
   jest.restoreAllMocks();
 });
 
@@ -59,17 +64,19 @@ function renderSwitcher(
 ): ReactTestRenderer {
   let tree!: ReactTestRenderer;
   act(() => {
-    tree = create(
-      <SafeAreaProvider
-        initialMetrics={{
-          frame: { x: 0, y: 0, width: 390, height: 844 },
-          insets: { top: 47, left: 0, right: 0, bottom: 34 },
-        }}
-      >
-        <ThemeProvider override={override}>
-          <FloatingSwitcher segments={SEGMENTS} activeKey={activeKey} onSelect={onSelect} />
-        </ThemeProvider>
-      </SafeAreaProvider>,
+    tree = trackReactTestRenderer(
+      create(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 390, height: 844 },
+            insets: { top: 47, left: 0, right: 0, bottom: 34 },
+          }}
+        >
+          <ThemeProvider override={override}>
+            <FloatingSwitcher segments={SEGMENTS} activeKey={activeKey} onSelect={onSelect} />
+          </ThemeProvider>
+        </SafeAreaProvider>,
+      ),
     );
   });
   return tree;
