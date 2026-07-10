@@ -31,8 +31,15 @@ and `theme` params. See `findings.md` for the state-by-state pass/fail verdict.
 - **Type-scale (FTY-213..217) confirmed regression-free.** No clipped, wrapped,
   truncated, or mis-sized text in any of the eight captures; display hero
   numerals render tabular and full-width.
-- **No visual defects observed** on Today, so no planner notes filed. This story
-  ships evidence only — no product code changed.
+- **One visual defect observed and filed, not fixed** (DEF-1 in `findings.md`):
+  in the dark signed-out capture the native segmented control renders light-mode
+  chrome, leaving the unselected **Create account** label dark-on-dark and
+  illegible. Filed as an `out_of_scope_bug` planner note. This story ships
+  evidence only — no product code changed.
+- **Coverage boundary:** the `EntryRow` failed-parse / needs-clarification
+  accentText sites (Retry, Edit as text, "Add a detail ›") are not reachable
+  through these four presets and are deferred to FTY-342 — see the per-preset
+  coverage table in `findings.md`.
 
 ## How the states were driven
 
