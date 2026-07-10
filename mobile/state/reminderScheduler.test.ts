@@ -74,7 +74,7 @@ function mockNotifications(): NotificationsAdapter & {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("CADENCE_OPTIONS", () => {
-  it("includes Weekly, Every 2 weeks, Monthly, Off", () => {
+  it("includes weekly, biweekly, monthly, off", () => {
     const values = CADENCE_OPTIONS.map((o) => o.value);
     expect(values).toContain("weekly");
     expect(values).toContain("biweekly");
@@ -88,6 +88,17 @@ describe("CADENCE_OPTIONS", () => {
     expect(map.biweekly).toBe(14);
     expect(map.monthly).toBe(30);
     expect(map.off).toBeNull();
+  });
+
+  it("uses short display labels that fit equal-width segments (FTY-347)", () => {
+    // Labels are cosmetic; short forms avoid ellipsis on the narrowest phone.
+    const map = Object.fromEntries(CADENCE_OPTIONS.map((o) => [o.value, o.label]));
+    expect(map.weekly).toBe("Weekly");
+    expect(map.biweekly).toBe("Biweekly");
+    expect(map.monthly).toBe("Monthly");
+    expect(map.off).toBe("Off");
+    // The overflowing long form is gone.
+    expect(CADENCE_OPTIONS.map((o) => o.label)).not.toContain("Every 2 weeks");
   });
 });
 
