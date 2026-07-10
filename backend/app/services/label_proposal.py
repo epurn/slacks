@@ -187,7 +187,7 @@ def _load_label_item(
     food-item source that goes through the proposal gate — so the read never
     mistakes a text-parsed food item for a proposal. The match uses
     ``USER_LABEL_SOURCE_TYPE``, the same constant the persistence path
-    (:func:`app.estimator.processing._persist_resolved_labels`) writes, so the two
+    (:func:`app.estimator.persist._persist_resolved_labels`) writes, so the two
     cannot drift. Optionally filtered to a given ``status`` (``proposed`` for the
     read). A label upload produces exactly one such item; the first is returned
     defensively if more ever exist.
