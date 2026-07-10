@@ -52,32 +52,24 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 
 from app.estimator.branded_routing import identity_variants
-from app.estimator.count_serving_resolution import (
-    has_explicit_amount,
-    scale_count_reference,
-)
-from app.estimator.evidence_utils import _content_hash, _record_source_ref
-from app.estimator.food_serving import resolve_grams, scale_facts
-from app.estimator.identity_sanitizer import sanitized_identity
+from app.estimator.evidence_utils import _record_source_ref
+from app.estimator.model_prior import _model_prior
 from app.estimator.official_fetch import OfficialFetchSettings, fetch_official_source
 from app.estimator.pipeline import (
     CandidateDraft,
-    ClarificationDraft,
     EstimationContext,
-    NeedsClarification,
     ResolvedFoodItem,
 )
 from app.estimator.reference_fetch import ReferenceFetchSettings, fetch_searched_result
+from app.estimator.resolved_item import _build_item
 from app.estimator.search import (
     OFFICIAL_SOURCE,
     OFFICIAL_SOURCE_TYPE,
     SearchProvider,
 )
 from app.estimator.searched_reference import (
-    _LOGGED_MODEL_PRIOR_PROMPT,
     _OFFICIAL_PAGE_KIND,
     _REFERENCE_PAGE_KIND,
     MODEL_PRIOR_SOURCE,
@@ -85,9 +77,6 @@ from app.estimator.searched_reference import (
     REFERENCE_SEARCH_INTENT,
     REFERENCE_SOURCE,
     REFERENCE_SOURCE_TYPE,
-    SearchedReferenceFacts,
-    _identity_query,
-    searched_reference_from_estimate,
     searched_reference_per_100g,
 )
 from app.estimator.web_evidence_trace import (
@@ -97,18 +86,7 @@ from app.estimator.web_evidence_trace import (
     traced_fetch,
 )
 from app.llm.base import Provider
-from app.llm.errors import (
-    LLMConfigurationError,
-    LLMResponseError,
-    LLMTransientError,
-    StructuredOutputValidationError,
-)
-from app.schemas.official_source import (
-    OFFICIAL_SOURCE_SCHEMA_VERSION,
-    EstimateDisposition,
-    FactBasis,
-    NamedFoodEstimate,
-)
+from app.schemas.official_source import OFFICIAL_SOURCE_SCHEMA_VERSION
 from app.settings import DEFAULT_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR, EstimatorClarifyMode
 
 __all__ = [
@@ -202,7 +180,18 @@ class OfficialSourceResolveStep:
         if item is None:
             item = self._try_reference_source(context, candidate, reasons, index)
         if item is None:
-            item = self._model_prior(context, candidate, reasons, index)
+            item = _model_prior(
+                context,
+                candidate,
+                reasons,
+                index,
+                step_name=self.name,
+                provider=self.provider,
+                model_prior_confidence_floor=self.model_prior_confidence_floor,
+                clarify_mode=self.clarify_mode,
+                unknown_food_question=UNKNOWN_FOOD_QUESTION,
+                quantity_question=QUANTITY_QUESTION,
+            )
         # Surface the resolution's assumptions on the run too (content-free metadata).
         for assumption in item.assumptions:
             if assumption not in context.assumptions:
@@ -365,7 +354,7 @@ class OfficialSourceResolveStep:
             )
             if found is None:
                 continue
-            item = self._build_item(
+            item = _build_item(
                 context,
                 candidate,
                 found,
@@ -373,6 +362,9 @@ class OfficialSourceResolveStep:
                 source_ref=found.source_ref,
                 hash_key=found.hash_key,
                 base_assumptions=(),
+                step_name=self.name,
+                clarify_mode=self.clarify_mode,
+                quantity_question=QUANTITY_QUESTION,
                 allow_unresolvable_fallthrough=self.clarify_mode == "estimate_first",
                 candidate_index=candidate_index,
             )
@@ -387,75 +379,6 @@ class OfficialSourceResolveStep:
             if unscalable not in reasons:
                 reasons.append(unscalable)
         return None
-
-    def _model_prior(
-        self,
-        context: EstimationContext,
-        candidate: CandidateDraft,
-        reasons: list[str],
-        index: int | None,
-    ) -> ResolvedFoodItem:
-        """Estimate the named food from model prior, recorded with an explicit status.
-
-        The gated last resort: the entry carries ``source_type = model_prior`` and an
-        ``assumptions`` reason naming, per evidence tier, why official/reference
-        evidence was not used, so the source status is surfaced and the entry stays
-        user-editable. A model that cannot estimate the item (``unresolved`` / no
-        facts) routes to ``needs_clarification`` — still never a silent guess.
-        """
-
-        def _record_prior(outcome: str) -> None:
-            context.record_decision(
-                self.name,
-                "source",
-                candidate_index=index,
-                tier=MODEL_PRIOR_SOURCE,
-                outcome=outcome,
-            )
-
-        def _clarify(reason: str) -> NeedsClarification:
-            _record_prior(reason)
-            context.record_decision(
-                self.name, "outcome", candidate_index=index, outcome="clarified_unknown_food"
-            )
-            context.clarification_questions = [ClarificationDraft(text=UNKNOWN_FOOD_QUESTION)]
-            return NeedsClarification(reason)
-
-        _record_source_ref(context, MODEL_PRIOR_SOURCE)
-        reason = "; ".join([*reasons, "estimated from model prior"])
-        estimate = self._estimate_model_prior(candidate)
-        if (
-            estimate is None
-            or estimate.disposition is not EstimateDisposition.RESOLVED
-            or estimate.confidence < self.model_prior_confidence_floor
-        ):
-            raise _clarify("model_prior_unavailable")
-
-        reference = searched_reference_from_estimate(
-            estimate,
-            source_ref=MODEL_PRIOR_SOURCE,
-            hash_key=_identity_query(candidate),
-        )
-        if reference is None:
-            raise _clarify("model_prior_unusable")
-
-        item = self._build_item(
-            context,
-            candidate,
-            reference,
-            source_type=MODEL_PRIOR_SOURCE_TYPE,
-            source_ref=MODEL_PRIOR_SOURCE,
-            hash_key=_identity_query(candidate),
-            base_assumptions=(reason,),
-            allow_unresolvable_fallthrough=self.clarify_mode == "estimate_first",
-            candidate_index=index,
-        )
-        if item is None:
-            # The estimate was unusable (e.g. per-serving facts with no gram serving
-            # size); ask rather than guess the portion.
-            raise _clarify("model_prior_unusable")
-        _record_prior("accepted")
-        return item
 
     def _fetch_official(self, url: str) -> str:
         """Fetch ``url`` through the official hardened fetcher.
@@ -479,250 +402,8 @@ class OfficialSourceResolveStep:
 
         return self.reference_fetch_fn(url, self.reference_fetch_settings)
 
-    def _record_clarified_quantity(
-        self, context: EstimationContext, candidate_index: int | None
-    ) -> None:
-        """Trace that the candidate's terminal route is a quantity clarification."""
-
-        context.record_decision(
-            self.name, "outcome", candidate_index=candidate_index, outcome="clarified_quantity"
-        )
-
-    def _estimate_model_prior(self, candidate: CandidateDraft) -> NamedFoodEstimate | None:
-        """Ask for a rough estimate from sanitized identity + structured portion."""
-
-        identity = _sanitized_model_identity(candidate)
-        if not identity:
-            return None
-        prompt = _LOGGED_MODEL_PRIOR_PROMPT.format(
-            identity=identity,
-            portion=_structured_portion_for_prompt(candidate),
-        )
-        try:
-            return self.provider.structured_completion(prompt, NamedFoodEstimate)
-        except (
-            StructuredOutputValidationError,
-            LLMResponseError,
-            LLMConfigurationError,
-            LLMTransientError,
-        ):
-            return None
-
-    def _build_item(
-        self,
-        context: EstimationContext,
-        candidate: CandidateDraft,
-        reference: SearchedReferenceFacts,
-        *,
-        source_type: str,
-        source_ref: str,
-        hash_key: str,
-        base_assumptions: tuple[str, ...],
-        allow_unresolvable_fallthrough: bool = False,
-        candidate_index: int | None = None,
-    ) -> ResolvedFoodItem | None:
-        """Apply deterministic serving math and build the resolved item + provenance.
-
-        Returns ``None`` when the validated facts cannot be canonicalised to a usable
-        basis, so the caller can try another source. Raises
-        :class:`NeedsClarification` only when the active policy still allows asking
-        after rough default/as-logged fallback has been considered.
-        """
-
-        def _record_serving(outcome: str) -> None:
-            context.record_decision(
-                self.name,
-                "serving",
-                candidate_index=candidate_index,
-                tier=source_type,
-                source_ref=source_ref,
-                outcome=outcome,
-            )
-
-        assumptions = base_assumptions + reference.assumptions
-        if reference.basis == FactBasis.AS_LOGGED.value:
-            _record_serving("as_logged_total")
-            content_hash = _content_hash(hash_key, reference.facts)
-            return ResolvedFoodItem(
-                name=candidate.name,
-                quantity_text=candidate.quantity_text,
-                unit=candidate.unit,
-                amount=candidate.amount,
-                grams=None,
-                calories=round(reference.facts.calories, 1),
-                protein_g=round(reference.facts.protein_g, 1),
-                carbs_g=round(reference.facts.carbs_g, 1),
-                fat_g=round(reference.facts.fat_g, 1),
-                product_id=None,
-                source_type=source_type,
-                source_ref=source_ref,
-                content_hash=content_hash,
-                fetched_at=datetime.now(UTC),
-                calories_per_100g=round(reference.facts.calories, 4),
-                protein_per_100g=round(reference.facts.protein_g, 4),
-                carbs_per_100g=round(reference.facts.carbs_g, 4),
-                fat_per_100g=round(reference.facts.fat_g, 4),
-                assumptions=_with_unique_assumptions(assumptions, ("as_logged_model_prior",)),
-                basis=FactBasis.AS_LOGGED.value,
-            )
-
-        count_scaled = scale_count_reference(
-            candidate=candidate,
-            reference=reference,
-            source_type=source_type,
-            assumptions=assumptions,
-        )
-        if count_scaled is not None:
-            _record_serving("count_serving_scaled")
-            scaled = count_scaled.scaled
-            snapshot = count_scaled.snapshot
-            assumptions = count_scaled.assumptions
-            content_hash = _content_hash(hash_key, reference.facts)
-            return ResolvedFoodItem(
-                name=candidate.name,
-                quantity_text=candidate.quantity_text,
-                unit=candidate.unit,
-                amount=candidate.amount,
-                grams=scaled.grams,
-                calories=scaled.calories,
-                protein_g=scaled.protein_g,
-                carbs_g=scaled.carbs_g,
-                fat_g=scaled.fat_g,
-                product_id=None,
-                source_type=source_type,
-                source_ref=source_ref,
-                content_hash=content_hash,
-                fetched_at=datetime.now(UTC),
-                calories_per_100g=round(snapshot.calories, 4),
-                protein_per_100g=round(snapshot.protein_g, 4),
-                carbs_per_100g=round(snapshot.carbs_g, 4),
-                fat_per_100g=round(snapshot.fat_g, 4),
-                assumptions=assumptions,
-                basis=count_scaled.basis,
-            )
-
-        if reference.count_serving is not None and has_explicit_amount(candidate):
-            _record_serving("rejected_incompatible_serving")
-            return None
-
-        grams = resolve_grams(
-            unit=candidate.unit,
-            amount=candidate.amount,
-            quantity_text=candidate.quantity_text,
-            default_serving_g=(
-                None if reference.count_serving is not None else reference.default_serving_g
-            ),
-        )
-        if grams is None:
-            grams = _default_serving_grams(candidate, reference.default_serving_g)
-            if grams is None:
-                if allow_unresolvable_fallthrough:
-                    return None
-                self._record_clarified_quantity(context, candidate_index)
-                context.clarification_questions = [ClarificationDraft(text=QUANTITY_QUESTION)]
-                raise NeedsClarification("unresolvable_quantity")
-            if not _allows_default_serving_estimate(self.clarify_mode, candidate):
-                self._record_clarified_quantity(context, candidate_index)
-                context.clarification_questions = [ClarificationDraft(text=QUANTITY_QUESTION)]
-                raise NeedsClarification("unresolvable_quantity")
-            _record_serving("default_serving_estimated")
-            assumptions = _with_unique_assumptions(
-                assumptions,
-                (
-                    f"clarify_mode:{self.clarify_mode}",
-                    "estimated_default_serving",
-                ),
-            )
-
-        per_100g = reference.per_100g_facts
-        if per_100g is None:
-            # A per-serving count reference with no gram serving size has no per-100g
-            # basis, so measured grams cannot scale it; fall through to the next tier
-            # rather than scale raw per-serving facts as a density.
-            return None
-        scaled = scale_facts(per_100g, grams)
-        content_hash = _content_hash(hash_key, per_100g)
-
-        return ResolvedFoodItem(
-            name=candidate.name,
-            quantity_text=candidate.quantity_text,
-            unit=candidate.unit,
-            amount=candidate.amount,
-            grams=scaled.grams,
-            calories=scaled.calories,
-            protein_g=scaled.protein_g,
-            carbs_g=scaled.carbs_g,
-            fat_g=scaled.fat_g,
-            product_id=None,
-            source_type=source_type,
-            source_ref=source_ref,
-            content_hash=content_hash,
-            fetched_at=datetime.now(UTC),
-            calories_per_100g=round(per_100g.calories, 4),
-            protein_per_100g=round(per_100g.protein_g, 4),
-            carbs_per_100g=round(per_100g.carbs_g, 4),
-            fat_per_100g=round(per_100g.fat_g, 4),
-            assumptions=assumptions,
-        )
-
 
 def _has_brand(candidate: CandidateDraft) -> bool:
     """Whether ``candidate`` names a branded product (has a non-blank ``brand``)."""
 
     return bool(candidate.brand and candidate.brand.strip())
-
-
-def _allows_default_serving_estimate(
-    clarify_mode: EstimatorClarifyMode, candidate: CandidateDraft
-) -> bool:
-    """Whether serving-math gaps can use a rough default serving before asking."""
-
-    if clarify_mode == "estimate_first":
-        return True
-    if clarify_mode == "balanced":
-        return candidate.amount is not None and candidate.amount > 0
-    return False
-
-
-def _default_serving_grams(
-    candidate: CandidateDraft, default_serving_g: float | None
-) -> float | None:
-    """Fallback consumed grams from a source/model default serving.
-
-    Used only for rough estimate-first paths after deterministic serving math fails:
-    a positive structured count scales the default serving, while an amountless
-    recognized identity assumes one default serving. The assumption is recorded on the
-    evidence row by the caller.
-    """
-
-    if default_serving_g is None or default_serving_g <= 0:
-        return None
-    servings = candidate.amount if candidate.amount is not None and candidate.amount > 0 else 1.0
-    return round(servings * default_serving_g, 3)
-
-
-def _with_unique_assumptions(
-    assumptions: tuple[str, ...], extras: tuple[str, ...]
-) -> tuple[str, ...]:
-    """Append content-free assumptions without duplicating existing labels."""
-
-    result = list(assumptions)
-    for extra in extras:
-        if extra not in result:
-            result.append(extra)
-    return tuple(result)
-
-
-def _sanitized_model_identity(candidate: CandidateDraft) -> str:
-    """Identity sent to model-prior: bounded food tokens only, never diary text."""
-
-    return sanitized_identity(_identity_query(candidate))
-
-
-def _structured_portion_for_prompt(candidate: CandidateDraft) -> str:
-    """Bounded structured portion summary for model-prior, excluding raw text."""
-
-    if candidate.amount is not None and candidate.amount > 0:
-        unit = sanitized_identity(candidate.unit or "") or "count"
-        return f"amount={candidate.amount:g}; unit={unit}"
-    return "amount=unspecified; use one typical serving only if needed"
