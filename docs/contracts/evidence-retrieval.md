@@ -56,6 +56,17 @@ Adapter — FTY-079 / FTY-164**.
 
 ## Version
 
+9 (FTY-326): food-resolution evidence tiers now write sanitized hit/miss/rejection
+status labels into the run-local `InterpretationSession` evidence ledger. After
+an official/reference evidence dead end, the resolver may spend the session's
+single bounded re-interpretation pass and re-query once with a revised identity
+before falling to `model_prior`. The `model_prior` tool receives only sanitized
+identity, bounded structured portion fields, and evidence-status labels; its
+terminal trace adds detail outcomes (`provider_error`, `low_confidence`,
+`non_resolved_disposition`, `unusable_facts`). Source hierarchy, lookup statuses,
+search/fetch egress, fact schema, provenance fields, and retention rules are
+unchanged.
+
 8 (FTY-348, contract only): relocates the global FTY-324 interpretation-loop framing
 to [interpretation-session.md](interpretation-session.md); page-local rules unchanged.
 
@@ -226,7 +237,14 @@ rather than a blind one-way fall-through; the session/tool contract and its
 raw-text-egress limits are defined in
 [interpretation-session.md](interpretation-session.md). This page still owns the
 source hierarchy, lookup statuses, egress/fetch gates, fact-schema validation,
-serving math, budget caps, and persisted provenance.
+serving math, budget caps, and persisted provenance. FTY-326 implements the
+food-resolution side of that framing: tier hits, misses, fetch/extraction
+failures, compatibility rejections, and snippet-surface outcomes are recorded as
+sanitized evidence-status labels; after an evidence dead end the resolver may
+re-open interpretation once and re-query with a revised identity. The ledger
+never carries raw diary text, raw search queries, raw pages, raw snippets, or
+provider output, and it never changes the source hierarchy or deterministic
+authority over math/provenance.
 
 **User-stated facts and the fallback rule (FTY-279).** A nutrition fact the user
 stated in the entry text (`user_text`) is the **highest-preference** source for
@@ -883,7 +901,9 @@ search adapter, FTY-079/164), fetches the bounded result page through the harden
 **searched-result** fetch policy, transcribes the facts the page states through the
 strict `NamedFoodEstimate` schema, and recomputes calories/macros with the FTY-044
 deterministic serving math. Only when this tier also produces nothing confident does
-the resolver fall to `model_prior` — with per-tier `assumptions` naming why.
+the resolver fall to `model_prior` — after the bounded evidence-driven
+re-interpretation pass when a source result failed or was rejected, and with
+per-tier `assumptions` naming why.
 
 ### Tier order (pipeline, after a USDA/OFF miss)
 
@@ -1010,6 +1030,10 @@ pre-FTY-314 fetch-only behavior exactly.
   wholesale — only the fixed content-free `search_result_snippet` label is
   recorded — so a provider response echoing raw snippet text into its
   assumptions can never reach evidence/run assumptions.
+- Snippet/fetch/extraction dead ends still enter the interpretation loop only as
+  sanitized status labels such as `fetch_403`, `extract_unresolved`,
+  `extract_low_confidence`, or `snippet_unavailable`; the raw snippet/page text is
+  not copied into the session ledger or model-prior prompt.
 - No egress change: snippets arrive on the existing search response; this adds
   no browser automation, redirects, allowlist widening, or new fetch surface.
 

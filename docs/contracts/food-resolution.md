@@ -39,6 +39,11 @@ estimator / contracts / backend-core / security-privacy lane:
 
 ## Version
 
+19 (FTY-326): implements evidence tiers as session tools: sanitized tier outcomes
+feed the ledger, official/reference dead ends get one bounded re-query before
+`model_prior`, `not_applicable_by_session` replaces frozen generic skips, and
+model-prior failures add sanitized detail. No schema/DTO/source/egress change.
+
 18 (FTY-348, contract only): the global FTY-324 interpretation-session semantics
 (the model-owned/deterministic-owned division of labour and the
 evidence-tiers-as-tools framing) move to
@@ -1011,15 +1016,18 @@ When the search provider is **disabled** or **unavailable** (no key), when a tie
 fetch is off (**official**: empty allowlist; **reference**:
 `FATTY_REFERENCE_FETCH_ENABLED=false`), or when **nothing confident is found** on
 either tier, the candidate falls through to a **model-prior** `NamedFoodEstimate`
-from sanitized identity plus bounded amount/unit fields, never raw diary text. It
-is recorded with `source_type = model_prior`, `source_ref = model_prior`, and an
+from sanitized identity, bounded amount/unit fields, and evidence-status labels —
+never raw diary text, search queries, pages, or snippets. It is recorded with
+`source_type = model_prior`, `source_ref = model_prior`, and an
 explicit `assumptions` reason naming each tier's outcome
 (e.g. `"official_source returned no confident match; reference_source returned no
 confident match; estimated from model prior"`) plus the model's own assumptions,
 so the entry surfaces an explicit source status and stays user-editable — never a
 silent guess (per the `evidence-retrieval.md` Fallback Rule). If serving math
 cannot infer grams, it may record `estimated_default_serving` or bounded `basis =
-as_logged`; unusable estimates clarify.
+as_logged`; unusable estimates clarify with legacy unavailable/unusable labels
+plus sanitized detail (`provider_error`, `low_confidence`,
+`non_resolved_disposition`, or `unusable_facts`).
 
 ### Persistence
 

@@ -79,6 +79,7 @@ from app.estimator.fdc_ranking import (
     is_fdc_description_rank_stable,
 )
 from app.estimator.food_serving import NutritionFacts, resolve_grams, scale_facts
+from app.estimator.interpretation_tools import add_evidence_record, current_food_candidate
 from app.estimator.off import (
     OFF_SOURCE,
     OFF_SOURCE_TYPE,
@@ -359,6 +360,7 @@ class FoodResolveStep:
         ``unresolved`` and the event still completes.
         """
 
+        candidate = current_food_candidate(context, candidate, index)
         barcode_resolver = self.barcode_resolver
 
         if candidate.barcode and barcode_resolver is not None and barcode_resolver.enabled:
@@ -406,6 +408,7 @@ class FoodResolveStep:
             tier=FDC_SOURCE,
             outcome="source_unavailable",
         )
+        add_evidence_record(context, tier=FDC_SOURCE, outcome="source_unavailable")
         if _should_defer_after_source_gap(candidate, self.clarify_mode):
             self._record_deferral(context, index)
             context.pending_official_candidates.append(candidate)
@@ -448,6 +451,7 @@ class FoodResolveStep:
                 tier=OFF_SOURCE,
                 outcome="off_transient_error",
             )
+            add_evidence_record(context, tier=OFF_SOURCE, outcome="off_transient_error")
             raise StepError("off_transient_error") from exc
         except OffResponseError as exc:
             # OFF answered unusably; fail closed rather than guess a number.
@@ -458,12 +462,14 @@ class FoodResolveStep:
                 tier=OFF_SOURCE,
                 outcome="off_response_error",
             )
+            add_evidence_record(context, tier=OFF_SOURCE, outcome="off_response_error")
             raise StepFailed("off_response_error") from exc
 
         if resolved is None:
             context.record_decision(
                 self.name, "source", candidate_index=index, tier=OFF_SOURCE, outcome="miss"
             )
+            add_evidence_record(context, tier=OFF_SOURCE, outcome="miss")
             return None
         return self._build_item(
             context,
@@ -498,6 +504,7 @@ class FoodResolveStep:
                 tier=FDC_SOURCE,
                 outcome="fdc_transient_error",
             )
+            add_evidence_record(context, tier=FDC_SOURCE, outcome="fdc_transient_error")
             raise StepError("fdc_transient_error") from exc
         except FdcResponseError as exc:
             # The source answered unusably; fail closed rather than guess a number.
@@ -508,12 +515,14 @@ class FoodResolveStep:
                 tier=FDC_SOURCE,
                 outcome="fdc_response_error",
             )
+            add_evidence_record(context, tier=FDC_SOURCE, outcome="fdc_response_error")
             raise StepFailed("fdc_response_error") from exc
 
         if resolved is None:
             context.record_decision(
                 self.name, "source", candidate_index=index, tier=FDC_SOURCE, outcome="miss"
             )
+            add_evidence_record(context, tier=FDC_SOURCE, outcome="miss")
             return None
         if not is_evidence_brand_compatible(
             resolved.product.description, name=candidate.name, brand=candidate.brand
@@ -533,6 +542,12 @@ class FoodResolveStep:
                 source_ref=resolved.product.source_ref,
                 source_desc=resolved.product.description,
                 outcome="rejected_brand_mismatch",
+            )
+            add_evidence_record(
+                context,
+                tier=FDC_SOURCE,
+                outcome="rejected_brand_mismatch",
+                source_ref=resolved.product.source_ref,
             )
             return None
         return self._build_item(
@@ -592,6 +607,12 @@ class FoodResolveStep:
                     source_ref=product.source_ref,
                     outcome="rejected_unresolvable_quantity",
                 )
+                add_evidence_record(
+                    context,
+                    tier=product.source,
+                    outcome="rejected_unresolvable_quantity",
+                    source_ref=product.source_ref,
+                )
                 return None
             context.record_decision(
                 self.name,
@@ -620,6 +641,12 @@ class FoodResolveStep:
             tier=product.source,
             source_ref=product.source_ref,
             outcome="accepted",
+        )
+        add_evidence_record(
+            context,
+            tier=product.source,
+            outcome="accepted",
+            source_ref=product.source_ref,
         )
         product_id: uuid.UUID = product.id
 

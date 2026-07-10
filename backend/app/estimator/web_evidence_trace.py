@@ -32,6 +32,7 @@ from app.estimator.hardened_fetch import (
     FetchResponseError,
     FetchTransientError,
 )
+from app.estimator.interpretation_tools import add_evidence_record
 from app.estimator.pipeline import CandidateDraft, EstimationContext
 from app.estimator.searched_reference import (
     AcceptSearchedReference,
@@ -84,6 +85,12 @@ def decision_recorder(
             tier=tier,
             query_variant=query_variant,
             **fields,
+        )
+        add_evidence_record(
+            context,
+            tier=tier,
+            outcome=fields.get("outcome") or fields.get("search_status") or decision,
+            source_ref=fields.get("source_ref"),
         )
 
     return _note
