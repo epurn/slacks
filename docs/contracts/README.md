@@ -57,6 +57,7 @@ Use contracts for:
 | [food-resolution.md](food-resolution.md) | Deterministic generic-food resolution step using USDA and external sources |
 | [goals-target-reveal.md](goals-target-reveal.md) | Goal direction input and target-calculation step turning user goals into calorie targets |
 | [identity-and-profile.md](identity-and-profile.md) | User identity, profile data model, and minimal local-mode profile defaults |
+| [interpretation-session.md](interpretation-session.md) | LLM-owned interpretation session: the revisable hypothesis, evidence-tiers-as-tools, and deterministic-code authority across an estimation run |
 | [label-extraction.md](label-extraction.md) | Nutrition label extraction step from uploaded photos |
 | [label-upload.md](label-upload.md) | HTTP upload boundary for capturing and transmitting nutrition label photos |
 | [llm-provider.md](llm-provider.md) | Provider-agnostic LLM adapter configuration supporting OpenAI, Anthropic, Claude Code, and local models |

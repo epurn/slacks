@@ -56,6 +56,9 @@ Adapter — FTY-079 / FTY-164**.
 
 ## Version
 
+8 (FTY-348, contract only): relocates the global FTY-324 interpretation-loop framing
+to [interpretation-session.md](interpretation-session.md); page-local rules unchanged.
+
 7 (FTY-306, contract only): adds the **exact evidence upgrade** — the correction
 sheet's `Make it exact` lever — as an in-place source replacement for **low-trust
 or incomplete food items**: a server-built barcode/label **proposal** (opaque
@@ -217,17 +220,13 @@ make exact/product-backed, official/reference-backed, comparable aggregate, and
 model/default-prior estimates distinguishable in persistence and read models.
 
 **Evidence tools inside the interpretation loop (FTY-324).** Source tiers remain
-ordered by the hierarchy above, but they are tools the
+ordered by the hierarchy above, but they are bounded tools the
 `InterpretationSession` may consult with the current hypothesis and evidence view
-instead of a blind one-way fall-through from the initial parse. A non-success
-lookup status, rejected compatibility check, fetch/extraction failure, unusable
-serving basis, or snippet-only success feeds back into interpretation as a
-sanitized status label. It does not authorize raw text egress, provenance-free
-averaging, source-order bypass, or model-prior finalization while an applicable
-source remains usable. Deterministic code still owns every lookup status,
-egress/fetch gate, fact-schema validation, serving math, budget cap, and persisted
-provenance field; the model may only interpret which bounded tool result describes
-the user's item.
+rather than a blind one-way fall-through; the session/tool contract and its
+raw-text-egress limits are defined in
+[interpretation-session.md](interpretation-session.md). This page still owns the
+source hierarchy, lookup statuses, egress/fetch gates, fact-schema validation,
+serving math, budget caps, and persisted provenance.
 
 **User-stated facts and the fallback rule (FTY-279).** A nutrition fact the user
 stated in the entry text (`user_text`) is the **highest-preference** source for
@@ -1464,13 +1463,14 @@ amount adjustment (`food-resolution.md` owns the operation shape). It:
   distinction between exact/product-backed, official/reference-backed, comparable
   aggregate, and model/default-prior estimates. FTY-301 adds runtime fallback only:
   existing `model_prior`, `basis`, and assumptions carry the rough provenance.
-- **FTY-324 (contract cross-reference only; no schema/code in this story).** The
-  evidence hierarchy is now referenced as the bounded tool surface for the
-  `InterpretationSession`. The lookup-status vocabulary, source hierarchy,
-  normalized fact schema, search/fetch boundaries, retention rules, source refs,
-  assumptions, and rough-provenance labels remain unchanged. FTY-325/FTY-326 wire
-  source misses/rejections back into the interpreter without adding providers or
-  widening egress.
+- **FTY-324 / FTY-348 (contract cross-reference only; no schema/code in this
+  story).** The evidence hierarchy is referenced as the bounded tool surface for the
+  `InterpretationSession` (FTY-324); FTY-348 relocated that global framing to
+  [interpretation-session.md](interpretation-session.md) with no normative change.
+  The lookup-status vocabulary, source hierarchy, fact schema, search/fetch
+  boundaries, retention, source refs, assumptions, and rough-provenance labels are
+  unchanged. FTY-325/FTY-326 wire misses/rejections back into the interpreter
+  without adding providers or widening egress.
 - **FTY-306 (contract only; no schema/code in this story).** Adds the **Exact
   Evidence Upgrade** section: the `Make it exact` proposal/apply taxonomy for
   existing low-trust/incomplete food items. It introduces **no new source tier,

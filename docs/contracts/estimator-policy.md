@@ -16,18 +16,20 @@ schema, migration, provider, prompt, or estimator behavior.
 
 estimator / contracts / backend-core / security-privacy lane:
 `backend/app/estimator/clarify_policy.py`, downstream estimator settings, and
-the public contracts that consume this policy ([parse-candidates.md](parse-candidates.md),
+the public contracts that consume this policy ([interpretation-session.md](interpretation-session.md),
+[parse-candidates.md](parse-candidates.md),
 [food-resolution.md](food-resolution.md), [evidence-retrieval.md](evidence-retrieval.md)).
 
 ## Version
 
-3 (FTY-324, contract cross-reference): clarifies that the active FTY-298 modes are
-consumed by the `InterpretationSession` defined in
-[parse-candidates.md](parse-candidates.md) and
-[food-resolution.md](food-resolution.md). Only that interpretation loop may conclude
-"genuinely indeterminate" for an otherwise recognizable food/exercise item; the
-deterministic safety gates still clarify or fail closed on their own authority.
-No env var, mode, threshold, DTO, schema, provider, or runtime behavior changes.
+3 (FTY-324, contract cross-reference; FTY-348 relocation): clarifies that the active
+FTY-298 modes are consumed by the `InterpretationSession` defined in
+[interpretation-session.md](interpretation-session.md) (FTY-324 first stated this in
+parse-candidates.md/food-resolution.md; FTY-348 relocated the definition there). Only
+that interpretation loop may conclude "genuinely indeterminate" for an otherwise
+recognizable food/exercise item; the deterministic safety gates still clarify or fail
+closed on their own authority. No env var, mode, threshold, DTO, schema, provider, or
+runtime behavior changes.
 
 2 (FTY-304, wording clarification): defines
 `FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS` as the shared cap for parse-step

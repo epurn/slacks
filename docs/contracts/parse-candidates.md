@@ -37,15 +37,10 @@ estimator / contracts / backend-core lane:
 
 ## Version
 
-9 (FTY-324, contract only): redefines the parsed candidate set as the
-`InterpretationSession`'s **interpretation hypothesis**, not frozen upstream truth.
-The model owns interpretation of the user's raw text plus accumulated clarification
-answers for the lifetime of an estimation run; deterministic code owns schema
-validation, calibrated confidence, plausibility gates, math, provenance, privacy,
-and persistence. Hypotheses may be revised when later evidence contradicts or
-clarifies the initial parse, and each revision is traced only with sanitized labels.
-No schema, persistence, provider, prompt, settings, API, or estimator behavior changes
-land in this documentation story; FTY-325/FTY-326 implement the target contract.
+10 (FTY-348, contract only): relocates the FTY-324 (v9) interpretation-session and
+hypothesis-revision semantics to [interpretation-session.md](interpretation-session.md)
+with no normative change; this page keeps the parse schema, sampling, routing, and
+persistence rules.
 
 8 (FTY-304, wording clarification): names the concrete FTY-300 pre-validation
 provider-output repair phases governed by
@@ -212,118 +207,6 @@ clarification questions before persistence.
 
 String length and list count bounds cap an adversarial or runaway reply.
 
-### Interpretation session and hypothesis revisions (FTY-324)
-
-The natural-language estimation run has one logical **`InterpretationSession`**.
-It begins with the raw log text and any accumulated `clarification_answers`, then
-continues through parse, food resolution, exercise resolution, and evidence
-lookup until the event reaches a terminal status. The session contract is:
-
-> The model owns interpretation of the user's text end to end. Structured
-> candidates are the model's working hypothesis — revisable whenever new evidence
-> arrives — never a frozen upstream truth. Deterministic code owns math, bounds,
-> provenance, privacy, and persistence. It never guesses intent, and it never
-> discards or overrides user-stated detail because that detail did not fit an
-> extracted field.
-
-The raw log text and answered clarification text remain available **only inside
-the configured LLM boundary** for every model interpretation call in the session.
-They are not copied into search queries, fetch requests, run traces,
-`assumptions`, `source_refs`, provider error strings, logs, or evidence rows.
-Downstream search/fetch/model-prior tools receive the least-sensitive structured
-inputs their contracts allow: sanitized item identity, bounded amount/unit fields,
-source refs, fetched inert text, snippets, and content-free source-status labels.
-
-An `InterpretationHypothesis` is a run-local working object. It is not a new public
-HTTP DTO and is not persisted wholesale. It carries enough structure for
-deterministic code to validate and calculate without interpreting intent:
-
-| Field | Meaning |
-| --- | --- |
-| `session_id` | Run-local identifier used only inside the estimation run; never exposed as user data. |
-| `raw_text` | The owning event's raw text, available to the configured LLM provider only. |
-| `clarification_answers` | Prior answered question/answer pairs, fed to the model as bounded structured detail. |
-| `items` | Ordered food/exercise hypothesis items. Each item has a run-local `hypothesis_item_id`, `type`, `name`, `quantity_text`, optional `unit`, `amount`, `barcode`, `brand`, and optional `stated_*` facts. |
-| `item_links` | Run-local split/merge lineage between hypothesis items; used for traceability only, never as persisted user-visible data. |
-| `evidence_view` | Bounded evidence gathered so far: source tier, lookup status, source refs, snippets/page extraction status, compatibility result, and content-free reject reason. It never carries raw fetched pages, raw snippets, provider output, or raw search queries. |
-| `policy_view` | Active FTY-298 mode plus calibrated self-consistency/agreement signal metadata from ADR-0003. |
-| `pending_questions` | Candidate clarification questions with item scope when an item-scoped question is allowed by FTY-278. |
-
-The hypothesis may be revised during the same session. A revision may:
-
-- add an item the initial parse missed;
-- split one item into several items;
-- merge duplicate or over-split items;
-- remove a spurious item;
-- correct an item identity, brand/product identity, amount, unit, or exercise
-  detail;
-- attach, detach, or correct a user-stated nutrition fact;
-- mark an item as genuinely indeterminate for an allowed clarification reason.
-
-The following **model-consultable decision points** must be able to pass the raw
-text, clarification answers, current hypothesis, and evidence view back to the
-model for interpretation rather than relying only on frozen extracted fields:
-
-| Decision point | Trigger |
-| --- | --- |
-| `initial_parse` | First structured interpretation of the raw log text. |
-| `provider_clarification_adjudication` | A provider returns `needs_clarification`, samples disagree, or the hybrid score is conservative but a recognizable identity may be recoverable under FTY-298. |
-| `source_selection` | Choosing which evidence tier(s) and query variants are applicable to an item. |
-| `source_acceptance` | A source result, snippet, page extraction, barcode/OFF result, USDA row, official page, reference page, or model-prior estimate may or may not match the item the user meant. |
-| `source_rejection_feedback` | A lookup misses, fetch fails, extraction is unresolved/low-confidence, compatibility rejects a result, or serving math rejects otherwise useful evidence. |
-| `hypothesis_repair` | Evidence implies the initial item set was degenerate, over-split, under-split, brandless, amountless, or attached to the wrong item. |
-| `clarification_boundary` | The session may ask only after the interpretation loop concludes the remaining item is genuinely indeterminate under the active FTY-298 mode, except deterministic gates that independently clarify/fail closed. |
-| `answer_reestimate` | A clarification answer re-opens interpretation with the original raw text plus accumulated answers. |
-
-Any current or future resolution decision that keys on a frozen extracted field
-(`has_brand`, `amount_kind`, `name`, `unit`, `brand`, `quantity_text`, or a count
-serving relation) must treat that field as a hypothesis feature, not authority.
-It may be used by deterministic validators and as sanitized input to tools, but
-if evidence suggests the feature is wrong or incomplete, the session revises the
-hypothesis instead of forcing all later tiers to chase the stale value.
-
-Confidence remains an engineered signal. The model may produce a verbalized
-`confidence` because the existing schema carries it, but routing never trusts a
-single self-reported score. Parse abstention uses the ADR-0003 hybrid
-self-consistency/agreement signal and calibrated threshold, with FTY-298 mode
-semantics layered on top; later interpretation calls that need uncertainty must
-use the same cold-pass/agreement style or a stricter deterministic validator, not
-a raw provider confidence claim.
-
-#### Sanitized hypothesis-revision trace labels
-
-Hypothesis revisions are traced with content-free labels. A trace entry for this
-contract uses `decision = hypothesis_revision`; `candidate_index`, `tier`,
-`amount_kind`, `has_brand`, and `result_count` may be included when useful, but
-the entry must never include raw diary text, raw clarification answers, item
-names, quantity phrases, prompts, provider output, fetched page/snippet text,
-search queries, URLs with secrets, request/response bodies, or provider error
-bodies.
-
-Allowed `outcome` labels are:
-
-- `initial_hypothesis`;
-- `hypothesis_kept`;
-- `item_added`;
-- `item_removed`;
-- `item_split`;
-- `item_merged`;
-- `identity_revised`;
-- `brand_revised`;
-- `quantity_revised`;
-- `unit_revised`;
-- `stated_nutrition_revised`;
-- `exercise_detail_revised`;
-- `evidence_attached`;
-- `evidence_rejected`;
-- `clarification_needed`;
-- `deterministic_gate_failed`;
-- `revision_truncated`.
-
-The labels describe only the kind of revision. The revised values live in the
-ordinary user-owned derived-item/evidence rows after validation and persistence,
-not in the run trace.
-
 ### Pre-validation provider-output repair (FTY-300 / FTY-304)
 
 `FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS` caps deterministic, local
@@ -422,10 +305,8 @@ parallel, and a unanimous first window of 2 stops early, so stable inputs pay
 two calls and contested inputs pay three). Every sample is schema-validated
 independently; the step then routes on the sample set and its **calibrated
 clarify decision** (below). When the set is trusted, the routed candidates are
-the most self-confident `parsed` sample's items. Under FTY-324 those routed
-candidates are the `InterpretationSession`'s **initial hypothesis**, not an
-immutable parse truth; later evidence may revise the item set or fields before
-validated numbers are persisted.
+the most self-confident `parsed` sample's items — the `InterpretationSession`'s
+revisable **initial hypothesis** ([interpretation-session.md](interpretation-session.md)).
 
 Under FTY-298 the routing table is interpreted through the active shared policy
 ([estimator-policy.md](estimator-policy.md)). In the default `estimate_first` mode, a
@@ -714,12 +595,6 @@ both `users` and `log_events` enforces object-level ownership.
   embedded instructions in the user text are never executed or followed —
   candidate names, questions, and quick-pick options are stored as data through
   parameterized inserts and never interpreted.
-- **Raw text stays inside the model boundary.** The raw log text and accumulated
-  clarification answers may be sent to the configured LLM provider for
-  interpretation throughout the `InterpretationSession`, as the parse step already
-  does today. They must not be sent to search/fetch providers or copied into run
-  traces, source refs, assumptions, diagnostics, error strings, or logs; those
-  surfaces keep the sanitized label/source-id vocabulary described above.
 - **No raw text in logs or runs.** The prompt and raw model output are never
   logged (provider contract) and never copied into the estimation run's `trace`
   or `error`; only sanitized labels (`empty_input`, `unparseable_input`,
@@ -868,9 +743,7 @@ event.raw_text = "stuff"
   and the `schema_validation_failed` fail-closed result when repair is disabled,
   exhausted, unsafe, or still invalid. No `ParseResult`, persistence, DTO, migration,
   provider, prompt, settings, or estimator behavior changes are made here.
-- **FTY-324 (contract only; no code or migration in this story).** The parse
-  contract now names the `InterpretationSession`, the `InterpretationHypothesis`
-  fields, model-consultable decision points, and sanitized hypothesis-revision
-  trace labels. It deliberately does not add a public API, parse persistence column,
-  provider, prompt, settings, migration, or compatibility shim. FTY-325/FTY-326
-  implement the interpreter core and evidence-tier tool loop against this target.
+- **FTY-324 / FTY-348 (contract only; no code or migration).** FTY-324 named the
+  `InterpretationSession` contract; FTY-348 relocates it to
+  [interpretation-session.md](interpretation-session.md) with no normative change.
+  FTY-325/FTY-326 implement the interpreter core.
