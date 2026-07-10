@@ -48,11 +48,18 @@ _MAX_HTTP_STATUS = 599
 def trace_candidate_index(context: EstimationContext, candidate: CandidateDraft) -> int | None:
     """The candidate's position in the parsed food-candidate list, for the trace.
 
-    Matches the ``candidate_index`` the food step recorded for the same candidate
-    (drafts are frozen value objects, so ``index`` finds the original position).
-    ``None`` when the candidate is not in the parse list (hand-built pipelines).
+    Matches the ``candidate_index`` the food step recorded for the same candidate.
+    Drafts are frozen *value* objects — duplicate parsed candidates compare equal —
+    so identity is checked first: the pipeline threads the parse step's own draft
+    objects through ``pending_official_candidates``, and an identity match keeps a
+    duplicate's decisions attributed to its own position instead of the first
+    equal one. Equality is the fallback for hand-built pipelines that pass an
+    equal copy; ``None`` when the candidate is not in the parse list at all.
     """
 
+    for position, draft in enumerate(context.food_candidates):
+        if draft is candidate:
+            return position
     try:
         return context.food_candidates.index(candidate)
     except ValueError:

@@ -43,7 +43,7 @@ from app.estimator.hardened_fetch import FetchResponseError
 from app.estimator.official_fetch import OfficialFetchSettings
 from app.estimator.official_step import OfficialSourceResolveStep
 from app.estimator.parse import ParseStep
-from app.estimator.pipeline import Pipeline
+from app.estimator.pipeline import CandidateDraft, EstimationContext, Pipeline
 from app.estimator.processing import process_estimation
 from app.estimator.reference_fetch import ReferenceFetchSettings
 from app.estimator.search import (
@@ -496,3 +496,48 @@ def test_accepted_snippet_and_count_serving_scaling_are_traced(
     serialized = str(run.trace)
     assert _SNIPPET_SENTINEL not in serialized
     assert _RAW_TEXT not in serialized
+
+
+def test_duplicate_drafts_attribute_official_decisions_to_their_own_index() -> None:
+    """Each of two value-equal drafts gets its own downstream ``candidate_index``.
+
+    Drafts are frozen value objects, so two identical parsed candidates compare
+    equal and an index-by-equality lookup would attribute the second candidate's
+    official/reference/model-prior decisions to the first. The step must key
+    attribution on the draft object's own position in the parse list.
+    """
+
+    context = EstimationContext(
+        log_event_id=uuid.uuid4(), user_id=uuid.uuid4(), raw_text="PC hummus, twice"
+    )
+    first = CandidateDraft(
+        name="hummus", quantity_text="2 tbsp", unit="tbsp", amount=2.0, brand="PC"
+    )
+    duplicate = CandidateDraft(
+        name="hummus", quantity_text="2 tbsp", unit="tbsp", amount=2.0, brand="PC"
+    )
+    assert first == duplicate  # value objects: equality cannot tell them apart
+    context.food_candidates.extend([first, duplicate])
+    context.pending_official_candidates.extend([first, duplicate])
+
+    step = OfficialSourceResolveStep(
+        provider=FakeProvider(
+            responses=[{"disposition": "resolved", "confidence": 0.9, "facts": _MODEL_PRIOR_FACTS}]
+            * 2
+        ),
+        search_provider=QueueSearchProvider(enabled=False),
+        fetch_settings=OfficialFetchSettings(allowed_hosts=frozenset({"shop.example.com"})),
+        reference_fetch_settings=ReferenceFetchSettings(),
+        fetch_fn=ScriptedFetcher({}),
+        reference_fetch_fn=ScriptedFetcher({}),
+    )
+    step.run(context)
+
+    assert len(context.resolved_food_items) == 2
+    entries = [entry for entry in context.trace if "decision" in entry]
+    for index in (0, 1):
+        official = _find(entries, tier="official_source", candidate_index=index)
+        assert official and official[0]["outcome"] == "search_disabled"
+        reference = _find(entries, tier="reference_source", candidate_index=index)
+        assert reference and reference[0]["outcome"] == "search_disabled"
+        assert _find(entries, tier="model_prior", outcome="accepted", candidate_index=index)

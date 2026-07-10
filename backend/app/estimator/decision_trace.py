@@ -105,12 +105,18 @@ _FIELD_ORDER = (
 )
 
 
+def _redact_secrets(text: str) -> str:
+    """Redact secret-looking material (:data:`_SECRET_PATTERNS`) from ``text``."""
+
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub(_REDACTED, text)
+    return text
+
+
 def sanitize_trace_label(value: object, *, max_len: int = MAX_TRACE_LABEL_LEN) -> str:
     """Return ``value`` as a bounded, control-free, secret-redacted label."""
 
-    text = _CONTROL_CHARS.sub(" ", str(value))
-    for pattern in _SECRET_PATTERNS:
-        text = pattern.sub(_REDACTED, text)
+    text = _redact_secrets(_CONTROL_CHARS.sub(" ", str(value)))
     text = " ".join(text.split())
     return text[:max_len]
 
@@ -121,9 +127,10 @@ def sanitize_trace_source_ref(ref: object) -> str:
     A plain source id (``usda_fdc:12345``, ``model_prior``) passes through with
     control characters stripped. A reference embedding a URL (``official_source:
     https://…`` or a bare URL) keeps only the scheme, host, and path: the query
-    string, fragment, and userinfo are dropped, so a search-result URL carrying
-    a credential-style query parameter can never enter the trace. The result is
-    truncated to :data:`MAX_TRACE_REF_LEN`.
+    string, fragment, and userinfo are dropped, and each remaining path segment
+    is redacted of secret-looking material (an untrusted result URL can carry a
+    token in its path, not just its query string). The result is truncated to
+    :data:`MAX_TRACE_REF_LEN`.
     """
 
     text = _CONTROL_CHARS.sub("", str(ref)).strip()
@@ -137,11 +144,13 @@ def sanitize_trace_source_ref(ref: object) -> str:
         host = parts.hostname or ""
         if parts.port is not None:
             host = f"{host}:{parts.port}"
-        text = prefix + urlunsplit((parts.scheme, host, parts.path, "", ""))
+        # Redact per segment: the opaque-blob pattern must see one segment at a
+        # time, or any ≥40-char path would match as a single "/"-joined blob.
+        path = "/".join(_redact_secrets(segment) for segment in parts.path.split("/"))
+        text = _redact_secrets(prefix) + urlunsplit((parts.scheme, host, path, "", ""))
     else:
         # No URL embedded; still redact secret-looking material defensively.
-        for pattern in _SECRET_PATTERNS:
-            text = pattern.sub(_REDACTED, text)
+        text = _redact_secrets(text)
     return text[:MAX_TRACE_REF_LEN]
 
 

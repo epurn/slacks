@@ -22,7 +22,8 @@ from app.estimator.decision_trace import (
     sanitize_trace_label,
     sanitize_trace_source_ref,
 )
-from app.estimator.pipeline import EstimationContext
+from app.estimator.pipeline import CandidateDraft, EstimationContext
+from app.estimator.web_evidence_trace import trace_candidate_index
 
 
 def _context() -> EstimationContext:
@@ -110,6 +111,48 @@ class TestSourceRefSanitization:
 
     def test_secret_looking_plain_ref_is_redacted(self) -> None:
         assert "SECRET" not in sanitize_trace_source_ref("token=SECRET")
+
+    def test_provider_key_path_segment_is_redacted(self) -> None:
+        ref = sanitize_trace_source_ref(
+            "reference_source:https://host.example/download/sk-live0123456789abc/facts"
+        )
+        assert "sk-live0123456789abc" not in ref
+        assert ref.startswith("reference_source:https://host.example/download/")
+        assert ref.endswith("/facts")
+
+    def test_opaque_token_path_segment_is_redacted(self) -> None:
+        blob = "A1b2" * 12  # a 48-char high-entropy segment, token-shaped
+        ref = sanitize_trace_source_ref(f"https://host.example/p/{blob}/hummus")
+        assert blob not in ref
+        assert ref.endswith("/hummus")
+
+    def test_key_value_path_segment_is_redacted(self) -> None:
+        ref = sanitize_trace_source_ref("https://host.example/api_key=TOPSECRET9/p/hummus")
+        assert "TOPSECRET9" not in ref
+        assert ref.endswith("/p/hummus")
+
+    def test_ordinary_product_path_is_preserved(self) -> None:
+        ref = "official_source:https://www.example.com/products/pc-blue-menu-hummus"
+        assert sanitize_trace_source_ref(ref) == ref
+
+
+class TestTraceCandidateIndex:
+    def test_duplicate_drafts_attribute_to_their_own_position(self) -> None:
+        context = _context()
+        first = CandidateDraft(name="hummus", quantity_text="2 tbsp", brand="PC")
+        duplicate = CandidateDraft(name="hummus", quantity_text="2 tbsp", brand="PC")
+        assert first == duplicate  # frozen value objects: equality cannot disambiguate
+        context.food_candidates.extend([first, duplicate])
+        assert trace_candidate_index(context, first) == 0
+        assert trace_candidate_index(context, duplicate) == 1
+
+    def test_equal_copy_falls_back_to_first_equal_position(self) -> None:
+        context = _context()
+        context.food_candidates.append(CandidateDraft(name="eggs", quantity_text="2"))
+        assert trace_candidate_index(context, CandidateDraft(name="eggs", quantity_text="2")) == 0
+
+    def test_unknown_candidate_returns_none(self) -> None:
+        assert trace_candidate_index(_context(), CandidateDraft(name="eggs")) is None
 
 
 class TestBuildDecisionEntry:
