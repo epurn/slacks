@@ -13,6 +13,7 @@
  * existing hollow-border shape; `no-data` stays a muted, borderless fill.
  */
 
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 
 import type { AdherenceDay } from "@/state/trends";
@@ -35,6 +36,21 @@ interface AdherenceStripProps {
 
 export function AdherenceStrip({ days, today, onDayPress }: AdherenceStripProps) {
   const { colors } = useTheme();
+  const scrollRef = useRef<ScrollView>(null);
+
+  const scrollToRecentEnd = useCallback(() => {
+    scrollRef.current?.scrollToEnd({ animated: false });
+  }, []);
+
+  const rangeKey = useMemo(() => {
+    const first = days[0]?.date ?? "";
+    const last = days[days.length - 1]?.date ?? "";
+    return `${days.length}:${first}:${last}`;
+  }, [days]);
+
+  useEffect(() => {
+    scrollToRecentEnd();
+  }, [rangeKey, scrollToRecentEnd]);
 
   if (days.length === 0) {
     return null;
@@ -42,11 +58,13 @@ export function AdherenceStrip({ days, today, onDayPress }: AdherenceStripProps)
 
   return (
     <ScrollView
+      ref={scrollRef}
       horizontal
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.strip}
       accessibilityRole="toolbar"
       accessibilityLabel="Daily intake adherence"
+      onContentSizeChange={scrollToRecentEnd}
     >
       {days.map((day) => {
         const cellStyle = resolveCellStyle(day, colors);
