@@ -22,10 +22,11 @@ existing `reminderScheduler` / `SettingsScreen` tests and a new label assertion.
 
 ## Running-app evidence
 
-Captured on the leased slot simulator (`Slacks-Slot-0`, **iPhone 17 Pro** —
-393 pt, the narrowest supported non-Max/non-Air width), this branch's JS served
-from Metro in E2E mode, via the `settings.appearance` visual-review preset with
-`&theme=light` / `&theme=dark`.
+Captured on an **iPhone SE (3rd generation)** simulator (375 pt — the app's
+smallest supported phone width; `docs/design/ux-design.md` scopes the device
+range to SE → Pro Max), this branch's JS served from Metro in E2E mode, via the
+`settings.appearance` visual-review preset with `&theme=light` / `&theme=dark`.
+Screenshots are native 750×1334 SE resolution.
 
 ### Light
 
