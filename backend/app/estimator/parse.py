@@ -1,10 +1,14 @@
 """The structured NL parse step (FTY-042; calibrated clarify gate FTY-159).
 
-This is the first *real* estimation pipeline step. It draws N schema-validated
-parse samples of a log event's raw text through the FTY-041 provider's
-``structured_completion`` (the FTY-158 self-consistency sampler — parallel, with
-a unanimous-first-window early stop so easy inputs stay cheap) and routes on the
-validated samples plus their consistency signal:
+This is the first *real* estimation pipeline step. Since FTY-325 it delegates
+interpretation to the :class:`~app.estimator.interpretation.InterpretationSession`:
+the session draws the N schema-validated parse samples (the FTY-158
+self-consistency sampler — parallel, with a unanimous-first-window early stop so
+easy inputs stay cheap), forms the run's initial item *hypothesis* from them —
+re-interpreting once, budget-capped, when the samples structurally disagree on
+item count/identity/brand instead of freezing a degenerate aggregate — and is
+carried on the context for later steps (FTY-326). This step then routes on the
+session's hypothesis plus the calibrated consistency signal:
 
 - **parsed, calibrated-confident** → record food/exercise candidates onto the
   context; the worker persists them ``unresolved`` (no calories — FTY-043/044
@@ -24,7 +28,10 @@ deterministic safety gates and downstream rough resolution. ``balanced`` keeps
 the calibrated operating point without re-asking for already-stated details, and
 ``strict`` keeps old-style abstention. The deterministic gates are unchanged:
 the FTY-156 plausibility validator and FTY-279 stated-nutrition stability check
-still run before any candidate is trusted.
+still run before any candidate is trusted. Under FTY-325 those gates are
+*validators over the session's hypothesis*: their fail-closed authority is
+unchanged, and they perform no interpretation of their own — a hypothesis they
+reject routes to clarification or failure, never to a silently patched item.
 
 Trust boundary (security baseline + ``docs/security/security-baseline.md``): the
 model is an untrusted analyst. Every sample is schema-validated before anything
@@ -50,29 +57,19 @@ from app.estimator.detail_signals import (
     parse_range_midpoint,
 )
 from app.estimator.exercise import has_exercise_detail
+from app.estimator.interpretation import InterpretationSession, representative_sample
 from app.estimator.parse_policy import ParsePolicySettings
 from app.estimator.parse_prompt import build_parse_prompt
 from app.estimator.pipeline import (
-    AnsweredClarification,
     CandidateDraft,
     ClarificationDraft,
     EstimationContext,
     NeedsClarification,
-    StepError,
     StepFailed,
 )
 from app.estimator.plausibility import check_candidate
-from app.estimator.self_consistency import (
-    SelfConsistencySignal,
-    collect_parse_samples,
-)
+from app.estimator.self_consistency import SelfConsistencySignal
 from app.llm.base import Provider
-from app.llm.errors import (
-    LLMConfigurationError,
-    LLMResponseError,
-    LLMTransientError,
-    StructuredOutputValidationError,
-)
 from app.schemas.parse import (
     PARSE_SCHEMA_VERSION,
     ParsedCandidate,
@@ -172,45 +169,30 @@ class ParseStep:
             # spend an LLM call on it.
             raise StepFailed("empty_input")
 
-        signal = self._signal(raw, context.answered_clarifications)
-        self._route(context, signal)
+        # The session owns interpretation for the run's lifetime (FTY-325): it
+        # draws the sample set, forms the initial hypothesis, re-interprets on
+        # structural sample disagreement, and stays on the context so later
+        # steps (FTY-326) can consult it. Provider failures surface from it
+        # with the same step-signal mapping as before.
+        session = InterpretationSession(
+            self.provider,
+            raw,
+            policy=self.policy,
+            answered=context.answered_clarifications,
+            step_name=self.name,
+        )
+        context.interpretation_session = session
+        signal = session.interpret_initial(context)
+        self._route(context, session, signal)
         context.record_step(self.name, "ok")
 
-    def _signal(
-        self, raw_text: str, answered: Sequence[AnsweredClarification]
-    ) -> SelfConsistencySignal:
-        """Sample the parse and compute the consistency signal, mapping failures.
-
-        Draws the FTY-158 sample set (parallel, early-stopped when the first
-        window is unanimous). ``answered`` folds the accumulated clarification
-        answers into every sample's prompt as structured detail on an
-        answer-triggered re-estimate (FTY-171); the raw text itself is passed
-        through unchanged. Transient transport failures are retryable
-        (:class:`StepError`); a schema-validation rejection or any other
-        deterministic provider error is terminal and fails closed
-        (:class:`StepFailed`) — a partially-failed sample set is never scored,
-        and rejected output is never returned to the caller as trusted.
-        """
-
-        try:
-            samples = collect_parse_samples(
-                self.provider,
-                raw_text,
-                answered=answered,
-                max_repair_attempts=self.policy.max_repair_attempts,
-            )
-        except StructuredOutputValidationError as exc:
-            # Untrusted-analyst trust boundary: reject and fail closed. The label
-            # is content-free — no raw output is surfaced.
-            raise StepFailed("schema_validation_failed") from exc
-        except LLMTransientError as exc:
-            raise StepError("provider_transient_error") from exc
-        except (LLMResponseError, LLMConfigurationError) as exc:
-            raise StepFailed("provider_error") from exc
-        return SelfConsistencySignal.from_samples(samples)
-
-    def _route(self, context: EstimationContext, signal: SelfConsistencySignal) -> None:
-        """Apply the calibrated decision to the sample set, or raise a step signal."""
+    def _route(
+        self,
+        context: EstimationContext,
+        session: InterpretationSession,
+        signal: SelfConsistencySignal,
+    ) -> None:
+        """Apply the calibrated decision to the session's hypothesis, or raise."""
 
         samples = signal.samples
         if all(sample.disposition is ParseDisposition.UNPARSEABLE for sample in samples):
@@ -218,7 +200,7 @@ class ParseStep:
             # coarse fixed label (the model's ``reason`` stays untrusted text).
             raise StepFailed("unparseable_input")
 
-        result = _representative(samples)
+        result = session.result
 
         # The calibrated gate still identifies conservative sample sets, but the
         # active operator mode decides what that means. In default estimate_first
@@ -232,9 +214,13 @@ class ParseStep:
             result = _conservative_result_or_raise(
                 self.policy.mode,
                 context,
+                session,
                 signal,
                 default=result,
             )
+            # Routing may have settled on a different validated sample than the
+            # session's pick; the session stays the hypothesis owner.
+            session.adopt_result(context, result)
 
         # A sample set that claims "parsed" yet routes nothing to persist is
         # treated as unparseable (fail closed) rather than silently completing
@@ -243,7 +229,9 @@ class ParseStep:
             raise StepFailed("no_candidates")
 
         if not _all_candidates_have_recognizable_identity(result.items):
-            context.clarification_questions = _clarification_questions(samples)
+            questions = _clarification_questions(samples)
+            context.clarification_questions = questions
+            session.note_pending_questions(context, questions, outcome="deterministic_gate_failed")
             raise NeedsClarification("missing_identity")
 
         # Deterministic plausibility gate (FTY-156): check each *food* candidate's
@@ -262,6 +250,9 @@ class ParseStep:
         implausible = _first_implausible([item for item, _ in effective])
         if implausible is not None:
             context.clarification_questions = [implausible]
+            session.note_pending_questions(
+                context, [implausible], outcome="deterministic_gate_failed"
+            )
             raise NeedsClarification("implausible_candidate")
 
         # User-stated nutrition stability gate (FTY-279/FTY-280): a stated calorie
@@ -273,12 +264,12 @@ class ParseStep:
         # closed to a targeted calorie question instead of trusting a shaky number.
         unstable = _first_unstable_stated_item(signal.samples, result.items)
         if unstable is not None:
-            context.clarification_questions = [
-                ClarificationDraft(
-                    text=f"How many calories were in the {unstable.name}?",
-                    options=list(_CALORIE_AMOUNT_OPTIONS),
-                )
-            ]
+            question = ClarificationDraft(
+                text=f"How many calories were in the {unstable.name}?",
+                options=list(_CALORIE_AMOUNT_OPTIONS),
+            )
+            context.clarification_questions = [question]
+            session.note_pending_questions(context, [question], outcome="deterministic_gate_failed")
             raise NeedsClarification("unstable_stated_nutrition")
 
         for item, assumption in effective:
@@ -291,26 +282,10 @@ class ParseStep:
                 context.exercise_candidates.append(draft)
 
 
-def _representative(samples: Sequence[ParseResult]) -> ParseResult:
-    """The sample whose candidates are routed when the set is trusted.
-
-    Preference order: the most self-confident ``parsed`` sample (every parsed
-    sample is an equally schema-valid parse; the verbalized score is the only
-    within-set ranking the model expresses), then — for non-parsed sets that may
-    still estimate via the FTY-167 detail override — the most confident sample
-    that extracted items, then the first sample. ``max`` keeps the earliest of
-    equally-confident samples, so the choice is deterministic for a recorded
-    sample set.
-    """
-
-    parsed = [s for s in samples if s.disposition is ParseDisposition.PARSED]
-    pool = parsed or [s for s in samples if s.items] or list(samples)
-    return max(pool, key=lambda sample: sample.confidence)
-
-
 def _conservative_result_or_raise(
     mode: str,
     context: EstimationContext,
+    session: InterpretationSession,
     signal: SelfConsistencySignal,
     *,
     default: ParseResult,
@@ -323,11 +298,13 @@ def _conservative_result_or_raise(
         if not signal.all_non_parsed and _all_candidates_have_recognizable_identity(default.items)
         else ()
     )
-    context.clarification_questions = _clarification_questions(
+    questions = _clarification_questions(
         signal.samples,
         fallback_items=fallback_items,
         prefer_backend_missing_detail=mode == "balanced",
     )
+    context.clarification_questions = questions
+    session.note_pending_questions(context, questions, outcome="clarification_needed")
     raise NeedsClarification("low_confidence_or_ambiguous")
 
 
@@ -341,7 +318,7 @@ def _policy_allowed_result(
     candidates = [sample for sample in samples if _policy_allows_estimate(mode, sample.items)]
     if not candidates:
         return None
-    return _representative(candidates)
+    return representative_sample(candidates)
 
 
 def _effective_candidate(item: ParsedCandidate) -> tuple[ParsedCandidate, str | None]:

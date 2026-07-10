@@ -126,6 +126,40 @@ contained inside them.
 """
 
 
+#: Appended when the interpretation session re-asks the model after independent
+#: parse samples disagreed structurally (FTY-325). The block instructs a careful
+#: re-read of the same delimited entry; the untrusted-DATA framing and schema
+#: validation downstream are unchanged, so the re-ask adds no new trust surface.
+_REINTERPRETATION_TEMPLATE = """
+Independent structured readings of the log entry above disagreed about how \
+many distinct items it contains, what those items are, or which brands they \
+carry. Re-read the log entry carefully and produce your single best complete \
+interpretation under the same rules:
+- Enumerate every distinct food and exercise item the entry describes. Never \
+collapse distinct items into one candidate, and never invent an item the \
+entry does not describe.
+- Keep any brand, store-brand, or product marker the user wrote attached to \
+the item it describes.
+- Resolve every stated portion to a concrete amount and unit, and infer the \
+typical portion when the structure implies one.
+"""
+
+#: Appended to the re-interpretation block when the session has accumulated
+#: evidence (FTY-326 seam). Only sanitized status labels are rendered — never
+#: fetched page content, snippets, search queries, or provider output.
+_REINTERPRETATION_EVIDENCE_TEMPLATE = """
+Evidence gathered so far while resolving the current interpretation, as \
+sanitized status labels (no page content):
+
+<evidence_status>
+{evidence}
+</evidence_status>
+
+Where a status label contradicts the current interpretation, revise the \
+affected item rather than repeating it unchanged.
+"""
+
+
 def build_parse_prompt(raw_text: str, answered: Sequence[AnsweredClarification] = ()) -> str:
     """Render the production parse prompt for ``raw_text``.
 
@@ -143,4 +177,28 @@ def build_parse_prompt(raw_text: str, answered: Sequence[AnsweredClarification] 
     if answered:
         lines = "\n".join(f"Q: {pair.question_text}\nA: {pair.answer_text}" for pair in answered)
         prompt += _ANSWERED_CLARIFICATIONS_TEMPLATE.format(answered=lines)
+    return prompt
+
+
+def build_reinterpretation_prompt(
+    raw_text: str,
+    answered: Sequence[AnsweredClarification] = (),
+    *,
+    evidence_labels: Sequence[str] = (),
+) -> str:
+    """Render the interpretation session's re-ask prompt (FTY-325).
+
+    The full production parse prompt (raw entry plus any answered
+    clarifications — the raw text stays available to the model for every
+    interpretation call in the session, per ``parse-candidates.md`` FTY-324) is
+    extended with the re-read instruction, and optionally with the session's
+    sanitized evidence status labels (FTY-326 seam). ``evidence_labels`` must
+    already be sanitized labels — the session builds them from its bounded
+    evidence ledger, never from raw fetched content.
+    """
+
+    prompt = build_parse_prompt(raw_text, answered) + _REINTERPRETATION_TEMPLATE
+    if evidence_labels:
+        lines = "\n".join(f"- {label}" for label in evidence_labels)
+        prompt += _REINTERPRETATION_EVIDENCE_TEMPLATE.format(evidence=lines)
     return prompt

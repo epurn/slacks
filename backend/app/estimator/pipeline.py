@@ -44,6 +44,7 @@ from app.estimator.decision_trace import (
 
 if TYPE_CHECKING:
     from app.estimator.food_step import BarcodeResolver, FoodResolver
+    from app.estimator.interpretation import InterpretationSession
     from app.estimator.label_step import LabelInput
     from app.estimator.official_step import OfficialSourceResolveStep
     from app.estimator.parse_policy import ParsePolicySettings
@@ -314,6 +315,12 @@ class EstimationContext:
     #: re-estimate the parse step applies these as structured detail alongside the
     #: unchanged ``raw_text``. Untrusted user text — never copied into ``trace``.
     answered_clarifications: list[AnsweredClarification] = field(default_factory=list)
+    #: The run's interpretation session (FTY-324/FTY-325): owns the raw text and
+    #: the revisable item hypothesis for the run's lifetime. Set by the parse
+    #: step; later steps (FTY-326) may consult it to re-open interpretation with
+    #: accumulated evidence. In-memory only — never persisted, never copied into
+    #: ``trace`` or any run field (it holds raw user text).
+    interpretation_session: InterpretationSession | None = None
     provider: str | None = None
     model: str | None = None
     schema_version: str | None = None
