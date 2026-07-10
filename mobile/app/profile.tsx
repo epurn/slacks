@@ -49,20 +49,46 @@ export default function ProfileRoute() {
           headerTintColor: colors.accentText,
           headerTitleStyle: { color: colors.text },
           headerLargeTitleStyle: { color: colors.text },
-          headerRight: () => (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Done"
-              testID="profile-done"
-              onPress={handleDone}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              style={styles.doneButton}
-            >
-              <Text style={[styles.doneLabel, { color: colors.accentText }]}>
-                Done
-              </Text>
-            </Pressable>
-          ),
+          // Done is calm native text chrome (FTY-305), not a filled button. On
+          // iOS 26 the navigation bar wraps a bar-button item in a shared "glass"
+          // capsule — an opaque platter behind the label — which reads as the
+          // white rectangle/flash the dogfooding pass flagged. The classic
+          // `headerRight` element has no way to opt out of that platter, so the
+          // route hands Done through `unstable_headerRightItems` (the typed
+          // native-stack surface already in expo-router) as a custom item with
+          // `hidesSharedBackground` — the item maps to `UIBarButtonItem`'s
+          // `hidesSharedBackground`, so the platter never draws and only the amber
+          // label shows. The element itself is the same inert `Pressable` so the
+          // `profile-done` test id, the Done role/label, and the stable 44pt
+          // target are all preserved. On < iOS 26 the flag is a no-op.
+          unstable_headerRightItems: () => [
+            {
+              type: "custom",
+              hidesSharedBackground: true,
+              element: (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Done"
+                  testID="profile-done"
+                  onPress={handleDone}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  // The Pressable itself stays visually inert: the style is a
+                  // function of `pressed` that returns identical bounds either way,
+                  // so there is no pressed background/fill, opacity dim,
+                  // scale/transform, or padding/size change, and ripple is disabled
+                  // — nothing to flash or shift the header before the route pops.
+                  // The 44pt target comes from stable minHeight/minWidth plus
+                  // hitSlop, never a pressed-state expansion.
+                  android_ripple={null}
+                  style={() => styles.doneButton}
+                >
+                  <Text style={[styles.doneLabel, { color: colors.accentText }]}>
+                    Done
+                  </Text>
+                </Pressable>
+              ),
+            },
+          ],
         }}
       />
       <SettingsScreen onAppearanceChange={setAppearance} />
