@@ -28,12 +28,12 @@ This story ships **evidence only** — no product code changes.
 
 Every onboarding step, in order, light + dark:
 
-| # | State | Preset | Light | Dark |
-|---|-------|--------|-------|------|
-| 1 | Step 1 — goal + pace | `onboarding.goal` | `onboarding-goal-light.png` | `onboarding-goal-dark.png` |
-| 2 | Step 2 — measurements + formula (Higher +5 **selected**) | `onboarding.measurements_formula` | `onboarding-measurements-formula-light.png` | `onboarding-measurements-formula-dark.png` |
-| 3 | Step 2 — formula toggled (Higher +5 now **unselected**, Lower −161 selected) | `onboarding.measurements_formula` + tap | `onboarding-measurements-formula-toggled-light.png` | `onboarding-measurements-formula-toggled-dark.png` |
-| 4 | Step 3 — target reveal | `onboarding.target_reveal` | `onboarding-target-reveal-light.png` | `onboarding-target-reveal-dark.png` |
+| # | State | Preset | Light | Dark | Verdict |
+|---|-------|--------|-------|------|---------|
+| 1 | Step 1 — goal + pace | `onboarding.goal` | `onboarding-goal-light.png` | `onboarding-goal-dark.png` | light **pass** / dark **defect D1** (unselected segmented-control labels illegible — see Defects) |
+| 2 | Step 2 — measurements + formula (Higher +5 **selected**) | `onboarding.measurements_formula` | `onboarding-measurements-formula-light.png` | `onboarding-measurements-formula-dark.png` | **pass** (both themes) |
+| 3 | Step 2 — formula toggled (Higher +5 now **unselected**, Lower −161 selected) | `onboarding.measurements_formula` + tap | `onboarding-measurements-formula-toggled-light.png` | `onboarding-measurements-formula-toggled-dark.png` | **pass** (both themes) |
+| 4 | Step 3 — target reveal | `onboarding.target_reveal` | `onboarding-target-reveal-light.png` | `onboarding-target-reveal-dark.png` | **pass** (both themes) |
 
 ## Sweep-outcome verdicts
 
@@ -72,7 +72,7 @@ step components. Verified regression-free across every capture:
 
 | Step | Elements checked | Verdict |
 |------|------------------|---------|
-| 1 goal | `largeTitle` header, `body` subtitle, `footnote` uppercase section labels, `footnote` pace caption, native segmented controls | no clip / wrap / truncation — **pass** |
+| 1 goal | `largeTitle` header, `body` subtitle, `footnote` uppercase section labels, `footnote` pace caption, native segmented controls | no clip / wrap / truncation — **pass** (type-scale/geometry only; the segmented controls' dark-mode label *colour* defect is D1 below, not a type-scale regression) |
 | 2 measurements | `largeTitle` header, `body` subtitle + inputs, `footnote` field/section labels, `subhead 600` formula chip labels, `footnote` descriptions | no clip / wrap / truncation — **pass** |
 | 3 target reveal | `largeTitle` header, `heroDisplay` (56) "2000" hero number, `title3` "kcal / day" unit, `footnote` provenance + reveal note | hero number crisp and un-clipped; no mis-size — **pass** |
 
@@ -82,11 +82,38 @@ overflow — i.e. intended wrapping, not a type-scale regression.
 
 ## Defects
 
-**None observed.** No accent/text-color, type-scale, layout, legibility, or
-theme defect was found on the Onboarding screen in either light or dark mode.
-Per the story's "file, do not fix" rule there is consequently nothing to file as
-a planner note. (Had any defect been present, it would have been filed as an
-`out_of_scope_bug` planner note with the screenshot attached, and left unfixed.)
+**One defect observed.** Per the story's "file, do not fix" rule it is filed as
+an `out_of_scope_bug` planner note with the screenshot attached and is **not**
+fixed in this PR — the diff remains evidence-only.
+
+### D1 — Dark mode: unselected segmented-control labels illegible (step 1, goal)
+
+- **Evidence:** `onboarding-goal-dark.png`. In both native segmented controls
+  (DIRECTION and PACE) the unselected labels — "Maintain", "Gain", "Gentle",
+  "Faster" — render as black glyphs on the dark control track. Sampled from the
+  committed screenshot: label glyphs `#000000` on a `#272729` track ≈ **1.4:1**
+  contrast, far below the WCAG AA 4.5:1 minimum and effectively unreadable.
+  Light mode (`onboarding-goal-light.png`) is unaffected (dark glyphs on a
+  light track, comfortably AA). Selected segments are unaffected in both themes
+  (dark label on the white selected pill).
+- **Classification:** pre-existing legibility/theming defect, **not**
+  sweep-caused. Neither the accent-as-text nor the type-scale sweep touched the
+  native control; its wrapper (`mobile/components/ui/SegmentedControl.tsx`)
+  deliberately applies no tint/color overrides, so the platform
+  `UISegmentedControl` follows the **OS** appearance.
+- **Root-cause pointer (for the fix story):** the app's theme forcing is
+  JS-only. Both the FTY-247 visual-review `theme=dark` param and the
+  user-facing Settings appearance override (`mobile/state/appearance.tsx` →
+  `ThemeProvider override`) swap the JS palette without syncing native
+  appearance — `Appearance.setColorScheme` is never called anywhere in the app.
+  When the app renders dark while the OS appearance is light, the native
+  control still draws its light-appearance black unselected labels while its
+  translucent track composites dark over the dark JS surface. This state is
+  reachable by a real user (Settings → Appearance → Dark with the OS in light
+  mode) and plausibly affects every `SegmentedControl` site app-wide (Settings
+  units / appearance / cadence, Trends range), not just Onboarding.
+- **Disposition:** filed as an `out_of_scope_bug` planner note; no product code
+  changed here.
 
 ## Acceptance criteria
 
@@ -95,5 +122,5 @@ a planner note. (Had any defect been present, it would have been filed as an
 | `docs/verification/FTY-239/` has light+dark screenshots for every Scope state + this `findings.md` with a state-by-state verdict | pass |
 | Every accent-as-text site on Onboarding confirmed `accentText`-rendered and AA-legible in the evidence | pass |
 | Type-scale rendering confirmed regression-free in the evidence | pass |
-| Every observed defect has a planner note; none fixed here | pass (no defects observed → no notes; no code changed) |
+| Every observed defect has a planner note; none fixed here | pass (one defect observed — D1, dark-mode unselected segmented-control labels — filed as an `out_of_scope_bug` planner note; no code changed) |
 | PR body embeds the key screenshots (first revision) | pass |
