@@ -14,7 +14,11 @@ ownership, and delegate to the estimator's :class:`~app.estimator.re_match.ReMat
 (which owns all resolution, recompute, and persistence). The ``{user_id}`` path is
 explicit so ownership is checked on every call; a cross-user or unknown item renders
 ``404`` — the API never confirms another user's item exists nor mutates it (fail
-closed), matching the FTY-051 corrections posture. A chosen reference the server
+closed), matching the FTY-051 corrections posture. Both routes also fail closed
+(``404``) when the item's parent log event is **voided** (FTY-321): they return or
+mutate the target row directly, bypassing the read-time exclusion join, so a
+backend-core boundary precheck refuses voided targets before the capability runs —
+the estimator itself stays void-agnostic. A chosen reference the server
 cannot re-derive, or a re-match the new source cannot cost, renders ``422`` with a
 machine-readable shape that never echoes the item's values. A transient or unusable
 candidate-source failure during listing renders a retryable ``503`` rather than a
@@ -31,7 +35,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.deps import CurrentUser
-from app.enums import SourceType
+from app.enums import CandidateType, SourceType
 from app.estimator.re_match import (
     AlternativesUnavailable,
     ItemForbidden,
@@ -49,10 +53,26 @@ from app.schemas.re_match import (
     SourceCandidateDTO,
 )
 from app.services import item_read_model
+from app.services.corrections import DerivedItemNotFound, ensure_parent_event_not_voided
 
 router = APIRouter(prefix="/api/users", tags=["re-match"])
 
 _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="derived item not found")
+
+
+def _refuse_voided_parent(session: Session, item_id: uuid.UUID, owner_id: uuid.UUID) -> None:
+    """FTY-321 boundary precheck: ``404`` when the item's parent event is voided.
+
+    Runs before the estimator capability is invoked, so a voided target is
+    refused at the backend-core boundary and the capability (which is
+    void-agnostic) never loads it. A missing or cross-user item passes through —
+    the capability's own owner-scoped loader reports those as ``404``.
+    """
+
+    try:
+        ensure_parent_event_not_voided(session, CandidateType.FOOD, item_id, owner_id)
+    except DerivedItemNotFound as exc:
+        raise _NOT_FOUND from exc
 
 
 @router.post(
@@ -70,11 +90,13 @@ def list_source_candidates(
 
     Runs the existing resolution providers in list-candidates mode over the item's
     identity (or the sanitized ``query`` override) and returns a bounded list of
-    energy-bearing matches. Cross-user or unknown items fail closed as ``404``; a
-    transient or unusable candidate-source failure returns ``503`` (retryable) rather
-    than a misleading empty list.
+    energy-bearing matches. Cross-user or unknown items — and items whose parent
+    log event is voided (FTY-321) — fail closed as ``404``; a transient or unusable
+    candidate-source failure returns ``503`` (retryable) rather than a misleading
+    empty list.
     """
 
+    _refuse_voided_parent(session, item_id, user_id)
     capability = build_re_match_capability(session)
     try:
         candidates = capability.list_alternatives(
@@ -110,11 +132,13 @@ def re_resolve_item(
     Recomputes calories/macros from the chosen source at the item's current portion,
     rewrites its provenance to the new source, and re-snapshots the estimated
     originals — the item is **not** marked edited. The response carries the new
-    per-item ``source`` descriptor (FTY-092). Cross-user or unknown items fail closed
-    as ``404``; a reference the server cannot re-derive, or a re-match the new source
-    cannot cost, returns ``422`` with a clear error shape.
+    per-item ``source`` descriptor (FTY-092). Cross-user or unknown items — and items
+    whose parent log event is voided (FTY-321) — fail closed as ``404``; a reference
+    the server cannot re-derive, or a re-match the new source cannot cost, returns
+    ``422`` with a clear error shape.
     """
 
+    _refuse_voided_parent(session, item_id, user_id)
     capability = build_re_match_capability(session)
     try:
         item = capability.re_resolve(

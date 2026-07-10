@@ -13,7 +13,8 @@ FTY-096 makes create safe-to-retry for an offline outbox: an optional opaque
 ``idempotency_key`` dedups a submit per user. A fresh keyed (or unkeyed) create
 returns ``201`` and enqueues one job; a replay of an already-submitted key
 returns ``200`` with the existing event at its current status and enqueues
-nothing. See ``docs/contracts/log-events.md``.
+nothing — unless that stored event has been voided (FTY-321), in which case the
+replay fails closed as ``404``. See ``docs/contracts/log-events.md``.
 
 FTY-064 adds the nutrition-label upload path: a captured label image is posted as
 the raw request body and resolved synchronously in-request (the raw image is
@@ -105,6 +106,9 @@ def create_log_event(
     With an ``idempotency_key`` the submit is safe to retry (FTY-096): a fresh
     create returns ``201`` and enqueues one job; an idempotent replay returns
     ``200`` with the existing event at its current status and enqueues nothing.
+    A keyed replay whose stored event has been **voided** (FTY-321) fails closed
+    as ``404`` — the replay is a read, so it never returns a voided event as a
+    live DTO; the key stays consumed and no replacement row is created.
     """
 
     try:
@@ -115,7 +119,7 @@ def create_log_event(
             payload.raw_text,
             idempotency_key=payload.idempotency_key,
         )
-    except LogEventForbidden as exc:
+    except (LogEventForbidden, LogEventNotFound) as exc:
         raise _NOT_FOUND from exc
     if created:
         enqueue(log_event_id=event.id, user_id=event.user_id)

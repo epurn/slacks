@@ -54,7 +54,11 @@ mislogged entry: it sets `voided_at` **once** (a terminal status; there is no
 un-void), which excludes the event **and every derived item hanging off it**
 from the list / by-date / single GET, the clarification read/answer, the
 day-listing items, and the daily-summary intake/exercise/`uncounted_entries`
-totals — so the entry disappears from the day. **No row is hard-deleted**: the
+totals — so the entry disappears from the day. The **keyed create-replay** and
+the **single-item mutation endpoints** (correction edit, re-match
+candidate-list / re-resolve) **fail closed (`404`)** against a voided event via
+backend-core boundary prechecks, since they return/mutate their target row
+directly and bypass the read-time join. **No row is hard-deleted**: the
 event, its derived items, corrections, and evidence are all retained, preserving
 the append-only audit/provenance stance (`corrections.md` reconciled). The
 delete is **idempotent** (repeating it returns `204` identically) and works from
@@ -254,7 +258,9 @@ clarification answer):
 
 - **Create (fresh)** → `201` with the event DTO at `status: "pending"`.
 - **Create (idempotent replay)** → `200` with the **existing** event's DTO at its
-  current status (see [Idempotent create](#idempotent-create-201-vs-200)).
+  current status; a replay whose stored event has been **voided** (FTY-321) fails
+  closed with `404` instead (see
+  [Idempotent create](#idempotent-create-201-vs-200)).
 - **List-today** → `200` with a JSON array of event DTOs, ordered oldest-first.
 - **Day-listing read** → `200` with a JSON array of entry DTOs, ordered
   oldest-first by the owning event:
@@ -354,6 +360,14 @@ every backend regardless of whether the driver preserves the offset on read.
   **existing** event's current DTO, create **no** new row, enqueue **no** second
   job. Returns `200`. The `201`/`200` distinction lets the client tell a fresh
   create from a replay.
+- **Key supplied, the stored event is voided** (FTY-321) → **fail closed with
+  `404`**. The replay is a **read** of the stored event, so it obeys the same
+  "excluded from every read" rule as every other read path: a voided event is
+  never resurfaced as a live DTO. The key stays **consumed**
+  (first-write-wins) — the stored row keeps the key, so no replacement row is
+  created and no second job is enqueued. A client that voids an entry and later
+  flushes a stale outbox replay of it treats the `404` as expected, exactly as
+  it does for get-by-id.
 
 Replay reflects the event's **current** status: if the original has advanced to
 `processing` or `completed` before the retry arrives, the replay returns that
@@ -410,6 +424,26 @@ mistaken or unwanted logged entry. It is a **soft void**, not a hard delete:
   daily summary `intake` / `exercise`, nor does it count toward
   `uncounted_entries` (`daily-summary.md`). The clarification read and answer
   fail closed (`404`) for a voided event.
+- **Single-item surfaces fail closed (`404`).** The endpoints that return or
+  mutate a specific stored row **directly** — and so never pass through the
+  read-time exclusion join above — each refuse a voided target with `404`,
+  making the exclusion exhaustive across the surface:
+  - the **keyed create-replay** (`POST .../log-events` with an
+    `idempotency_key` whose stored event is voided) — see
+    [Idempotent create](#idempotent-create-201-vs-200); the key stays consumed
+    and no replacement row is created;
+  - the **clarification read and answer** (`clarification.md`), as above;
+  - the **correction edit**
+    (`PATCH .../derived-items/{item_type}/{item_id}`, `corrections.md`) on an
+    item whose parent event is voided;
+  - the **re-match candidate-list and re-resolve**
+    (`POST .../derived-items/food/{item_id}/source-candidates` and
+    `.../re-resolve`, `corrections.md`) on an item whose parent event is voided.
+
+  These are backend-core route/service boundary prechecks (each loads the
+  target's parent event and rejects when `voided_at` is set); the estimator
+  re-match capability and the worker stay void-agnostic. The `404` matches the
+  unknown-item/unknown-event shape, so there is no void oracle.
 - **Any status.** Voiding works whatever the event's estimation status
   (`pending`, `processing`, `completed`, `failed`, `needs_clarification`) —
   `voided_at` is orthogonal to `status`, and the event keeps its pre-void status

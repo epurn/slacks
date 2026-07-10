@@ -10,8 +10,10 @@ single GET / derived items / daily totals), void from any status, clarify-on-voi
 fails closed, idempotency, set-once first-write-wins under a concurrent DELETE,
 the ``404`` fail-closed cases (unknown / cross-user), no hard deletion,
 retained-and-excluded derived rows written by a late estimation after the void,
-and the exact-contribution drop in daily totals — exercised against SQLite and
-(opt-in) Postgres.
+the void-aware keyed create-replay (fails closed ``404``, key stays consumed),
+the fail-closed correction-edit / re-match boundary prechecks on a voided
+parent, and the exact-contribution drop in daily totals — exercised against
+SQLite and (opt-in) Postgres.
 """
 
 from __future__ import annotations
@@ -20,15 +22,19 @@ import uuid
 from datetime import UTC, date, datetime
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.engine import Engine
 
 from app.db import create_session_factory
-from app.enums import DerivedItemStatus, LogEventStatus, SourceType
+from app.enums import CandidateType, DerivedItemStatus, LogEventStatus, SourceType
+from app.models.corrections import Correction
 from app.models.derived import ClarificationQuestion, DerivedExerciseItem, DerivedFoodItem
 from app.models.food_sources import EvidenceSource
 from app.models.identity import User, UserProfile
 from app.models.log_events import LogEvent
+from app.services import corrections as corrections_service
 from app.services import daily_summary as daily_summary_service
 from app.services import log_events as log_event_service
 from tests.conftest import upgrade
@@ -522,8 +528,145 @@ def test_late_estimation_rows_on_voided_event_stay_excluded(
         assert session.get(DerivedExerciseItem, exercise_id) is not None
 
 
+# ---------------------------------------------------------------------------
+# Fail-closed single-item surfaces: keyed create-replay, correction edit,
+# re-match candidate-list / re-resolve
+# ---------------------------------------------------------------------------
+
+
+def test_keyed_create_replay_of_voided_event_fails_closed(
+    client: TestClient, db_engine: Engine
+) -> None:
+    """A keyed replay of a voided event is 404, and the key stays consumed.
+
+    The replay is a read of the stored event, so it obeys the same "excluded
+    from every read" rule: it must never resurface the voided event as a live
+    DTO, and — first-write-wins — it must not mint a replacement row under the
+    same key.
+    """
+
+    user_id, auth = _register(client, "void-replay@example.com")
+    key = "void-replay-key-1"
+    payload = {"raw_text": "keyed entry", "idempotency_key": key}
+
+    created = client.post(
+        f"/api/users/{user_id}/log-events", headers={"Authorization": auth}, json=payload
+    )
+    assert created.status_code == 201
+    event_id = created.json()["id"]
+
+    # A pre-void replay is the unchanged FTY-096 behaviour: 200, same event.
+    live_replay = client.post(
+        f"/api/users/{user_id}/log-events", headers={"Authorization": auth}, json=payload
+    )
+    assert live_replay.status_code == 200
+    assert live_replay.json()["id"] == event_id
+
+    client.delete(
+        f"/api/users/{user_id}/log-events/{event_id}", headers={"Authorization": auth}
+    ).raise_for_status()
+
+    voided_replay = client.post(
+        f"/api/users/{user_id}/log-events", headers={"Authorization": auth}, json=payload
+    )
+    assert voided_replay.status_code == 404
+
+    # The key stays consumed by the voided row: no replacement row was created.
+    factory = create_session_factory(db_engine)
+    with factory() as session:
+        keyed_rows = list(session.scalars(select(LogEvent).where(LogEvent.idempotency_key == key)))
+        assert [str(row.id) for row in keyed_rows] == [event_id]
+        assert keyed_rows[0].voided_at is not None
+
+
+def test_void_makes_correction_edit_fail_closed(client: TestClient, db_engine: Engine) -> None:
+    """Editing a food or exercise item under a voided parent is 404 and mutates nothing."""
+
+    user_id, auth = _register(client, "void-edit@example.com")
+    event_id = _seed_event(db_engine, user_id, created_at=datetime(2026, 6, 20, 12, 0, tzinfo=UTC))
+    food_id = _seed_food_item(db_engine, user_id, event_id)
+    exercise_id = _seed_exercise_item(db_engine, user_id, event_id)
+
+    # The edit path is live before the void (non-voided behaviour unchanged).
+    before = client.patch(
+        f"/api/users/{user_id}/derived-items/food/{food_id}",
+        headers={"Authorization": auth},
+        json={"field": "calories", "value": 250.0},
+    )
+    assert before.status_code == 200
+
+    client.delete(
+        f"/api/users/{user_id}/log-events/{event_id}", headers={"Authorization": auth}
+    ).raise_for_status()
+
+    food_edit = client.patch(
+        f"/api/users/{user_id}/derived-items/food/{food_id}",
+        headers={"Authorization": auth},
+        json={"field": "calories", "value": 999.0},
+    )
+    exercise_edit = client.patch(
+        f"/api/users/{user_id}/derived-items/exercise/{exercise_id}",
+        headers={"Authorization": auth},
+        json={"field": "active_calories", "value": 999.0},
+    )
+    assert food_edit.status_code == 404
+    assert exercise_edit.status_code == 404
+
+    # Refused means refused: the retained rows keep their pre-void values and
+    # no correction row was appended by the rejected edits.
+    factory = create_session_factory(db_engine)
+    with factory() as session:
+        food = session.get(DerivedFoodItem, food_id)
+        assert food is not None
+        assert food.calories == 250.0
+        exercise = session.get(DerivedExerciseItem, exercise_id)
+        assert exercise is not None
+        assert exercise.active_calories == 120.0
+        corrections = list(
+            session.scalars(select(Correction).where(Correction.user_id == uuid.UUID(user_id)))
+        )
+        # Exactly the one row from the pre-void edit; the post-void 404s added none.
+        assert len(corrections) == 1
+
+
+def test_void_makes_re_match_endpoints_fail_closed(client: TestClient, db_engine: Engine) -> None:
+    """Candidate-list and re-resolve on an item under a voided parent are 404.
+
+    Before the void the same calls reach the capability (candidate listing
+    returns 200 with the no-provider empty list; re-resolve rejects the unknown
+    reference as 422). After the void both return 404 — proving the boundary
+    precheck refuses the voided target before any resolution work runs.
+    """
+
+    user_id, auth = _register(client, "void-rematch@example.com")
+    event_id = _seed_event(db_engine, user_id, created_at=datetime(2026, 6, 20, 12, 0, tzinfo=UTC))
+    item_id = _seed_food_item(db_engine, user_id, event_id)
+    candidates_url = f"/api/users/{user_id}/derived-items/food/{item_id}/source-candidates"
+    re_resolve_url = f"/api/users/{user_id}/derived-items/food/{item_id}/re-resolve"
+
+    # Live behaviour before the void (non-voided behaviour unchanged).
+    assert client.post(candidates_url, headers={"Authorization": auth}, json={}).status_code == 200
+    assert (
+        client.post(
+            re_resolve_url, headers={"Authorization": auth}, json={"source_ref": "usda_fdc:NEW"}
+        ).status_code
+        == 422
+    )
+
+    client.delete(
+        f"/api/users/{user_id}/log-events/{event_id}", headers={"Authorization": auth}
+    ).raise_for_status()
+
+    candidates = client.post(candidates_url, headers={"Authorization": auth}, json={})
+    re_resolve = client.post(
+        re_resolve_url, headers={"Authorization": auth}, json={"source_ref": "usda_fdc:NEW"}
+    )
+    assert candidates.status_code == 404
+    assert re_resolve.status_code == 404
+
+
 def test_void_round_trips_on_postgres(pg_engine: Engine) -> None:
-    """Void → read-model exclusion + row retention exercise the production datastore."""
+    """Void → exclusion, retention, and the fail-closed guards on the production datastore."""
 
     upgrade(pg_engine, "head")
     factory = create_session_factory(pg_engine)
@@ -537,6 +680,7 @@ def test_void_round_trips_on_postgres(pg_engine: Engine) -> None:
             raw_text="postgres mislog",
             status=LogEventStatus.COMPLETED,
             created_at=datetime(2026, 6, 20, 12, 0, tzinfo=UTC),
+            idempotency_key="pg-void-replay-key",
         )
         session.add(event)
         session.flush()
@@ -606,3 +750,28 @@ def test_void_round_trips_on_postgres(pg_engine: Engine) -> None:
         assert retained_event is not None
         assert retained_event.voided_at is not None
         assert session.get(DerivedFoodItem, item_id) is not None
+
+    # The fail-closed guards hold on Postgres too: the keyed replay refuses the
+    # voided event (key stays consumed, no replacement row), and the correction
+    # edit precheck refuses the retained item under its voided parent.
+    with factory() as session:
+        loaded = session.get(User, user_id)
+        assert loaded is not None
+        with pytest.raises(log_event_service.LogEventNotFound):
+            log_event_service.create_event(
+                session,
+                user_id,
+                loaded,
+                "postgres mislog",
+                idempotency_key="pg-void-replay-key",
+            )
+        keyed_rows = list(
+            session.scalars(
+                select(LogEvent).where(LogEvent.idempotency_key == "pg-void-replay-key")
+            )
+        )
+        assert [row.id for row in keyed_rows] == [event_id]
+        with pytest.raises(corrections_service.DerivedItemNotFound):
+            corrections_service.edit_derived_item(
+                session, user_id, loaded, CandidateType.FOOD, item_id, "calories", 999.0
+            )

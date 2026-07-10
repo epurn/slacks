@@ -121,6 +121,11 @@ def create_event(
     - **Key supplied, an event already exists** → return that existing event at
       its current status, create no row, return ``(event, False)``. A divergent
       ``raw_text`` on the replay is ignored — the stored event is authoritative.
+    - **Key supplied, the stored event is voided** (FTY-321) → fail closed with
+      :class:`LogEventNotFound` (rendered ``404``): a replay is a read of the
+      stored event, so it obeys the same "excluded from every read" rule as
+      every other read path and never resurfaces a voided event as a live DTO.
+      The key stays consumed (first-write-wins) — no replacement row is created.
 
     The create path is race-safe: two concurrent same-key submits collide on the
     ``(user_id, idempotency_key)`` unique index; the loser catches the integrity
@@ -133,7 +138,7 @@ def create_event(
     if idempotency_key is not None:
         existing = _find_by_key(session, owner_id, idempotency_key)
         if existing is not None:
-            return existing, False
+            return _replay(existing)
 
     event = LogEvent(
         user_id=owner_id,
@@ -154,10 +159,25 @@ def create_event(
         existing = _find_by_key(session, owner_id, idempotency_key)
         if existing is None:
             raise
-        return existing, False
+        return _replay(existing)
 
     session.refresh(event)
     return event, True
+
+
+def _replay(existing: LogEvent) -> tuple[LogEvent, bool]:
+    """Return a stored event as a keyed replay, failing closed when voided.
+
+    The replay is a **read** of the stored event, so it follows the FTY-321
+    "excluded from every read" rule: a voided stored event raises
+    :class:`LogEventNotFound` (rendered ``404``) rather than resurfacing as a
+    live DTO. The ``(user_id, idempotency_key)`` row stays in place, so the key
+    remains consumed and no replacement row is ever created.
+    """
+
+    if existing.voided_at is not None:
+        raise LogEventNotFound("log event not found")
+    return existing, False
 
 
 def list_events_for_day(

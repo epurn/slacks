@@ -2386,7 +2386,7 @@
     },
     "/api/users/{user_id}/derived-items/food/{item_id}/re-resolve": {
       "post": {
-        "description": "Re-resolve the caller's own food item to a chosen candidate reference.\n\nRecomputes calories/macros from the chosen source at the item's current portion,\nrewrites its provenance to the new source, and re-snapshots the estimated\noriginals \u2014 the item is **not** marked edited. The response carries the new\nper-item ``source`` descriptor (FTY-092). Cross-user or unknown items fail closed\nas ``404``; a reference the server cannot re-derive, or a re-match the new source\ncannot cost, returns ``422`` with a clear error shape.",
+        "description": "Re-resolve the caller's own food item to a chosen candidate reference.\n\nRecomputes calories/macros from the chosen source at the item's current portion,\nrewrites its provenance to the new source, and re-snapshots the estimated\noriginals \u2014 the item is **not** marked edited. The response carries the new\nper-item ``source`` descriptor (FTY-092). Cross-user or unknown items \u2014 and items\nwhose parent log event is voided (FTY-321) \u2014 fail closed as ``404``; a reference\nthe server cannot re-derive, or a re-match the new source cannot cost, returns\n``422`` with a clear error shape.",
         "operationId": "re_resolve_item_api_users__user_id__derived_items_food__item_id__re_resolve_post",
         "parameters": [
           {
@@ -2466,7 +2466,7 @@
     },
     "/api/users/{user_id}/derived-items/food/{item_id}/source-candidates": {
       "post": {
-        "description": "List alternative source candidates for the caller's own food item.\n\nRuns the existing resolution providers in list-candidates mode over the item's\nidentity (or the sanitized ``query`` override) and returns a bounded list of\nenergy-bearing matches. Cross-user or unknown items fail closed as ``404``; a\ntransient or unusable candidate-source failure returns ``503`` (retryable) rather\nthan a misleading empty list.",
+        "description": "List alternative source candidates for the caller's own food item.\n\nRuns the existing resolution providers in list-candidates mode over the item's\nidentity (or the sanitized ``query`` override) and returns a bounded list of\nenergy-bearing matches. Cross-user or unknown items \u2014 and items whose parent\nlog event is voided (FTY-321) \u2014 fail closed as ``404``; a transient or unusable\ncandidate-source failure returns ``503`` (retryable) rather than a misleading\nempty list.",
         "operationId": "list_source_candidates_api_users__user_id__derived_items_food__item_id__source_candidates_post",
         "parameters": [
           {
@@ -2851,7 +2851,7 @@
         ]
       },
       "post": {
-        "description": "Create a ``pending`` log event and enqueue its estimation job.\n\nThe event is committed first; only then is the job published, so the worker\nnever races ahead of a persisted event. The payload carries ids only \u2014 never\nthe raw text.\n\nWith an ``idempotency_key`` the submit is safe to retry (FTY-096): a fresh\ncreate returns ``201`` and enqueues one job; an idempotent replay returns\n``200`` with the existing event at its current status and enqueues nothing.",
+        "description": "Create a ``pending`` log event and enqueue its estimation job.\n\nThe event is committed first; only then is the job published, so the worker\nnever races ahead of a persisted event. The payload carries ids only \u2014 never\nthe raw text.\n\nWith an ``idempotency_key`` the submit is safe to retry (FTY-096): a fresh\ncreate returns ``201`` and enqueues one job; an idempotent replay returns\n``200`` with the existing event at its current status and enqueues nothing.\nA keyed replay whose stored event has been **voided** (FTY-321) fails closed\nas ``404`` \u2014 the replay is a read, so it never returns a voided event as a\nlive DTO; the key stays consumed and no replacement row is created.",
         "operationId": "create_log_event_api_users__user_id__log_events_post",
         "parameters": [
           {
