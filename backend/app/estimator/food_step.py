@@ -548,6 +548,7 @@ class FoodResolveStep:
                 tier=FDC_SOURCE,
                 outcome="rejected_brand_mismatch",
                 source_ref=resolved.product.source_ref,
+                source_desc=resolved.product.description,
             )
             return None
         return self._build_item(
@@ -605,6 +606,7 @@ class FoodResolveStep:
                     candidate_index=candidate_index,
                     tier=product.source,
                     source_ref=product.source_ref,
+                    source_desc=product.description,
                     outcome="rejected_unresolvable_quantity",
                 )
                 add_evidence_record(
@@ -612,6 +614,7 @@ class FoodResolveStep:
                     tier=product.source,
                     outcome="rejected_unresolvable_quantity",
                     source_ref=product.source_ref,
+                    source_desc=product.description,
                 )
                 return None
             context.record_decision(

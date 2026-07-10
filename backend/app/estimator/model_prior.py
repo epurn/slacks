@@ -167,13 +167,13 @@ def _structured_portion_for_prompt(candidate: CandidateDraft) -> str:
 
 
 def _model_prior_evidence_block(evidence_labels: tuple[str, ...]) -> str:
-    """Append sanitized evidence status labels to the model-prior tool prompt."""
+    """Append sanitized evidence-view lines to the model-prior tool prompt."""
 
     if not evidence_labels:
         return "\nEvidence status: none recorded."
     lines = "\n".join(f"- {label}" for label in evidence_labels)
     return (
-        "\nEvidence gathered before this rough-estimate tool, as sanitized status labels "
-        "(no raw page, snippet, query, or diary text):\n"
+        "\nEvidence gathered before this rough-estimate tool, as bounded sanitized "
+        "source/status records (no raw page, snippet, query, or diary text):\n"
         f"{lines}"
     )

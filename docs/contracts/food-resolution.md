@@ -364,8 +364,8 @@ A failed or rejected read feeds the evidence view for re-interpretation:
   the next tool is chosen.
 - Search miss, fetch failure, snippet-only evidence, extraction
   `unresolved`/low-confidence, compatibility rejection, or implausible facts feed
-  back as sanitized evidence-status labels; they do not silently erase the user's
-  raw detail or force the remaining tiers to keep the stale item shape.
+  back as bounded sanitized evidence-view records; they do not silently erase the
+  user's raw detail or force the remaining tiers to keep the stale item shape.
 - A model-prior unavailable/unusable result is a feedback signal. It may lead to a
   revised hypothesis, an item-scoped clarification when allowed, or a fail-closed
   deterministic outcome; it is never persisted as trusted-looking nutrition.
@@ -1016,7 +1016,7 @@ When the search provider is **disabled** or **unavailable** (no key), when a tie
 fetch is off (**official**: empty allowlist; **reference**:
 `FATTY_REFERENCE_FETCH_ENABLED=false`), or when **nothing confident is found** on
 either tier, the candidate falls through to a **model-prior** `NamedFoodEstimate`
-from sanitized identity, bounded amount/unit fields, and evidence-status labels —
+from sanitized identity, bounded amount/unit fields, and evidence-view records —
 never raw diary text, search queries, pages, or snippets. It is recorded with
 `source_type = model_prior`, `source_ref = model_prior`, and an
 explicit `assumptions` reason naming each tier's outcome

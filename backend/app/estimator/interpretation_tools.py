@@ -18,18 +18,27 @@ from app.schemas.parse import ParsedCandidate
 INTERPRETATION_TIER = "interpretation_session"
 
 
-def add_evidence_record(
+def add_evidence_record(  # noqa: PLR0913 - mirrors the bounded evidence-view field set.
     context: EstimationContext,
     *,
     tier: str,
     outcome: object,
     source_ref: object | None = None,
+    decision: object | None = None,
+    query_variant: object | None = None,
+    search_status: object | None = None,
+    result_count: object | None = None,
+    source_desc: object | None = None,
+    surface: object | None = None,
 ) -> None:
     """Append a bounded, sanitized evidence record to the session ledger.
 
     The ``EvidenceRecord`` renders through the decision-trace sanitizers at the
-    provider-egress seam, so callers may pass the same fixed labels/source refs
-    they already send to ``record_decision``.  Raw page/snippet/query/user text
+    provider-egress seam, so callers may pass the same bounded labels/source refs
+    they already send to ``record_decision``.  ``source_desc`` is for a bounded
+    source-stated identity descriptor (for example, a global database description
+    or schema-extracted product name) when the session needs the evidence surface
+    that a compatibility/serving decision saw. Raw page/snippet/query/user text
     must still never be passed here.
     """
 
@@ -41,6 +50,12 @@ def add_evidence_record(
             tier=str(tier),
             outcome=str(outcome),
             source_ref=None if source_ref is None else str(source_ref),
+            decision=None if decision is None else str(decision),
+            query_variant=_coerce_evidence_count(query_variant),
+            search_status=None if search_status is None else str(search_status),
+            result_count=_coerce_evidence_count(result_count),
+            source_desc=None if source_desc is None else str(source_desc),
+            surface=None if surface is None else str(surface),
         )
     )
 
@@ -210,3 +225,14 @@ def _step_signal_reason(exc: StepError | StepFailed) -> str:
     if isinstance(exc, StepFailed):
         return exc.reason
     return exc.message
+
+
+def _coerce_evidence_count(value: object | None) -> int | None:
+    if value is None:
+        return None
+    if not isinstance(value, int | str):
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None

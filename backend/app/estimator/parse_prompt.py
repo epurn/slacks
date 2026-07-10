@@ -163,17 +163,18 @@ keep any item that is already correct.
 """
 
 #: Appended to the re-interpretation block when the session has accumulated
-#: evidence (FTY-326 seam). Only sanitized status labels are rendered — never
-#: fetched page content, snippets, search queries, or provider output.
+#: evidence (FTY-326 seam). Only bounded, sanitized evidence-view fields are
+#: rendered — never fetched page content, raw snippets, raw search queries, or
+#: provider output blobs.
 _REINTERPRETATION_EVIDENCE_TEMPLATE = """
 Evidence gathered so far while resolving the current interpretation, as \
-sanitized status labels (no page content):
+bounded sanitized source/status records (no page content):
 
 <evidence_status>
 {evidence}
 </evidence_status>
 
-Where a status label contradicts the current interpretation, revise the \
+Where an evidence record contradicts the current interpretation, revise the \
 affected item rather than repeating it unchanged.
 """
 
@@ -211,12 +212,12 @@ def build_reinterpretation_prompt(
     clarifications — the raw text stays available to the model for every
     interpretation call in the session, per ``parse-candidates.md`` FTY-324) is
     extended with the re-read instruction, the session's current working
-    hypothesis, and optionally the sanitized evidence status labels (FTY-326
+    hypothesis, and optionally the sanitized evidence view (FTY-326
     seam). ``hypothesis_items`` is required — the FTY-324 decision-point shape
     passes the current hypothesis to every model-consultable re-ask, so the
-    model sees the item set and fields it is revising. ``evidence_labels`` must
-    already be sanitized labels — the session builds them from its bounded
-    evidence ledger, never from raw fetched content.
+    model sees the item set and fields it is revising. ``evidence_labels`` are
+    rendered lines from the bounded evidence ledger — never raw fetched content,
+    raw snippets, or raw search queries.
     """
 
     prompt = build_parse_prompt(raw_text, answered) + _REINTERPRETATION_TEMPLATE

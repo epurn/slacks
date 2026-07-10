@@ -271,7 +271,13 @@ def test_evidence_dead_end_requeries_revised_identity_before_model_prior(
     assert search.queries.index("dill pickle hummus Presidents Choice") > search.queries.index(
         "dill pickle hummus store brand"
     )
-    assert len([prompt for prompt in parse_provider.prompts if "<evidence_status>" in prompt]) == 1
+    requery_prompts = [prompt for prompt in parse_provider.prompts if "<evidence_status>" in prompt]
+    assert len(requery_prompts) == 1
+    assert "official_source: rejected_brand_mismatch" in requery_prompts[0]
+    assert "source_desc=" in requery_prompts[0]
+    assert "product=Presidents Choice Dill Pickle Hummus" in requery_prompts[0]
+    assert "basis=" in requery_prompts[0]
+    assert "serving_g=30" in requery_prompts[0]
 
     persisted = json.dumps(
         {

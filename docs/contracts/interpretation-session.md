@@ -148,12 +148,12 @@ model prior whenever an applicable provider is configured and available. FTY-324
 changes **who may reinterpret** between tiers, not the privacy or safety posture.
 A non-success lookup status, rejected compatibility check, fetch/extraction
 failure, unusable serving basis, or snippet-only success feeds back into
-interpretation as a sanitized status label. It does not authorize raw text egress,
-provenance-free averaging, source-order bypass, or model-prior finalization while
-an applicable source remains usable. Deterministic code still owns every lookup
-status, egress/fetch gate, fact-schema validation, serving math, budget cap, and
-persisted provenance field; the model may only interpret which bounded tool result
-describes the user's item.
+interpretation as a bounded sanitized evidence-view record. It does not authorize
+raw text egress, provenance-free averaging, source-order bypass, or model-prior
+finalization while an applicable source remains usable. Deterministic code still
+owns every lookup status, egress/fetch gate, fact-schema validation, serving math,
+budget cap, and persisted provenance field; the model may only interpret which
+bounded tool result describes the user's item.
 
 The concrete per-tier tool table, the food re-interpretation trigger points, and
 the deterministic tool-budget/fail-closed gates for food resolution live in
@@ -251,7 +251,7 @@ The privacy boundary is exact and must not be weakened by the interpretation loo
   identity only; fetch requests are selected URLs only; traces, assumptions,
   source refs, errors, and logs carry only bounded sanitized labels, source ids,
   and safe source refs. Source misses/rejections feed re-interpretation as
-  content-free status labels, never as raw text.
+  bounded evidence-view records, never as raw text.
 - **No provenance dishonesty.** Rough estimates carry rough/model/default/reference
   provenance and stay editable; source-backed values keep their source provenance.
   The loop never presents a rough estimate as a trusted value and never averages

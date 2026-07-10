@@ -5,8 +5,9 @@ Network-free, scripted-provider tests for
 the run's raw text and revisable item hypothesis, structural sample
 disagreement (item count/identity/brand) triggers a bounded re-interpretation
 instead of a majority-vote collapse, revisions are traced under sanitized
-labels only, and the audited two-item-branded collapse case no longer freezes
-a degenerate single generic candidate.
+labels, evidence-driven re-asks see bounded evidence-surface records, and the
+audited two-item-branded collapse case no longer freezes a degenerate single
+generic candidate.
 
 The FakeProvider scripts one reply per provider call: N self-consistency
 samples (2 when the first window is unanimous, 3 when contested) plus — when
@@ -342,10 +343,10 @@ def test_budget_of_zero_freezes_nothing_silently() -> None:
     assert session.hypothesis.revision == 0
 
 
-def test_evidence_driven_reinterpret_seam_feeds_sanitized_labels_only() -> None:
+def test_evidence_driven_reinterpret_seam_feeds_bounded_evidence_surface() -> None:
     # The FTY-326 seam: later steps append sanitized evidence records and
     # re-open interpretation. The re-ask prompt carries the raw text plus the
-    # evidence status labels — never fetched content.
+    # bounded evidence surface — never fetched content.
     unanimous = _parsed(
         [{"type": "food", "name": "dill pickle hummus", "quantity_text": "2 tbsp", "amount": 2}]
     )
@@ -366,7 +367,12 @@ def test_evidence_driven_reinterpret_seam_feeds_sanitized_labels_only() -> None:
 
     session.interpret_initial(context)
     session.add_evidence(
-        EvidenceRecord(tier="usda_fdc", outcome="rejected_brand_mismatch", source_ref="usda_fdc:1")
+        EvidenceRecord(
+            tier="usda_fdc",
+            outcome="rejected_brand_mismatch",
+            source_ref="usda_fdc:1",
+            source_desc="DENNY'S, chicken strips sk-live12345678",
+        )
     )
     result = session.reinterpret(context)
 
@@ -375,6 +381,8 @@ def test_evidence_driven_reinterpret_seam_feeds_sanitized_labels_only() -> None:
     reask_prompt = provider.prompts[-1]
     assert "<evidence_status>" in reask_prompt
     assert "usda_fdc: rejected_brand_mismatch (usda_fdc:1)" in reask_prompt
+    assert 'source_desc="DENNY' in reask_prompt
+    assert "sk-live" not in reask_prompt
     assert _RAW_SENTINEL in reask_prompt
     # The evidence-driven re-ask also sees the current hypothesis it is
     # revising (FTY-324 decision-point shape): the brandless item as held.
@@ -387,12 +395,11 @@ def test_evidence_driven_reinterpret_seam_feeds_sanitized_labels_only() -> None:
     assert session.hypothesis.items[0].hypothesis_item_id == 1
 
 
-def test_evidence_labels_are_sanitized_before_provider_egress() -> None:
+def test_evidence_records_are_sanitized_before_provider_egress() -> None:
     # FTY-325 security requirement: provider calls may include raw diary text
     # but nothing else raw. Evidence-ledger fields pass through the
-    # decision-trace sanitizers at the prompt seam, so a URL-bearing source_ref
-    # sheds its query string, fragment, and secret-looking material before the
-    # model sees it.
+    # decision-trace sanitizers at the prompt seam, so URL-bearing refs and
+    # source descriptors shed secret-looking material before the model sees them.
     unanimous = _parsed(
         [{"type": "food", "name": "dill pickle hummus", "quantity_text": "2 tbsp", "amount": 2}]
     )
@@ -420,6 +427,7 @@ def test_evidence_labels_are_sanitized_before_provider_egress() -> None:
                 "official_source:https://brand.example.com/nutrition"
                 "?api_key=sk-live1234567890abcdef#frag"
             ),
+            source_desc="PC hummus token=TOPSECRET42",
         )
     )
     session.reinterpret(context)
@@ -431,6 +439,7 @@ def test_evidence_labels_are_sanitized_before_provider_egress() -> None:
     ) in reask_prompt
     assert "api_key" not in reask_prompt
     assert "sk-live" not in reask_prompt
+    assert "TOPSECRET42" not in reask_prompt
     assert "#frag" not in reask_prompt
 
 

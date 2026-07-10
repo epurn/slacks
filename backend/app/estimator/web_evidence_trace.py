@@ -78,6 +78,7 @@ def decision_recorder(
     """A per-query-variant sanitized decision hook bound to the run trace."""
 
     def _note(*, decision: str = "source", **fields: object) -> None:
+        evidence_desc = fields.pop("evidence_desc", None)
         context.record_decision(
             step_name,
             decision,
@@ -91,6 +92,12 @@ def decision_recorder(
             tier=tier,
             outcome=fields.get("outcome") or fields.get("search_status") or decision,
             source_ref=fields.get("source_ref"),
+            decision=decision,
+            query_variant=query_variant,
+            search_status=fields.get("search_status"),
+            result_count=fields.get("result_count"),
+            source_desc=evidence_desc or fields.get("source_desc"),
+            surface=fields.get("surface"),
         )
 
     return _note
@@ -112,6 +119,7 @@ def acceptance_gate(
                 decision="extract",
                 source_ref=found.source_ref,
                 outcome="rejected_incompatible_serving",
+                evidence_desc=_evidence_surface(found),
             )
             return False
         if not is_evidence_brand_compatible(
@@ -121,6 +129,7 @@ def acceptance_gate(
                 decision="extract",
                 source_ref=found.source_ref,
                 outcome="rejected_brand_mismatch",
+                evidence_desc=_evidence_surface(found),
             )
             return False
         return True
@@ -166,3 +175,17 @@ def _fetch_error_outcome(exc: Exception) -> str:
     if isinstance(exc, FetchTransientError):
         return "fetch_transient_error"
     return "fetch_response_error"
+
+
+def _evidence_surface(found: SearchedReferenceFacts) -> str | None:
+    """Bounded source-stated facts the session can use for compatibility repair."""
+
+    details: list[str] = []
+    if found.product_name:
+        details.append(f"product={found.product_name}")
+    details.append(f"basis={found.basis}")
+    if found.count_serving is not None:
+        details.append(f"count={found.count_serving.amount:g} {found.count_serving.unit}")
+    if found.serving_g is not None:
+        details.append(f"serving_g={found.serving_g:g}")
+    return "; ".join(details) if details else None

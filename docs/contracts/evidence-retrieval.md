@@ -56,16 +56,16 @@ Adapter — FTY-079 / FTY-164**.
 
 ## Version
 
-9 (FTY-326): food-resolution evidence tiers now write sanitized hit/miss/rejection
-status labels into the run-local `InterpretationSession` evidence ledger. After
-an official/reference evidence dead end, the resolver may spend the session's
-single bounded re-interpretation pass and re-query once with a revised identity
-before falling to `model_prior`. The `model_prior` tool receives only sanitized
-identity, bounded structured portion fields, and evidence-status labels; its
-terminal trace adds detail outcomes (`provider_error`, `low_confidence`,
-`non_resolved_disposition`, `unusable_facts`). Source hierarchy, lookup statuses,
-search/fetch egress, fact schema, provenance fields, and retention rules are
-unchanged.
+9 (FTY-326): food-resolution evidence tiers now write bounded sanitized evidence-view records into the run-local `InterpretationSession` ledger. Records may include trace-safe source refs,
+surfaces, and source-stated descriptors needed for interpretation, but never raw
+pages, snippets, queries, diary text, or provider output blobs. After an
+official/reference evidence dead end, the resolver may spend the session's one
+bounded re-interpretation pass and re-query once before falling to `model_prior`.
+The `model_prior` tool receives only sanitized identity, bounded structured
+portion fields, and evidence-view records; its terminal trace adds
+`provider_error`, `low_confidence`, `non_resolved_disposition`, or
+`unusable_facts`. Source hierarchy, statuses, egress, schema, provenance, and
+retention rules are unchanged.
 
 8 (FTY-348, contract only): relocates the global FTY-324 interpretation-loop framing
 to [interpretation-session.md](interpretation-session.md); page-local rules unchanged.
@@ -236,15 +236,14 @@ ordered by the hierarchy above, but they are bounded tools the
 rather than a blind one-way fall-through; the session/tool contract and its
 raw-text-egress limits are defined in
 [interpretation-session.md](interpretation-session.md). This page still owns the
-source hierarchy, lookup statuses, egress/fetch gates, fact-schema validation,
-serving math, budget caps, and persisted provenance. FTY-326 implements the
-food-resolution side of that framing: tier hits, misses, fetch/extraction
-failures, compatibility rejections, and snippet-surface outcomes are recorded as
-sanitized evidence-status labels; after an evidence dead end the resolver may
-re-open interpretation once and re-query with a revised identity. The ledger
-never carries raw diary text, raw search queries, raw pages, raw snippets, or
-provider output, and it never changes the source hierarchy or deterministic
-authority over math/provenance.
+source hierarchy, statuses, egress/fetch gates, fact-schema validation, serving
+math, budget caps, and persisted provenance. FTY-326 records tier hits, misses,
+fetch/extraction failures, compatibility rejections, and snippet-surface outcomes as
+bounded sanitized evidence-view records; after an evidence dead end the resolver may
+re-open interpretation once and re-query with a revised identity.
+The ledger never carries raw diary text, raw search queries, raw pages, raw
+snippets, or provider output blobs, and it never changes the source hierarchy or
+math/provenance authority.
 
 **User-stated facts and the fallback rule (FTY-279).** A nutrition fact the user
 stated in the entry text (`user_text`) is the **highest-preference** source for
