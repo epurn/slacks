@@ -44,7 +44,7 @@ from app.estimator.exact_evidence import (
 from app.estimator.food_resolvers import _ResolvedProduct
 from app.estimator.food_serving import NutritionFacts
 from app.estimator.identity_sanitizer import sanitized_identity
-from app.estimator.off import normalize_barcode
+from app.estimator.off import OffMissReason, normalize_barcode
 from app.models.derived import DerivedFoodItem
 
 #: Closed, content-free ``failure_reason`` labels a barcode fallback / no-proposal
@@ -55,9 +55,11 @@ from app.models.derived import DerivedFoodItem
 #:
 #: - ``barcode_invalid`` — the string is not a plausible GTIN after normalization
 #:   (untrusted user input, not a source failure);
-#: - ``barcode_no_match`` — OFF (cache or live, by barcode only) returned no usable
-#:   product, including one whose facts the existing plausibility gate rejected;
-#: - ``barcode_source_unavailable`` — OFF is disabled/unavailable by self-host config.
+#: - ``barcode_no_match`` — OFF (cache or live, by barcode only) has no product for the
+#:   barcode (a genuine miss);
+#: - ``no_usable_facts`` — OFF returned a product, but its facts are unusable/implausible
+#:   (no energy on a usable basis, or the existing plausibility gate rejected them);
+#: - ``source_unavailable`` — OFF is disabled/unavailable by self-host config.
 #:
 #: A *transient/terminal* OFF **error** (timeout/5xx/4xx/policy) is **not** a
 #: ``failure_reason`` here: it propagates from the resolver so the route surfaces a
@@ -65,7 +67,14 @@ from app.models.derived import DerivedFoodItem
 #: (``docs/contracts/food-resolution.md`` — Exact Evidence Upgrade Routing, Errors).
 FAILURE_INVALID: Final = "barcode_invalid"
 FAILURE_NO_MATCH: Final = "barcode_no_match"
-FAILURE_SOURCE_UNAVAILABLE: Final = "barcode_source_unavailable"
+FAILURE_NO_USABLE_FACTS: Final = "no_usable_facts"
+FAILURE_SOURCE_UNAVAILABLE: Final = "source_unavailable"
+
+#: Map an OFF miss reason to its closed FTY-308 ``failure_reason`` label.
+_MISS_REASON_FAILURE: Final[dict[OffMissReason, str]] = {
+    OffMissReason.NO_MATCH: FAILURE_NO_MATCH,
+    OffMissReason.NO_USABLE_FACTS: FAILURE_NO_USABLE_FACTS,
+}
 
 
 @dataclass(frozen=True)
@@ -102,10 +111,15 @@ class BarcodeExactSource(Protocol):
         """Whether the underlying OFF source is enabled and may be queried."""
         ...
 
-    def resolve_product(self, barcode: str) -> _ResolvedProduct | None:
-        """Return the cached/fetched product for ``barcode``, or ``None`` on a miss.
+    def resolve_product_outcome(
+        self, barcode: str
+    ) -> tuple[_ResolvedProduct | None, OffMissReason | None]:
+        """Return ``(product, None)`` for a match, or ``(None, reason)`` for a miss.
 
-        Raises :class:`~app.estimator.off.OffTransientError` /
+        The miss ``reason`` distinguishes a genuine miss
+        (:attr:`~app.estimator.off.OffMissReason.NO_MATCH`) from a found-but-unusable
+        product (:attr:`~app.estimator.off.OffMissReason.NO_USABLE_FACTS`). Raises
+        :class:`~app.estimator.off.OffTransientError` /
         :class:`~app.estimator.off.OffResponseError` on a source failure.
         """
         ...
@@ -189,22 +203,25 @@ class BarcodeProposalGenerator:
         """Try the cache-first OFF match; ``(product, "")`` or ``(None, reason)``.
 
         An invalid GTIN (``barcode_invalid``), a disabled source
-        (``barcode_source_unavailable``), or an empty/rejected result
-        (``barcode_no_match``) all yield no product plus a content-free reason, so the
-        caller falls through to the fallback rather than dead-ending. OFF facts the
-        existing plausibility gate rejects surface as a miss (the resolver returns
-        ``None``), preserving that gate. A transient/terminal OFF **error** is **not**
-        caught here: it propagates from :meth:`BarcodeExactSource.resolve_product` so
-        the route renders a retryable ``503`` rather than a disguised miss/fallback.
+        (``source_unavailable``), a genuine miss (``barcode_no_match``), or a
+        found-but-unusable product (``no_usable_facts``) all yield no product plus a
+        content-free reason, so the caller falls through to the fallback rather than
+        dead-ending. OFF facts the existing plausibility gate rejects surface as
+        ``no_usable_facts`` (the resolver reports the miss reason), preserving that gate.
+        A transient/terminal OFF **error** is **not** caught here: it propagates from
+        :meth:`BarcodeExactSource.resolve_product_outcome` so the route renders a
+        retryable ``503`` rather than a disguised miss/fallback.
         """
 
         if normalize_barcode(barcode) is None:
             return None, FAILURE_INVALID
         if not self.exact_source.enabled:
             return None, FAILURE_SOURCE_UNAVAILABLE
-        resolved = self.exact_source.resolve_product(barcode)
+        resolved, miss_reason = self.exact_source.resolve_product_outcome(barcode)
         if resolved is None:
-            return None, FAILURE_NO_MATCH
+            return None, _MISS_REASON_FAILURE.get(
+                miss_reason or OffMissReason.NO_MATCH, FAILURE_NO_MATCH
+            )
         return resolved, ""
 
     def _resolve_fallback(self, item: DerivedFoodItem) -> FallbackFacts | None:

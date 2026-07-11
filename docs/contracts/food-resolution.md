@@ -46,13 +46,14 @@ confident match yields an `exact` `product_database` proposal (built through the
 FTY-307 signed-`proposal_ref` foundation), a miss/disabled-source/plausibility-rejected
 result yields a clearly-labelled `fallback` from the item's identity through the
 existing reference-source → model-prior tiers when they can resolve, else a `none`
-no-proposal read. The barcode `failure_reason` vocabulary is fixed here:
-`barcode_invalid` (non-GTIN input), `barcode_no_match` (OFF returned no usable/plausible
-product), `barcode_source_unavailable` (OFF disabled by config). A transient/terminal OFF
-**error** surfaces a retryable `503`, never a disguised miss. The route evaluates
-exact-upgrade eligibility server-side (`not_upgradeable` `422` for an already
-source-backed item) and never mutates the item — apply (FTY-307) does. No schema,
-migration, or estimator change.
+no-proposal read. The barcode `failure_reason` vocabulary is fixed here: `barcode_invalid`
+(non-GTIN input), `barcode_no_match` (OFF has no product for the barcode), `no_usable_facts`
+(OFF returned a product but its facts are unusable/plausibility-rejected), and
+`source_unavailable` (OFF disabled by config). A transient/terminal OFF **error** surfaces a
+retryable `503`, never a disguised miss. The route evaluates exact-upgrade eligibility
+server-side (`not_upgradeable` `422` for an already source-backed item **or an owned exercise
+item**) and never mutates the item — apply (FTY-307) does. No schema, migration, or estimator
+change.
 
 19 (FTY-326): implements evidence tiers as session tools: sanitized tier outcomes
 feed the ledger, official/reference dead ends get one bounded re-query before

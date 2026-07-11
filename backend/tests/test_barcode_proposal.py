@@ -23,19 +23,21 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 
 import pytest
+from fastapi import Depends
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from app.db import create_session_factory
+from app.db import create_session_factory, get_session
 from app.enums import ExactEvidenceKind, ExactEvidenceQuality, SourceType
 from app.estimator.barcode_proposal import (
     FAILURE_INVALID,
     FAILURE_NO_MATCH,
+    FAILURE_NO_USABLE_FACTS,
     FAILURE_SOURCE_UNAVAILABLE,
     BarcodeProposalGenerator,
     FallbackFacts,
@@ -45,7 +47,13 @@ from app.estimator.fdc import ProductFacts
 from app.estimator.food_resolvers import BarcodeResolver, _ResolvedProduct
 from app.estimator.food_serving import NutritionFacts
 from app.estimator.identity_fallback import IdentityFallbackResolver
-from app.estimator.off import OFF_SOURCE, OffClient, OffResponseError, OffSettings
+from app.estimator.off import (
+    OFF_SOURCE,
+    OffClient,
+    OffMissReason,
+    OffResponseError,
+    OffSettings,
+)
 from app.estimator.reference_fetch import ReferenceFetchSettings
 from app.estimator.search import (
     OFFICIAL_SOURCE_TYPE,
@@ -55,7 +63,7 @@ from app.estimator.search import (
     SearchStatus,
 )
 from app.llm.providers.fake import FakeProvider
-from app.models.derived import DerivedFoodItem
+from app.models.derived import DerivedExerciseItem, DerivedFoodItem
 from app.models.food_sources import EvidenceSource, Product
 from app.models.identity import User
 from app.models.log_events import LogEvent
@@ -112,21 +120,27 @@ class FakeExactSource:
         enabled: bool = True,
         product: _ResolvedProduct | None = None,
         error: Exception | None = None,
+        miss_reason: OffMissReason = OffMissReason.NO_MATCH,
     ) -> None:
         self._enabled = enabled
         self._product = product
         self._error = error
+        self._miss_reason = miss_reason
         self.barcodes: list[str] = []
 
     @property
     def enabled(self) -> bool:
         return self._enabled
 
-    def resolve_product(self, barcode: str) -> _ResolvedProduct | None:
+    def resolve_product_outcome(
+        self, barcode: str
+    ) -> tuple[_ResolvedProduct | None, OffMissReason | None]:
         self.barcodes.append(barcode)
         if self._error is not None:
             raise self._error
-        return self._product
+        if self._product is not None:
+            return self._product, None
+        return None, self._miss_reason
 
 
 class FakeFallback:
@@ -241,7 +255,23 @@ def test_disabled_source_falls_back_with_source_unavailable_reason() -> None:
     outcome = _generator(exact, fallback).generate(owner_id=owner_id, item=item, barcode=BARCODE)
 
     assert exact.barcodes == []  # a disabled source is never queried
-    assert outcome.failure_reason == FAILURE_SOURCE_UNAVAILABLE
+    assert outcome.failure_reason == FAILURE_SOURCE_UNAVAILABLE == "source_unavailable"
+    assert outcome.proposal is not None
+    assert outcome.proposal.quality is ExactEvidenceQuality.FALLBACK
+
+
+def test_unusable_facts_falls_back_with_no_usable_facts_reason() -> None:
+    owner_id = uuid.uuid4()
+    item = _transient_item(owner_id)
+    # OFF returned a product, but its facts were unusable/plausibility-rejected — a
+    # distinct reason from a genuine miss.
+    exact = FakeExactSource(product=None, miss_reason=OffMissReason.NO_USABLE_FACTS)
+    fallback = FakeFallback(_reference_fallback())
+
+    outcome = _generator(exact, fallback).generate(owner_id=owner_id, item=item, barcode=BARCODE)
+
+    assert exact.barcodes == [BARCODE]  # the source was queried
+    assert outcome.failure_reason == FAILURE_NO_USABLE_FACTS == "no_usable_facts"
     assert outcome.proposal is not None
     assert outcome.proposal.quality is ExactEvidenceQuality.FALLBACK
 
@@ -328,6 +358,10 @@ class CountingOffSource:
     def lookup(self, barcode: str) -> Any:
         self.lookups.append(barcode)
         return self._facts
+
+    def lookup_outcome(self, barcode: str) -> tuple[Any, OffMissReason | None]:
+        facts = self.lookup(barcode)
+        return facts, (None if facts is not None else OffMissReason.NO_MATCH)
 
 
 def _seed_off_product(session: Session, barcode: str = BARCODE) -> None:
@@ -473,6 +507,48 @@ def test_exact_proposal_route_costs_current_amount_and_never_mutates(
     item = session.get(DerivedFoodItem, item_id)
     assert item is not None
     assert item.calories == 300.0
+
+
+def test_repeat_barcode_proposal_serves_committed_cache_no_second_off_call(
+    client: TestClient, db_engine: Engine
+) -> None:
+    user_id, auth = register(client, "bc-repeat@example.com")
+    item_id = _seed_resolved_item(db_engine, user_id, amount=20.0, unit="g")
+    facts = ProductFacts(
+        source=OFF_SOURCE,
+        source_ref=f"{OFF_SOURCE}:{BARCODE}",
+        query_key=BARCODE,
+        description="Fetched spread",
+        facts=NutritionFacts(calories=539.0, protein_g=6.3, carbs_g=57.5, fat_g=30.9),
+        default_serving_g=15.0,
+        content_hash="fetched-hash",
+        barcode=BARCODE,
+    )
+    off = CountingOffSource(facts=facts)
+
+    # Wire the real cache-first resolver over a counting OFF source, rebuilt per request
+    # against that request's session — exactly the production shape.
+    def _override(
+        session: Annotated[Session, Depends(get_session)],
+    ) -> BarcodeProposalGenerator:
+        return BarcodeProposalGenerator(
+            exact_source=BarcodeResolver(session=session, source=off),
+            fallback_source=FakeFallback(),
+        )
+
+    client.app.dependency_overrides[  # type: ignore[attr-defined]
+        exact_evidence.get_barcode_proposal_generator
+    ] = _override
+
+    headers = {"Authorization": auth}
+    first = client.post(_propose_url(user_id, item_id), json={"barcode": BARCODE}, headers=headers)
+    second = client.post(_propose_url(user_id, item_id), json={"barcode": BARCODE}, headers=headers)
+
+    assert first.status_code == 200 and first.json()["quality"] == "exact"
+    assert second.status_code == 200 and second.json()["quality"] == "exact"
+    # The first request committed the fetched product; the repeat serves it from the
+    # products cache and makes no second external OFF call.
+    assert off.lookups == [BARCODE]
 
 
 def test_uncostable_amount_requires_amount_without_guessing(
@@ -637,7 +713,7 @@ def test_cross_user_item_is_not_found(client: TestClient, db_engine: Engine) -> 
     assert resp.status_code == 404
 
 
-def test_unknown_and_exercise_items_are_not_found(client: TestClient, db_engine: Engine) -> None:
+def test_unknown_item_is_not_found(client: TestClient, db_engine: Engine) -> None:
     user_id, auth = register(client, "bc-unknown@example.com")
     _install(client, _generator(FakeExactSource(product=_off_product()), FakeFallback()))
 
@@ -646,15 +722,46 @@ def test_unknown_and_exercise_items_are_not_found(client: TestClient, db_engine:
         json={"barcode": BARCODE},
         headers={"Authorization": auth},
     )
+
+    assert unknown.status_code == 404  # unknown id is indistinguishable from missing
+
+
+def test_owned_exercise_item_is_not_upgradeable(
+    client: TestClient, db_engine: Engine, session: Session
+) -> None:
+    user_id, auth = register(client, "bc-exercise@example.com")
     exercise_id = seed_exercise_item(db_engine, user_id)
-    exercise = client.post(
+    _install(client, _generator(FakeExactSource(product=_off_product()), FakeFallback()))
+
+    resp = client.post(
         _propose_url(user_id, exercise_id),
         json={"barcode": BARCODE},
         headers={"Authorization": auth},
     )
 
-    assert unknown.status_code == 404
-    assert exercise.status_code == 404  # food-only route
+    # An owned exercise item is a real but ineligible target: 422, not a masked 404.
+    assert resp.status_code == 422
+    assert resp.json() == {"detail": {"error": "not_upgradeable"}}
+    # No mutation: the exercise burn is untouched.
+    item = session.get(DerivedExerciseItem, exercise_id)
+    assert item is not None
+    assert item.active_calories == 120.0
+
+
+def test_cross_user_exercise_item_is_not_found(client: TestClient, db_engine: Engine) -> None:
+    owner_id, _owner_auth = register(client, "bc-ex-owner@example.com")
+    _other_id, other_auth = register(client, "bc-ex-other@example.com")
+    exercise_id = seed_exercise_item(db_engine, owner_id)
+    _install(client, _generator(FakeExactSource(product=_off_product()), FakeFallback()))
+
+    # A *cross-user* exercise id stays a fail-closed 404 — no not_upgradeable oracle.
+    resp = client.post(
+        _propose_url(owner_id, exercise_id),
+        json={"barcode": BARCODE},
+        headers={"Authorization": other_auth},
+    )
+
+    assert resp.status_code == 404
 
 
 def test_voided_parent_item_is_not_found(

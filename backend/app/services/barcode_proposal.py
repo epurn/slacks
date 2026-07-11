@@ -34,8 +34,9 @@ from app.estimator.re_match import ItemForbidden, ItemNotFound
 from app.estimator.reference_fetch import load_reference_fetch_settings
 from app.estimator.search import build_search_provider
 from app.llm import build_provider, load_llm_settings
-from app.models.derived import DerivedFoodItem
+from app.models.derived import DerivedExerciseItem, DerivedFoodItem
 from app.models.identity import User
+from app.models.log_events import LogEvent
 from app.schemas.exact_evidence import ExactEvidenceProposalDTO
 from app.services.exact_evidence import (
     NotUpgradeable,
@@ -58,12 +59,13 @@ def propose_barcode_evidence(
     """Build the barcode proposal DTO for ``owner_id``'s food ``item_id`` + ``barcode``.
 
     Loads the item scoped to its owner (:class:`ItemForbidden` for a non-owner caller,
-    :class:`ItemNotFound` for an unknown / non-food item — both rendered ``404`` by the
-    route), refuses an already-source-backed item
-    (:class:`~app.services.exact_evidence.NotUpgradeable` → ``422 not_upgradeable``),
+    :class:`ItemNotFound` for an unknown / cross-user item — both rendered ``404`` by the
+    route), refuses an ineligible item — already source-backed **or** an owned exercise
+    item (:class:`~app.services.exact_evidence.NotUpgradeable` → ``422 not_upgradeable``),
     then runs the generator, signs any produced proposal, and returns the read DTO; a
     no-proposal outcome returns a ``quality = none`` DTO with a content-free
-    ``failure_reason`` and no signed reference. Never mutates the item.
+    ``failure_reason`` and no signed reference. Never mutates the item; it only commits
+    any global ``products`` cache row the resolver fetched, so a repeat barcode is free.
     """
 
     if owner_id != current_user.id:
@@ -74,6 +76,11 @@ def propose_barcode_evidence(
 
     generator = generator or build_barcode_proposal_generator(session)
     outcome = generator.generate(owner_id=owner_id, item=item, barcode=barcode)
+    # Persist any OFF product the resolver fetched-and-cached this request (a flush-only
+    # global cache row, no user data). The route otherwise never commits, so without
+    # this the fetched `products` row is rolled back at request end and a repeat barcode
+    # would call OFF again instead of serving from cache. The item itself is untouched.
+    session.commit()
     if outcome.proposal is None:
         return _no_proposal_dto(outcome.failure_reason)
 
@@ -86,10 +93,17 @@ def propose_barcode_evidence(
 def _load_owned_food_item(
     session: Session, item_id: uuid.UUID, owner_id: uuid.UUID
 ) -> DerivedFoodItem:
-    """Load a food item by id scoped to ``owner_id`` so a cross-user id is not found.
+    """Load a food item by id scoped to ``owner_id``, classifying an owned exercise id.
 
-    The query is constrained to the owner, so another user's item — or an exercise /
-    unknown id — is indistinguishable from a missing one (no existence oracle).
+    The query is constrained to the owner, so another user's item — or an unknown id —
+    is indistinguishable from a missing one (:class:`ItemNotFound` → ``404``, no
+    existence oracle). An **owned** exercise item, however, is a real but ineligible
+    target (an exercise burn has no evidence to upgrade), so it is refused with
+    :class:`NotUpgradeable` → ``422 not_upgradeable`` rather than masqueraded as unknown
+    — matching the FTY-308 eligibility contract. A cross-user exercise id stays a
+    ``404`` (owner-scoped), and an owned exercise item whose parent log event is
+    soft-voided stays a ``404`` (no void oracle), consistent with the food path's
+    router precheck.
     """
 
     item = session.scalars(
@@ -98,9 +112,32 @@ def _load_owned_food_item(
             DerivedFoodItem.user_id == owner_id,
         )
     ).one_or_none()
-    if item is None:
-        raise ItemNotFound("derived food item not found")
-    return item
+    if item is not None:
+        return item
+    if _owns_active_exercise_item(session, item_id, owner_id):
+        raise NotUpgradeable("exercise items are not exact-upgradeable")
+    raise ItemNotFound("derived food item not found")
+
+
+def _owns_active_exercise_item(session: Session, item_id: uuid.UUID, owner_id: uuid.UUID) -> bool:
+    """Whether ``item_id`` is an owner's exercise item with a non-voided parent event.
+
+    Owner-scoped and voided-parent-excluded so this stays fail-closed: a cross-user id
+    or a soft-voided-parent item does not report ``True`` (both remain ``404`` with no
+    existence/void disclosure). A ``True`` result marks a genuinely ineligible target
+    the route renders ``422 not_upgradeable``.
+    """
+
+    exercise_id = session.execute(
+        select(DerivedExerciseItem.id)
+        .join(LogEvent, LogEvent.id == DerivedExerciseItem.log_event_id)
+        .where(
+            DerivedExerciseItem.id == item_id,
+            DerivedExerciseItem.user_id == owner_id,
+            LogEvent.voided_at.is_(None),
+        )
+    ).scalar_one_or_none()
+    return exercise_id is not None
 
 
 def _no_proposal_dto(failure_reason: str | None) -> ExactEvidenceProposalDTO:
