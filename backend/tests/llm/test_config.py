@@ -25,11 +25,11 @@ def test_defaults_to_fake_provider() -> None:
 def test_load_openai_from_env() -> None:
     settings = load_llm_settings(
         {
-            "FATTY_LLM_PROVIDER": "openai",
-            "FATTY_LLM_API_KEY": "sk-test",
-            "FATTY_LLM_MODEL": "gpt-4o-mini",
-            "FATTY_LLM_TIMEOUT_SECONDS": "12.5",
-            "FATTY_LLM_MAX_RETRIES": "1",
+            "SLACKS_LLM_PROVIDER": "openai",
+            "SLACKS_LLM_API_KEY": "sk-test",
+            "SLACKS_LLM_MODEL": "gpt-4o-mini",
+            "SLACKS_LLM_TIMEOUT_SECONDS": "12.5",
+            "SLACKS_LLM_MAX_RETRIES": "1",
         }
     )
 
@@ -51,10 +51,10 @@ def test_supports_vision_defaults_off() -> None:
 def test_supports_vision_loaded_from_env() -> None:
     settings = load_llm_settings(
         {
-            "FATTY_LLM_PROVIDER": "openai",
-            "FATTY_LLM_API_KEY": "sk-test",
-            "FATTY_LLM_MODEL": "gpt-4o",
-            "FATTY_LLM_SUPPORTS_VISION": "true",
+            "SLACKS_LLM_PROVIDER": "openai",
+            "SLACKS_LLM_API_KEY": "sk-test",
+            "SLACKS_LLM_MODEL": "gpt-4o",
+            "SLACKS_LLM_SUPPORTS_VISION": "true",
         }
     )
 
@@ -84,9 +84,9 @@ def test_openai_compatible_with_base_url_is_valid() -> None:
 
 
 def test_claude_code_loads_without_key_or_model() -> None:
-    # Claude Code authenticates via its own local session, so no Fatty key and no
+    # Claude Code authenticates via its own local session, so no Slacks key and no
     # model are required; the settings must load cleanly.
-    settings = load_llm_settings({"FATTY_LLM_PROVIDER": "claude_code"})
+    settings = load_llm_settings({"SLACKS_LLM_PROVIDER": "claude_code"})
 
     assert settings.provider == "claude_code"
     assert settings.api_key is None
@@ -95,7 +95,7 @@ def test_claude_code_loads_without_key_or_model() -> None:
 
 def test_claude_code_passes_model_through_when_supplied() -> None:
     settings = load_llm_settings(
-        {"FATTY_LLM_PROVIDER": "claude_code", "FATTY_LLM_MODEL": "claude-sonnet-4-5"}
+        {"SLACKS_LLM_PROVIDER": "claude_code", "SLACKS_LLM_MODEL": "claude-sonnet-4-5"}
     )
 
     assert settings.provider == "claude_code"
@@ -111,7 +111,7 @@ def test_claude_code_ignores_a_supplied_key() -> None:
 
 
 def test_codex_loads_without_key_or_model() -> None:
-    settings = load_llm_settings({"FATTY_LLM_PROVIDER": "codex"})
+    settings = load_llm_settings({"SLACKS_LLM_PROVIDER": "codex"})
 
     assert settings.provider == "codex"
     assert settings.api_key is None
@@ -119,7 +119,9 @@ def test_codex_loads_without_key_or_model() -> None:
 
 
 def test_codex_passes_model_through_when_supplied() -> None:
-    settings = load_llm_settings({"FATTY_LLM_PROVIDER": "codex", "FATTY_LLM_MODEL": "gpt-5-codex"})
+    settings = load_llm_settings(
+        {"SLACKS_LLM_PROVIDER": "codex", "SLACKS_LLM_MODEL": "gpt-5-codex"}
+    )
 
     assert settings.provider == "codex"
     assert settings.model == "gpt-5-codex"
@@ -128,8 +130,8 @@ def test_codex_passes_model_through_when_supplied() -> None:
 def test_codex_accepts_optional_api_key_as_secret() -> None:
     settings = load_llm_settings(
         {
-            "FATTY_LLM_PROVIDER": "codex",
-            "FATTY_LLM_API_KEY": "codex-secret-key",
+            "SLACKS_LLM_PROVIDER": "codex",
+            "SLACKS_LLM_API_KEY": "codex-secret-key",
         }
     )
 
@@ -143,8 +145,8 @@ def test_codex_accepts_optional_api_key_as_secret() -> None:
 def test_codex_ignores_base_url_requirement() -> None:
     settings = load_llm_settings(
         {
-            "FATTY_LLM_PROVIDER": "codex",
-            "FATTY_LLM_BASE_URL": "https://llm.example.invalid/v1",
+            "SLACKS_LLM_PROVIDER": "codex",
+            "SLACKS_LLM_BASE_URL": "https://llm.example.invalid/v1",
         }
     )
 
@@ -173,16 +175,16 @@ def test_unknown_field_is_rejected() -> None:
 
 
 def test_unknown_env_var_is_ignored() -> None:
-    # The loader reads only known fields, so a stray FATTY_LLM_ var is dropped
+    # The loader reads only known fields, so a stray SLACKS_LLM_ var is dropped
     # rather than forbidden — it never reaches the model.
-    settings = load_llm_settings({"FATTY_LLM_UNEXPECTED": "x"})
+    settings = load_llm_settings({"SLACKS_LLM_UNEXPECTED": "x"})
 
     assert settings.provider == "fake"
 
 
 def test_out_of_range_timeout_is_rejected() -> None:
     with pytest.raises(ValidationError):
-        load_llm_settings({"FATTY_LLM_TIMEOUT_SECONDS": "0"})
+        load_llm_settings({"SLACKS_LLM_TIMEOUT_SECONDS": "0"})
 
 
 def test_api_key_is_not_exposed_in_repr_or_str() -> None:

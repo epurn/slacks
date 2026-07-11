@@ -1,7 +1,7 @@
 """Self-consistency confidence signal for the NL parse (FTY-158, ADR 0003 Layer B).
 
 The verbalized ``confidence`` the parse model self-reports is weak and
-overconfident on instruction-tuned models, and Fatty's plan-covered provider
+overconfident on instruction-tuned models, and Slacks's plan-covered provider
 (Claude) exposes no token log-probabilities, so logprob-based confidence is
 unavailable. The viable strong signal is **sampling agreement**: parse the same
 input N times (the provider samples at its default temperature > 0), and measure

@@ -1,7 +1,7 @@
 """Config-driven LLM provider layer.
 
 Public surface for the estimator pipeline (FTY-042 consumes this). A self-hoster
-configures a provider through ``FATTY_LLM_`` environment variables;
+configures a provider through ``SLACKS_LLM_`` environment variables;
 :func:`build_provider` returns a :class:`Provider` exposing the single
 ``structured_completion(prompt, schema) -> validated object`` capability.
 

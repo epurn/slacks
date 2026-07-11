@@ -288,7 +288,7 @@ even though no derived food rows are persisted.
 provider **selector** (`openai`, `openai_compatible`, `anthropic`,
 `claude_code`, `codex`, `fake`) — not the shared wire-format adapter label — and
 `estimation_runs.model` records the configured model string
-(`FATTY_LLM_MODEL`; empty only for CLI-session providers using their session
+(`SLACKS_LLM_MODEL`; empty only for CLI-session providers using their session
 default). Both are operator configuration, never secrets.
 
 Retention is unchanged: the trace lives on `estimation_runs`, cascades with the

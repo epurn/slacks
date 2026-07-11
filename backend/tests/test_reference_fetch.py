@@ -105,10 +105,10 @@ def test_defaults_are_enabled_with_bounded_inert_text_policy() -> None:
 def test_env_parses_enabled_flag_and_limits() -> None:
     settings = load_reference_fetch_settings(
         {
-            "FATTY_REFERENCE_FETCH_ENABLED": "false",
-            "FATTY_REFERENCE_FETCH_TIMEOUT_SECONDS": "7",
-            "FATTY_REFERENCE_FETCH_MAX_BYTES": "1024",
-            "FATTY_REFERENCE_FETCH_ALLOWED_CONTENT_TYPES": " text/HTML , text/plain ,",
+            "SLACKS_REFERENCE_FETCH_ENABLED": "false",
+            "SLACKS_REFERENCE_FETCH_TIMEOUT_SECONDS": "7",
+            "SLACKS_REFERENCE_FETCH_MAX_BYTES": "1024",
+            "SLACKS_REFERENCE_FETCH_ALLOWED_CONTENT_TYPES": " text/HTML , text/plain ,",
         }
     )
 

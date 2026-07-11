@@ -32,8 +32,8 @@ from tests.estimate_first_representative_harness import (
     static_model_provider,
 )
 
-_ENABLE_ENV = "FATTY_ESTIMATE_FIRST_LIVE_SMOKE"
-_SUMMARY_ENV = "FATTY_ESTIMATE_FIRST_LIVE_SMOKE_SUMMARY"
+_ENABLE_ENV = "SLACKS_ESTIMATE_FIRST_LIVE_SMOKE"
+_SUMMARY_ENV = "SLACKS_ESTIMATE_FIRST_LIVE_SMOKE_SUMMARY"
 
 
 @pytest.fixture
@@ -87,7 +87,7 @@ def _live_settings_or_skip() -> LLMSettings:
     except ValidationError as exc:
         pytest.skip(f"live provider settings are incomplete: {type(exc).__name__}")
     if settings.provider == "fake":
-        pytest.skip("FATTY_LLM_PROVIDER=fake is not a live provider")
+        pytest.skip("SLACKS_LLM_PROVIDER=fake is not a live provider")
     return settings
 
 

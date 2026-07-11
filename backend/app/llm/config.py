@@ -1,7 +1,7 @@
 """Typed LLM provider configuration.
 
 A self-hoster points the estimator at a provider entirely through
-``FATTY_LLM_``-prefixed environment variables (a Pi-inspired, config-driven
+``SLACKS_LLM_``-prefixed environment variables (a Pi-inspired, config-driven
 provider model). These variable names are a contract consumed by the self-host
 docs (FTY-072) and must stay stable.
 
@@ -18,19 +18,19 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
-#: LLM settings are read from variables with this prefix, e.g. ``FATTY_LLM_PROVIDER``.
-ENV_PREFIX = "FATTY_LLM_"
+#: LLM settings are read from variables with this prefix, e.g. ``SLACKS_LLM_PROVIDER``.
+ENV_PREFIX = "SLACKS_LLM_"
 
 #: Supported provider selectors. ``openai_compatible`` covers any endpoint that
 #: speaks the OpenAI Chat Completions wire format (vLLM, LM Studio, Together, ...).
 #: ``claude_code`` wraps a locally installed, first-party Claude Code session
-#: (subscription auth, no Fatty-side key). ``codex`` wraps a locally installed,
+#: (subscription auth, no Slacks-side key). ``codex`` wraps a locally installed,
 #: first-party Codex CLI session. ``fake`` is the in-memory test/dev provider
 #: and never makes network calls.
 ProviderName = Literal["openai", "anthropic", "openai_compatible", "claude_code", "codex", "fake"]
 
 #: Default OpenAI API base. ``openai_compatible`` has no default — the operator
-#: must supply ``FATTY_LLM_BASE_URL`` for their endpoint.
+#: must supply ``SLACKS_LLM_BASE_URL`` for their endpoint.
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 
 #: Default Anthropic API base.
@@ -41,7 +41,7 @@ class LLMSettings(BaseModel):
     """Validated LLM provider configuration.
 
     Frozen and ``extra="forbid"`` so configuration is immutable once loaded and
-    unknown ``FATTY_LLM_`` keys are rejected rather than silently ignored. The
+    unknown ``SLACKS_LLM_`` keys are rejected rather than silently ignored. The
     cross-field rules (a real provider needs a key; ``openai_compatible`` needs a
     base URL) fail fast at load time instead of at the first provider call.
     """
@@ -78,15 +78,15 @@ class LLMSettings(BaseModel):
             return self
         if self.provider == "claude_code":
             # Claude Code owns its own authentication (``claude login``) and picks
-            # the model from the active session/plan, so a Fatty-side key is
+            # the model from the active session/plan, so a Slacks-side key is
             # meaningless and the model is optional. A supplied model is honored
             # (passed through to the invocation); a supplied key is simply unused.
             return self
         if self.provider == "codex":
             # Codex owns its saved auth under CODEX_HOME unless an optional
-            # Fatty-side key is supplied for this child process only. Its model is
+            # Slacks-side key is supplied for this child process only. Its model is
             # also optional: an empty value lets the local Codex install choose
-            # its configured/default model. FATTY_LLM_BASE_URL is intentionally
+            # its configured/default model. SLACKS_LLM_BASE_URL is intentionally
             # ignored by the factory for this provider.
             return self
         if self.provider == "openai_compatible":
@@ -96,15 +96,15 @@ class LLMSettings(BaseModel):
             # nowhere to connect and nothing to ask for, so missing either is a
             # fail-closed misconfiguration.
             if not self.base_url:
-                raise ValueError("provider 'openai_compatible' requires FATTY_LLM_BASE_URL")
+                raise ValueError("provider 'openai_compatible' requires SLACKS_LLM_BASE_URL")
             if not self.model:
-                raise ValueError("provider 'openai_compatible' requires FATTY_LLM_MODEL")
+                raise ValueError("provider 'openai_compatible' requires SLACKS_LLM_MODEL")
             return self
         # All other non-fake providers (openai, anthropic) require both a key and a model.
         if self.api_key is None or not self.api_key.get_secret_value():
-            raise ValueError(f"provider {self.provider!r} requires FATTY_LLM_API_KEY")
+            raise ValueError(f"provider {self.provider!r} requires SLACKS_LLM_API_KEY")
         if not self.model:
-            raise ValueError(f"provider {self.provider!r} requires FATTY_LLM_MODEL")
+            raise ValueError(f"provider {self.provider!r} requires SLACKS_LLM_MODEL")
         return self
 
     def resolved_base_url(self) -> str:
@@ -118,7 +118,7 @@ class LLMSettings(BaseModel):
 
 
 def load_llm_settings(environ: Mapping[str, str] | None = None) -> LLMSettings:
-    """Build :class:`LLMSettings` from ``FATTY_LLM_``-prefixed variables.
+    """Build :class:`LLMSettings` from ``SLACKS_LLM_``-prefixed variables.
 
     Only known fields are read; missing values fall back to defaults and invalid
     or inconsistent values raise ``ValidationError``.

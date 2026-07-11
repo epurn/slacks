@@ -12,8 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from app.estimator.search_sanitization import is_local_search_host
 
 #: Search settings are read from variables with this prefix, e.g.
-#: ``FATTY_SEARCH_API_KEY``.
-ENV_PREFIX = "FATTY_SEARCH_"
+#: ``SLACKS_SEARCH_API_KEY``.
+ENV_PREFIX = "SLACKS_SEARCH_"
 
 #: The keyless local/self-hosted SearXNG backend — the default (FTY-164).
 SEARXNG_PROVIDER = "searxng"
@@ -44,7 +44,7 @@ _BRAVE_SEARCH_PATH = "/res/v1/web/search"
 
 
 class SearchSettings(BaseModel):
-    """Validated search-provider config, read from ``FATTY_SEARCH_`` env vars.
+    """Validated search-provider config, read from ``SLACKS_SEARCH_`` env vars.
 
     Frozen and ``extra="forbid"`` so config is immutable and unknown keys are
     rejected. The default backend is the keyless local SearXNG instance, so search
@@ -102,7 +102,7 @@ class SearchSettings(BaseModel):
         """
 
         if self.provider not in KNOWN_PROVIDERS:
-            raise ValueError(f"FATTY_SEARCH_PROVIDER must be one of {sorted(KNOWN_PROVIDERS)}")
+            raise ValueError(f"SLACKS_SEARCH_PROVIDER must be one of {sorted(KNOWN_PROVIDERS)}")
         if self.provider == NONE_PROVIDER:
             return self  # no egress, nothing to validate
         lowered = self.base_url.lower()
@@ -116,10 +116,10 @@ class SearchSettings(BaseModel):
             return self
         if self.provider == SEARXNG_PROVIDER:
             raise ValueError(
-                "FATTY_SEARCH_BASE_URL must be https, or http for the local SearXNG "
+                "SLACKS_SEARCH_BASE_URL must be https, or http for the local SearXNG "
                 "service only (searxng / localhost / loopback)"
             )
-        raise ValueError("FATTY_SEARCH_BASE_URL must be an https URL")
+        raise ValueError("SLACKS_SEARCH_BASE_URL must be an https URL")
 
     @property
     def is_enabled(self) -> bool:
@@ -185,7 +185,7 @@ class SearchSettings(BaseModel):
 
 
 def load_search_settings(environ: Mapping[str, str] | None = None) -> SearchSettings:
-    """Build :class:`SearchSettings` from ``FATTY_SEARCH_``-prefixed variables."""
+    """Build :class:`SearchSettings` from ``SLACKS_SEARCH_``-prefixed variables."""
 
     source = os.environ if environ is None else environ
     data: dict[str, str] = {}

@@ -318,14 +318,14 @@ Food resolution consumes the shared estimator policy defined by
 applied to source misses, missing default servings, unresolvable serving math, food
 item routing, and rough/default-prior fallback.
 
-### Config (`FdcSettings`, `FATTY_FDC_` env vars)
+### Config (`FdcSettings`, `SLACKS_FDC_` env vars)
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `FATTY_FDC_API_KEY` | _(none)_ | data.gov FDC key (secret). **Absent → source disabled.** |
-| `FATTY_FDC_BASE_URL` | `https://api.nal.usda.gov/fdc/v1` | API base; **must be https**. |
-| `FATTY_FDC_TIMEOUT_SECONDS` | `10` | Per-request wall-clock timeout. |
-| `FATTY_FDC_MAX_RESULTS` | `5` | Search results inspected for an energy-bearing match. |
+| `SLACKS_FDC_API_KEY` | _(none)_ | data.gov FDC key (secret). **Absent → source disabled.** |
+| `SLACKS_FDC_BASE_URL` | `https://api.nal.usda.gov/fdc/v1` | API base; **must be https**. |
+| `SLACKS_FDC_TIMEOUT_SECONDS` | `10` | Per-request wall-clock timeout. |
+| `SLACKS_FDC_MAX_RESULTS` | `5` | Search results inspected for an energy-bearing match. |
 
 The key is a `SecretStr`, read from the environment only, never exposed to clients,
 never logged, and sent only in the `X-Api-Key` **header** (never the query string, so
@@ -796,14 +796,14 @@ OFF is queried first; a confident match is preferred over a generic USDA estimat
 (`backend/app/models/food_sources.py` + `0010` migration), and the source-diagnostics
 endpoint (`backend/app/routers/health.py`, `backend/app/services/sources.py`).
 
-### Config (`OffSettings`, `FATTY_OFF_` env vars)
+### Config (`OffSettings`, `SLACKS_OFF_` env vars)
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `FATTY_OFF_ENABLED` | `true` | Self-host enable/disable flag. OFF is an open API (no key), so it is **on by default**; set `false` to disable the source. |
-| `FATTY_OFF_BASE_URL` | `https://world.openfoodfacts.org` | API base; **must be https**. The allowlisted host is derived from it. |
-| `FATTY_OFF_TIMEOUT_SECONDS` | `10` | Per-request wall-clock timeout. |
-| `FATTY_OFF_USER_AGENT` | `Fatty/1.0 (+…)` | Non-secret identifying user-agent (OFF API etiquette / rate limits). `Fatty/1.0` is the current runtime literal (`backend/app/estimator/off.py`); it is a legacy identifier pending a separate runtime rename, not the product name. |
+| `SLACKS_OFF_ENABLED` | `true` | Self-host enable/disable flag. OFF is an open API (no key), so it is **on by default**; set `false` to disable the source. |
+| `SLACKS_OFF_BASE_URL` | `https://world.openfoodfacts.org` | API base; **must be https**. The allowlisted host is derived from it. |
+| `SLACKS_OFF_TIMEOUT_SECONDS` | `10` | Per-request wall-clock timeout. |
+| `SLACKS_OFF_USER_AGENT` | `Slacks/1.0 (+…)` | Non-secret identifying user-agent (OFF API etiquette / rate limits). `Slacks/1.0` is the runtime literal (`backend/app/estimator/off.py`), the product's outbound identity. |
 
 OFF needs no credentials, so a provider is **available** whenever it is enabled. A
 candidate carries a barcode only when one was explicitly supplied (a future scan,
@@ -893,14 +893,14 @@ egress boundary; FTY-044's USDA behavior is unchanged.
 (`backend/app/routers/health.py`, `backend/app/services/sources.py`,
 `backend/app/schemas/sources.py`).
 
-### Config (`OfficialFetchSettings`, `FATTY_OFFICIAL_FETCH_` env vars)
+### Config (`OfficialFetchSettings`, `SLACKS_OFFICIAL_FETCH_` env vars)
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `FATTY_OFFICIAL_FETCH_ALLOWED_HOSTS` | _(empty)_ | Comma-separated official-source host allowlist (lower-cased). **Empty → nothing is fetchable** (fail closed). |
-| `FATTY_OFFICIAL_FETCH_TIMEOUT_SECONDS` | `10` | Per-request wall-clock timeout. |
-| `FATTY_OFFICIAL_FETCH_MAX_BYTES` | `2000000` | Response-size cap; a larger body fails closed. |
-| `FATTY_OFFICIAL_FETCH_ALLOWED_CONTENT_TYPES` | `text/html, application/xhtml+xml, text/plain` | Accepted content types; anything else fails closed. |
+| `SLACKS_OFFICIAL_FETCH_ALLOWED_HOSTS` | _(empty)_ | Comma-separated official-source host allowlist (lower-cased). **Empty → nothing is fetchable** (fail closed). |
+| `SLACKS_OFFICIAL_FETCH_TIMEOUT_SECONDS` | `10` | Per-request wall-clock timeout. |
+| `SLACKS_OFFICIAL_FETCH_MAX_BYTES` | `2000000` | Response-size cap; a larger body fails closed. |
+| `SLACKS_OFFICIAL_FETCH_ALLOWED_CONTENT_TYPES` | `text/html, application/xhtml+xml, text/plain` | Accepted content types; anything else fails closed. |
 
 The settings are frozen and reject unknown keys. Only the explicit result URLs handed
 to the fetcher are fetched — no crawling, no multi-page traversal, no open-ended
@@ -916,7 +916,7 @@ Every official-source fetch is gated, before and across the request, by the shar
   pass). Any loopback, private, link-local (incl. cloud metadata `169.254.169.254`),
   RFC 6598 CGNAT (`100.64.0.0/10`), multicast, reserved, or unspecified address is
   refused; non-HTTPS and `file:`/other schemes are refused.
-- **Host allowlist.** Only the configured `FATTY_OFFICIAL_FETCH_ALLOWED_HOSTS` are
+- **Host allowlist.** Only the configured `SLACKS_OFFICIAL_FETCH_ALLOWED_HOSTS` are
   reachable; anything off-allowlist fails closed (an empty allowlist blocks everything).
 - **Redirects refused.** Every 3xx is refused rather than followed, so a redirect can
   never bounce an allowlisted request to a private/off-allowlist target.
@@ -1035,7 +1035,7 @@ global `products` row.
 
 When the search provider is **disabled** or **unavailable** (no key), when a tier's
 fetch is off (**official**: empty allowlist; **reference**:
-`FATTY_REFERENCE_FETCH_ENABLED=false`), or when **nothing confident is found** on
+`SLACKS_REFERENCE_FETCH_ENABLED=false`), or when **nothing confident is found** on
 either tier, the candidate falls through to a **model-prior** `NamedFoodEstimate`
 from sanitized identity, bounded amount/unit fields, and evidence-view records —
 never raw diary text, search queries, pages, or snippets. It is recorded with
@@ -1320,6 +1320,12 @@ The backend exposes four health-check endpoints, all returning structured JSON w
 
 ## Migration / Compatibility
 
+- **FTY-334 (brand cutover, mechanical rename).** The FDC, OFF, official-fetch,
+  and reference-fetch environment keys documented here now use the `SLACKS_`
+  prefix, and the Open Food Facts user-agent is `Slacks/1.0`, both renamed as
+  part of the repo-wide brand cutover to Slacks. This is not a contract version
+  bump — key meanings, defaults, fetch allowlists, and egress behaviour are
+  unchanged.
 - The `0007` migration applies (`alembic upgrade head`) on top of the `0006`
   exercise-burn schema and is fully reversible (`alembic downgrade 0006`), verified by
   an apply/rollback test against a throwaway database.
@@ -1355,7 +1361,7 @@ The backend exposes four health-check endpoints, all returning structured JSON w
   pre-v1 breaking change to the fallback order: model prior now runs only after the
   reference tier). **No migration**: `evidence_sources.source_type` / `source_ref`
   are strings, and the `0012` `assumptions` column already carries the fallback
-  reasons. Additive config (`FATTY_REFERENCE_FETCH_*`), an additive
+  reasons. Additive config (`SLACKS_REFERENCE_FETCH_*`), an additive
   `searched_result_fetch` egress-diagnostics block, and a new `reference_source`
   value in the provenance vocabulary/read-model. The USDA/OFF/label paths, the
   search adapter, and the serving math are unchanged.

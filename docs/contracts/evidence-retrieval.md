@@ -550,10 +550,10 @@ carries two values that are intentionally **outside** the estimation enums:
 a `source_ref`, or a lookup `status`, and they do not participate in source
 selection or the **Fallback Rule**. The `claude_code` provider (FTY-087/088) is the
 first instance: `id = claude_code`, `enabled` when it is the active
-`FATTY_LLM_PROVIDER`, and `available` when the CLI is on `PATH` and a login session
+`SLACKS_LLM_PROVIDER`, and `available` when the CLI is on `PATH` and a login session
 is detected — booleans only, no credential content surfaced. FTY-296 adds `codex`
 with the same shape: enabled when selected, available when the CLI is on `PATH`
-and saved `CODEX_HOME` auth or selected-provider `FATTY_LLM_API_KEY` exists, with
+and saved `CODEX_HOME` auth or selected-provider `SLACKS_LLM_API_KEY` exists, with
 no keys, tokens, identities, auth-file contents, host paths, or raw CLI output.
 `llm-provider.md` owns the provider contract itself and defers diagnostics here.
 
@@ -785,14 +785,14 @@ status, implementing the **Search Request / Response Boundary** above. It is a
   normal dev/self-host install starts with search enabled *and available* — no paid
   API, no credential. The dev-stack container is FTY-165.
 - **`brave` (explicit opt-in).** The Brave Search API; requires
-  `FATTY_SEARCH_API_KEY`. Without the key it reports `unavailable`.
+  `SLACKS_SEARCH_API_KEY`. Without the key it reports `unavailable`.
 - **`none` (explicit opt-out).** Search deliberately off: every lookup is
   `disabled`, nothing egresses, and diagnostics show the opt-out rather than a
   missing credential.
 
 Search is a **non-optional default capability**: the out-of-the-box posture is
 "available, keyless", and only an explicit operator choice (`none`, or
-`FATTY_SEARCH_ENABLED=false`) turns it off. The adapter ships **no fetcher** (the
+`SLACKS_SEARCH_ENABLED=false`) turns it off. The adapter ships **no fetcher** (the
 result URLs are fetched by FTY-078's hardened fetcher) and **no resolution
 pipeline** (FTY-062).
 
@@ -805,16 +805,16 @@ pipeline** (FTY-062).
 surface (`backend/app/services/sources.py`, `backend/app/routers/health.py`). The
 adapters reuse `hardened_fetch.py` for egress.
 
-### Config (`SearchSettings`, `FATTY_SEARCH_` env vars)
+### Config (`SearchSettings`, `SLACKS_SEARCH_` env vars)
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `FATTY_SEARCH_PROVIDER` | `searxng` | Which registered backend to use: `searxng`, `brave`, or `none`. An unknown value fails closed at config load. |
-| `FATTY_SEARCH_ENABLED` | `true` | Self-host enable/disable flag. `false` → `disabled` regardless of provider. |
-| `FATTY_SEARCH_API_KEY` | _(none)_ | Brave key (secret); only the `brave` backend uses it. **Absent with `brave` → `unavailable`.** SearXNG ignores it. |
-| `FATTY_SEARCH_BASE_URL` | `http://searxng:8080` (searxng) / `https://api.search.brave.com` (brave) | API base; the allowlisted host is derived from it. See **Base URL rules** below. |
-| `FATTY_SEARCH_TIMEOUT_SECONDS` | `10` | Per-request wall-clock timeout. |
-| `FATTY_SEARCH_MAX_RESULTS` | `5` | Candidate result URLs surfaced (Brave: also requested via `count`; SearXNG: bounded client-side). |
+| `SLACKS_SEARCH_PROVIDER` | `searxng` | Which registered backend to use: `searxng`, `brave`, or `none`. An unknown value fails closed at config load. |
+| `SLACKS_SEARCH_ENABLED` | `true` | Self-host enable/disable flag. `false` → `disabled` regardless of provider. |
+| `SLACKS_SEARCH_API_KEY` | _(none)_ | Brave key (secret); only the `brave` backend uses it. **Absent with `brave` → `unavailable`.** SearXNG ignores it. |
+| `SLACKS_SEARCH_BASE_URL` | `http://searxng:8080` (searxng) / `https://api.search.brave.com` (brave) | API base; the allowlisted host is derived from it. See **Base URL rules** below. |
+| `SLACKS_SEARCH_TIMEOUT_SECONDS` | `10` | Per-request wall-clock timeout. |
+| `SLACKS_SEARCH_MAX_RESULTS` | `5` | Candidate result URLs surfaced (Brave: also requested via `count`; SearXNG: bounded client-side). |
 
 The Brave key is a `SecretStr`, read from the environment only, never exposed to
 clients, never logged, and sent only in the `X-Subscription-Token` **header** (never
@@ -853,7 +853,7 @@ Capability / Status** vocabulary above:
 
 | Status | When | Result |
 | --- | --- | --- |
-| `disabled` | `FATTY_SEARCH_ENABLED=false`, or `FATTY_SEARCH_PROVIDER=none`. | No call; caller tries next source / `model_prior`. |
+| `disabled` | `SLACKS_SEARCH_ENABLED=false`, or `SLACKS_SEARCH_PROVIDER=none`. | No call; caller tries next source / `model_prior`. |
 | `unavailable` | `brave` selected with no API key. (SearXNG is keyless and never `unavailable` by config.) | No call; caller falls through. |
 | `rate_limited` | Provider returned an HTTP 429 rate-limit / quota signal. | Bounded retry, then next source / `model_prior`. |
 | `failed` | Timeout, connection error, 5xx, other 4xx, non-JSON, oversized, or policy-blocked (scheme / non-allowlisted / redirect / address-posture) response. | Nothing trusted; next source / `model_prior`. |
@@ -958,7 +958,7 @@ The reference query is the sanitized item identity **plus the fixed string
 `sanitize_query` chokepoint, so raw diary text, profile, weight, history, and event
 metadata have no channel to the provider. Result URLs and titles remain untrusted.
 
-### Searched-result fetch policy (`FATTY_REFERENCE_FETCH_` env vars)
+### Searched-result fetch policy (`SLACKS_REFERENCE_FETCH_` env vars)
 
 A searched result URL points at an **arbitrary public host** the operator could not
 have allowlisted in advance, so this policy deliberately has **no host allowlist**;
@@ -976,10 +976,10 @@ URL:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `FATTY_REFERENCE_FETCH_ENABLED` | `true` | Whether searched public result pages may be fetched at all. `false` turns the tier off (skipped with an explicit model-prior reason). |
-| `FATTY_REFERENCE_FETCH_TIMEOUT_SECONDS` | `10` | Per-request wall-clock timeout. |
-| `FATTY_REFERENCE_FETCH_MAX_BYTES` | `2000000` | Response-size cap; a larger body fails closed. |
-| `FATTY_REFERENCE_FETCH_ALLOWED_CONTENT_TYPES` | `text/html, application/xhtml+xml, text/plain` | Accepted content types; anything else fails closed. |
+| `SLACKS_REFERENCE_FETCH_ENABLED` | `true` | Whether searched public result pages may be fetched at all. `false` turns the tier off (skipped with an explicit model-prior reason). |
+| `SLACKS_REFERENCE_FETCH_TIMEOUT_SECONDS` | `10` | Per-request wall-clock timeout. |
+| `SLACKS_REFERENCE_FETCH_MAX_BYTES` | `2000000` | Response-size cap; a larger body fails closed. |
+| `SLACKS_REFERENCE_FETCH_ALLOWED_CONTENT_TYPES` | `text/html, application/xhtml+xml, text/plain` | Accepted content types; anything else fails closed. |
 
 ### Record shape / provenance
 
@@ -1109,7 +1109,7 @@ stable `source_ref` (the opaque candidate id), a display name, the match `basis`
 (per-100g — providers canonicalise to per-100g during listing), and a compact facts
 preview (per-basis calories + macros). A non-schema-valid / energy-less (`partial`)
 match is **excluded** — it is not an offerable match. The list is **bounded** (the
-provider fan-out is capped by `FATTY_FDC_MAX_RESULTS`, and the aggregated result by a
+provider fan-out is capped by `SLACKS_FDC_MAX_RESULTS`, and the aggregated result by a
 hard ceiling).
 
 Each surfaced candidate's facts are extracted/validated **server-side during listing**
@@ -1408,6 +1408,12 @@ amount adjustment (`food-resolution.md` owns the operation shape). It:
 
 ## Migration / Compatibility
 
+- **FTY-334 (brand cutover, mechanical rename).** The search, reference-fetch,
+  FDC, and LLM environment keys documented here now use the `SLACKS_` prefix,
+  renamed from the legacy prefix as part of the repo-wide brand cutover to
+  Slacks. This is not a contract version bump — every key's meaning, defaults,
+  the capability/status vocabulary, and egress behaviour are unchanged; only
+  the `SLACKS_` prefix is new.
 - This contract is **additive documentation**; it introduces no schema or code
   change on its own. It names and fixes the source taxonomy, status values,
   normalized-fact fields, and search/fetch boundaries that FTY-044 already
@@ -1475,12 +1481,12 @@ amount adjustment (`food-resolution.md` owns the operation shape). It:
   `kinds = [estimation]`). It is additive operator/health state only: no estimation source, schema change, or lookup status; descriptor values stay outside the estimation Source Hierarchy and `kinds` enums. Provider contract: `llm-provider.md`.
 - FTY-079 adds the `official_source` search adapter (`search.py`) and an
   `official_source` entry in `GET /healthz/sources`. It is additive: a new
-  `FATTY_SEARCH_`-prefixed config block, no schema change, and a
+  `SLACKS_SEARCH_`-prefixed config block, no schema change, and a
   backward-compatible `status_code` attribute on `hardened_fetch`'s
   response/transient errors for rate-limit (HTTP 429) detection. The fetcher
   (FTY-078) and the resolution pipeline (FTY-062) remain separate.
 - FTY-164 **changes the search defaults** (a deliberate pre-v1 breaking change):
-  `FATTY_SEARCH_PROVIDER` defaults to `searxng` (was `brave`) and search is
+  `SLACKS_SEARCH_PROVIDER` defaults to `searxng` (was `brave`) and search is
   available out of the box with **no API key**. It registers the `searxng` and
   `none` provider ids alongside `brave`, adds the per-provider default base URL
   (`http://searxng:8080` for SearXNG), and adds the narrow local-HTTP egress
@@ -1499,7 +1505,7 @@ amount adjustment (`food-resolution.md` owns the operation shape). It:
 - FTY-166 adds the **`reference_source`** tier (a deliberate pre-v1 breaking
   change to the resolution order): the source-system id `reference_source` joins
   the stable vocabulary, model prior moves to rank 6, and a new
-  `FATTY_REFERENCE_FETCH_`-prefixed config block governs the searched-result fetch
+  `SLACKS_REFERENCE_FETCH_`-prefixed config block governs the searched-result fetch
   policy. No schema migration: `evidence_sources.source_type` / `source_ref` are
   strings and the `assumptions` column (FTY-062) already carries the fallback
   reasons. Clients gain the `reference_source` value in the provenance read-model

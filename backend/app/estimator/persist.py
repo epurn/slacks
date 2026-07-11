@@ -217,7 +217,7 @@ def _persist_resolved_labels(
 
     The deterministic serving math (FTY-061) is unchanged; only the item's
     committed/counted status changes. The row is written :attr:`~app.enums.
-    DerivedItemStatus.PROPOSED`, **not** ``RESOLVED``: "OCR is fallible — Fatty never
+    DerivedItemStatus.PROPOSED`, **not** ``RESOLVED``: "OCR is fallible — Slacks never
     silently trusts a fallible parse" (``docs/design-philosophy.md``). A ``proposed``
     item is excluded from every finalized-state read by construction (the
     daily-summary filter requires ``resolved``), so it does not count toward totals

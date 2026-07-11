@@ -7,10 +7,10 @@ fact and is preferred over a generic USDA estimate for the same input. It turns 
 normalized **barcode** (UPC/EAN) into canonical per-100g facts through a hardened,
 allowlisted HTTPS client:
 
-- **Config** (:class:`OffSettings`) is read from ``FATTY_OFF_``-prefixed environment
+- **Config** (:class:`OffSettings`) is read from ``SLACKS_OFF_``-prefixed environment
   variables, mirroring the FDC config. OFF is an *open* API needing no key, so the
   source is **enabled by default**; a self-hoster disables it with
-  ``FATTY_OFF_ENABLED=false``. An optional, non-secret ``user_agent`` honours OFF's
+  ``SLACKS_OFF_ENABLED=false``. An optional, non-secret ``user_agent`` honours OFF's
   identifying-client etiquette.
 - **Transport** goes through :func:`app.estimator.hardened_fetch.get_json`: HTTPS
   only, the configured OFF host allowlisted, SSRF/private-network blocking, no
@@ -58,15 +58,15 @@ from app.estimator.hardened_fetch import (
     get_json,
 )
 
-#: OFF settings are read from variables with this prefix, e.g. ``FATTY_OFF_BASE_URL``.
-ENV_PREFIX = "FATTY_OFF_"
+#: OFF settings are read from variables with this prefix, e.g. ``SLACKS_OFF_BASE_URL``.
+ENV_PREFIX = "SLACKS_OFF_"
 
 #: Default OFF API base. Overridable for self-host proxies/mirrors via env.
 DEFAULT_OFF_BASE_URL = "https://world.openfoodfacts.org"
 
 #: A non-secret default identifying user-agent, per OFF's API etiquette. A
 #: self-hoster can override it (e.g. with a contact address) via env.
-DEFAULT_OFF_USER_AGENT = "Fatty/1.0 (+https://github.com/epurn/fatty)"
+DEFAULT_OFF_USER_AGENT = "Slacks/1.0 (+https://github.com/epurn/slacks)"
 
 #: Stable identifier recorded as the cached product's source and on run evidence.
 OFF_SOURCE = "open_food_facts"
@@ -130,7 +130,7 @@ class BarcodeSource(Protocol):
 
 
 class OffSettings(BaseModel):
-    """Validated OFF client configuration, read from ``FATTY_OFF_`` env vars.
+    """Validated OFF client configuration, read from ``SLACKS_OFF_`` env vars.
 
     Frozen and ``extra="forbid"`` so config is immutable and unknown keys are
     rejected. The base URL must be ``https`` (the hardened fetch refuses anything
@@ -153,7 +153,7 @@ class OffSettings(BaseModel):
         """Fail closed on a non-https base URL (the hardened fetch would reject it)."""
 
         if not self.base_url.lower().startswith("https://"):
-            raise ValueError("FATTY_OFF_BASE_URL must be an https URL")
+            raise ValueError("SLACKS_OFF_BASE_URL must be an https URL")
         return self
 
     @property
@@ -182,7 +182,7 @@ class OffSettings(BaseModel):
 
 
 def load_off_settings(environ: Mapping[str, str] | None = None) -> OffSettings:
-    """Build :class:`OffSettings` from ``FATTY_OFF_``-prefixed variables."""
+    """Build :class:`OffSettings` from ``SLACKS_OFF_``-prefixed variables."""
 
     source = os.environ if environ is None else environ
     data: dict[str, str] = {}

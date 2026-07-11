@@ -2,7 +2,7 @@
 
 Runs a locally installed, first-party Claude Code in headless mode and reads a
 schema-constrained JSON object from its stdout. Authentication is owned entirely
-by Claude Code (``claude login`` / the active monthly-plan session): Fatty holds
+by Claude Code (``claude login`` / the active monthly-plan session): Slacks holds
 no key and stores no credential. This is the ToS-clean, plan-covered path — it
 wraps the first-party binary rather than reusing Claude Code's OAuth tokens in a
 homemade API client.
@@ -46,8 +46,8 @@ DEFAULT_BINARY = "claude"
 MAX_STDOUT_BYTES = 1_000_000
 
 #: Environment variables forwarded to the claude subprocess. Every key absent
-#: from this set is withheld, so FATTY_AUTH_SECRET, POSTGRES_PASSWORD,
-#: FATTY_FDC_API_KEY, FATTY_SEARCH_API_KEY, and any other secret the
+#: from this set is withheld, so SLACKS_AUTH_SECRET, POSTGRES_PASSWORD,
+#: SLACKS_FDC_API_KEY, SLACKS_SEARCH_API_KEY, and any other secret the
 #: API/worker process holds are excluded by construction.
 #:
 #: Keys were determined empirically (``env -i`` scrubbing), not by guessing:
@@ -56,7 +56,7 @@ MAX_STDOUT_BYTES = 1_000_000
 #:   HOME             — fallback config dir (~/.claude) when CLAUDE_CONFIG_DIR
 #:                      is absent; the binary errors on missing config without it.
 #:   CLAUDE_CONFIG_DIR — session/credential directory mounted by FTY-088; this
-#:                      is the primary auth surface for Fatty's deployment.
+#:                      is the primary auth surface for Slacks's deployment.
 #:   LANG/LC_ALL/LC_CTYPE — locale: ensure UTF-8 text encoding so JSON output
 #:                      is parseable across all deployment environments.
 #:   TMPDIR           — runtime temp directory; the Bun-bundled binary creates
@@ -175,7 +175,7 @@ def run_claude_code(invocation: Invocation, *, timeout_seconds: float) -> Claude
 
     The subprocess receives only the variables in :data:`_ENV_ALLOWLIST`,
     copied from the parent environment when present. This ensures that
-    ``FATTY_AUTH_SECRET``, ``POSTGRES_PASSWORD``, and every other secret the
+    ``SLACKS_AUTH_SECRET``, ``POSTGRES_PASSWORD``, and every other secret the
     API/worker process holds are absent from the child's environment by
     construction, making the module's no-credential-leak guarantee enforceable
     rather than merely asserted.

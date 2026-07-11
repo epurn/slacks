@@ -12,7 +12,7 @@ and the "judge outputs" are deterministic stand-ins that exist to pin the router
 offline, exactly like FTY-158's recorded samples.
 
 Every input here is **authored** — realistic in *style*, never scraped from a
-real user. The `fatty` repo is public and real diary entries are PII
+real user. The `slacks` repo is public and real diary entries are PII
 (``docs/security/data-retention.md``); no real user data is ever committed.
 
 This generator holds the authored cases and their *recorded* judge outputs

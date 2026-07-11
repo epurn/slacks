@@ -57,23 +57,23 @@ structured_completion(
   text. Images are never logged.
 
 Supplying `images` requires a **vision-capable configured model**
-(`FATTY_LLM_SUPPORTS_VISION=true`). If an image is supplied to a non-vision
+(`SLACKS_LLM_SUPPORTS_VISION=true`). If an image is supplied to a non-vision
 model the call fails fast with `LLMConfigurationError` **before any provider
 call**, so an image is never sent to a model that cannot read it. Per-provider
 multimodal mechanics (OpenAI `image_url` data-URL content parts vs. Anthropic
 base64 `image` blocks) are implementation details behind the interface.
 
-Provider configuration is read from `FATTY_LLM_`-prefixed environment variables:
+Provider configuration is read from `SLACKS_LLM_`-prefixed environment variables:
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `FATTY_LLM_PROVIDER` | `fake` | One of `openai`, `anthropic`, `openai_compatible`, `claude_code`, `codex`, `fake`. |
-| `FATTY_LLM_API_KEY` | _(none)_ | Required for `openai`/`anthropic`. **Optional for `openai_compatible`** — omit it for keyless local endpoints (Ollama/LM Studio/vLLM); set it for keyed remote endpoints such as OpenRouter or Together. When absent no `Authorization` header is sent. **Not required (and unused) for `claude_code`** — it authenticates via the local Claude Code session. **Optional for `codex`** — when absent, Codex CLI uses saved auth under `CODEX_HOME`; when present, Slacks may pass it to only the `codex exec` child as `CODEX_API_KEY`. Secret; env/secret-manager only. |
-| `FATTY_LLM_MODEL` | _(empty)_ | Required for `openai`/`anthropic`/`openai_compatible` (e.g. `gpt-4o-mini`, `claude-3-5-sonnet`, `deepseek/deepseek-v4-pro`). **Optional for `claude_code`** — Claude Code picks the model from the session/plan; a supplied value is passed through to the invocation. **Optional for `codex`** — a supplied value is passed as `--model`; when omitted, Codex uses its configured/default local model. Prefer setting an explicit supported model for reproducible deployments. |
-| `FATTY_LLM_BASE_URL` | provider default | Required for `openai_compatible`; overrides the default OpenAI/Anthropic base. Use `https://openrouter.ai/api/v1` for OpenRouter. **Not used by `codex`**; direct OpenAI API base URL overrides, OpenRouter, and local OpenAI-compatible runtimes remain the `openai` / `openai_compatible` paths. |
-| `FATTY_LLM_TIMEOUT_SECONDS` | `30` | Per-attempt wall-clock timeout (0–600). Tunable. |
-| `FATTY_LLM_MAX_RETRIES` | `2` | Additional attempts after the first, on transient failures only (0–10). Tunable. |
-| `FATTY_LLM_SUPPORTS_VISION` | `false` | Declares the configured model as vision-capable. Required to be `true` before `images` may be supplied; otherwise image input fails fast. |
+| `SLACKS_LLM_PROVIDER` | `fake` | One of `openai`, `anthropic`, `openai_compatible`, `claude_code`, `codex`, `fake`. |
+| `SLACKS_LLM_API_KEY` | _(none)_ | Required for `openai`/`anthropic`. **Optional for `openai_compatible`** — omit it for keyless local endpoints (Ollama/LM Studio/vLLM); set it for keyed remote endpoints such as OpenRouter or Together. When absent no `Authorization` header is sent. **Not required (and unused) for `claude_code`** — it authenticates via the local Claude Code session. **Optional for `codex`** — when absent, Codex CLI uses saved auth under `CODEX_HOME`; when present, Slacks may pass it to only the `codex exec` child as `CODEX_API_KEY`. Secret; env/secret-manager only. |
+| `SLACKS_LLM_MODEL` | _(empty)_ | Required for `openai`/`anthropic`/`openai_compatible` (e.g. `gpt-4o-mini`, `claude-3-5-sonnet`, `deepseek/deepseek-v4-pro`). **Optional for `claude_code`** — Claude Code picks the model from the session/plan; a supplied value is passed through to the invocation. **Optional for `codex`** — a supplied value is passed as `--model`; when omitted, Codex uses its configured/default local model. Prefer setting an explicit supported model for reproducible deployments. |
+| `SLACKS_LLM_BASE_URL` | provider default | Required for `openai_compatible`; overrides the default OpenAI/Anthropic base. Use `https://openrouter.ai/api/v1` for OpenRouter. **Not used by `codex`**; direct OpenAI API base URL overrides, OpenRouter, and local OpenAI-compatible runtimes remain the `openai` / `openai_compatible` paths. |
+| `SLACKS_LLM_TIMEOUT_SECONDS` | `30` | Per-attempt wall-clock timeout (0–600). Tunable. |
+| `SLACKS_LLM_MAX_RETRIES` | `2` | Additional attempts after the first, on transient failures only (0–10). Tunable. |
+| `SLACKS_LLM_SUPPORTS_VISION` | `false` | Declares the configured model as vision-capable. Required to be `true` before `images` may be supplied; otherwise image input fails fast. |
 
 Invalid or inconsistent configuration fails fast at load with a `ValidationError`:
 `openai`/`anthropic` without a key or model; `openai_compatible` without a base URL
@@ -84,12 +84,12 @@ by the provider invocation and surfaced as `LLMConfigurationError`.
 
 ### `openai_compatible` keyless (local / LAN — zero per-token cost)
 
-`FATTY_LLM_PROVIDER=openai_compatible` with no `FATTY_LLM_API_KEY` is the
+`SLACKS_LLM_PROVIDER=openai_compatible` with no `SLACKS_LLM_API_KEY` is the
 intended path for a **local or LAN model runtime** — Ollama, LM Studio, or vLLM.
 These runtimes expose the OpenAI Chat Completions wire format locally and require no
-authentication. Set `FATTY_LLM_BASE_URL` to your runtime's endpoint (e.g.
-`http://localhost:11434/v1` for Ollama) and `FATTY_LLM_MODEL` to the loaded model
-name; leave `FATTY_LLM_API_KEY` unset. The adapter sends no `Authorization` header.
+authentication. Set `SLACKS_LLM_BASE_URL` to your runtime's endpoint (e.g.
+`http://localhost:11434/v1` for Ollama) and `SLACKS_LLM_MODEL` to the loaded model
+name; leave `SLACKS_LLM_API_KEY` unset. The adapter sends no `Authorization` header.
 
 The existing base-URL scheme expectations (SSRF/egress posture) are unchanged;
 keyless only affects whether an `Authorization` header is emitted — it does not
@@ -100,10 +100,10 @@ relax which URLs are reachable.
 OpenRouter is supported as a keyed `openai_compatible` endpoint:
 
 ```
-FATTY_LLM_PROVIDER=openai_compatible
-FATTY_LLM_BASE_URL=https://openrouter.ai/api/v1
-FATTY_LLM_MODEL=deepseek/deepseek-v4-pro
-FATTY_LLM_API_KEY=<openrouter key>
+SLACKS_LLM_PROVIDER=openai_compatible
+SLACKS_LLM_BASE_URL=https://openrouter.ai/api/v1
+SLACKS_LLM_MODEL=deepseek/deepseek-v4-pro
+SLACKS_LLM_API_KEY=<openrouter key>
 ```
 
 `deepseek/deepseek-v4-pro` is the intended local dogfooding choice at the time
@@ -118,24 +118,24 @@ Optional live smoke, skipped without a key:
 
 ```
 cd backend
-FATTY_OPENROUTER_SMOKE_API_KEY=<openrouter key> \
+SLACKS_OPENROUTER_SMOKE_API_KEY=<openrouter key> \
   uv run pytest tests/llm/test_openrouter_smoke.py
 ```
 
 The smoke uses a neutral synthetic prompt and tiny schema; it never sends diary
-text. `FATTY_OPENROUTER_SMOKE_MODEL` may override the default
+text. `SLACKS_OPENROUTER_SMOKE_MODEL` may override the default
 `deepseek/deepseek-v4-pro`.
 
 ### `claude_code` (subscription, no per-token billing)
 
-`FATTY_LLM_PROVIDER=claude_code` runs the estimator through a **locally installed,
+`SLACKS_LLM_PROVIDER=claude_code` runs the estimator through a **locally installed,
 first-party Claude Code** session in headless mode. A self-hoster who already pays
 for a Claude monthly plan pays nothing per token.
 
-- **No `FATTY_LLM_API_KEY`.** Claude Code owns its own authentication
+- **No `SLACKS_LLM_API_KEY`.** Claude Code owns its own authentication
   (`claude login`); Slacks supplies no key and stores, reads, or logs **no**
   operator credential. A supplied key is ignored.
-- **`FATTY_LLM_MODEL` is optional.** Claude Code selects the model from the active
+- **`SLACKS_LLM_MODEL` is optional.** Claude Code selects the model from the active
   session/plan when the value is empty; a supplied model is passed through
   (`--model`).
 - **All tools disabled / sandboxed.** The invocation runs with every Claude Code
@@ -145,41 +145,41 @@ for a Claude monthly plan pays nothing per token.
   Code's own model call.
 - **Trust boundary is identical.** Claude Code output is an untrusted analyst's
   output, returned only after it validates against the caller's schema.
-- `FATTY_LLM_TIMEOUT_SECONDS` and `FATTY_LLM_MAX_RETRIES` apply unchanged.
+- `SLACKS_LLM_TIMEOUT_SECONDS` and `SLACKS_LLM_MAX_RETRIES` apply unchanged.
 - Operator setup, installation, and health diagnostics are out of scope here
   (tracked separately); image input is **not** supported via `claude_code`.
 
 ### `codex` (first-party Codex CLI subprocess)
 
-`FATTY_LLM_PROVIDER=codex` runs the estimator through a **locally installed,
+`SLACKS_LLM_PROVIDER=codex` runs the estimator through a **locally installed,
 first-party Codex CLI** subprocess using documented `codex exec`
 non-interactive mode and JSON Schema structured output. This is not the OpenAI
 API provider, not an OpenAI-compatible HTTP endpoint, not OpenRouter, not a
 keyless local OpenAI-compatible runtime, not Codex CLI's `--oss` local-provider
 mode, and not `claude_code`.
 
-- **Auth is owned by Codex CLI.** `FATTY_LLM_API_KEY` is optional. When it is
+- **Auth is owned by Codex CLI.** `SLACKS_LLM_API_KEY` is optional. When it is
   absent, the provider uses Codex CLI's normal saved auth under `CODEX_HOME`
   (for example an operator-run `codex login`, browser/device auth, or
   `codex login --with-access-token`). `CODEX_ACCESS_TOKEN` is an operator setup
   path for seeding Codex auth into `CODEX_HOME`; it is not a new Slacks secret
   field.
-- **Child-only API key handling.** When `FATTY_LLM_API_KEY` is configured for
+- **Child-only API key handling.** When `SLACKS_LLM_API_KEY` is configured for
   `codex`, the adapter may expose it only to the `codex exec` child process as
   `CODEX_API_KEY` for that invocation. It must never appear in argv, logs,
   client responses, persisted config, transcripts, or any non-Codex subprocess
   environment.
-- **Model selection.** `FATTY_LLM_MODEL` is optional. When set, the adapter
+- **Model selection.** `SLACKS_LLM_MODEL` is optional. When set, the adapter
   passes it as `--model`. When omitted, Codex uses the configured/default local
   model available to that Codex installation. Operators should set an explicit
   supported model for reproducible self-hosted deployments. This contract adds no
   Slacks reasoning/config env var; any future reasoning or Codex tuning belongs
   to provider-owned Codex setup and must preserve the safe invocation boundary
   below.
-- **No base URL.** `FATTY_LLM_BASE_URL` is ignored by `codex`. Direct OpenAI API
-  calls still use `FATTY_LLM_PROVIDER=openai`; OpenRouter, Ollama, LM Studio,
+- **No base URL.** `SLACKS_LLM_BASE_URL` is ignored by `codex`. Direct OpenAI API
+  calls still use `SLACKS_LLM_PROVIDER=openai`; OpenRouter, Ollama, LM Studio,
   vLLM, Together, and other OpenAI-compatible HTTP runtimes still use
-  `FATTY_LLM_PROVIDER=openai_compatible`.
+  `SLACKS_LLM_PROVIDER=openai_compatible`.
 - **Safe subprocess boundary.** The adapter must run `codex exec` from a
   dedicated empty working directory, not the Slacks repository, and use the
   `--skip-git-repo-check` path when needed for that one-off directory. The prompt
@@ -204,7 +204,7 @@ mode, and not `claude_code`.
   the caller's requested schema. Codex must not receive user profile, goal, or
   body-metric context beyond the prompt the estimator already sends to every
   provider.
-- **Images.** When `FATTY_LLM_SUPPORTS_VISION=true`, `codex` must support the
+- **Images.** When `SLACKS_LLM_SUPPORTS_VISION=true`, `codex` must support the
   existing `images` argument by writing image bytes to temporary files and
   attaching them to the initial prompt through Codex CLI image attachments
   (`--image` / `-i`). Codex support is contracted for `image/jpeg` and
@@ -270,7 +270,7 @@ requested Pydantic schema maps to `StructuredOutputValidationError`. All
 diagnostics remain content-free: no raw prompt, image data, stdout, stderr,
 schema-invalid output, key, auth token, or saved-auth material may be included.
 
-Transient errors are retried up to `FATTY_LLM_MAX_RETRIES` additional attempts
+Transient errors are retried up to `SLACKS_LLM_MAX_RETRIES` additional attempts
 with a short jittered exponential backoff between each attempt (base 0.5 s, cap
 8 s, full-jitter). Once the retry budget is exhausted the last transient error
 propagates.
@@ -291,7 +291,7 @@ provider = build_provider(load_llm_settings())
 result = provider.structured_completion("one medium apple", Candidate)
 # result is a validated Candidate, or an LLM* error was raised.
 
-# With an image (v2 — requires FATTY_LLM_SUPPORTS_VISION=true):
+# With an image (v2 — requires SLACKS_LLM_SUPPORTS_VISION=true):
 image = ImageInput(data=jpeg_bytes, media_type="image/jpeg")
 result = provider.structured_completion(
     "extract the nutrition facts", Candidate, images=[image]
@@ -301,37 +301,43 @@ result = provider.structured_completion(
 
 ## Migration / Compatibility
 
-- The `FATTY_LLM_` variable names are a self-host contract (FTY-072 docs).
+- The `SLACKS_LLM_` variable names are a self-host contract (FTY-072 docs).
+- **Brand cutover (FTY-334): mechanical rename, no semantic change.** The
+  LLM-provider environment variables documented here now use the `SLACKS_LLM_`
+  prefix, renamed as part of the repo-wide brand cutover to Slacks. This is not
+  a contract version bump — the provider set, every variable's meaning,
+  defaults, and the `structured_completion` signature are all unchanged; only
+  the `SLACKS_` prefix is new.
 - The `structured_completion(prompt, schema) -> validated object` signature is
   the estimator contract consumed by FTY-042.
 - **v2 is backward-compatible.** `images` is a keyword-only argument defaulting
   to `None`; existing text-only callers (FTY-042) are unaffected and their
-  requests are byte-for-byte identical. The new `FATTY_LLM_SUPPORTS_VISION`
+  requests are byte-for-byte identical. The new `SLACKS_LLM_SUPPORTS_VISION`
   variable defaults to `false`, so existing deployments behave exactly as in v1.
 - Adding a provider means adding an adapter behind the same interface; the
   signature and env-var contract stay stable.
 - **v3 is backward-compatible.** `claude_code` is a new opt-in
-  `FATTY_LLM_PROVIDER` value; the existing providers, every `FATTY_LLM_*`
+  `SLACKS_LLM_PROVIDER` value; the existing providers, every `SLACKS_LLM_*`
   variable, and the `structured_completion` signature are unchanged. The only
   relaxation is scoped to `claude_code`: it needs no key and its model is
   optional.
-- **v4 is backward-compatible.** `FATTY_LLM_API_KEY` becomes optional for
+- **v4 is backward-compatible.** `SLACKS_LLM_API_KEY` becomes optional for
   `openai_compatible` only (keyless local endpoints — Ollama/LM Studio/vLLM).
   `openai` and `anthropic` still require a key; `openai_compatible` still requires
-  `FATTY_LLM_BASE_URL` and `FATTY_LLM_MODEL`; all other variables and the
+  `SLACKS_LLM_BASE_URL` and `SLACKS_LLM_MODEL`; all other variables and the
   `structured_completion` signature are unchanged. A keyed `openai_compatible`
   deployment continues to work exactly as in v3.
 - **v5 is backward-compatible.** OpenRouter remains an `openai_compatible`
-  endpoint using the existing `FATTY_LLM_*` variables. The only wire difference
-  is host-scoped: when `FATTY_LLM_BASE_URL` is exactly the OpenRouter API root
+  endpoint using the existing `SLACKS_LLM_*` variables. The only wire difference
+  is host-scoped: when `SLACKS_LLM_BASE_URL` is exactly the OpenRouter API root
   (`https://openrouter.ai/api/v1`, trailing slash ignored), structured-output
   requests include the OpenRouter `provider.require_parameters=true` routing
   preference. Non-OpenRouter endpoints receive the same request shape as v4.
-- **v6 is backward-compatible.** `codex` is a new opt-in `FATTY_LLM_PROVIDER`
+- **v6 is backward-compatible.** `codex` is a new opt-in `SLACKS_LLM_PROVIDER`
   value. Existing `openai`, `anthropic`, `openai_compatible`, `claude_code`, and
   `fake` behavior is unchanged. `codex` adds its own optional
-  `FATTY_LLM_API_KEY` and optional `FATTY_LLM_MODEL` semantics, and it is the
-  only provider that ignores `FATTY_LLM_BASE_URL`. OpenAI API calls, keyed
+  `SLACKS_LLM_API_KEY` and optional `SLACKS_LLM_MODEL` semantics, and it is the
+  only provider that ignores `SLACKS_LLM_BASE_URL`. OpenAI API calls, keyed
   OpenRouter, keyless local OpenAI-compatible runtimes, and Claude Code keep
   their existing selectors and setup paths.
 - Per-provider structured-output mechanics (OpenAI JSON-schema `response_format`

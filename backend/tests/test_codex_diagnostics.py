@@ -99,13 +99,13 @@ def test_probe_codex_binary_present_with_saved_auth(tmp_path: Path) -> None:
     assert auth is True
 
 
-def test_probe_codex_binary_present_with_fatty_api_key(tmp_path: Path) -> None:
+def test_probe_codex_binary_present_with_slacks_api_key(tmp_path: Path) -> None:
     codex_home = tmp_path / "codex"
     codex_home.mkdir()
     env = {
-        "FATTY_LLM_PROVIDER": "codex",
+        "SLACKS_LLM_PROVIDER": "codex",
         "CODEX_HOME": str(codex_home),
-        "FATTY_LLM_API_KEY": "codex-child-key-must-not-leak",
+        "SLACKS_LLM_API_KEY": "codex-child-key-must-not-leak",
     }
     with patch("app.services.sources.shutil.which", side_effect=_which):
         binary, auth = _probe_codex(env)
@@ -133,7 +133,7 @@ def test_codex_enabled_when_selected_with_saved_auth(tmp_path: Path) -> None:
     codex_home = tmp_path / "codex"
     codex_home.mkdir()
     (codex_home / "auth.json").write_text("{}", encoding="utf-8")
-    env = {"FATTY_LLM_PROVIDER": "codex", "CODEX_HOME": str(codex_home)}
+    env = {"SLACKS_LLM_PROVIDER": "codex", "CODEX_HOME": str(codex_home)}
     with patch("app.services.sources.shutil.which", side_effect=_which):
         result = sources_service.list_source_capabilities(env)
     cap = _codex_cap(result)
@@ -146,7 +146,7 @@ def test_codex_available_false_when_binary_absent(tmp_path: Path) -> None:
     codex_home = tmp_path / "codex"
     codex_home.mkdir()
     (codex_home / "auth.json").write_text("{}", encoding="utf-8")
-    env = {"FATTY_LLM_PROVIDER": "codex", "CODEX_HOME": str(codex_home)}
+    env = {"SLACKS_LLM_PROVIDER": "codex", "CODEX_HOME": str(codex_home)}
     with patch("app.services.sources.shutil.which", return_value=None):
         result = sources_service.list_source_capabilities(env)
     cap = _codex_cap(result)
@@ -158,7 +158,7 @@ def test_codex_available_false_when_binary_absent(tmp_path: Path) -> None:
 def test_codex_available_false_when_no_auth(tmp_path: Path) -> None:
     codex_home = tmp_path / "codex"
     codex_home.mkdir()
-    env = {"FATTY_LLM_PROVIDER": "codex", "CODEX_HOME": str(codex_home)}
+    env = {"SLACKS_LLM_PROVIDER": "codex", "CODEX_HOME": str(codex_home)}
     with patch("app.services.sources.shutil.which", side_effect=_which):
         result = sources_service.list_source_capabilities(env)
     cap = _codex_cap(result)
@@ -167,13 +167,13 @@ def test_codex_available_false_when_no_auth(tmp_path: Path) -> None:
     assert cap.available is False
 
 
-def test_codex_available_true_with_fatty_api_key(tmp_path: Path) -> None:
+def test_codex_available_true_with_slacks_api_key(tmp_path: Path) -> None:
     codex_home = tmp_path / "codex"
     codex_home.mkdir()
     env = {
-        "FATTY_LLM_PROVIDER": "codex",
+        "SLACKS_LLM_PROVIDER": "codex",
         "CODEX_HOME": str(codex_home),
-        "FATTY_LLM_API_KEY": "codex-child-key-must-not-leak",
+        "SLACKS_LLM_API_KEY": "codex-child-key-must-not-leak",
     }
     with patch("app.services.sources.shutil.which", side_effect=_which):
         result = sources_service.list_source_capabilities(env)
@@ -187,7 +187,7 @@ def test_codex_available_true_not_selected(tmp_path: Path) -> None:
     codex_home = tmp_path / "codex"
     codex_home.mkdir()
     (codex_home / "auth.json").write_text("{}", encoding="utf-8")
-    env = {"FATTY_LLM_PROVIDER": "fake", "CODEX_HOME": str(codex_home)}
+    env = {"SLACKS_LLM_PROVIDER": "fake", "CODEX_HOME": str(codex_home)}
     with patch("app.services.sources.shutil.which", side_effect=_which):
         result = sources_service.list_source_capabilities(env)
     cap = _codex_cap(result)
@@ -200,9 +200,9 @@ def test_codex_ignores_generic_api_key_when_not_selected(tmp_path: Path) -> None
     codex_home = tmp_path / "codex"
     codex_home.mkdir()
     env = {
-        "FATTY_LLM_PROVIDER": "anthropic",
-        "FATTY_LLM_API_KEY": "anthropic-key-must-not-count-as-codex-auth",
-        "FATTY_LLM_MODEL": "claude-3-5-haiku-20241022",
+        "SLACKS_LLM_PROVIDER": "anthropic",
+        "SLACKS_LLM_API_KEY": "anthropic-key-must-not-count-as-codex-auth",
+        "SLACKS_LLM_MODEL": "claude-3-5-haiku-20241022",
         "CODEX_HOME": str(codex_home),
     }
     with patch("app.services.sources.shutil.which", side_effect=_which):
@@ -226,9 +226,9 @@ def test_no_secret_or_path_in_codex_descriptor(
     (codex_home / "auth.json").write_text(json.dumps(auth), encoding="utf-8")
 
     env = {
-        "FATTY_LLM_PROVIDER": "codex",
+        "SLACKS_LLM_PROVIDER": "codex",
         "CODEX_HOME": str(codex_home),
-        "FATTY_LLM_API_KEY": "codex-child-key-must-not-leak",
+        "SLACKS_LLM_API_KEY": "codex-child-key-must-not-leak",
     }
     with patch("app.services.sources.shutil.which", side_effect=_which):
         result = sources_service.list_source_capabilities(env)

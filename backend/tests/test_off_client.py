@@ -21,6 +21,7 @@ from app.estimator.hardened_fetch import (
     FetchTransientError,
 )
 from app.estimator.off import (
+    DEFAULT_OFF_USER_AGENT,
     OFF_SOURCE,
     OffClient,
     OffResponseError,
@@ -121,7 +122,9 @@ def test_lookup_sends_only_normalized_barcode_and_user_agent() -> None:
     call = transport.calls[0]
     assert "0123456789012" in call["url"]
     # A non-secret identifying user-agent is sent; no api key, no personal context.
-    assert call["headers"]["User-Agent"]
+    # The default outbound identity is the brand user-agent `Slacks/1.0` (OFF etiquette).
+    assert call["headers"]["User-Agent"] == DEFAULT_OFF_USER_AGENT
+    assert call["headers"]["User-Agent"].startswith("Slacks/1.0")
     assert "X-Api-Key" not in call["headers"]
     # Only the barcode and the static field list are in the URL — nothing else.
     assert "012-345" not in call["url"]
@@ -255,7 +258,7 @@ def test_off_enabled_by_default_and_available_without_credentials() -> None:
 
 def test_load_off_settings_reads_env_prefix() -> None:
     settings = load_off_settings(
-        {"FATTY_OFF_ENABLED": "false", "FATTY_OFF_USER_AGENT": "Custom/2.0 (contact)"}
+        {"SLACKS_OFF_ENABLED": "false", "SLACKS_OFF_USER_AGENT": "Custom/2.0 (contact)"}
     )
 
     assert settings.enabled is False

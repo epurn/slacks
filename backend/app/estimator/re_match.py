@@ -1,7 +1,7 @@
 """Item re-match capability: list alternative sources + re-resolve (FTY-093).
 
 The "Change match" lever of the correction sheet: a user whose entry matched the
-**wrong food** (Fatty heard "turkey", matched chicken) fixes it without
+**wrong food** (Slacks heard "turkey", matched chicken) fixes it without
 delete-and-retype. This estimator-boundary capability owns the two cohesive halves
 of that one capability:
 
@@ -77,7 +77,7 @@ from app.models.identity import User
 PER_100G_BASIS: Final[str] = "per_100g"
 
 #: Upper bound on the aggregated candidate list. The provider fan-out is already
-#: bounded (``FATTY_FDC_MAX_RESULTS``); this caps the combined result so the listing
+#: bounded (``SLACKS_FDC_MAX_RESULTS``); this caps the combined result so the listing
 #: stays a short, scannable set even as more candidate providers are added.
 MAX_ALTERNATIVES: Final[int] = 10
 

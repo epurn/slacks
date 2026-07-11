@@ -18,7 +18,7 @@ kcal/kg/hour``::
 
     gross_kcal = MET × weight_kg × duration_hours
 
-But Fatty's daily allowance already counts resting energy in TDEE (RMR × the
+But Slacks's daily allowance already counts resting energy in TDEE (RMR × the
 baseline activity multiplier; see :mod:`app.estimator.calculator`). Adding the
 *gross* burn on top would double-count the resting component the user would have
 spent anyway. We therefore credit only the energy **above rest** — the ``(MET − 1)``
