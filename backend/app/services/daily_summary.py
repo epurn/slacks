@@ -8,17 +8,27 @@ This module owns three contracts:
    router renders as ``404`` so the API never confirms another user's data exists.
 
 2. **Finalized-state filtering.** The exact filter predicate, kept explicit so
-   the rule is auditable: ``log_events.voided_at IS NULL AND log_events.status IN
-   ('completed', 'partially_resolved') AND derived_items.status == 'resolved' AND
-   current_value IS NOT NULL``. Items on ``pending`` / ``processing`` / ``failed`` /
-   ``needs_clarification`` events and any ``unresolved`` (uncosted) item are
-   excluded so pending/failed work never inflates a total. Only ``completed``
-   events carry committed resolved items (FTY-043/FTY-044 commit items in the
-   same transaction as the terminal status). A **voided** event (FTY-321) is
-   excluded outright — a mislogged entry no longer counts toward the day — even
-   though its rows are retained; the same ``voided_at IS NULL`` clause gates the
-   ``uncounted_entries`` predicates so a voided clarification/proposal drops from
-   that count too.
+   the rule is auditable: ``log_events.voided_at IS NULL AND
+   <finalized-event predicate> AND derived_items.status == 'resolved' AND
+   current_value IS NOT NULL``. The finalized-event predicate keys on **committed
+   resolved items**, not solely on the parent event's transient status
+   (:func:`_finalized_event_condition`): a ``resolved`` item counts when its event
+   is ``completed`` or ``partially_resolved`` **or** is momentarily ``processing``
+   **as an answer-triggered scoped re-estimate of a previously-partial event**
+   (FTY-349) — discriminated by the presence of ≥1 already-committed ``resolved``
+   sibling on that event. Items on ``pending`` / ``failed`` /
+   ``needs_clarification`` events, on a **first-pass** ``processing`` event (no
+   committed resolved item — nothing counts early), and any ``unresolved``
+   (uncosted) item are excluded so pending/failed/in-flight work never inflates a
+   total. Committed resolved items appear on ``completed`` and
+   ``partially_resolved`` events (FTY-043/FTY-044/FTY-278 commit items in the same
+   transaction as the terminal status); the scoped-re-estimate clause keeps those
+   siblings counted for the whole window while the event flips to ``processing`` to
+   re-cost the still-open component, so the day total never dips and reappears
+   (calm-by-default). A **voided** event (FTY-321) is excluded outright — a
+   mislogged entry no longer counts toward the day — even though its rows are
+   retained; the same ``voided_at IS NULL`` clause gates the ``uncounted_entries``
+   predicates so a voided clarification/proposal drops from that count too.
 
 3. **Day / timezone resolution.** ``day`` is interpreted in the user's profile
    timezone (falling back to UTC). Items are attributed to a day by their owning
@@ -47,8 +57,8 @@ from collections.abc import Iterable
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import ColumnElement, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import ColumnElement, and_, func, or_, select
+from sqlalchemy.orm import Session, aliased
 
 from app.enums import DerivedItemStatus, LogEventStatus
 from app.models.derived import (
@@ -202,10 +212,85 @@ def _authorize(owner_id: uuid.UUID, current_user: User) -> None:
 #
 # Both the single-day and range read paths build their queries from these helpers
 # so the documented finalized filter is defined exactly once. The predicate:
-# ``log_events.status IN ('completed', 'partially_resolved')`` AND
-# ``derived_*_items.status == 'resolved'`` AND the costed-value column
-# ``IS NOT NULL``, windowed by the owning log event's ``created_at`` over
-# ``[start, end)``. Day attribution is the event's ``created_at``.
+# ``_finalized_event_condition()`` AND ``derived_*_items.status == 'resolved'`` AND
+# the costed-value column ``IS NOT NULL``, windowed by the owning log event's
+# ``created_at`` over ``[start, end)``. Day attribution is the event's
+# ``created_at``.
+
+
+def _has_committed_resolved_item() -> ColumnElement[bool]:
+    """True when the current ``LogEvent`` row already carries ≥1 committed resolved item.
+
+    This is the FTY-349 discriminator that separates an **answer-triggered scoped
+    re-estimate of a previously-partial event** (which keeps its committed
+    ``resolved`` siblings while it momentarily flips ``partially_resolved →
+    processing`` to re-cost the open component) from a **first-pass** ``processing``
+    estimation (which has committed nothing yet). It is a **committed resolved
+    item**, not a new status: by the FTY-043/044/278 commit rule a resolved item is
+    only ever committed on a ``completed`` / ``partially_resolved`` terminal
+    transition, so a first-pass ``processing`` event has zero of them and never
+    counts early.
+
+    A correlated ``EXISTS`` over the owning event's own derived items (food **or**
+    exercise), aliased so it never collides with the outer query's item join. A
+    committed resolved item is exactly a ``resolved`` item with a non-null headline
+    value — the same per-item gate the finalized filter applies.
+    """
+
+    food = aliased(DerivedFoodItem)
+    exercise = aliased(DerivedExerciseItem)
+    food_exists = (
+        select(1)
+        .where(
+            food.log_event_id == LogEvent.id,
+            food.status == DerivedItemStatus.RESOLVED,
+            food.calories.isnot(None),
+        )
+        .correlate(LogEvent)
+        .exists()
+    )
+    exercise_exists = (
+        select(1)
+        .where(
+            exercise.log_event_id == LogEvent.id,
+            exercise.status == DerivedItemStatus.RESOLVED,
+            exercise.active_calories.isnot(None),
+        )
+        .correlate(LogEvent)
+        .exists()
+    )
+    return or_(food_exists, exercise_exists)
+
+
+def _scoped_reestimate_processing() -> ColumnElement[bool]:
+    """A ``processing`` event that is a scoped re-estimate of a previously-partial event.
+
+    ``LogEvent.status == 'processing'`` **and** the event carries ≥1 already-committed
+    resolved sibling (:func:`_has_committed_resolved_item`). A first-pass
+    ``processing`` event fails the second clause, so nothing counts early (FTY-349).
+    """
+
+    return and_(
+        LogEvent.status == LogEventStatus.PROCESSING,
+        _has_committed_resolved_item(),
+    )
+
+
+def _finalized_event_condition() -> ColumnElement[bool]:
+    """Event-level gate: whose committed resolved items count toward the day total.
+
+    An event's ``resolved`` items count when the event is terminal-finalized
+    (``completed`` / ``partially_resolved``) **or** is momentarily ``processing`` as
+    an answer-triggered scoped re-estimate of a previously-partial event (FTY-349) —
+    so a partial event's already-counted siblings stay counted for the whole
+    re-estimate window and the total never dips and reappears. Keys on committed
+    resolved items, not on the transient event status alone.
+    """
+
+    return or_(
+        LogEvent.status.in_(_FINALIZED_EVENT_STATUSES),
+        _scoped_reestimate_processing(),
+    )
 
 
 def _food_window_conditions(
@@ -217,7 +302,7 @@ def _food_window_conditions(
         DerivedFoodItem.user_id == owner_id,
         LogEvent.user_id == owner_id,
         LogEvent.voided_at.is_(None),
-        LogEvent.status.in_(_FINALIZED_EVENT_STATUSES),
+        _finalized_event_condition(),
         DerivedFoodItem.status == DerivedItemStatus.RESOLVED,
         DerivedFoodItem.calories.isnot(None),
         LogEvent.created_at >= start_utc,
@@ -234,7 +319,7 @@ def _exercise_window_conditions(
         DerivedExerciseItem.user_id == owner_id,
         LogEvent.user_id == owner_id,
         LogEvent.voided_at.is_(None),
-        LogEvent.status.in_(_FINALIZED_EVENT_STATUSES),
+        _finalized_event_condition(),
         DerivedExerciseItem.status == DerivedItemStatus.RESOLVED,
         DerivedExerciseItem.active_calories.isnot(None),
         LogEvent.created_at >= start_utc,
@@ -251,13 +336,17 @@ def _exercise_window_conditions(
 #      ``created_at``.
 #   2. unanswered ITEM-SCOPED QUESTIONS on ``partially_resolved`` events — one per
 #      unresolved component that owns an open question; resolved siblings count in
-#      intake instead.
+#      intake instead. This also holds for the whole window while a *sibling*
+#      answer flips the event ``partially_resolved → processing`` for a scoped
+#      re-estimate (FTY-349): a still-open question keeps its uncounted entry and
+#      drops only when its own component resolves.
 #   3. ``proposed`` DERIVED FOOD ITEMS (FTY-196) — a costed-but-unconfirmed label
 #      parse, excluded from every finalized read by construction. Attributed by the
 #      owning event's ``created_at`` (the same day rule ``intake`` uses).
-# Deliberately excluded: ``pending`` / ``processing`` events (the estimator is
-# still working — the client's loading path, not "awaiting details"), ``failed``
-# events (a distinct retry state), and finalized entries (already in ``intake``).
+# Deliberately excluded: ``pending`` events and **first-pass** ``processing`` events
+# (the estimator is still working — the client's loading path, not "awaiting
+# details"), ``failed`` events (a distinct retry state), and finalized entries
+# (already in ``intake``).
 
 
 def _needs_clarification_window_conditions(
@@ -277,14 +366,27 @@ def _needs_clarification_window_conditions(
 def _partial_question_window_conditions(
     owner_id: uuid.UUID, start_utc: datetime, end_utc: datetime
 ) -> tuple[ColumnElement[bool], ...]:
-    """WHERE conditions selecting open item-scoped questions on partial events."""
+    """WHERE conditions selecting open item-scoped questions on partial events.
+
+    The counting unit is unchanged — one per still-`unresolved` component that owns
+    an open (unanswered) item-scoped question. The event-status gate mirrors the
+    finalized filter's scoped-re-estimate clause (FTY-349) so a **still-open**
+    question does not spuriously drop while a *sibling* question's answer flips the
+    event ``partially_resolved → processing``; it stays counted for the whole
+    re-estimate window and drops only when its own component resolves. A first-pass
+    ``processing`` event has no committed resolved sibling (and no clarification
+    questions yet), so it adds nothing here.
+    """
 
     answered_ids = select(ClarificationAnswer.question_id)
     return (
         ClarificationQuestion.user_id == owner_id,
         LogEvent.user_id == owner_id,
         LogEvent.voided_at.is_(None),
-        LogEvent.status == LogEventStatus.PARTIALLY_RESOLVED,
+        or_(
+            LogEvent.status == LogEventStatus.PARTIALLY_RESOLVED,
+            _scoped_reestimate_processing(),
+        ),
         ClarificationQuestion.derived_food_item_id.isnot(None),
         ClarificationQuestion.id.not_in(answered_ids),
         LogEvent.created_at >= start_utc,

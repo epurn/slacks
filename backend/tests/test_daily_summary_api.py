@@ -24,7 +24,7 @@ from sqlalchemy.engine import Engine
 
 from app.db import create_session_factory
 from app.enums import DerivedItemStatus, LogEventStatus
-from app.models.derived import DerivedExerciseItem, DerivedFoodItem
+from app.models.derived import ClarificationQuestion, DerivedExerciseItem, DerivedFoodItem
 from app.models.log_events import LogEvent
 from app.models.targets import DailyTarget, Goal
 
@@ -488,14 +488,21 @@ def test_target_macros_are_int_grams_distinct_from_float_intake_macros(
 
 
 def test_non_completed_events_are_excluded(client: TestClient, db_engine: Engine) -> None:
-    """Items on pending/processing/failed/needs_clarification events are not counted."""
+    """Items on pending/failed/needs_clarification events are not counted.
+
+    Even a stray ``resolved`` item on one of these non-finalized statuses never
+    inflates a total — the finalized-event gate only ever admits ``completed`` /
+    ``partially_resolved``, plus the scoped-re-estimate ``processing`` case covered
+    separately (FTY-349). ``processing`` is exercised in its own tests because the
+    new rule discriminates a first-pass from a scoped re-estimate by committed
+    resolved siblings.
+    """
 
     user_id, auth = _register(client, "statuses@example.com")
     today = datetime.now(UTC).date()
 
     for non_final_status in (
         LogEventStatus.PENDING,
-        LogEventStatus.PROCESSING,
         LogEventStatus.FAILED,
         LogEventStatus.NEEDS_CLARIFICATION,
     ):
@@ -511,9 +518,238 @@ def test_non_completed_events_are_excluded(client: TestClient, db_engine: Engine
 
     assert resp.status_code == 200
     body = resp.json()
-    # No completed events, so totals are zero
+    # No finalized events, so totals are zero
     assert body["intake"]["calories"] == 0.0
     assert body["exercise"]["active_calories"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# FTY-349: the day total is stable while an item-scoped answer re-estimates
+# ---------------------------------------------------------------------------
+
+
+def _seed_partial_like_event(
+    db_engine: Engine,
+    user_id: str,
+    *,
+    status: str,
+    created_at: datetime | None = None,
+) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+    """Seed a mixed log at ``status`` with a committed ``resolved`` sibling
+    (180 kcal), a still-``unresolved`` component, and one open item-scoped question
+    on it. Returns ``(event_id, sibling_id, unresolved_id)``.
+
+    At ``partially_resolved`` this is the FTY-278 pinned partial state; at
+    ``processing`` it is the exact DB state mid answer-triggered scoped re-estimate
+    (the event has flipped ``partially_resolved → processing`` to re-cost the open
+    component while the committed sibling is left untouched — FTY-349).
+    """
+
+    factory = create_session_factory(db_engine)
+    with factory() as session:
+        event = LogEvent(
+            user_id=uuid.UUID(user_id),
+            raw_text="peanut butter toast and milk amount pending",
+            status=status,
+            **({"created_at": created_at} if created_at is not None else {}),
+        )
+        session.add(event)
+        session.flush()
+        sibling = DerivedFoodItem(
+            log_event_id=event.id,
+            user_id=uuid.UUID(user_id),
+            name="peanut butter toast",
+            quantity_text="1 slice",
+            status=DerivedItemStatus.RESOLVED,
+            calories=180.0,
+            protein_g=7.0,
+            carbs_g=22.0,
+            fat_g=8.0,
+            calories_estimated=180.0,
+        )
+        unresolved = DerivedFoodItem(
+            log_event_id=event.id,
+            user_id=uuid.UUID(user_id),
+            name="milk",
+            quantity_text="",
+            status=DerivedItemStatus.UNRESOLVED,
+        )
+        session.add_all([sibling, unresolved])
+        session.flush()
+        session.add(
+            ClarificationQuestion(
+                log_event_id=event.id,
+                user_id=uuid.UUID(user_id),
+                question_text="How much milk?",
+                options=["a splash", "1/2 cup", "1 cup"],
+                derived_food_item_id=unresolved.id,
+                position=0,
+            )
+        )
+        session.commit()
+        return event.id, sibling.id, unresolved.id
+
+
+def test_committed_sibling_stays_counted_during_scoped_reestimate(
+    client: TestClient, db_engine: Engine
+) -> None:
+    """A committed resolved sibling keeps counting while the event re-estimates.
+
+    The event has flipped ``partially_resolved → processing`` to re-cost its open
+    component (an answer is in flight). The already-committed sibling must stay in
+    ``intake`` and its still-open question in ``uncounted_entries`` — no surface
+    dips and reappears (FTY-349, calm-by-default).
+    """
+
+    user_id, auth = _register(client, "scoped-reestimate@example.com")
+    today = datetime.now(UTC).date()
+    _seed_partial_like_event(db_engine, user_id, status=LogEventStatus.PROCESSING)
+
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary",
+        headers={"Authorization": auth},
+        params={"day": str(today)},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    # The sibling is still counted while the event is ``processing``; the open
+    # component (unresolved, no calories) is not — the total is exactly the sibling,
+    # and its still-open question stays counted for the whole window.
+    assert body["intake"]["calories"] == 180.0
+    assert body["has_intake"] is True
+    assert body["uncounted_entries"] == 1
+
+
+def test_first_pass_processing_event_contributes_nothing(
+    client: TestClient, db_engine: Engine
+) -> None:
+    """A first-pass ``processing`` event (no committed resolved item) is excluded.
+
+    The estimator is still working its initial pass — nothing counts early. The
+    scoped-re-estimate clause is discriminated by a committed resolved sibling,
+    which a first-pass event never has (FTY-349).
+    """
+
+    user_id, auth = _register(client, "first-pass-processing@example.com")
+    today = datetime.now(UTC).date()
+
+    evt_id = _seed_completed_event(db_engine, user_id, status=LogEventStatus.PROCESSING)
+    # First-pass processing: only uncommitted, unresolved items exist.
+    _seed_food_item(
+        db_engine, user_id, evt_id, calories=None, item_status=DerivedItemStatus.UNRESOLVED
+    )
+    _seed_exercise_item(
+        db_engine, user_id, evt_id, active_calories=None, item_status=DerivedItemStatus.UNRESOLVED
+    )
+
+    resp = client.get(
+        f"/api/users/{user_id}/daily-summary",
+        headers={"Authorization": auth},
+        params={"day": str(today)},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["intake"]["calories"] == 0.0
+    assert body["exercise"]["active_calories"] == 0.0
+    assert body["has_intake"] is False
+    assert body["uncounted_entries"] == 0
+
+
+def test_day_total_is_flat_before_during_and_after_scoped_reestimate(
+    client: TestClient, db_engine: Engine
+) -> None:
+    """The day total is identical before, during, and after a scoped re-estimate.
+
+    Model the three moments as three DB states and assert the sibling's calories
+    hold flat across all of them, and that resolving the open component raises the
+    total by exactly the new item — never re-adding or double-counting the sibling.
+    """
+
+    user_id, auth = _register(client, "flat-total@example.com")
+    day = date(2026, 7, 10)
+    at = datetime(2026, 7, 10, 12, 0, tzinfo=UTC)
+    _set_timezone(client, user_id, auth, "UTC")
+
+    def _intake_and_uncounted() -> tuple[float, int]:
+        resp = client.get(
+            f"/api/users/{user_id}/daily-summary",
+            headers={"Authorization": auth},
+            params={"day": str(day)},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        return body["intake"]["calories"], body["uncounted_entries"]
+
+    # BEFORE: partially_resolved with a committed sibling + one open question.
+    event_id, _sibling_id, unresolved_id = _seed_partial_like_event(
+        db_engine, user_id, status=LogEventStatus.PARTIALLY_RESOLVED, created_at=at
+    )
+    assert _intake_and_uncounted() == (180.0, 1)
+
+    # DURING: an answer flips the event to processing to re-estimate; the sibling
+    # and the open component are untouched.
+    factory = create_session_factory(db_engine)
+    with factory() as session:
+        event = session.get(LogEvent, event_id)
+        assert event is not None
+        event.status = LogEventStatus.PROCESSING
+        session.commit()
+    assert _intake_and_uncounted() == (180.0, 1)
+
+    # AFTER: the open component resolves and the event completes; the total rises
+    # by exactly the newly-resolved item and the sibling is unchanged.
+    with factory() as session:
+        event = session.get(LogEvent, event_id)
+        item = session.get(DerivedFoodItem, unresolved_id)
+        assert event is not None and item is not None
+        item.status = DerivedItemStatus.RESOLVED
+        item.calories = 120.0
+        item.calories_estimated = 120.0
+        event.status = LogEventStatus.COMPLETED
+        session.commit()
+    assert _intake_and_uncounted() == (300.0, 0)
+
+
+def test_range_and_has_intake_match_single_day_during_scoped_reestimate(
+    client: TestClient, db_engine: Engine
+) -> None:
+    """The by-date/range read and ``has_intake`` match the single-day rule mid re-estimate.
+
+    Every intake surface keys on committed resolved items, so the range read and
+    ``has_intake`` keep the sibling counted during the scoped re-estimate exactly
+    like the single-day path — no surface dips (FTY-349).
+    """
+
+    user_id, auth = _register(client, "scoped-range-parity@example.com")
+    _set_timezone(client, user_id, auth, "UTC")
+    _seed_partial_like_event(
+        db_engine,
+        user_id,
+        status=LogEventStatus.PROCESSING,
+        created_at=datetime(2026, 7, 10, 12, 0, tzinfo=UTC),
+    )
+
+    single = client.get(
+        f"/api/users/{user_id}/daily-summary",
+        headers={"Authorization": auth},
+        params={"day": "2026-07-10"},
+    )
+    ranged = client.get(
+        f"/api/users/{user_id}/daily-summary/range",
+        headers={"Authorization": auth},
+        params={"from": "2026-07-10", "to": "2026-07-10"},
+    )
+
+    assert single.status_code == 200
+    assert ranged.status_code == 200
+    # The range read is the same read-model over a window: identical DTO per day.
+    assert ranged.json() == [single.json()]
+    day_row = ranged.json()[0]
+    assert day_row["intake"]["calories"] == 180.0
+    assert day_row["has_intake"] is True
+    assert day_row["uncounted_entries"] == 1
 
 
 def test_unresolved_items_are_excluded(client: TestClient, db_engine: Engine) -> None:

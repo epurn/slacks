@@ -120,7 +120,10 @@ settles four contract points and cross-links the affected contracts:
    leaves the already-resolved siblings **untouched** (never re-costing,
    re-creating, or replacing them), and completes the entry when the last
    component resolves, with no double-counting or duplicate item rows (the
-   job/run mechanics are `estimation-jobs.md` v3).
+   job/run mechanics are `estimation-jobs.md` v3). This `partially_resolved →
+   processing` flip is **invisible in the day total**: the daily-summary
+   finalized gate keys on committed resolved items, so the committed siblings stay
+   counted for the whole re-estimate window (FTY-349, `daily-summary.md`).
 
 **This version is a contract decision only; it edits no product code.** The
 downstream estimator/backend implementation is a required follow-up split (called
