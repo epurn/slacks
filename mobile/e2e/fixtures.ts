@@ -192,7 +192,7 @@ function todayAtDeviceLocal(hour: number, minute: number): string {
   return at.toISOString();
 }
 
-const E2E_RESOLVED_EVENT_INSTANT = todayAtDeviceLocal(11, 14);
+export const E2E_RESOLVED_EVENT_INSTANT = todayAtDeviceLocal(11, 14);
 
 /**
  * Synthetic needs_clarification event for the FTY-162 clarify flow. Pinned to

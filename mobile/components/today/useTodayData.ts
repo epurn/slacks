@@ -48,6 +48,7 @@ import { useDeleteEvent } from "./useDeleteEvent";
 import { useQuickAddSuggestions } from "./useQuickAddSuggestions";
 import { useEntryResolveBeats } from "./useEntryResolveBeats";
 import { useLabelProposal } from "./useLabelProposal";
+import { usePartialClarifications } from "./usePartialClarifications";
 import { useTodayScanner } from "./useTodayScanner";
 import { useTodaySubmit } from "./useTodaySubmit";
 import "./visualReviewEntryRows";
@@ -311,6 +312,17 @@ export function useTodayData({
     itemsByEvent,
   );
 
+  // Open item-scoped clarification questions for partially-resolved events
+  // (FTY-330): the by-date feed carries a partial event's committed siblings,
+  // but its still-open question is only on the status-gated clarification read.
+  // The timeline renders one pending-question row per open component from this.
+  const questionsByEvent = usePartialClarifications({
+    apiSession,
+    events,
+    getClarification,
+    reloadKey,
+  });
+
   // Label-capture proposal flow (FTY-064 + FTY-196/197): a legible upload lands
   // as an uncounted proposal the user confirms/adjusts before it counts.
   const {
@@ -567,6 +579,7 @@ export function useTodayData({
     loadError,
     deleteError,
     itemsByEvent,
+    questionsByEvent,
     displayEvents,
     offlineStateById,
     resolveAnimIds,

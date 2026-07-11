@@ -9,6 +9,7 @@ import { type DerivedItem } from "@/api/derivedItems";
 import {
   answerClarification as answerClarificationApi,
   getLogEventClarification as getLogEventClarificationApi,
+  type ClarificationQuestionDTO,
   type LogEventDTO,
 } from "@/api/logEvents";
 import { type ClarificationData } from "@/components/CorrectionSheet";
@@ -16,7 +17,11 @@ import { type SheetMode } from "@/components/correction/useCorrectionSheet";
 import { type ApiSession } from "@/state/session";
 import { sortByNewest } from "@/state/today";
 
-import { clarificationPlaceholderItem, messageFor } from "./helpers";
+import {
+  clarificationPlaceholderItem,
+  messageFor,
+  questionPlaceholderItem,
+} from "./helpers";
 
 /**
  * The tapped correction/detail sheet target: the item plus its log phrase, and
@@ -112,17 +117,30 @@ export function useCorrectionSheet({
   // when it resolves (calm, no layout jump). A loading/empty/error read leaves the
   // generic prompt + free-text path intact — the user is never blocked.
   const openClarifySheet = useCallback(
-    (event: LogEventDTO) => {
+    (event: LogEventDTO, question?: ClarificationQuestionDTO) => {
+      // Item-scoped (FTY-330): the timeline already holds the specific open
+      // component's question, so open the sheet pre-targeted to it — the row
+      // that was tapped names that one component, and its answer must resolve
+      // that exact question id (not just "the first open question"). The
+      // event-level `needs_clarification` case passes no question and keeps the
+      // generic-prompt-then-fill behaviour below.
       setSheetTarget({
-        item: clarificationPlaceholderItem(event),
+        item: question
+          ? questionPlaceholderItem(event, question)
+          : clarificationPlaceholderItem(event),
         logPhrase: event.raw_text,
         needsClarification: true,
         eventId: event.id,
-        questionId: null,
-        clarificationData: { question: null, options: [] },
+        questionId: question ? question.id : null,
+        clarificationData: question
+          ? { question: question.text, options: question.options }
+          : { question: null, options: [] },
       });
       setSheetVisible(true);
       if (!apiSession) return;
+      // A specific item-scoped question is already fully in hand, so there is
+      // nothing to fetch — the sheet shows its question + chips immediately.
+      if (question) return;
       getClarification(apiSession, event.id).then(
         (result) => {
           const first = result.questions[0];

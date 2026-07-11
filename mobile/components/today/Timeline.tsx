@@ -10,7 +10,12 @@ import {
   type DerivedItem,
   type DerivedFoodItemDTO,
 } from "@/api/derivedItems";
-import { type LogEventDTO } from "@/api/logEvents";
+import {
+  type ClarificationQuestionDTO,
+  type LogEventDTO,
+} from "@/api/logEvents";
+
+import { type QuestionsByEvent } from "./usePartialClarifications";
 import { type OutboxSyncState } from "@/state/outbox";
 import { clusterByTime } from "@/state/today";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
@@ -27,6 +32,7 @@ import { type Phase } from "./helpers";
 export function Timeline({
   events,
   itemsByEvent,
+  questionsByEvent = {},
   offlineStateById,
   resolveAnimIds,
   onOpenItem,
@@ -44,6 +50,12 @@ export function Timeline({
 }: {
   events: readonly LogEventDTO[];
   itemsByEvent: Readonly<Record<string, readonly DerivedItem[]>>;
+  /**
+   * Open item-scoped clarification questions per partially-resolved event
+   * (FTY-330). The timeline renders one pending-question row per open component
+   * from the question `text`; empty for every non-partial event.
+   */
+  questionsByEvent?: QuestionsByEvent;
   /** Idempotency key → offline sync state for offline-queued rows (FTY-147). */
   offlineStateById: ReadonlyMap<string, OutboxSyncState>;
   /** Event ids whose value row should ease in — the entry-resolve beat (FTY-181). */
@@ -51,7 +63,15 @@ export function Timeline({
   onOpenItem?: (item: DerivedItem, logPhrase: string) => void;
   /** Reopen the confirm sheet for an uncounted label proposal (FTY-197). */
   onOpenProposal?: (item: DerivedFoodItemDTO) => void;
-  onOpenClarify?: (event: LogEventDTO) => void;
+  /**
+   * Open the clarify sheet for an event-level `needs_clarification` entry (no
+   * `question`), or pre-targeted to a specific item-scoped question on a
+   * `partially_resolved` entry (FTY-330).
+   */
+  onOpenClarify?: (
+    event: LogEventDTO,
+    question?: ClarificationQuestionDTO,
+  ) => void;
   /** Retry a failed parse as a fresh attempt (FTY-176). */
   onRetryFailed?: (event: LogEventDTO) => void;
   /** Prefill the composer with a failed entry's text to fix + resubmit (FTY-176). */
@@ -150,6 +170,7 @@ export function Timeline({
           key={cluster.anchorTime}
           cluster={cluster}
           itemsByEvent={itemsByEvent}
+          questionsByEvent={questionsByEvent}
           offlineStateById={offlineStateById}
           resolveAnimIds={resolveAnimIds}
           onOpenItem={onOpenItem}

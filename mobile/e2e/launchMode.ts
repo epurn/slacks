@@ -87,6 +87,17 @@ import {
   E2E_BARCODE_SUMMARY,
 } from './barcodeFixtures';
 import {
+  E2E_PARTIAL_RAW_TEXT,
+  E2E_PARTIAL_EVENT,
+  E2E_PARTIAL_CLARIFICATION,
+  E2E_PARTIAL_RESOLVED_ITEM,
+  E2E_PARTIAL_HUMMUS_ITEM,
+  E2E_PARTIAL_SUMMARY,
+  E2E_PARTIAL_PROCESSING_EVENT,
+  E2E_PARTIAL_COMPLETED_EVENT,
+  E2E_PARTIAL_RESOLVED_SUMMARY,
+} from './partialResolutionFixtures';
+import {
   isActiveVisualReviewPresetSignedOut,
   recordVisualReviewServed,
   resolveVisualReviewFetch,
@@ -244,6 +255,15 @@ export function createE2EMockFetch(): typeof fetch {
   // resolves the main delete entry). Keyed on its own raw_text.
   let pendingDeleteStage: 0 | 1 = 0;
   let pendingDeleteVoided = false;
+  // FTY-330 partial-resolution flow: 0 before the mixed log, 1 once it is
+  // created (partially_resolved — one committed sibling counted, one open
+  // item-scoped question). `partialAnswered` flips when the open component's
+  // answer round-trip lands, after which the SAME event completes in place (same
+  // id and sibling), the answered component becomes a counted row, and the open
+  // question clears. Keyed on its own raw_text so it never collides with the
+  // clarify "coffee" or any other phase machine.
+  let partialStage: 0 | 1 = 0;
+  let partialAnswered = false;
   // How phase 2 was reached — decides which day-list GET serves (see above).
   let resolvedVia: 'answer' | 'resubmit' | null = null;
   // FTY-183 correction flow: set once the saved food is submitted so GET
@@ -349,6 +369,22 @@ export function createE2EMockFetch(): typeof fetch {
           deleteStage === 1 && !deleteVoided ? [E2E_DELETE_ENTRY] : [],
         );
       }
+      // FTY-330 partial flow: the committed sibling (yogurt) is on the feed from
+      // the start; once the open component is answered its now-resolved sibling
+      // (hummus) joins the SAME event — the yogurt row is unchanged, proving the
+      // event completes in place with no duplicate row.
+      if (partialStage === 1) {
+        return json([
+          {
+            event: partialAnswered
+              ? E2E_PARTIAL_COMPLETED_EVENT
+              : E2E_PARTIAL_EVENT,
+            items: partialAnswered
+              ? [E2E_PARTIAL_RESOLVED_ITEM, E2E_PARTIAL_HUMMUS_ITEM]
+              : [E2E_PARTIAL_RESOLVED_ITEM],
+          },
+        ]);
+      }
       if (phase === 0) return json([]);
       if (phase === 1) return json([{ event: E2E_CLARIFY_EVENT, items: [] }]);
       return json([
@@ -428,6 +464,14 @@ export function createE2EMockFetch(): typeof fetch {
           pendingDeleteStage = 1;
           return json(E2E_PENDING_DELETE_EVENT, 201);
         }
+        // FTY-330 partial-resolution flow: the mixed log resolves straight to a
+        // partially_resolved event (one committed sibling, one open question).
+        // Keyed on its own raw_text so it never disturbs the clarify phase
+        // machine.
+        if (rawTextOf(init) === E2E_PARTIAL_RAW_TEXT) {
+          partialStage = 1;
+          return json(E2E_PARTIAL_EVENT, 201);
+        }
         if (phase === 0) {
           phase = 1;
           return json(E2E_CLARIFY_EVENT, 201);
@@ -464,6 +508,13 @@ export function createE2EMockFetch(): typeof fetch {
           dayEvents.push(E2E_PENDING_DELETE_EVENT);
         }
         return json(dayEvents);
+      }
+      // FTY-330 partial flow: the same event, partially_resolved until answered,
+      // then completed — same id and raw phrase (the no-duplicate proof).
+      if (partialStage === 1) {
+        return json([
+          partialAnswered ? E2E_PARTIAL_COMPLETED_EVENT : E2E_PARTIAL_EVENT,
+        ]);
       }
       if (phase === 0) return json([]);
       if (phase === 1) return json([E2E_CLARIFY_EVENT]);
@@ -503,14 +554,28 @@ export function createE2EMockFetch(): typeof fetch {
     // reflects the resolved, counting entry.
     if (pathEnd.endsWith('/clarification/answers')) {
       if (method === 'POST') {
+        // FTY-330 partial flow: answering the open component resolves the SAME
+        // event in place. It returns `processing` (the scoped re-estimate,
+        // FTY-349); the reads above then serve it completed with the answered
+        // sibling counted. Distinguished from the coffee clarify answer by the
+        // active partial stage (flows run in isolated launches).
+        if (partialStage === 1) {
+          partialAnswered = true;
+          return json(E2E_PARTIAL_PROCESSING_EVENT, 201);
+        }
         phase = 2;
         resolvedVia = 'answer';
         return json(E2E_CLARIFY_PROCESSING_EVENT, 201);
       }
     }
 
-    // /clarification — the clarify sheet's lazy question-read.
+    // /clarification — the clarify sheet's / partial timeline's lazy
+    // question-read. The partial flow serves its open component's question until
+    // it is answered, then an empty set (no open question remains).
     if (pathEnd.endsWith('/clarification')) {
+      if (partialStage === 1) {
+        return json(partialAnswered ? { questions: [] } : E2E_PARTIAL_CLARIFICATION);
+      }
       return json(E2E_CLARIFICATION);
     }
 
@@ -539,6 +604,11 @@ export function createE2EMockFetch(): typeof fetch {
       // day returns to zero — the hero drop is the running-app proof of removal.
       if (deleteStage === 1)
         return json(deleteVoided ? E2E_DAILY_SUMMARY : E2E_DELETE_SUMMARY);
+      // FTY-330 partial flow: the committed sibling counts immediately with one
+      // uncounted unit for the open question; answering counts the second
+      // sibling and clears the uncounted unit.
+      if (partialStage === 1)
+        return json(partialAnswered ? E2E_PARTIAL_RESOLVED_SUMMARY : E2E_PARTIAL_SUMMARY);
       return json(phase === 2 ? E2E_RESOLVED_SUMMARY : E2E_DAILY_SUMMARY);
     }
 
