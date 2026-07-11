@@ -3,6 +3,8 @@ import { act } from "react-test-renderer";
 import { TodayScreen } from "./TodayScreen";
 import { type FoodSuggestionDTO } from "@/api/foodSuggestions";
 import { type LogEventDTO } from "@/api/logEvents";
+import { type SavedFoodSearchResponse } from "@/api/savedFoods";
+import { TypeaheadSuggestionBar } from "@/components/TypeaheadSuggestionBar";
 import { mockReduceMotion } from "@/testUtils/reduceMotion";
 
 import {
@@ -271,6 +273,189 @@ describe("TodayScreen quick-add suggestion chips (FTY-341)", () => {
       );
     });
     expect(textContent(tree)).toContain("200");
+  });
+
+  it("still takes the estimator-skip path when Add is tapped before the hydration resolves", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const yogurt = savedFood({ id: "sf-1", name: "Greek yogurt", calories: 200 });
+    // The saved-food lookup stays in flight until the test resolves it — the
+    // exact window where a fast tap + Add used to fall back to the estimator.
+    let resolveLookup!: (response: SavedFoodSearchResponse) => void;
+    const searchSavedFoods = jest.fn().mockReturnValue(
+      new Promise<SavedFoodSearchResponse>((resolve) => {
+        resolveLookup = resolve;
+      }),
+    );
+    let resolveCreate!: (dto: LogEventDTO) => void;
+    const create = jest.fn().mockReturnValue(
+      new Promise<LogEventDTO>((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+    const getSuggestions = jest
+      .fn()
+      .mockResolvedValue({ items: [SAVED_SUGGESTION], limit: 8 });
+
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        create={create}
+        searchSavedFoods={searchSavedFoods}
+        getSuggestions={getSuggestions}
+        useActive={ACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    // Tap the chip and Add back-to-back, without letting the lookup resolve.
+    press(tree, "Suggestion: Greek yogurt");
+    press(tree, "Add entry");
+
+    // The submit joined the in-flight hydration instead of racing past it.
+    expect(create).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveLookup({ items: [yogurt], limit: 20 });
+    });
+
+    // Once hydrated, the joined submit went out with the saved food attached:
+    // synthetic resolved item, no estimator skeleton (FTY-053 skip path).
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+      "my usual yogurt",
+      expect.any(String),
+    );
+    expect(textContent(tree)).toContain("200");
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(false);
+
+    await act(async () => {
+      resolveCreate(
+        event({ id: "server-4", raw_text: "my usual yogurt", status: "pending" }),
+      );
+    });
+    expect(textContent(tree)).toContain("200");
+  });
+
+  it("drops a superseded chip's late hydration when another chip is tapped before submit", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const yogurt = savedFood({ id: "sf-1", name: "Greek yogurt", calories: 200 });
+    let resolveLookup!: (response: SavedFoodSearchResponse) => void;
+    const searchSavedFoods = jest.fn().mockReturnValue(
+      new Promise<SavedFoodSearchResponse>((resolve) => {
+        resolveLookup = resolve;
+      }),
+    );
+    const create = jest
+      .fn()
+      .mockResolvedValue(
+        event({ id: "server-5", raw_text: "black coffee", status: "pending" }),
+      );
+    const getSuggestions = jest.fn().mockResolvedValue({
+      items: [SAVED_SUGGESTION, HISTORY_SUGGESTION],
+      limit: 8,
+    });
+
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        create={create}
+        searchSavedFoods={searchSavedFoods}
+        getSuggestions={getSuggestions}
+        useActive={ACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    // Saved-food chip first (lookup in flight), then a history chip replaces
+    // the composer text before the lookup lands.
+    press(tree, "Suggestion: Greek yogurt");
+    press(tree, "Suggestion: Black coffee");
+    await act(async () => {
+      resolveLookup({ items: [yogurt], limit: 20 });
+    });
+
+    await act(async () => {
+      press(tree, "Add entry");
+    });
+
+    // The stale hydration never attaches to the new text: the history chip's
+    // submit takes the normal estimator path, no synthetic saved-food values.
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+      "black coffee",
+      expect.any(String),
+    );
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+    expect(textContent(tree)).not.toContain("200");
+  });
+
+  it("lets a typeahead selection supersede an in-flight chip hydration", async () => {
+    const load = jest.fn().mockResolvedValue([]);
+    const yogurt = savedFood({ id: "sf-1", name: "Greek yogurt", calories: 200 });
+    const oatmeal = savedFood({ id: "sf-2", name: "Oatmeal", calories: 350 });
+    let resolveLookup!: (response: SavedFoodSearchResponse) => void;
+    const searchSavedFoods = jest.fn().mockReturnValue(
+      new Promise<SavedFoodSearchResponse>((resolve) => {
+        resolveLookup = resolve;
+      }),
+    );
+    let resolveCreate!: (dto: LogEventDTO) => void;
+    const create = jest.fn().mockReturnValue(
+      new Promise<LogEventDTO>((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+    const getSuggestions = jest
+      .fn()
+      .mockResolvedValue({ items: [SAVED_SUGGESTION], limit: 8 });
+
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        create={create}
+        searchSavedFoods={searchSavedFoods}
+        getSuggestions={getSuggestions}
+        useActive={ACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    // Chip tap starts the yogurt hydration; before it lands the user makes a
+    // deliberate FTY-053 typeahead pick (driven through the bar's onSelect —
+    // the debounce timer is irrelevant to what is being proven here).
+    press(tree, "Suggestion: Greek yogurt");
+    const typeahead = tree.root.findByType(TypeaheadSuggestionBar);
+    act(() => {
+      typeahead.props.onSelect(oatmeal);
+    });
+    await act(async () => {
+      resolveLookup({ items: [yogurt], limit: 20 });
+    });
+
+    await act(async () => {
+      press(tree, "Add entry");
+    });
+
+    // The explicit pick wins: the synthetic item carries Oatmeal's values and
+    // the stale chip hydration never overwrote it.
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+      "Oatmeal",
+      expect.any(String),
+    );
+    expect(textContent(tree)).toContain("350");
+    expect(textContent(tree)).not.toContain("200");
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(false);
+
+    await act(async () => {
+      resolveCreate(
+        event({ id: "server-6", raw_text: "Oatmeal", status: "pending" }),
+      );
+    });
+    expect(textContent(tree)).toContain("350");
   });
 
   it("takes the normal estimator submit for a history-only chip (no saved_food_id)", async () => {

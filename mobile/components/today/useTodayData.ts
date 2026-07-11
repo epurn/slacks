@@ -239,8 +239,7 @@ export function useTodayData({
           return { ...rest, [server.id]: updated };
         });
         pendingSavedFoodById.current.delete(optimisticId);
-        // The just-logged item's rank changes, so refresh the quick-add
-        // suggestions (FTY-341) — the "after a successful submit" trigger.
+        // Refresh quick-add suggestions (FTY-341): the rank just changed.
         refreshSuggestionsRef.current();
       },
       rollbackOptimistic(optimisticId) {
@@ -274,7 +273,7 @@ export function useTodayData({
     setSubmitting,
     submitError,
     setSubmitError,
-    handleSubmit,
+    handleSubmit: submitLogEntry,
     reachability,
     offlineEntries,
     queuedCount,
@@ -633,11 +632,10 @@ export function useTodayData({
     (hasPendingWork(events) || hasFreshResolveAwaitingItems);
   useIntervalPolling(shouldPoll, pollIntervalMs, pollOnce);
 
-  // Quick-add suggestion chips (FTY-341): the FTY-340 ranking fetched on the
-  // focus edge (same active signal as polling) and after a successful submit,
-  // plus the deliberate prefill-on-tap. Its own hook keeps the suggestion
-  // lifecycle out of this shell's core data flow.
-  const { suggestions, refreshSuggestions, handleSelectSuggestion } =
+  // Quick-add suggestion chips (FTY-341): focus-edge + post-submit fetches,
+  // the deliberate prefill-on-tap, and the submit/typeahead wrappers that
+  // join or supersede an in-flight saved-food hydration (FTY-053 skip path).
+  const { suggestions, refreshSuggestions, handleSelectSuggestion, handleSubmit, selectSavedFood } =
     useQuickAddSuggestions({
     apiSession,
     isActive,
@@ -646,6 +644,8 @@ export function useTodayData({
     setText,
     inputRef,
     setSelectedSavedFood,
+    selectedSavedFoodRef,
+    submitLogEntry,
   });
   useEffect(() => {
     refreshSuggestionsRef.current = refreshSuggestions;
@@ -725,7 +725,7 @@ export function useTodayData({
     submitError,
     reachability,
     queuedCount,
-    setSelectedSavedFood,
+    setSelectedSavedFood: selectSavedFood,
     suggestions,
     handleSelectSuggestion,
     refresh,
