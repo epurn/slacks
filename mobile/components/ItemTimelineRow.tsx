@@ -198,7 +198,14 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
               {iconSkeleton}
               {nameSkeleton}
             </View>
-            <View style={styles.stackedSecondary}>{kcalSkeleton}</View>
+            <View style={styles.stackedSecondary}>
+              {/* Right-align the kcal placeholder to the far edge of the second
+                  line so it lands exactly where the resolved `kcalStacked`
+                  value (flex:1 + textAlign:"right") does — otherwise a pending
+                  row's value would jump left→right when it resolves at AX
+                  sizes. */}
+              <View style={styles.kcalSkeletonStacked}>{kcalSkeleton}</View>
+            </View>
           </>
         ) : (
           <>
@@ -437,5 +444,12 @@ const styles = StyleSheet.create({
   // aligned; it no longer needs to reserve a fixed 64pt column beside the text.
   kcalStacked: {
     flex: 1,
+  },
+  // Loading counterpart of `kcalStacked`: the fixed-width kcal skeleton owns the
+  // second line and is pushed to its right edge, so it occupies the same spot
+  // the resolved right-aligned value lands in (zero horizontal jump on resolve).
+  kcalSkeletonStacked: {
+    flex: 1,
+    alignItems: "flex-end",
   },
 });

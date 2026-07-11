@@ -76,3 +76,26 @@ share a parent, reserved 64 pt kcal column intact); at an AX size the row stacks
 (`flexDirection: column`), the wrapping question keeps `flex: 1` and its
 word-wrap (`numberOfLines` undefined), and the tag/kcal reflow to a separate
 parent from the name. Read-only past-day and resolved variants are covered too.
+
+## Round 2 — loading-skeleton footprint parity at AX sizes
+
+Round 1 review flagged that the reflowed **loading skeleton** did not match the
+resolved stacked-row footprint: its second-line kcal placeholder sat at the left
+of the line while the resolved row's kcal value (`kcalStacked`: `flex: 1` +
+`textAlign: "right"`) sits at the far right, so a pending row could still jump
+horizontally when it resolved at Larger Accessibility sizes.
+
+Fix: the loading branch now wraps the fixed-width kcal placeholder in a
+`kcalSkeletonStacked` container (`flex: 1`, `alignItems: "flex-end"`), landing it
+in the exact spot the resolved right-aligned value occupies — zero horizontal
+jump on resolve. A new test in the FTY-360 block renders the loading variant at
+an AX `fontScale`, asserts the loading row stacks (matching the resolved row) and
+that the kcal placeholder wrapper is `flex: 1` + `flex-end`, mirroring the
+resolved `kcalStacked` value's `flex: 1` + `textAlign: "right"`.
+
+No new simulator capture: this fix does not alter the pending-question row shown
+in the screenshots above (that row never renders the loading skeleton), so the
+committed visual matrix remains valid. The loading skeleton is a transient
+estimating state; its footprint parity with the resolved row is a layout-geometry
+property, proven deterministically by the added component test rather than a
+momentary screenshot.

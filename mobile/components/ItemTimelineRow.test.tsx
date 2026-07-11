@@ -588,6 +588,48 @@ describe("ItemTimelineRow — Larger Accessibility reflow (FTY-360)", () => {
     expect(firstA11yLabel(tree!)).toContain("205 kcal");
   });
 
+  it("at a Larger Accessibility size the loading skeleton keeps the resolved stacked footprint — kcal placeholder right-aligned, no jump on resolve", () => {
+    mockFontScale(2.5);
+    // The Skeleton shimmer drives Animated.loop; stub it so no rAF-driven loop
+    // outlives the test (its animation is Skeleton's own concern, covered
+    // elsewhere).
+    jest
+      .spyOn(Animated, "loop")
+      .mockReturnValue({ start: jest.fn(), stop: jest.fn() } as never);
+
+    let loadingTree: ReactTestRenderer;
+    let resolvedTree: ReactTestRenderer;
+    act(() => {
+      loadingTree = render(<ItemTimelineRow loading accessibilityLabel="Estimating" />);
+    });
+    act(() => {
+      resolvedTree = render(<ItemTimelineRow item={foodItem({ name: "Oatmeal", calories: 205 })} />);
+    });
+
+    // The loading row stacks vertically at AX sizes, matching the resolved row —
+    // same two-line footprint.
+    const loadingRow = loadingTree!.root.find(
+      (n) => n.props.accessibilityRole === "progressbar",
+    );
+    expect(rowGeometry(loadingRow).flexDirection).toBe("column");
+    expect(rowGeometry(interactiveRow(resolvedTree!)).flexDirection).toBe("column");
+
+    // The kcal placeholder (width 64) is wrapped in a flex:1 + flex-end container
+    // so it lands at the far-right of the second line — exactly where the resolved
+    // `kcalStacked` value (flex:1 + textAlign:"right") sits. Without this the
+    // placeholder would sit at the left and the value would slide left→right on
+    // resolve.
+    const kcalSkeleton = loadingTree!.root.find((n) => n.props.width === 64);
+    const wrapperStyle = styleOf(kcalSkeleton.parent!);
+    expect(wrapperStyle.flex).toBe(1);
+    expect(wrapperStyle.alignItems).toBe("flex-end");
+
+    // The resolved counterpart is the flexed, right-aligned kcal value.
+    const resolvedKcal = resolvedTree!.root.find((n) => n.props.children === "205 kcal");
+    expect(styleOf(resolvedKcal).flex).toBe(1);
+    expect(styleOf(resolvedKcal).textAlign).toBe("right");
+  });
+
   it("read-only past-day row reflows at AX sizes while preserving its value+provenance label", () => {
     mockFontScale(2.5);
     let tree: ReactTestRenderer;
