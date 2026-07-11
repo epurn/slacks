@@ -83,35 +83,35 @@ that re-enable path.
 **5. (Optional) Configure providers:**
 
 Open `.env` and configure any providers you want:
-- **LLM:** set `FATTY_LLM_PROVIDER`. Leave `FATTY_LLM_PROVIDER=fake` to skip (estimation degrades gracefully).
+- **LLM:** set `SLACKS_LLM_PROVIDER`. Leave `SLACKS_LLM_PROVIDER=fake` to skip (estimation degrades gracefully).
   - **Claude subscription (no API key):** if you have a Claude monthly plan, the `claude_code` provider runs estimation through your own subscription — no per-token billing:
     ```
-    FATTY_LLM_PROVIDER=claude_code
-    # FATTY_LLM_MODEL is optional — Claude Code uses your plan's model by default
-    # No FATTY_LLM_API_KEY — auth is your 'claude login' session (see step 7 below)
+    SLACKS_LLM_PROVIDER=claude_code
+    # SLACKS_LLM_MODEL is optional — Claude Code uses your plan's model by default
+    # No SLACKS_LLM_API_KEY — auth is your 'claude login' session (see step 7 below)
     ```
     See **Claude Code session setup** (step 7) to complete the one-time login.
   - **Codex CLI:** if you use Codex through ChatGPT or an enterprise access token, the `codex` provider runs estimation through the first-party Codex CLI installed in the backend image:
     ```
-    FATTY_LLM_PROVIDER=codex
-    # FATTY_LLM_MODEL is optional — set it for reproducible deployments
-    # Leave FATTY_LLM_BASE_URL unset; Codex is not an HTTP base-URL provider
+    SLACKS_LLM_PROVIDER=codex
+    # SLACKS_LLM_MODEL is optional — set it for reproducible deployments
+    # Leave SLACKS_LLM_BASE_URL unset; Codex is not an HTTP base-URL provider
     # Optional for image-capable Codex models:
-    # FATTY_LLM_SUPPORTS_VISION=true
+    # SLACKS_LLM_SUPPORTS_VISION=true
     ```
-    See **Codex session setup** (step 8) to complete the one-time login. If you prefer API-key auth, set `FATTY_LLM_API_KEY` instead; Slacks passes it only to the `codex exec` child as `CODEX_API_KEY`.
+    See **Codex session setup** (step 8) to complete the one-time login. If you prefer API-key auth, set `SLACKS_LLM_API_KEY` instead; Slacks passes it only to the `codex exec` child as `CODEX_API_KEY`.
   - **Zero-cost local model:** run [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), or [vLLM](https://github.com/vllm-project/vllm) locally, then set:
     ```
-    FATTY_LLM_PROVIDER=openai_compatible
-    FATTY_LLM_BASE_URL=http://localhost:11434/v1   # Ollama default; adjust for LM Studio / vLLM
-    FATTY_LLM_MODEL=<your loaded model name>
-    # No FATTY_LLM_API_KEY needed — local runtimes don't authenticate
+    SLACKS_LLM_PROVIDER=openai_compatible
+    SLACKS_LLM_BASE_URL=http://localhost:11434/v1   # Ollama default; adjust for LM Studio / vLLM
+    SLACKS_LLM_MODEL=<your loaded model name>
+    # No SLACKS_LLM_API_KEY needed — local runtimes don't authenticate
     ```
     This uses the OpenAI Chat Completions wire format exposed by these local runtimes, with no key and no per-token billing.
-  - **API key providers:** for OpenAI or Anthropic, set `FATTY_LLM_PROVIDER`, `FATTY_LLM_API_KEY`, and `FATTY_LLM_MODEL`.
-- **USDA FDC:** set `FATTY_FDC_API_KEY` with your free data.gov key. Omit to skip generic-food lookups.
-- **Open Food Facts:** enabled by default (no key needed). Set `FATTY_OFF_ENABLED=false` to disable.
-- **Official-source search:** enabled by default via the bundled keyless `searxng` service — no key or setup needed. To use Brave instead, set `FATTY_SEARCH_PROVIDER=brave` and `FATTY_SEARCH_API_KEY`; set `FATTY_SEARCH_PROVIDER=none` to turn search off.
+  - **API key providers:** for OpenAI or Anthropic, set `SLACKS_LLM_PROVIDER`, `SLACKS_LLM_API_KEY`, and `SLACKS_LLM_MODEL`.
+- **USDA FDC:** set `SLACKS_FDC_API_KEY` with your free data.gov key. Omit to skip generic-food lookups.
+- **Open Food Facts:** enabled by default (no key needed). Set `SLACKS_OFF_ENABLED=false` to disable.
+- **Official-source search:** enabled by default via the bundled keyless `searxng` service — no key or setup needed. To use Brave instead, set `SLACKS_SEARCH_PROVIDER=brave` and `SLACKS_SEARCH_API_KEY`; set `SLACKS_SEARCH_PROVIDER=none` to turn search off.
 
 See `.env.example` for all available options with documentation.
 
@@ -148,7 +148,7 @@ curl -fsS http://localhost:8000/healthz/sources | python3 -m json.tool
 
 **Security note:** the `claude-config` Docker volume contains your OAuth session credentials. It is a host secret — never copy its contents into the image, never commit it to source control, and restrict its host-path permissions if you bind-mount it. The image itself contains only the Claude Code binary; no credentials are baked in.
 
-**8. (Required if using `codex` provider without `FATTY_LLM_API_KEY`) One-time Codex login:**
+**8. (Required if using `codex` provider without `SLACKS_LLM_API_KEY`) One-time Codex login:**
 
 The `codex` provider authenticates through Codex CLI state under `CODEX_HOME`.
 The Codex CLI is pre-installed in the backend image. The session is stored in a
@@ -169,7 +169,7 @@ docker compose exec api codex login --device-auth
 printf '%s' "$CODEX_ACCESS_TOKEN" | docker compose exec -T api codex login --with-access-token
 ```
 
-For API-key auth, skip saved login and set `FATTY_LLM_API_KEY` in `.env`.
+For API-key auth, skip saved login and set `SLACKS_LLM_API_KEY` in `.env`.
 The adapter maps that value only to the `codex exec` child process as
 `CODEX_API_KEY`; do not set `CODEX_API_KEY` globally in `.env`.
 

@@ -1,10 +1,10 @@
-# Docker Compose stack for the Fatty backend (FTY-011, self-host setup FTY-072).
+# Docker Compose stack for the Slacks backend (FTY-011, self-host setup FTY-072).
 #
 # Brings up Postgres, Redis, a one-shot Alembic migration runner, the FastAPI
 # API, a Celery worker, and a private SearXNG search service (FTY-165) over plain
 # HTTP:
 #
-#     cp .env.example .env           # copy template; fill in FATTY_AUTH_SECRET
+#     cp .env.example .env           # copy template; fill in SLACKS_AUTH_SECRET
 #     docker compose up              # starts all services; migrations run first
 #
 # First-boot: the `migrate` service runs `alembic upgrade head` before the API
@@ -27,7 +27,7 @@
 #
 # Binding to 127.0.0.1 limits access to the local machine; never use 0.0.0.0
 # for datastore ports on a networked host. Alternatively, use:
-#   docker compose exec postgres psql -U fatty fatty   # no host port needed
+#   docker compose exec postgres psql -U slacks slacks   # no host port needed
 #
 # SearXNG (FTY-165): a private, keyless metasearch service that backs the
 # official-source search adapter (FTY-164). Like postgres and redis it is NOT
@@ -43,7 +43,7 @@
 # env-var names below are relied on by later infra and backend stories. The API
 # healthcheck depends on FTY-012's `GET /healthz` shape.
 
-name: fatty
+name: slacks
 
 services:
   postgres:
@@ -93,11 +93,11 @@ services:
     env_file:
       - .env
     # Pin the in-container bind so the host port mapping below is stable
-    # regardless of any FATTY_HOST/FATTY_PORT set in .env. Only the published
+    # regardless of any SLACKS_HOST/SLACKS_PORT set in .env. Only the published
     # host port is configurable (API_PORT), to avoid host port conflicts.
     environment:
-      FATTY_HOST: "0.0.0.0"
-      FATTY_PORT: "8000"
+      SLACKS_HOST: "0.0.0.0"
+      SLACKS_PORT: "8000"
       # Claude Code session directory (FTY-088). The claude-config volume below
       # persists the operator's 'claude login' session across restarts. This
       # env var tells the Claude Code CLI where to find its config; it is not
@@ -120,7 +120,7 @@ services:
       - claude-config:/claude-config
       # Persistent Codex CLI state volume (FTY-296). Populated once by
       # 'codex login' / device auth / access-token login in the container, or
-      # bypassed per-run by FATTY_LLM_API_KEY. Treat as a host secret.
+      # bypassed per-run by SLACKS_LLM_API_KEY. Treat as a host secret.
       - codex-config:/codex-config
     # Wait for migrations to complete and datastores to be healthy before starting.
     depends_on:

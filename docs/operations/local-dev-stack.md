@@ -35,7 +35,7 @@ checklist, smoke check) see the README **Self-Hosting** section.
   ```
   Alternatively, access the database without a host port via:
   ```sh
-  docker compose exec postgres psql -U fatty fatty
+  docker compose exec postgres psql -U slacks slacks
   ```
 - `api`, `worker`, `postgres`, and `redis` all declare `restart: unless-stopped`;
   they restart automatically if they crash. The one-shot `migrate` service has no
@@ -93,7 +93,7 @@ copy it into the image, commit it, or include it in support artifacts.
 
 Configuration comes from `.env` (copied from `.env.example`). `.env.example` is
 the documented self-host configuration contract (FTY-072): it lists every
-required and optional `FATTY_*` variable with documentation and placeholder-only
+required and optional `SLACKS_*` variable with documentation and placeholder-only
 values. The real `.env` is gitignored; never commit real secrets.
 
 Key variable groups (see `.env.example` for full documentation):
@@ -104,15 +104,15 @@ Key variable groups (see `.env.example` for full documentation):
 | Datastores | `POSTGRES_*`, `SLACKS_DATABASE_URL`, `REDIS_PORT`, `SLACKS_REDIS_URL` | Service hostnames must match compose service names. |
 | Host ports | `API_PORT` | Published host port for the API; containers always listen on fixed ports. `POSTGRES_PORT` / `REDIS_PORT` are meaningful only if you re-enable loopback-only host mappings for direct datastore access (see Services above). |
 | Application | `SLACKS_ENVIRONMENT`, `SLACKS_LOG_LEVEL` | App config. |
-| LLM provider | `FATTY_LLM_*` | Optional; defaults to `fake` (model-prior-with-status). See LLM providers below. |
+| LLM provider | `SLACKS_LLM_*` | Optional; defaults to `fake` (model-prior-with-status). See LLM providers below. |
 | Estimator policy | `SLACKS_ESTIMATOR_*` | Optional estimate-vs-ask clarification policy; defaults to estimate-first and does not change privacy/logging/provider validation rules. |
-| USDA FDC | `FATTY_FDC_*` | Optional; free data.gov key. Disabled when key absent. |
-| Open Food Facts | `FATTY_OFF_*` | Optional, open API; enabled by default, no key required. |
-| Search | `FATTY_SEARCH_*` | Keyless SearXNG by default (points at the `searxng` service; enabled, no key). Brave is an opt-in override; `none` turns search off. |
+| USDA FDC | `SLACKS_FDC_*` | Optional; free data.gov key. Disabled when key absent. |
+| Open Food Facts | `SLACKS_OFF_*` | Optional, open API; enabled by default, no key required. |
+| Search | `SLACKS_SEARCH_*` | Keyless SearXNG by default (points at the `searxng` service; enabled, no key). Brave is an opt-in override; `none` turns search off. |
 
 ## LLM Providers
 
-The `FATTY_LLM_PROVIDER` variable selects the LLM backend. It defaults to `fake`
+The `SLACKS_LLM_PROVIDER` variable selects the LLM backend. It defaults to `fake`
 (no network calls; estimation degrades to model-prior-with-status). CLI-session
 and local-runtime options are available for self-hosters who want live estimation
 without an API key:
@@ -121,9 +121,9 @@ without an API key:
 
 Set in `.env`:
 ```
-FATTY_LLM_PROVIDER=claude_code
-# FATTY_LLM_MODEL is optional — Claude Code picks the model from your plan
-# No FATTY_LLM_API_KEY — auth is the operator's 'claude login' session
+SLACKS_LLM_PROVIDER=claude_code
+# SLACKS_LLM_MODEL is optional — Claude Code picks the model from your plan
+# No SLACKS_LLM_API_KEY — auth is the operator's 'claude login' session
 ```
 
 Then complete the **one-time Claude Code login** (see below).
@@ -132,14 +132,14 @@ Then complete the **one-time Claude Code login** (see below).
 
 Set in `.env`:
 ```
-FATTY_LLM_PROVIDER=codex
-# FATTY_LLM_MODEL is optional — set it for reproducible deployments
-# FATTY_LLM_SUPPORTS_VISION=true only for image-capable Codex models
-# No FATTY_LLM_BASE_URL — Codex is not an HTTP base-URL provider
+SLACKS_LLM_PROVIDER=codex
+# SLACKS_LLM_MODEL is optional — set it for reproducible deployments
+# SLACKS_LLM_SUPPORTS_VISION=true only for image-capable Codex models
+# No SLACKS_LLM_BASE_URL — Codex is not an HTTP base-URL provider
 ```
 
 Then complete the **one-time Codex login** (see below). As an alternative, set
-`FATTY_LLM_API_KEY` for the Codex provider; the adapter maps it only to the
+`SLACKS_LLM_API_KEY` for the Codex provider; the adapter maps it only to the
 `codex exec` child process as `CODEX_API_KEY` for that invocation. Do not add a
 global `CODEX_API_KEY` to `.env`.
 
@@ -147,10 +147,10 @@ global `CODEX_API_KEY` to `.env`.
 
 Set in `.env`:
 ```
-FATTY_LLM_PROVIDER=openai_compatible
-FATTY_LLM_BASE_URL=http://localhost:11434/v1   # Ollama default; adjust for LM Studio / vLLM
-FATTY_LLM_MODEL=<your loaded model name>
-# No FATTY_LLM_API_KEY needed — local runtimes don't authenticate
+SLACKS_LLM_PROVIDER=openai_compatible
+SLACKS_LLM_BASE_URL=http://localhost:11434/v1   # Ollama default; adjust for LM Studio / vLLM
+SLACKS_LLM_MODEL=<your loaded model name>
+# No SLACKS_LLM_API_KEY needed — local runtimes don't authenticate
 ```
 
 ## Claude Code Login (One-Time Setup, FTY-088)
@@ -160,7 +160,7 @@ Claude Code session. The session is written into the `claude-config` Docker volu
 and shared between `api` and `worker`, so it survives restarts without re-login.
 
 **Prerequisites:** the stack must be running (`docker compose up -d`) and
-`FATTY_LLM_PROVIDER=claude_code` must be set in `.env`.
+`SLACKS_LLM_PROVIDER=claude_code` must be set in `.env`.
 
 ```sh
 # Run the login flow in the api container (interactive — needs a terminal):
@@ -191,9 +191,9 @@ the compose stack sets `CODEX_HOME=/codex-config` and mounts the same
 `codex-config` volume into `api` and `worker`.
 
 **Prerequisites:** the stack must be running (`docker compose up -d`) and
-`FATTY_LLM_PROVIDER=codex` must be set in `.env`. Leave `FATTY_LLM_BASE_URL`
-unset for this provider. `FATTY_LLM_MODEL` is optional but recommended for
-reproducible deployments, and `FATTY_LLM_SUPPORTS_VISION=true` is required before
+`SLACKS_LLM_PROVIDER=codex` must be set in `.env`. Leave `SLACKS_LLM_BASE_URL`
+unset for this provider. `SLACKS_LLM_MODEL` is optional but recommended for
+reproducible deployments, and `SLACKS_LLM_SUPPORTS_VISION=true` is required before
 image-capable Codex models receive image inputs.
 
 Use one of these saved-auth flows in the `api` container:
@@ -211,7 +211,7 @@ printf '%s' "$CODEX_ACCESS_TOKEN" | docker compose exec -T api codex login --wit
 
 `CODEX_ACCESS_TOKEN` is only an operator setup input for seeding Codex auth into
 `CODEX_HOME`; it is not a Slacks configuration variable. For API-key auth instead
-of saved login, set `FATTY_LLM_API_KEY` in `.env`. The Slacks adapter maps that
+of saved login, set `SLACKS_LLM_API_KEY` in `.env`. The Slacks adapter maps that
 value only to the `codex exec` child process as `CODEX_API_KEY`; do not set
 `CODEX_API_KEY` globally in `.env`.
 
@@ -270,12 +270,12 @@ curl -fsS http://localhost:8000/healthz/sources | python3 -m json.tool
 #  provider is selected. Confirm the container itself is up with `docker compose ps`.)
 ```
 
-Selecting Brave without a key, or setting `FATTY_SEARCH_PROVIDER=none` /
-`FATTY_SEARCH_ENABLED=false`, flips these flags so the opt-out or missing
+Selecting Brave without a key, or setting `SLACKS_SEARCH_PROVIDER=none` /
+`SLACKS_SEARCH_ENABLED=false`, flips these flags so the opt-out or missing
 credential is visible here. The `claude_code` entry specifically shows whether
 the CLI is installed and the session is valid; the `codex` entry shows whether
 the CLI is installed and either a saved auth marker under `CODEX_HOME` or
-`FATTY_LLM_API_KEY` is configured while `FATTY_LLM_PROVIDER=codex`. These
+`SLACKS_LLM_API_KEY` is configured while `SLACKS_LLM_PROVIDER=codex`. These
 descriptors expose booleans only — no credential contents, identity, host path,
 filename content, or raw CLI output.
 
@@ -413,14 +413,14 @@ silent zero is not an acknowledgement).
 ### Prerequisites
 
 - The stack is **up and migrated** (`make sim-smoke` reports READY).
-- A **real LLM provider** is configured and logged in (`FATTY_LLM_PROVIDER` set
+- A **real LLM provider** is configured and logged in (`SLACKS_LLM_PROVIDER` set
   to `claude_code`, `codex`, or `openai_compatible`, per the **LLM Providers**
   and login sections above). The default `fake` provider degrades estimation to
   model-prior-with-status and **cannot parse** natural-language food, so the
   smoke will report failures against it — that is expected, not a v1 regression.
 - Live evidence sources help the branded fixtures resolve with the best
   provenance: the keyless SearXNG search (default) and Open Food Facts are on out
-  of the box; USDA FDC needs `FATTY_FDC_API_KEY` (optional). Confirm provider
+  of the box; USDA FDC needs `SLACKS_FDC_API_KEY` (optional). Confirm provider
   wiring with `curl -fsS http://localhost:${API_PORT}/healthz/sources`.
 
 ### Interpreting results
@@ -480,7 +480,7 @@ about the cause, so it is never mistaken for a food regression.
 ## Container User
 
 The backend image runs all three services (`migrate`, `api`, `worker`) as a
-dedicated non-root user — `fatty` (UID/GID 10001) — rather than root (FTY-116).
+dedicated non-root user — `slacks` (UID/GID 10001) — rather than root (FTY-116).
 This limits the blast radius of an in-container exploit to an unprivileged
 account. The `claude-config` and `codex-config` volume mountpoints are created
 owned by this user so provider login and subsequent session writes succeed
