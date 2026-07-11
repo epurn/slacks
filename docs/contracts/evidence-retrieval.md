@@ -56,6 +56,18 @@ Adapter — FTY-079 / FTY-164**.
 
 ## Version
 
+10 (FTY-308): implements the **barcode** exact-evidence proposal generator (the
+`kind = barcode` half of the **Exact Evidence Upgrade** below). It reuses the existing
+hardened cache-first Open Food Facts path and plausibility gate for the `exact`
+`product_database` proposal and the existing reference-source → model-prior tiers (from
+the item's sanitized identity only) for a `fallback`, signed into the FTY-307
+`proposal_ref`. This fixes the concrete barcode `failure_reason` vocabulary the shape
+below references: `barcode_invalid` (non-GTIN input), `barcode_no_match` (OFF returned
+no usable/plausible product), and `barcode_source_unavailable` (OFF disabled by
+config); a fallback records a fixed content-free provenance assumption, never provider
+output, and the source hierarchy, statuses, fact schema, egress, and retention rules
+are unchanged.
+
 9 (FTY-326): food-resolution evidence tiers now write bounded sanitized evidence-view records into the run-local `InterpretationSession` ledger. Records may include trace-safe source refs,
 surfaces, and source-stated descriptors needed for interpretation, but never raw
 pages, snippets, queries, diary text, or provider output blobs. After an

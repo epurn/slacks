@@ -28,9 +28,10 @@ Pydantic request validation on this endpoint (an oversized ``proposal_ref``, a
 client-injected nutrition fact caught by ``extra="forbid"``, a malformed ``amount``)
 must NOT fall through to FastAPI's default ``RequestValidationError`` response —
 that body echoes the rejected ``input`` verbatim, reflecting the submitted
-``proposal_ref`` or injected facts back to the caller. :func:`sanitized_apply_validation_handler`
-replaces it with a content-free ``422 {"error": "invalid_request"}`` for this route
-only; every other endpoint keeps FastAPI's default validation body.
+``proposal_ref`` or injected facts back to the caller.
+:func:`sanitized_exact_evidence_validation_handler` replaces it with a content-free
+``422 {"error": "invalid_request"}`` for this route (and the FTY-308 barcode-propose
+route) only; every other endpoint keeps FastAPI's default validation body.
 """
 
 from __future__ import annotations
@@ -47,56 +48,79 @@ from sqlalchemy.orm import Session
 from app.db import get_session
 from app.deps import CurrentUser
 from app.enums import CandidateType
+from app.estimator.barcode_proposal import BarcodeProposalGenerator
 from app.estimator.exact_evidence import (
     AmountNotCostable,
     ProposalNotResolvable,
     build_exact_evidence_apply_capability,
 )
+from app.estimator.off import OffResponseError, OffTransientError
 from app.estimator.re_match import ItemForbidden, ItemNotFound
 from app.schemas.corrections import DerivedFoodItemDTO
-from app.schemas.exact_evidence import ExactEvidenceApplyRequest
+from app.schemas.exact_evidence import (
+    BarcodeProposalRequest,
+    ExactEvidenceApplyRequest,
+    ExactEvidenceProposalDTO,
+)
+from app.services import barcode_proposal as barcode_proposal_service
 from app.services import item_read_model
 from app.services.corrections import DerivedItemNotFound, ensure_parent_event_not_voided
+from app.services.exact_evidence import NotUpgradeable
 from app.settings import Settings
 
 router = APIRouter(prefix="/api/users", tags=["exact-evidence"])
 
 _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="derived item not found")
 
-#: Path suffix that identifies the exact-evidence apply route. The router has a
-#: single POST endpoint, so matching the suffix uniquely selects it without
-#: coupling the sanitizer to the full parameterised path.
-_APPLY_PATH_SUFFIX = "/exact-upgrade/apply"
+#: Path suffixes whose request bodies carry untrusted, potentially sensitive input
+#: (a signed ``proposal_ref``, a barcode, or client-injected nutrition facts caught by
+#: ``extra="forbid"``). A validation failure on either must return a content-free code
+#: rather than echo the rejected value. Matching the suffix uniquely selects these two
+#: POST endpoints without coupling the sanitizer to the full parameterised paths.
+_SANITIZED_PATH_SUFFIXES = ("/exact-upgrade/apply", "/exact-upgrade/barcode")
 
 
-def _is_apply_request(request: Request) -> bool:
-    """True when ``request`` targets the exact-evidence apply endpoint."""
+def _is_sanitized_request(request: Request) -> bool:
+    """True when ``request`` targets an exact-evidence endpoint with sanitized errors."""
 
-    return request.method == "POST" and request.url.path.endswith(_APPLY_PATH_SUFFIX)
+    return request.method == "POST" and request.url.path.endswith(_SANITIZED_PATH_SUFFIXES)
 
 
-async def sanitized_apply_validation_handler(
+async def sanitized_exact_evidence_validation_handler(
     request: Request, exc: RequestValidationError
 ) -> Response:
-    """Content-free ``422`` for apply request-validation failures; default elsewhere.
+    """Content-free ``422`` for exact-evidence request-validation failures; default elsewhere.
 
     Registered app-wide for :class:`RequestValidationError` (see
-    ``app.main.create_app``), but only overrides the response for the apply route.
-    FastAPI's default validation body echoes the rejected ``input`` — for this
-    endpoint that would reflect the submitted signed ``proposal_ref`` or a
-    client-injected nutrition fact (``extra="forbid"``) straight back to the caller,
-    violating the stable-code-only error contract. For the apply route we return
-    ``{"detail": {"error": "invalid_request"}}`` — a stable code carrying no
-    submitted value. Every other endpoint falls through to FastAPI's default handler
-    so their validation-error contracts are unchanged.
+    ``app.main.create_app``), but only overrides the response for the exact-evidence
+    apply and barcode-propose routes. FastAPI's default validation body echoes the
+    rejected ``input`` — for these endpoints that would reflect the submitted signed
+    ``proposal_ref`` / barcode or a client-injected nutrition fact (``extra="forbid"``)
+    straight back to the caller, violating the stable-code-only error contract. For
+    those routes we return ``{"detail": {"error": "invalid_request"}}`` — a stable code
+    carrying no submitted value. Every other endpoint falls through to FastAPI's default
+    handler so their validation-error contracts are unchanged.
     """
 
-    if _is_apply_request(request):
+    if _is_sanitized_request(request):
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"detail": {"error": "invalid_request"}},
         )
     return await request_validation_exception_handler(request, exc)
+
+
+def get_barcode_proposal_generator(
+    session: Annotated[Session, Depends(get_session)],
+) -> BarcodeProposalGenerator:
+    """Build the per-request barcode proposal generator (FTY-308).
+
+    A FastAPI dependency so tests can override it with a network-free generator; the
+    default wires the real cache-first OFF resolver and the identity fallback over the
+    configured LLM/search/fetch clients. Construction opens no socket.
+    """
+
+    return barcode_proposal_service.build_barcode_proposal_generator(session)
 
 
 def _refuse_voided_parent(session: Session, item_id: uuid.UUID, owner_id: uuid.UUID) -> None:
@@ -163,3 +187,61 @@ def apply_exact_evidence(
         ) from exc
 
     return item_read_model.serialize_food_item(session, item)
+
+
+@router.post(
+    "/{user_id}/derived-items/food/{item_id}/exact-upgrade/barcode",
+    response_model=ExactEvidenceProposalDTO,
+)
+def propose_barcode_evidence(
+    user_id: uuid.UUID,
+    item_id: uuid.UUID,
+    payload: BarcodeProposalRequest,
+    current_user: CurrentUser,
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    generator: Annotated[BarcodeProposalGenerator, Depends(get_barcode_proposal_generator)],
+) -> ExactEvidenceProposalDTO:
+    """Build an exact-or-fallback barcode proposal for the caller's own food item.
+
+    Resolves the barcode through the hardened, cache-first Open Food Facts path and
+    returns a server-signed **proposal** the user previews and applies via FTY-307 — a
+    read-only operation that never mutates the item. A confident OFF match yields an
+    ``exact`` ``product_database`` proposal costed at the item's current amount (or a
+    proposal requiring an amount when the current amount is uncostable); no usable exact
+    match yields a clearly-labelled ``fallback`` proposal from the item's identity when
+    the estimator can produce one, else a ``none`` (no-proposal) response with a
+    content-free reason.
+
+    Cross-user / unknown / non-food items — and items whose parent log event is voided —
+    fail closed as ``404``; an already-source-backed (ineligible) item returns ``422
+    {"error": "not_upgradeable"}``; a transient/terminal OFF source failure surfaces a
+    retryable ``503`` rather than a disguised miss. Nothing mutates on any path.
+    """
+
+    _refuse_voided_parent(session, item_id, user_id)
+    settings: Settings = request.app.state.settings
+    try:
+        return barcode_proposal_service.propose_barcode_evidence(
+            session,
+            owner_id=user_id,
+            current_user=current_user,
+            item_id=item_id,
+            barcode=payload.barcode,
+            secret=settings.auth_secret.get_secret_value(),
+            generator=generator,
+        )
+    except (ItemForbidden, ItemNotFound) as exc:
+        raise _NOT_FOUND from exc
+    except NotUpgradeable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "not_upgradeable"},
+        ) from exc
+    except (OffTransientError, OffResponseError) as exc:
+        # A source outage during propose is surfaced honestly as retryable, never
+        # disguised as a `none`/`fallback` miss (mirrors the re-match listing posture).
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "source_unavailable"},
+        ) from exc
