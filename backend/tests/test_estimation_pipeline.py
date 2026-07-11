@@ -13,7 +13,7 @@ from typing import cast
 import pytest
 from sqlalchemy.orm import Session
 
-from app.estimator.food_step import FoodResolver
+from app.estimator.food_resolvers import FoodResolver
 from app.estimator.pipeline import (
     EstimationContext,
     NeedsClarification,

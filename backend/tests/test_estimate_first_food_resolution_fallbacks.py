@@ -22,8 +22,9 @@ from sqlalchemy.orm import Session
 from app.db import create_session_factory
 from app.enums import DerivedItemStatus, EstimationJobStatus, LogEventStatus
 from app.estimator.fdc import FDC_SOURCE, ProductFacts
+from app.estimator.food_resolvers import BarcodeResolver, FoodResolver
 from app.estimator.food_serving import NutritionFacts
-from app.estimator.food_step import BarcodeResolver, FoodResolver, FoodResolveStep
+from app.estimator.food_step import FoodResolveStep
 from app.estimator.off import OFF_SOURCE, normalize_barcode
 from app.estimator.official_fetch import OfficialFetchSettings
 from app.estimator.official_step import (

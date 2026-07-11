@@ -20,7 +20,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.estimator.fdc import ProductFacts
-from app.estimator.food_step import FoodResolver, FoodResolveStep
+from app.estimator.food_resolvers import FoodResolver
+from app.estimator.food_step import FoodResolveStep
 from app.estimator.hardened_fetch import FetchResponseError
 from app.estimator.official_fetch import OfficialFetchSettings
 from app.estimator.official_step import OfficialSourceResolveStep

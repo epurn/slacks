@@ -43,7 +43,7 @@ from app.estimator.decision_trace import (
 )
 
 if TYPE_CHECKING:
-    from app.estimator.food_step import BarcodeResolver, FoodResolver
+    from app.estimator.food_resolvers import BarcodeResolver, FoodResolver
     from app.estimator.interpretation import InterpretationSession
     from app.estimator.label_step import LabelInput
     from app.estimator.official_step import OfficialSourceResolveStep
