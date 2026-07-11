@@ -40,7 +40,8 @@ from app.enums import (
     SourceType,
 )
 from app.estimator.fdc import ProductFacts
-from app.estimator.food_step import FoodResolver, FoodResolveStep
+from app.estimator.food_resolvers import FoodResolver
+from app.estimator.food_step import FoodResolveStep
 from app.estimator.parse import ParseStep
 from app.estimator.pipeline import Pipeline
 from app.estimator.processing import process_estimation
