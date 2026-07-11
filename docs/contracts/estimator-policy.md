@@ -32,7 +32,7 @@ closed on their own authority. No env var, mode, threshold, DTO, schema, provide
 runtime behavior changes.
 
 2 (FTY-304, wording clarification): defines
-`FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS` as the shared cap for parse-step
+`SLACKS_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS` as the shared cap for parse-step
 pre-validation provider-output repair, with phase-specific mechanics and failure
 labels owned by [parse-candidates.md](parse-candidates.md). Normative behavior is
 unchanged from FTY-300.
@@ -51,15 +51,15 @@ implementation stories expose the mode through:
 
 | Variable | Default | Values | Meaning |
 | --- | --- | --- | --- |
-| `FATTY_ESTIMATOR_CLARIFY_MODE` | `estimate_first` | `estimate_first`, `balanced`, `strict` | Operator-selected abstention posture for natural-language parse/resolution. Unknown values fail closed at config load. |
+| `SLACKS_ESTIMATOR_CLARIFY_MODE` | `estimate_first` | `estimate_first`, `balanced`, `strict` | Operator-selected abstention posture for natural-language parse/resolution. Unknown values fail closed at config load. |
 
 Optional numeric tunables are contract names for downstream code stories:
 
 | Variable | Default | Bounds | Applies to | Meaning |
 | --- | --- | --- | --- | --- |
-| `FATTY_ESTIMATOR_PARSE_CLARIFY_THRESHOLD` | unset (`null`) | `0.0`-`1.0` when set | `balanced`, `strict` | Overrides the calibrated parse abstention threshold. It must never make the gate re-ask for a user-stated detail in `balanced`. |
-| `FATTY_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR` | `0.6` | `0.0`-`1.0` | rough nutrition facts | Minimum calibrated/cold-pass agreement for accepting a model/default-prior rough nutrition estimate; disagreement leaves a rough/unknown field or asks only for an allowed reason. |
-| `FATTY_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS` | `2` | `0`-`10` | all modes; parse-step pre-`ParseResult` provider-output validation | Shared cap for deterministic recovery passes before the parse step has a trusted `ParseResult`. [parse-candidates.md](parse-candidates.md) owns the repairable phases, examples, and fail-closed labels. This setting does not retry provider calls and does not repair schema-valid provider output that conflicts with the active policy; those outputs are routed by the parse policy gates. |
+| `SLACKS_ESTIMATOR_PARSE_CLARIFY_THRESHOLD` | unset (`null`) | `0.0`-`1.0` when set | `balanced`, `strict` | Overrides the calibrated parse abstention threshold. It must never make the gate re-ask for a user-stated detail in `balanced`. |
+| `SLACKS_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR` | `0.6` | `0.0`-`1.0` | rough nutrition facts | Minimum calibrated/cold-pass agreement for accepting a model/default-prior rough nutrition estimate; disagreement leaves a rough/unknown field or asks only for an allowed reason. |
+| `SLACKS_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS` | `2` | `0`-`10` | all modes; parse-step pre-`ParseResult` provider-output validation | Shared cap for deterministic recovery passes before the parse step has a trusted `ParseResult`. [parse-candidates.md](parse-candidates.md) owns the repairable phases, examples, and fail-closed labels. This setting does not retry provider calls and does not repair schema-valid provider output that conflicts with the active policy; those outputs are routed by the parse policy gates. |
 
 Invalid enum values, out-of-range floats, and out-of-range attempt counts fail
 closed at application config load instead of falling back to an unintended
