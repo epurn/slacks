@@ -10,13 +10,21 @@ re-interpretation pass before falling to model-prior.
 
 from __future__ import annotations
 
+import re
+from collections.abc import Sequence
+from typing import Final
+
 from app.enums import CandidateType
+from app.estimator.fdc import ProductFacts
 from app.estimator.interpretation import EvidenceRecord
 from app.estimator.pipeline import CandidateDraft, EstimationContext, StepError, StepFailed
 from app.estimator.searched_reference import StageEvidenceText
 from app.schemas.parse import ParsedCandidate
 
 INTERPRETATION_TIER = "interpretation_session"
+
+#: Tokenizer for the staged-excerpt echo filter (matches the session's own).
+_TAINT_TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"[a-z0-9]+")
 
 
 def add_evidence_record(  # noqa: PLR0913 - mirrors the bounded evidence-view field set.
@@ -105,7 +113,10 @@ def current_food_candidate(
         and candidate_index is not None
         and 0 <= candidate_index < len(drafts)
     ):
-        return drafts[candidate_index]
+        draft = drafts[candidate_index]
+        # An identity that was wholly evidence-derived filters to nothing
+        # (staged-echo taint); the resolver's known-good value stands instead.
+        return draft if draft.name.strip() else candidate
     for draft in drafts:
         if draft == candidate:
             return draft
@@ -224,21 +235,96 @@ def _session_food_drafts(context: EstimationContext) -> tuple[CandidateDraft, ..
         items = session.result.items
     except RuntimeError:
         return ()
-    return tuple(_to_draft(item) for item in items if item.type is CandidateType.FOOD)
+    taint = session.evidence_echo_taint()
+    return tuple(_to_draft(item, taint) for item in items if item.type is CandidateType.FOOD)
 
 
-def _to_draft(item: ParsedCandidate) -> CandidateDraft:
+def _to_draft(item: ParsedCandidate, taint: frozenset[str]) -> CandidateDraft:
+    """The resolver-facing view of one hypothesis item, echo-filtered (FTY-326).
+
+    The session's hypothesis may legitimately absorb staged evidence text, but
+    the resolver-side identity fields drive search queries, fetch-scoped
+    lookups, and persisted item names — surfaces raw page/snippet text must
+    never reach. Words carrying a token seen only in staged excerpts are
+    dropped here, at the one bridge every tier reads through. ``quantity_text``
+    keeps digit-bearing words (a page-echoed number cannot name a product, and
+    its egress path already drops digit tokens) so serving detail survives;
+    ``barcode`` is strict — a barcode must be user-supplied, so a page-echoed
+    one is dropped whole before it could key an OFF lookup.
+    """
+
+    barcode = item.barcode
+    if barcode is not None:
+        barcode = _drop_tainted_words(barcode, taint) or None
     return CandidateDraft(
-        name=item.name,
-        quantity_text=item.quantity_text,
+        name=_drop_tainted_words(item.name, taint),
+        quantity_text=_drop_tainted_words(item.quantity_text, taint, keep_digit_words=True),
         unit=item.unit,
         amount=item.amount,
-        barcode=item.barcode,
-        brand=item.brand,
+        barcode=barcode,
+        brand=None if item.brand is None else _drop_tainted_words(item.brand, taint),
         stated_calories=item.stated_calories,
         stated_protein_g=item.stated_protein_g,
         stated_carbs_g=item.stated_carbs_g,
         stated_fat_g=item.stated_fat_g,
+    )
+
+
+def _drop_tainted_words(text: str, taint: frozenset[str], *, keep_digit_words: bool = False) -> str:
+    """Drop whitespace words carrying an evidence-only token; else return ``text``."""
+
+    if not taint or not text:
+        return text
+    kept = [word for word in text.split() if not _word_tainted(word, taint, keep_digit_words)]
+    return text if len(kept) == len(text.split()) else " ".join(kept)
+
+
+def _word_tainted(word: str, taint: frozenset[str], keep_digit_words: bool) -> bool:
+    tokens = _TAINT_TOKEN_RE.findall(word.lower())
+    if keep_digit_words and tokens and all(token.isdigit() for token in tokens):
+        return False
+    return any(token in taint for token in tokens)
+
+
+def consult_rejected_rows(
+    context: EstimationContext,
+    candidate: CandidateDraft,
+    candidate_index: int | None,
+    *,
+    rejected: Sequence[ProductFacts],
+    step_name: str,
+    tier: str,
+) -> CandidateDraft | None:
+    """Feed compatibility-rejected source rows to the session and re-ask once.
+
+    The FTY-326 row-acceptance decision point for a trusted-database tier:
+    deterministic ranking only *bounds* the option set, so each energy-bearing
+    row it turned away is recorded on the ledger (sanitized outcome plus the
+    global row description — no user data) and the session may spend its one
+    bounded re-interpretation pass on them. Returns the revised draft for the
+    caller's single bounded retry, or ``None`` when the session keeps the
+    hypothesis — the rejection then stands as a deliberate miss.
+    """
+
+    for row in rejected:
+        context.record_decision(
+            step_name,
+            "source",
+            candidate_index=candidate_index,
+            tier=tier,
+            source_ref=row.source_ref,
+            source_desc=row.description,
+            outcome="rejected_incompatible_row",
+        )
+        add_evidence_record(
+            context,
+            tier=tier,
+            outcome="rejected_incompatible_row",
+            source_ref=row.source_ref,
+            source_desc=row.description,
+        )
+    return reinterpret_food_candidate(
+        context, candidate, candidate_index, step_name=step_name, trigger_tier=tier
     )
 
 

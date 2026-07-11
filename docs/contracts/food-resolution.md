@@ -42,10 +42,17 @@ estimator / contracts / backend-core / security-privacy lane:
 19 (FTY-326): implements evidence tiers as session tools: sanitized tier outcomes
 feed the ledger, official/reference dead ends get one bounded re-query before
 `model_prior`, `not_applicable_by_session` replaces frozen generic skips, and
-model-prior failures add sanitized detail. An unaccepted page/snippet read's own
-bounded FTY-314-framed text transiently reaches the re-interpretation prompt
-only (never ledger/trace/persisted/query/fetch surfaces — see
-`evidence-retrieval.md`). No schema/DTO/source/egress change.
+model-prior failures add sanitized detail. USDA row acceptance is
+session-consulted: the FTY-254 ranked compatibility gate now only *bounds* the
+option set — when it rejects every energy-bearing row, the bounded rejected rows
+feed the ledger as `rejected_incompatible_row` records (global row description +
+ref) and the session may spend its one re-interpretation pass to revise the
+identity for a single retried lookup, or keep it (a deliberate miss). An
+unaccepted page/snippet read's own bounded FTY-314-framed text transiently
+reaches the re-interpretation prompt only (never ledger/trace/persisted/query/
+fetch surfaces — see `evidence-retrieval.md`), and a revised identity is
+deterministically echo-filtered against the staged excerpt tokens before it may
+drive any re-query or persistence. No schema/DTO/source/egress change.
 
 18 (FTY-348, contract only): the global FTY-324 interpretation-session semantics
 (the model-owned/deterministic-owned division of labour and the
@@ -419,7 +426,14 @@ energy-bearing result (FTY-254, `fdc_ranking.py` — head-noun identity match, n
 unstated density-changing form, stated added ingredients present; preferred by
 fewest unstated demoted forms, then query-token coverage, then relevance order —
 see **Version 15**), maps it to canonical per-100g facts, and caches it as a
-`products` row. Rejecting every result is a **miss**, not a wrong-food match. A
+`products` row. Rejecting every result is a **miss**, not a wrong-food match —
+but since FTY-326 the gate is a bounding pre-filter, not the final row-acceptance
+authority: the bounded rejected energy-bearing rows are first recorded on the
+interpretation-session ledger as `rejected_incompatible_row` evidence (sanitized
+outcome + global row description + source ref), and the session may spend its one
+bounded re-interpretation pass to revise the identity for a **single** retried
+lookup before the miss stands. If the session keeps its hypothesis, the rejection
+is deliberate and resolution falls forward exactly as before. A
 **compatible rank-stable** cache hit makes **no** external call. Incompatible
 cached rows are never served; compatible but non-rank-stable rows (e.g. `tuna`
 cached to canned tuna, `scrambled eggs` to raw egg) re-fetch once and refresh the

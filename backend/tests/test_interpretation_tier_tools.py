@@ -15,7 +15,8 @@ from sqlalchemy.orm import Session
 
 from app.db import create_session_factory
 from app.enums import EstimationJobStatus, LogEventStatus
-from app.estimator.fdc import ProductFacts
+from app.estimator.fdc import FDC_SOURCE, FDC_SOURCE_TYPE, FdcLookup, ProductFacts
+from app.estimator.food_serving import NutritionFacts
 from app.estimator.food_step import FoodResolver, FoodResolveStep
 from app.estimator.interpretation import MAX_EVIDENCE_EXCERPT_CHARS, InterpretationSession
 from app.estimator.interpretation_tools import current_food_candidate
@@ -85,6 +86,30 @@ class FakeFoodSource:
     def lookup(self, query: str) -> ProductFacts | None:
         self.lookups.append(query)
         return self._facts.get(query.strip().lower())
+
+
+class FakeRowFoodSource(FakeFoodSource):
+    """Network-free USDA stand-in that also surfaces compatibility-rejected rows."""
+
+    def __init__(self, rows: dict[str, FdcLookup]) -> None:
+        super().__init__()
+        self._rows = rows
+
+    def lookup_rows(self, query: str) -> FdcLookup:
+        self.lookups.append(query)
+        return self._rows.get(query.strip().lower(), FdcLookup(match=None))
+
+
+def _fdc_row(description: str, *, query_key: str, ref: str = "usda_fdc:12345") -> ProductFacts:
+    return ProductFacts(
+        source=FDC_SOURCE,
+        source_ref=ref,
+        query_key=query_key,
+        description=description,
+        facts=NutritionFacts(calories=200.0, protein_g=8.0, carbs_g=14.0, fat_g=12.0),
+        default_serving_g=None,
+        content_hash=f"hash-{ref}",
+    )
 
 
 class ScriptedSearchProvider:
@@ -197,6 +222,34 @@ def _questions(session: Session, event_id: uuid.UUID) -> list[ClarificationQuest
     )
 
 
+def _web_pipeline(
+    session: Session,
+    parse_provider: FakeProvider,
+    official_provider: FakeProvider,
+    search: ScriptedSearchProvider,
+    fetcher: RecordingFetcher,
+    food_source: FakeFoodSource | None = None,
+) -> Pipeline:
+    """The parse → USDA → web-evidence pipeline the FTY-326 tests drive."""
+
+    return Pipeline(
+        [
+            ParseStep(parse_provider),
+            FoodResolveStep(FoodResolver(session=session, source=food_source or FakeFoodSource())),
+            OfficialSourceResolveStep(
+                provider=official_provider,
+                search_provider=search,
+                fetch_settings=OfficialFetchSettings(
+                    allowed_hosts=frozenset({"source.example.com"})
+                ),
+                reference_fetch_settings=ReferenceFetchSettings(),
+                fetch_fn=fetcher,
+                reference_fetch_fn=fetcher,
+            ),
+        ]
+    )
+
+
 def test_evidence_dead_end_requeries_revised_identity_before_model_prior(
     client: TestClient, session: Session
 ) -> None:
@@ -231,22 +284,7 @@ def test_evidence_dead_end_requeries_revised_identity_before_model_prior(
         }
     )
     fetcher = RecordingFetcher()
-    pipeline = Pipeline(
-        [
-            ParseStep(parse_provider),
-            FoodResolveStep(FoodResolver(session=session, source=FakeFoodSource())),
-            OfficialSourceResolveStep(
-                provider=official_provider,
-                search_provider=search,
-                fetch_settings=OfficialFetchSettings(
-                    allowed_hosts=frozenset({"source.example.com"})
-                ),
-                reference_fetch_settings=ReferenceFetchSettings(),
-                fetch_fn=fetcher,
-                reference_fetch_fn=fetcher,
-            ),
-        ]
-    )
+    pipeline = _web_pipeline(session, parse_provider, official_provider, search, fetcher)
     user_id, event_id = _seed_event(
         client,
         "fty326-requery@example.com",
@@ -323,22 +361,7 @@ def test_tier_exhaustion_uses_session_ledger_then_rough_model_prior(
     )
     search = ScriptedSearchProvider()
     fetcher = RecordingFetcher()
-    pipeline = Pipeline(
-        [
-            ParseStep(parse_provider),
-            FoodResolveStep(FoodResolver(session=session, source=FakeFoodSource())),
-            OfficialSourceResolveStep(
-                provider=official_provider,
-                search_provider=search,
-                fetch_settings=OfficialFetchSettings(
-                    allowed_hosts=frozenset({"source.example.com"})
-                ),
-                reference_fetch_settings=ReferenceFetchSettings(),
-                fetch_fn=fetcher,
-                reference_fetch_fn=fetcher,
-            ),
-        ]
-    )
+    pipeline = _web_pipeline(session, parse_provider, official_provider, search, fetcher)
     user_id, event_id = _seed_event(
         client, "fty326-rough@example.com", f"had a mystery wrap {_RAW_SENTINEL}"
     )
@@ -432,22 +455,7 @@ def test_ambiguous_reads_feed_framed_surface_text_to_reinterpretation_only(
         }
     )
     fetcher = RecordingFetcher(f"unreadable nutrition page {page_sentinel}")
-    pipeline = Pipeline(
-        [
-            ParseStep(parse_provider),
-            FoodResolveStep(FoodResolver(session=session, source=FakeFoodSource())),
-            OfficialSourceResolveStep(
-                provider=official_provider,
-                search_provider=search,
-                fetch_settings=OfficialFetchSettings(
-                    allowed_hosts=frozenset({"source.example.com"})
-                ),
-                reference_fetch_settings=ReferenceFetchSettings(),
-                fetch_fn=fetcher,
-                reference_fetch_fn=fetcher,
-            ),
-        ]
-    )
+    pipeline = _web_pipeline(session, parse_provider, official_provider, search, fetcher)
     user_id, event_id = _seed_event(
         client, "fty326-ambiguous-read@example.com", f"PC dill hummus {_RAW_SENTINEL}"
     )
@@ -654,22 +662,7 @@ def test_accepted_page_assumptions_never_persist_provider_output(
     )
     search = ScriptedSearchProvider({"dill pickle hummus Presidents Choice": _success(_HUMMUS_URL)})
     fetcher = RecordingFetcher(f"nutrition facts page {page_sentinel}")
-    pipeline = Pipeline(
-        [
-            ParseStep(parse_provider),
-            FoodResolveStep(FoodResolver(session=session, source=FakeFoodSource())),
-            OfficialSourceResolveStep(
-                provider=official_provider,
-                search_provider=search,
-                fetch_settings=OfficialFetchSettings(
-                    allowed_hosts=frozenset({"source.example.com"})
-                ),
-                reference_fetch_settings=ReferenceFetchSettings(),
-                fetch_fn=fetcher,
-                reference_fetch_fn=fetcher,
-            ),
-        ]
-    )
+    pipeline = _web_pipeline(session, parse_provider, official_provider, search, fetcher)
     user_id, event_id = _seed_event(
         client, "fty326-page-assumptions@example.com", "PC dill pickle hummus, 1 tbsp"
     )
@@ -765,3 +758,194 @@ def test_current_food_candidate_falls_back_to_value_match_when_shapes_differ() -
 
     assert current_food_candidate(context, candidate, 0) == candidate
     assert current_food_candidate(context, CandidateDraft(name="  Banana "), 0).name == "banana"
+
+
+def test_fdc_row_rejected_by_head_noun_gate_feeds_session_and_resolves(
+    client: TestClient, session: Session
+) -> None:
+    """USDA row acceptance is session-consulted: a row the deterministic
+    head-noun gate rejects feeds the ledger as ``rejected_incompatible_row``
+    evidence, the session revises the identity, and one bounded retried lookup
+    resolves from the trusted database instead of collapsing to a bare miss."""
+
+    hummus_row = _fdc_row("Hummus, commercial", query_key="hummus")
+    item: dict[str, Any] = {
+        "type": "food",
+        "name": "chickpea dip",
+        "quantity_text": "100 g",
+        "unit": "g",
+        "amount": 100,
+    }
+    parse_responses: list[dict[str, Any] | LLMError] = [
+        _parsed_response([item], confidence=0.95) for _ in range(SELF_CONSISTENCY_FIRST_WINDOW)
+    ]
+    parse_responses.append(_parsed_response([{**item, "name": "hummus"}], confidence=0.95))
+    parse_provider = FakeProvider(responses=parse_responses)
+    # The old gate rejects "Hummus, commercial" for "chickpea dip" (head noun
+    # "dip" absent); the same row is the ranked match once the session revises.
+    food_source = FakeRowFoodSource(
+        {
+            "chickpea dip": FdcLookup(match=None, rejected=(hummus_row,)),
+            "hummus": FdcLookup(match=hummus_row),
+        }
+    )
+    pipeline = Pipeline(
+        [
+            ParseStep(parse_provider),
+            FoodResolveStep(FoodResolver(session=session, source=food_source)),
+        ]
+    )
+    user_id, event_id = _seed_event(
+        client, "fty326-fdc-row@example.com", f"a chickpea dip {_RAW_SENTINEL}"
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.event_status is LogEventStatus.COMPLETED
+    assert _questions(session, event_id) == []
+    assert food_source.lookups == ["chickpea dip", "hummus"]
+    food = _foods(session, event_id)[0]
+    assert food.name == "hummus"
+    assert food.calories == pytest.approx(200.0)
+    evidence = _evidence(session, event_id)[0]
+    assert evidence.source_type == FDC_SOURCE_TYPE
+    assert evidence.source_ref == "usda_fdc:12345"
+
+    run = _run(session, event_id)
+    entries = _decisions(run)
+    rejected = _find(entries, tier=FDC_SOURCE, outcome="rejected_incompatible_row")
+    assert rejected and rejected[0]["source_desc"] == "Hummus, commercial"
+    assert _find(entries, tier="interpretation_session", outcome="requery_revised_identity")
+    assert _find(entries, tier=FDC_SOURCE, outcome="accepted")
+    # The session saw the rejected row as ledger evidence, not a bare miss.
+    requery_prompts = [prompt for prompt in parse_provider.prompts if "<evidence_status>" in prompt]
+    assert len(requery_prompts) == 1
+    assert "usda_fdc: rejected_incompatible_row" in requery_prompts[0]
+    assert 'source_desc="Hummus, commercial"' in requery_prompts[0]
+    assert _RAW_SENTINEL not in json.dumps({"trace": run.trace, "assumptions": run.assumptions})
+
+
+def test_fdc_row_rejection_kept_by_session_is_a_deliberate_miss(
+    client: TestClient, session: Session
+) -> None:
+    """When the session sees the rejected row evidence and keeps its hypothesis,
+    the rejection stands: the wrong-food row is never committed and resolution
+    falls forward to the rough tiers exactly as before."""
+
+    item: dict[str, Any] = {"type": "food", "name": "chickpea dip", "quantity_text": ""}
+    parse_responses: list[dict[str, Any] | LLMError] = [
+        _parsed_response([item], confidence=0.9) for _ in range(SELF_CONSISTENCY_FIRST_WINDOW + 1)
+    ]
+    parse_provider = FakeProvider(responses=parse_responses)
+    food_source = FakeRowFoodSource(
+        {
+            "chickpea dip": FdcLookup(
+                match=None, rejected=(_fdc_row("Hummus, commercial", query_key="hummus"),)
+            ),
+        }
+    )
+    official_provider = FakeProvider(
+        responses=[
+            {
+                "disposition": "resolved",
+                "confidence": 0.85,
+                "facts": _ROUGH_AS_LOGGED,
+                "assumptions": ["bounded rough dip estimate"],
+            }
+        ]
+    )
+    search = ScriptedSearchProvider()
+    fetcher = RecordingFetcher()
+    pipeline = _web_pipeline(
+        session, parse_provider, official_provider, search, fetcher, food_source=food_source
+    )
+    user_id, event_id = _seed_event(
+        client, "fty326-fdc-row-kept@example.com", f"a chickpea dip {_RAW_SENTINEL}"
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.event_status is LogEventStatus.COMPLETED
+    assert food_source.lookups == ["chickpea dip"]
+    evidence = _evidence(session, event_id)[0]
+    assert evidence.source_type == MODEL_PRIOR_SOURCE_TYPE
+
+    run = _run(session, event_id)
+    entries = _decisions(run)
+    assert _find(entries, tier=FDC_SOURCE, outcome="rejected_incompatible_row")
+    assert _find(entries, tier="interpretation_session", outcome="requery_identity_unchanged")
+    assert _find(entries, tier=FDC_SOURCE, outcome="miss")
+    assert not _find(entries, tier=FDC_SOURCE, outcome="accepted")
+    # The rough tool still sees the row evidence on its sanitized ledger view.
+    assert "usda_fdc: rejected_incompatible_row" in official_provider.prompts[-1]
+    assert _RAW_SENTINEL not in json.dumps({"trace": run.trace, "assumptions": run.assumptions})
+
+
+def test_requery_never_echoes_staged_evidence_text_into_search(
+    client: TestClient, session: Session
+) -> None:
+    """A re-ask reply that echoes staged page text into the revised identity is
+    deterministically filtered: the echoed word never reaches an outbound search
+    query or the persisted item, while the legitimate (user-derivable) parts of
+    the revision still drive the bounded re-query."""
+
+    page_sentinel = "RAW-PAGE-BODY sk-pagebody654"
+    item: dict[str, Any] = {
+        "type": "food",
+        "name": "dill hummus",
+        "brand": "PC",
+        "quantity_text": "",
+    }
+    # The re-ask echoes the staged page surface into the item name; the brand
+    # revision is legitimate (its words appear in no staged excerpt).
+    echoed_item: dict[str, Any] = {
+        **item,
+        "name": "dill hummus sk-pagebody654",
+        "brand": "Presidents Choice",
+    }
+    parse_responses: list[dict[str, Any] | LLMError] = [
+        _parsed_response([item], confidence=0.9) for _ in range(SELF_CONSISTENCY_FIRST_WINDOW)
+    ]
+    parse_responses.append(_parsed_response([echoed_item], confidence=0.9))
+    parse_provider = FakeProvider(responses=parse_responses)
+    official_provider = FakeProvider(
+        responses=[
+            {"disposition": "unresolved", "confidence": 0.4},
+            {
+                "disposition": "resolved",
+                "confidence": 0.85,
+                "facts": _ROUGH_AS_LOGGED,
+                "assumptions": ["bounded rough hummus estimate"],
+            },
+        ]
+    )
+    search = ScriptedSearchProvider({"dill hummus PC": _success(_HUMMUS_URL)})
+    fetcher = RecordingFetcher(f"unreadable nutrition page {page_sentinel}")
+    pipeline = _web_pipeline(session, parse_provider, official_provider, search, fetcher)
+    user_id, event_id = _seed_event(
+        client, "fty326-echo-egress@example.com", f"PC dill hummus {_RAW_SENTINEL}"
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.event_status is LogEventStatus.COMPLETED
+    # The staged surface reached its one permitted place: the re-ask prompt.
+    requery_prompts = [prompt for prompt in parse_provider.prompts if "<evidence_status>" in prompt]
+    assert len(requery_prompts) == 1
+    assert page_sentinel in requery_prompts[0]
+
+    run = _run(session, event_id)
+    entries = _decisions(run)
+    # The legitimate half of the revision still drove the bounded re-query...
+    assert _find(entries, tier="interpretation_session", outcome="requery_revised_identity")
+    assert "dill hummus Presidents Choice" in search.queries
+    # ...but the echoed page text was filtered before every egress/persisted
+    # surface, even though the provider returned it inside the revised name.
+    food = _foods(session, event_id)[0]
+    assert food.name == "dill hummus"
+    persisted = json.dumps({"trace": run.trace, "assumptions": run.assumptions})
+    for sentinel in ("RAW-PAGE-BODY", "sk-pagebody654", "pagebody654"):
+        assert all(sentinel not in query for query in search.queries)
+        assert all(sentinel not in url for url in fetcher.fetched)
+        assert sentinel not in persisted
+        assert sentinel not in official_provider.prompts[-1]

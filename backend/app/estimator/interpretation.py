@@ -39,6 +39,7 @@ pathological phrase cannot loop unbounded.
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -118,6 +119,9 @@ _MAX_STAGED_EVIDENCE_TEXTS = 3
 
 # Mirrors the decision-trace count bound without importing its private constant.
 _MAX_EVIDENCE_COUNT = 9_999
+
+#: Tokenizer for the staged-excerpt echo taint (the estimator's identity vocabulary).
+_EXCERPT_TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
 @dataclass(frozen=True)
@@ -324,6 +328,9 @@ class InterpretationSession:
         #: next re-interpretation prompt's construction. Never persisted,
         #: traced, or read back for queries/fetches.
         self._staged_evidence_texts: list[str] = []
+        #: Every token any staged excerpt carried, retained for the run so a
+        #: revised hypothesis can be echo-checked (:meth:`evidence_echo_taint`).
+        self._staged_excerpt_tokens: set[str] = set()
         self.pending_questions: tuple[ClarificationDraft, ...] = ()
         self.signal: SelfConsistencySignal | None = None
         self.hypothesis: InterpretationHypothesis | None = None
@@ -423,6 +430,7 @@ class InterpretationSession:
         excerpt = text.strip()[:MAX_EVIDENCE_EXCERPT_CHARS]
         if not excerpt:
             return
+        self._staged_excerpt_tokens.update(_EXCERPT_TOKEN_RE.findall(excerpt.lower()))
         header = " ".join(
             label
             for label in (
@@ -435,6 +443,26 @@ class InterpretationSession:
         self._staged_evidence_texts.append(f"[{header}]\n{excerpt}")
         # Keep only the most recent staged reads so the re-ask stays bounded.
         del self._staged_evidence_texts[:-_MAX_STAGED_EVIDENCE_TEXTS]
+
+    def evidence_echo_taint(self) -> frozenset[str]:
+        """Tokens seen only in staged evidence text, never in the user's own words.
+
+        The deterministic guard behind the FTY-326 egress rule that staged
+        page/snippet text "is never used to build a search query or fetch URL": a
+        re-interpretation call sees the staged excerpts, so its revised identity
+        fields could echo them. Any staged-excerpt token the raw entry text and
+        answered clarifications never contained is evidence-derived; the resolver
+        bridge drops identity words carrying one before the hypothesis may drive a
+        re-query or persistence. Empty until something is staged.
+        """
+
+        if not self._staged_excerpt_tokens:
+            return frozenset()
+        own = set(_EXCERPT_TOKEN_RE.findall(self.raw_text.lower()))
+        for answered in self.clarification_answers:
+            own.update(_EXCERPT_TOKEN_RE.findall(answered.question_text.lower()))
+            own.update(_EXCERPT_TOKEN_RE.findall(answered.answer_text.lower()))
+        return frozenset(self._staged_excerpt_tokens - own)
 
     def note_pending_questions(
         self,
