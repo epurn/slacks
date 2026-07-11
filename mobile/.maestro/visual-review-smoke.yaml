@@ -222,6 +222,54 @@ appId: com.fatty
     id: "visual-review-settled:today.confirm_parsed"
 - takeScreenshot: today-confirm-parsed-light
 
+# today.failed (FTY-342): failed-parse EntryRow rendered inline from Today's
+# E2E-only fixture seam — no live backend and no scripted failed submission.
+- openLink: "fatty://__visual-review?preset=today.failed&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.failed"
+    timeout: 20000
+- assertVisible:
+    text: "Retry"
+- assertVisible:
+    text: "Edit as text"
+- takeScreenshot: today-failed-light
+
+- openLink: "fatty://__visual-review?preset=today.failed&theme=dark"
+- runFlow: common/accept-open-in-fatty.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.failed"
+    timeout: 20000
+- assertVisible:
+    text: "Retry"
+- assertVisible:
+    text: "Edit as text"
+- takeScreenshot: today-failed-dark
+
+# today.needs_clarification (FTY-342): clarify EntryRow rendered inline from
+# Today's E2E-only fixture seam — no live backend and no scripted log/clarify.
+- openLink: "fatty://__visual-review?preset=today.needs_clarification&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.needs_clarification"
+    timeout: 20000
+- assertVisible:
+    text: "Add a detail"
+- takeScreenshot: today-needs-clarification-light
+
+- openLink: "fatty://__visual-review?preset=today.needs_clarification&theme=dark"
+- runFlow: common/accept-open-in-fatty.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.needs_clarification"
+    timeout: 20000
+- assertVisible:
+    text: "Add a detail"
+- takeScreenshot: today-needs-clarification-dark
+
 # correction.detail (light): the correction lane's seam (FTY-263) — the
 # correction sheet opens directly over a synthetic resolved entry via the
 # E2E-only initial-state seam, never a scripted tap, registered through this
