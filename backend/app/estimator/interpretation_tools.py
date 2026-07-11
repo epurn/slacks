@@ -72,21 +72,24 @@ def current_food_candidate(
     """Return the session's current food draft for ``candidate_index`` if present."""
 
     drafts = _session_food_drafts(context)
-    for draft in drafts:
-        if draft == candidate:
-            return draft
-    for draft in drafts:
-        if _same_food_identity(draft, candidate):
-            return draft
-    # Food candidates may have been claimed/removed by an earlier tier such as
-    # user_text, so index is safe only while the session/context food lists still
-    # have the same shape.
+    # Drafts are frozen value objects, so duplicate parsed candidates compare
+    # equal and a value scan can hand back the wrong duplicate's (unrevised)
+    # draft. The position is the authoritative key — but food candidates may
+    # have been claimed/removed by an earlier tier such as user_text, so index
+    # is safe only while the session/context food lists still have the same
+    # shape.
     if (
         len(drafts) == len(context.food_candidates)
         and candidate_index is not None
         and 0 <= candidate_index < len(drafts)
     ):
         return drafts[candidate_index]
+    for draft in drafts:
+        if draft == candidate:
+            return draft
+    for draft in drafts:
+        if _same_food_identity(draft, candidate):
+            return draft
     return candidate
 
 

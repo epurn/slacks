@@ -17,10 +17,13 @@ from app.db import create_session_factory
 from app.enums import EstimationJobStatus, LogEventStatus
 from app.estimator.fdc import ProductFacts
 from app.estimator.food_step import FoodResolver, FoodResolveStep
+from app.estimator.interpretation import InterpretationSession
+from app.estimator.interpretation_tools import current_food_candidate
 from app.estimator.model_prior import _model_prior
 from app.estimator.official_fetch import OfficialFetchSettings
 from app.estimator.official_step import OfficialSourceResolveStep
 from app.estimator.parse import ParseStep
+from app.estimator.parse_policy import ParsePolicySettings
 from app.estimator.pipeline import (
     CandidateDraft,
     EstimationContext,
@@ -550,3 +553,57 @@ def test_model_prior_failure_trace_carries_sanitized_reason_detail(
     entries = [entry for entry in context.trace if "decision" in entry]
     assert _find(entries, tier="model_prior", outcome=detail)
     assert _RAW_SENTINEL not in json.dumps(context.trace)
+
+
+def _unanimous_session(
+    context: EstimationContext, items: list[dict[str, Any]]
+) -> InterpretationSession:
+    """A real session whose hypothesis is the given items (unanimous samples)."""
+
+    reply = _parsed_response(items, confidence=0.9)
+    provider = FakeProvider(responses=[reply] * SELF_CONSISTENCY_FIRST_WINDOW, max_retries=0)
+    session = InterpretationSession(provider, context.raw_text, policy=ParsePolicySettings())
+    session.interpret_initial(context)
+    return session
+
+
+def test_current_food_candidate_prefers_position_for_duplicate_candidates() -> None:
+    # Duplicate parsed foods are equal value objects, so a value scan can hand
+    # back the wrong duplicate's unrevised draft when the session revised only
+    # one of them; while the session/context food lists have the same shape,
+    # the positional key is authoritative.
+    context = EstimationContext(
+        log_event_id=uuid.uuid4(), user_id=uuid.uuid4(), raw_text="banana and banana"
+    )
+    session = _unanimous_session(
+        context,
+        [
+            {"type": "food", "name": "large ripe banana", "quantity_text": ""},
+            {"type": "food", "name": "banana", "quantity_text": ""},
+        ],
+    )
+    context.interpretation_session = session
+    duplicate = CandidateDraft(name="banana")
+    context.food_candidates = [duplicate, duplicate]
+
+    assert current_food_candidate(context, duplicate, 0).name == "large ripe banana"
+    assert current_food_candidate(context, duplicate, 1) == duplicate
+
+
+def test_current_food_candidate_falls_back_to_value_match_when_shapes_differ() -> None:
+    # When an earlier tier claimed/removed a food candidate the index is no
+    # longer safe, so the helper falls back to value then name matching.
+    context = EstimationContext(log_event_id=uuid.uuid4(), user_id=uuid.uuid4(), raw_text="banana")
+    session = _unanimous_session(
+        context,
+        [
+            {"type": "food", "name": "large ripe banana", "quantity_text": ""},
+            {"type": "food", "name": "banana", "quantity_text": ""},
+        ],
+    )
+    context.interpretation_session = session
+    candidate = CandidateDraft(name="banana")
+    context.food_candidates = [candidate]
+
+    assert current_food_candidate(context, candidate, 0) == candidate
+    assert current_food_candidate(context, CandidateDraft(name="  Banana "), 0).name == "banana"
