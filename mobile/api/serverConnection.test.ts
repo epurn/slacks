@@ -67,7 +67,7 @@ describe("validateServerUrl — rejected (untrusted input)", () => {
 
   it("rejects file: and app deep-link schemes", () => {
     expect(validateServerUrl("file:///etc/passwd").ok).toBe(false);
-    expect(validateServerUrl("fatty://connect?url=evil").ok).toBe(false);
+    expect(validateServerUrl("slacks://connect?url=evil").ok).toBe(false);
     expect(validateServerUrl("ftp://host/x").ok).toBe(false);
   });
 

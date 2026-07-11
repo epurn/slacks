@@ -353,6 +353,23 @@ describe("QR scan", () => {
   });
 });
 
+// ─── Rebranded copy ──────────────────────────────────────────────────────────
+
+describe("rebranded copy", () => {
+  it("renders the Slacks server title", async () => {
+    const tree = await mount({});
+    const text = tree.root
+      .findAll((n) => typeof n.props.children === "string")
+      .map((n) => n.props.children as string);
+    expect(text).toContain("Connect to your Slacks server");
+  });
+
+  it("renders the Slacks server URL placeholder", async () => {
+    const tree = await mount({});
+    expect(input(tree).props.placeholder).toBe("https://slacks.example.com");
+  });
+});
+
 // ─── Accessibility + light/dark parity ───────────────────────────────────────
 
 describe("accessibility + light/dark parity", () => {

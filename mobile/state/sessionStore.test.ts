@@ -52,7 +52,7 @@ describe("secureSessionStore", () => {
     await secureSessionStore.save(SESSION);
     expect(setItemAsync).toHaveBeenCalledTimes(1);
     const [key, value] = setItemAsync.mock.calls[0] as [string, string];
-    expect(typeof key).toBe("string");
+    expect(key).toBe("slacks.session.v1");
     expect(JSON.parse(value)).toEqual(SESSION);
   });
 
