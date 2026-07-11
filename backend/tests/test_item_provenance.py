@@ -299,6 +299,66 @@ def test_user_text_comparable_marker_surfaces_estimate_basis(
     assert dto.source.estimate_basis is MacroEstimateBasis.COMPARABLE_REFERENCE
 
 
+@pytest.mark.parametrize(
+    "basis",
+    [
+        MacroEstimateBasis.COMPARABLE_REFERENCE,
+        MacroEstimateBasis.REFERENCE_SOURCE,
+        MacroEstimateBasis.MODEL_PRIOR,
+    ],
+)
+def test_user_text_macro_fill_marker_surfaces_each_basis(
+    client: TestClient, db_engine: Engine, basis: MacroEstimateBasis
+) -> None:
+    # Every code-emitted macro-fill tier records its MacroEstimateBasis marker on a
+    # user_text row's assumptions (comparable-reference aggregate FTY-281; single-source
+    # reference lookup and model-prior cold-pass FTY-350), so the read-model surfaces the
+    # matching estimate_basis while the item's own source_type stays user_text.
+    user_id, _ = register(client, f"prov-basis-{basis.value}@example.com")
+    item_id = seed_food_item(db_engine, user_id)
+    seed_evidence(
+        db_engine,
+        user_id,
+        item_id,
+        source_type=SourceType.USER_TEXT,
+        source_ref="user_text:" + "a" * 8,
+        assumptions=[
+            f"{ESTIMATE_BASIS_ASSUMPTION_PREFIX}{basis.value}",
+            f"protein_g estimated from {basis.value}",
+        ],
+    )
+
+    dto = _read_food(db_engine, item_id)
+
+    assert dto.source is not None
+    assert dto.source.source_type is SourceType.USER_TEXT
+    assert dto.source.estimate_basis is basis
+
+
+def test_unrecognized_estimate_basis_suffix_degrades_to_null(
+    client: TestClient, db_engine: Engine
+) -> None:
+    # An unrecognized basis suffix (a value outside the MacroEstimateBasis vocabulary)
+    # degrades to null on the read path rather than raising — the defensive
+    # MacroEstimateBasis(raw) construction in _macro_estimate_basis.
+    user_id, _ = register(client, "prov-unknown-basis@example.com")
+    item_id = seed_food_item(db_engine, user_id)
+    seed_evidence(
+        db_engine,
+        user_id,
+        item_id,
+        source_type=SourceType.USER_TEXT,
+        source_ref="user_text:" + "a" * 8,
+        assumptions=[f"{ESTIMATE_BASIS_ASSUMPTION_PREFIX}some_future_tier"],
+    )
+
+    dto = _read_food(db_engine, item_id)
+
+    assert dto.source is not None
+    assert dto.source.source_type is SourceType.USER_TEXT
+    assert dto.source.estimate_basis is None
+
+
 def test_provider_assumption_mimicking_marker_on_model_prior_is_not_a_basis(
     client: TestClient, db_engine: Engine
 ) -> None:

@@ -417,7 +417,12 @@ never invented while better evidence is still reachable:
    single confident match from the source tiers (official / product / trusted-database /
    reference) fills the field before any model prior is consulted. This is the same
    evidence-before-`model_prior` guarantee as the **Fallback Rule**, applied per missing
-   field: `field_provenance = estimated` with the source's `source_ref` recorded.
+   field: `field_provenance = estimated` with the source's `source_ref` recorded. When
+   this single-source reference lookup fills a `user_text` item's missing macros, the
+   read-model also surfaces the rough basis via the additive optional
+   `ItemSourceDTO.estimate_basis = reference_source` (FTY-350), derived at read time from
+   the item's own `assumptions` marker with **no** new persisted column — the item stays
+   `user_text`, exactly as step 2 surfaces `comparable_reference`.
 2. **Comparable-source aggregation — rough reference evidence.** When no single source
    confidently resolves the field but several comparable references exist, the estimator
    may derive a **rough reference estimate** by aggregating the comparable facts. This
@@ -464,6 +469,11 @@ never invented while better evidence is still reachable:
    source-backed lookup nor a plausible comparable-source aggregate is available does the
    field fall to a pure `model_prior` estimate (`field_provenance = estimated`, the reason
    in `assumptions`), or remain **unknown/`null`** when no credible estimate is produced.
+   When this cold-pass fills a `user_text` item's missing macros, the read-model surfaces
+   the rough basis via the additive optional `ItemSourceDTO.estimate_basis = model_prior`
+   (FTY-350), derived at read time from the item's own `assumptions` marker with **no** new
+   persisted column — the item stays `user_text`, consistent with the `comparable_reference`
+   and `reference_source` surfacing above.
    An **uncertain** missing-field model-prior estimate is produced through the same
    **cold-pass self-consistency** path the parse step uses (FTY-158/FTY-159;
    `app/estimator/self_consistency.py`, `parse-candidates.md`): the field is drawn over

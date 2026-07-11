@@ -44,6 +44,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
+from app.enums import ESTIMATE_BASIS_ASSUMPTION_PREFIX, MacroEstimateBasis
 from app.estimator.clarify_policy import (
     BASIS_DOCUMENTED_TUNABLE,
     ClarifyPolicy,
@@ -250,7 +251,18 @@ class UserTextMacroEstimator:
         assumption = (
             f"{filled} estimated from {tier} ({source_ref}) scaled to the stated {calories:g} kcal"
         )
-        return _EstimatedMacros(values=values, source_ref=source_ref, assumptions=(assumption,))
+        # Read-model estimate-basis marker (FTY-350): the reference-lookup and model-prior
+        # macro-fills additionally carry the ESTIMATE_BASIS_ASSUMPTION_PREFIX marker the
+        # comparable-reference tier already writes (build_missing_macro_fill), so the FTY-092
+        # read-model can surface ItemSourceDTO.estimate_basis for these tiers too — the same
+        # derive-don't-store mechanism, no new persisted column. ``tier`` is exactly a
+        # MacroEstimateBasis value; the marker suffix is that plain enum value only —
+        # content-free, never the source_ref, URL, or provider output — and it rides
+        # alongside the unchanged human-readable prose assumption.
+        basis_marker = f"{ESTIMATE_BASIS_ASSUMPTION_PREFIX}{MacroEstimateBasis(tier).value}"
+        return _EstimatedMacros(
+            values=values, source_ref=source_ref, assumptions=(basis_marker, assumption)
+        )
 
     def _reference_composition(
         self, context: EstimationContext, candidate: CandidateDraft

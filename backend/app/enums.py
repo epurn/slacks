@@ -306,25 +306,42 @@ class SourceType(StrEnum):
 
 
 class MacroEstimateBasis(StrEnum):
-    """How a ``user_text`` item's *missing* macros were filled (FTY-281 read-model).
+    """Which evidence tier filled a ``user_text`` item's *missing* macros (FTY-281/FTY-350).
 
     A user-stated calorie item keeps ``source_type = user_text`` (its calories are the
     number the user typed); this secondary signal — surfaced on
-    :class:`~app.schemas.corrections.ItemSourceDTO.estimate_basis` — lets a client tell
-    a **rough comparable-reference aggregate** macro estimate from a plain user-stated
-    item whose macros are unknown, so the two never read as the same evidence.
-    ``None`` on the DTO means no comparable-reference aggregate backs the item.
+    :class:`~app.schemas.corrections.ItemSourceDTO.estimate_basis` — lets a client tell a
+    **rough gap-filling** macro estimate from a plain user-stated item whose macros are
+    unknown, so the two never read as the same evidence. Each value names the
+    macro-fill **tier** (``user_text_macro_estimator.py`` / ``comparable_reference.py``),
+    matching the :class:`SourceType` vocabulary:
+
+    - :attr:`COMPARABLE_REFERENCE` — a rough median aggregate over compatible public
+      references (FTY-281, ``build_missing_macro_fill``).
+    - :attr:`REFERENCE_SOURCE` — a single confident source-backed reference lookup
+      (FTY-350, ``UserTextMacroEstimator._scale_missing`` with ``tier="reference_source"``).
+    - :attr:`MODEL_PRIOR` — the model-prior cold-pass fallback (FTY-350,
+      ``_scale_missing`` with ``tier="model_prior"``).
+
+    A value here names the *tier that filled the missing macro*, **not** the item's own
+    ``source_type`` (which stays ``user_text``). ``None`` on the DTO means the macros were
+    not gap-filled by any of these tiers (the user stated them, or they are unknown).
     """
 
     COMPARABLE_REFERENCE = "comparable_reference"
+    REFERENCE_SOURCE = "reference_source"
+    MODEL_PRIOR = "model_prior"
 
 
 #: Machine-readable ``evidence_sources.assumptions`` marker recording a user_text
-#: item's macro estimate basis (FTY-281). The comparable-reference tier writes
-#: ``"macro estimate basis: comparable_reference"`` so the FTY-092 read-model derives
-#: :class:`~app.schemas.corrections.ItemSourceDTO.estimate_basis` at read time from
-#: already-stored provenance, with **no** new persisted column. The suffix is a
-#: :class:`MacroEstimateBasis` value.
+#: item's macro estimate basis (FTY-281/FTY-350). The macro-fill tiers write
+#: ``"macro estimate basis: <MacroEstimateBasis value>"`` — the comparable-reference
+#: aggregate (``build_missing_macro_fill``) and, since FTY-350, the single-source
+#: reference lookup and the model-prior cold-pass (``_scale_missing``) — so the FTY-092
+#: read-model derives :class:`~app.schemas.corrections.ItemSourceDTO.estimate_basis` at
+#: read time from already-stored provenance, with **no** new persisted column. The suffix
+#: is a content-free :class:`MacroEstimateBasis` value — never a ``source_ref``, URL, or
+#: provider output.
 ESTIMATE_BASIS_ASSUMPTION_PREFIX = "macro estimate basis: "
 
 

@@ -89,12 +89,16 @@ class ItemSourceDTO(BaseModel):
     - ``ref`` — the stable ``source_ref`` (e.g. ``usda_fdc:<id>``,
       ``open_food_facts:<barcode>``, ``official_source:<url>``) for the sheet's
       deeper provenance line. For an ``official_source`` item this is the URL only.
-    - ``estimate_basis`` — *(FTY-281, optional)* how a ``user_text`` item's **missing**
-      macros were filled. ``comparable_reference`` marks a **rough comparable-reference
-      aggregate** estimate, so a client can tell it from a plain user-stated item whose
-      macros are unknown; ``None`` (the common case) when no such aggregate backs the
-      item. The item's ``source_type`` stays ``user_text`` — the calories are still the
-      user's stated number; only the macro estimate carries this secondary basis.
+    - ``estimate_basis`` — *(FTY-281 / FTY-350, optional)* which tier filled a
+      ``user_text`` item's **missing** macros when a rough estimate backs them:
+      ``comparable_reference`` (a rough comparable-reference aggregate, FTY-281),
+      ``reference_source`` (a single confident source-backed reference lookup, FTY-350),
+      or ``model_prior`` (the model-prior cold-pass, FTY-350) — so a client can tell a
+      gap-filled macro from a plain user-stated item whose macros are unknown; ``None``
+      (the common case) when no such fill backs the item. The value names the **fill
+      tier**, not the item's own ``source_type``, which stays ``user_text`` — the calories
+      are still the user's stated number; only the macro estimate carries this secondary
+      basis.
     """
 
     model_config = ConfigDict(extra="forbid")
