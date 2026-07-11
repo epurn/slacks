@@ -1,0 +1,80 @@
+{
+  "_comment": [
+    "Representative food-log fixtures for the FTY-256 local dogfood smoke.",
+    "These are the SUBMITTED USER INPUTS the smoke sends to the live local API",
+    "plus the outcome the estimator must deliver — they are verification data,",
+    "not estimator behavior. Kept as data (not a Python literal) so the smoke",
+    "code stays generic: it special-cases nothing and hardcodes no brand phrase,",
+    "and the estimator's no-special-case scan (test_exact_snack_phrase_resolution)",
+    "keeps holding over backend/app. Calorie bands are plausibility tolerances for",
+    "the verification, never a nutrition table the estimator reads.",
+    "expected_item_count: exact number of derived items, or null for 'at least one'.",
+    "forbid_source_types: source_type values that would be a WRONG resolution.",
+    "forbid_substrings: tokens that must not appear in an item name/label/ref."
+  ],
+  "fixtures": [
+    {
+      "key": "compliments-chicken-strips",
+      "raw_text": "compliments brand chicken strips (i had 4)",
+      "expected_item_count": 1,
+      "total_kcal_low": 80.0,
+      "total_kcal_high": 700.0,
+      "forbid_source_types": ["trusted_nutrition_database"],
+      "forbid_substrings": ["denny"]
+    },
+    {
+      "key": "one-banana",
+      "raw_text": "one banana",
+      "expected_item_count": 1,
+      "total_kcal_low": 50.0,
+      "total_kcal_high": 200.0,
+      "forbid_source_types": [],
+      "forbid_substrings": ["dehydrated", "powder", "dried", "chips", "flour"]
+    },
+    {
+      "key": "two-large-eggs",
+      "raw_text": "2 large eggs",
+      "expected_item_count": 1,
+      "total_kcal_low": 100.0,
+      "total_kcal_high": 260.0,
+      "forbid_source_types": [],
+      "forbid_substrings": []
+    },
+    {
+      "key": "one-slice-wheat-toast",
+      "raw_text": "1 slice wheat toast",
+      "expected_item_count": 1,
+      "total_kcal_low": 30.0,
+      "total_kcal_high": 160.0,
+      "forbid_source_types": [],
+      "forbid_substrings": []
+    },
+    {
+      "key": "scrambled-eggs-and-buttered-toast",
+      "raw_text": "two scrambled eggs and one slice buttered toast",
+      "expected_item_count": 2,
+      "total_kcal_low": 120.0,
+      "total_kcal_high": 520.0,
+      "forbid_source_types": [],
+      "forbid_substrings": []
+    },
+    {
+      "key": "100g-banana",
+      "raw_text": "100 grams banana",
+      "expected_item_count": 1,
+      "total_kcal_low": 50.0,
+      "total_kcal_high": 160.0,
+      "forbid_source_types": [],
+      "forbid_substrings": ["dehydrated", "powder", "dried", "chips", "flour"]
+    },
+    {
+      "key": "branded-crackers-and-hummus",
+      "raw_text": "4 toppables brand crackers with 1tbsp of loblaws store brand (PC/presidents choice) dill pickle hummus",
+      "expected_item_count": 2,
+      "total_kcal_low": 40.0,
+      "total_kcal_high": 400.0,
+      "forbid_source_types": [],
+      "forbid_substrings": []
+    }
+  ]
+}

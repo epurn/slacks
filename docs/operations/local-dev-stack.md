@@ -370,6 +370,96 @@ constant that never touches the network. Use the printed smoke URL for live
 simulator testing; use `mobile/verify-e2e.sh` only for the hermetic Maestro
 suite.
 
+## Food Dogfood Smoke (FTY-256)
+
+After the stack is **ready** (`make sim-smoke` prints READY) and a **real LLM
+provider** is configured, run one command to prove v1 **food logging actually
+works on the live local backend** — before a human opens the simulator:
+
+```sh
+docker compose up -d          # stack up
+make sim-smoke                # confirm READY first
+make food-smoke               # live food dogfood smoke (prints no secrets)
+```
+
+`make food-smoke` runs `python -m app.ops.food_dogfood_smoke` in the backend uv
+environment. It registers a **throwaway local account** (a unique fixture email
+each run, a non-secret fixture password), submits a small set of representative
+food logs to the live API at `http://localhost:${API_PORT}`, waits for each
+event to reach a terminal estimation state, and prints a sanitized pass/fail
+summary — per-item source type/ref and calories, and any clarification text.
+
+It catches the exact v1 dogfood regressions the hermetic suites cannot see (the
+2026-07-10 live failure was a clarify the fixture suites never triggered). The
+representative fixtures and what each proves:
+
+| Fixture | Asserted live outcome |
+| --- | --- |
+| `compliments brand chicken strips (i had 4)` | Completes; a **branded** item resolves through the branded/reference/model tiers, **not** a generic USDA/FDC row (the `Compliments` → `DENNY'S` mis-match). |
+| `one banana` | Completes; costs as fresh banana, **not** dehydrated/powdered banana (a plausible calorie band is the detector). |
+| `2 large eggs` | Completes; a supplied count resolves — no generic quantity clarification. |
+| `1 slice wheat toast` | Completes; a stated slice resolves. |
+| `two scrambled eggs and one slice buttered toast` | Completes with **two** derived items, each costed with honest provenance. |
+| `100 grams banana` | Completes; measured amount resolves; not banana powder. |
+| `4 toppables brand crackers with 1tbsp of loblaws store brand (PC/presidents choice) dill pickle hummus` | The 2026-07-10 live failure — completes with **two** derived items (no `needs_clarification`, no `failed`), each with a plausible calorie band and honest source/provenance. |
+
+For every fixture the smoke also asserts that a log carrying a count or measured
+amount **never** produces a generic no-option quantity clarification, and that
+each completed item carries a source/provenance status with positive calories (a
+silent zero is not an acknowledgement).
+
+### Prerequisites
+
+- The stack is **up and migrated** (`make sim-smoke` reports READY).
+- A **real LLM provider** is configured and logged in (`FATTY_LLM_PROVIDER` set
+  to `claude_code`, `codex`, or `openai_compatible`, per the **LLM Providers**
+  and login sections above). The default `fake` provider degrades estimation to
+  model-prior-with-status and **cannot parse** natural-language food, so the
+  smoke will report failures against it — that is expected, not a v1 regression.
+- Live evidence sources help the branded fixtures resolve with the best
+  provenance: the keyless SearXNG search (default) and Open Food Facts are on out
+  of the box; USDA FDC needs `FATTY_FDC_API_KEY` (optional). Confirm provider
+  wiring with `curl -fsS http://localhost:${API_PORT}/healthz/sources`.
+
+### Interpreting results
+
+- **Exit 0, `PASS: all N fixtures …`** — every fixture reached the expected v1
+  behavior. Food logging is usable; open the simulator.
+- **Exit nonzero, `FAIL: …`** — read the `!` lines under each failed fixture.
+  Because this is the **live** backend, a failure is a real v1 dogfood
+  regression *or* a stack/provider not configured for live estimation. Common
+  causes:
+  - **API unreachable** (`cannot reach the local API …`) — the stack is down or
+    on a different `API_PORT`; run `docker compose up -d` and `make sim-smoke`.
+  - **Registration/submit HTTP error** — the stack may be unmigrated or
+    unhealthy; re-run `make sim-smoke` and apply its coherent fix path.
+  - **`needs_clarification` on a counted entry** — a live clarify regression
+    (the FTY-252/253/254 estimate-first boundary); the sanitized question text is
+    printed under the fixture.
+  - **`forbidden source` / calorie band** — a branded item matched a generic FDC
+    row, or a banana costed as powder — the exact regressions this smoke guards.
+
+### Live-local vs. hermetic E2E
+
+This smoke targets the **live local backend** (real FastAPI, Postgres, worker,
+and the configured evidence/LLM providers) on `.env`'s `API_PORT`, exactly like
+`make sim-smoke` and the simulator connect flow. It is **not** the hermetic
+`mobile/verify-e2e.sh` mode, whose in-process mock `fetch` never leaves the app
+and whose `localhost:8000` is a synthetic constant (see **Live backend vs.
+hermetic E2E mock** above). Because it depends on live external providers, it is
+**not** part of `make verify` and must never become a required CI gate; only its
+pure parsing/assessment/redaction logic is unit-tested
+(`backend/tests/test_food_dogfood_smoke.py`).
+
+### Safety
+
+The smoke operates on a **fresh throwaway account per run** (a unique fixture
+email, a non-secret fixture password), so it is safe to run repeatedly and never
+touches real user data. It never prints the bearer token, provider keys, DB
+passwords, `.env` contents, or raw provider output — output is built from
+structured fields (status, fixture text, source type/ref, calories, sanitized
+clarification text) only.
+
 ## Container User
 
 The backend image runs all three services (`migrate`, `api`, `worker`) as a
