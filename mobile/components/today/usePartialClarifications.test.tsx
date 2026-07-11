@@ -172,4 +172,58 @@ describe("usePartialClarifications (FTY-330)", () => {
     expect(harness.captured.value).toEqual({});
     harness.unmount();
   });
+
+  it("does not resurrect an answered question when an event re-enters partial and its read fails", async () => {
+    jest.useFakeTimers();
+    try {
+      // Round 1: event `a` is partial with q1; the read succeeds.
+      const round1 = jest.fn().mockResolvedValue({
+        questions: [{ id: "q1", text: "How much hummus?", options: [] }],
+      });
+      const harness = renderHook({
+        events: [event({ id: "a", status: "partially_resolved" })],
+        getClarification: round1,
+      });
+      await act(async () => {});
+      expect(harness.captured.value.a).toEqual([
+        { id: "q1", text: "How much hummus?", options: [] },
+      ]);
+
+      // The user answers: `a` leaves partial (answered → processing). The cache
+      // must be pruned across this status gap, not merely hidden from the view.
+      await harness.update({
+        events: [event({ id: "a", status: "processing" })],
+        getClarification: round1,
+      });
+      expect(harness.captured.value).toEqual({});
+
+      // Round 2: `a` re-enters partial with a fresh question set, but the first
+      // read of the new round fails. The stale q1 must NOT reappear; the hook
+      // instead shows nothing and schedules a retry.
+      const round2 = jest
+        .fn()
+        .mockRejectedValueOnce(new Error("network"))
+        .mockResolvedValue({
+          questions: [{ id: "q2", text: "How much rice?", options: [] }],
+        });
+      await harness.update({
+        events: [event({ id: "a", status: "partially_resolved" })],
+        getClarification: round2,
+        reloadKey: 1,
+      });
+      expect(harness.captured.value).toEqual({});
+
+      // The retry fires and resolves the fresh question.
+      await act(async () => {
+        jest.advanceTimersByTime(PARTIAL_CLARIFICATION_RETRY_MS);
+      });
+      await act(async () => {});
+      expect(harness.captured.value.a).toEqual([
+        { id: "q2", text: "How much rice?", options: [] },
+      ]);
+      harness.unmount();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });

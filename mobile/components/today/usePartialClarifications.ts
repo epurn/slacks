@@ -86,6 +86,29 @@ export function usePartialClarifications({
   const partialKey = partialIds.join(",");
 
   useEffect(() => {
+    // Scope the failed-read fallback to one *continuous* partial round: drop any
+    // cached questions for events no longer in the partial set. A partial event
+    // that leaves `partially_resolved` (answered → processing) and later
+    // re-enters opens a fresh clarification round whose questions replace the old
+    // ones (`clarification.md`). Without this prune the departed id's questions
+    // linger in `fetchedRef`, so a transient failed read on re-entry would fall
+    // back to the stale (already-answered) question — re-showing it, hiding the
+    // real open component, and sending the wrong question id to the answer API.
+    // Pruning here runs synchronously on every membership change, including when
+    // the set empties (the early return below still lets this run first), so the
+    // status gap is always cleared before an id can return.
+    const partialSet = new Set(partialIds);
+    const prevFetched = fetchedRef.current;
+    const hasStale = Object.keys(prevFetched).some((id) => !partialSet.has(id));
+    if (hasStale) {
+      const pruned: Record<string, readonly ClarificationQuestionDTO[]> = {};
+      for (const id of partialIds) {
+        if (prevFetched[id]) pruned[id] = prevFetched[id];
+      }
+      fetchedRef.current = pruned;
+      setFetched(pruned);
+    }
+
     if (!apiSession || partialIds.length === 0) return;
     let active = true;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
