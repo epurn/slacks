@@ -36,6 +36,7 @@ from app.estimator.food_step import FoodResolveStep
 from app.estimator.off import (
     OFF_SOURCE,
     OFF_SOURCE_TYPE,
+    OffMissReason,
     OffTransientError,
     normalize_barcode,
 )
@@ -103,6 +104,10 @@ class FakeBarcodeSource:
         if self._error is not None:
             raise self._error
         return self._facts.get(normalize_barcode(barcode) or "")
+
+    def lookup_outcome(self, barcode: str) -> tuple[ProductFacts | None, OffMissReason | None]:
+        facts = self.lookup(barcode)
+        return facts, (None if facts is not None else OffMissReason.NO_MATCH)
 
 
 class FakeFoodSource:

@@ -18,14 +18,70 @@ applied item will read.
 
 from __future__ import annotations
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.enums import SourceType
 from app.estimator.exact_evidence import ExactEvidenceProposal, cost_grams
 from app.estimator.food_serving import scale_facts
 from app.models.derived import DerivedFoodItem
+from app.models.food_sources import EvidenceSource
 from app.schemas.exact_evidence import (
     ExactEvidenceProposalDTO,
     ExactEvidenceProposalPreviewDTO,
 )
 from app.services.item_read_model import source_descriptor
+
+#: The evidence source types that are **always** exact-upgrade-eligible: rough
+#: low-trust estimates a barcode/label can replace with exact facts
+#: (``docs/contracts/evidence-retrieval.md`` — Exact Evidence Upgrade, Eligibility;
+#: ``docs/contracts/daily-summary.md`` — the matching ``make it exact`` nudge signal).
+_ALWAYS_ELIGIBLE_SOURCE_TYPES = frozenset(
+    {SourceType.MODEL_PRIOR.value, SourceType.REFERENCE_SOURCE.value}
+)
+
+
+class NotUpgradeable(Exception):
+    """Raised when a food item is already source-backed and offers no exact upgrade.
+
+    The propose routes (barcode FTY-308, label FTY-309) evaluate exact-upgrade
+    eligibility server-side from the item's ``evidence_sources`` row, matching the
+    client-side ``make it exact`` nudge signal, and refuse an ineligible target with
+    ``422 {"error": "not_upgradeable"}`` (no mutation) — a ``user_label`` /
+    ``product_database`` / ``trusted_nutrition_database`` / ``official_source`` item
+    keeps the normal correction levers instead.
+    """
+
+
+def is_exact_upgrade_eligible(session: Session, item: DerivedFoodItem) -> bool:
+    """Whether ``item`` is a low-trust/incomplete food item eligible for exact upgrade.
+
+    Mirrors the ``make it exact`` nudge signal the read model exposes
+    (``docs/contracts/daily-summary.md`` → ``source`` descriptor): eligible for a
+    ``model_prior`` or ``reference_source`` item, or a ``user_text`` item whose macros
+    are incomplete — a macro fact ``None`` in this read shape, or a non-null
+    ``estimate_basis`` marker (a rough gap-filled macro). Already source-backed types
+    (``user_label`` / ``product_database`` / ``trusted_nutrition_database`` /
+    ``official_source``) are ineligible, and an item with **no** evidence row fails
+    closed as ineligible. Derived from the item's own evidence row and macro facts —
+    no new persisted flag.
+    """
+
+    evidence = session.scalars(
+        select(EvidenceSource)
+        .where(EvidenceSource.derived_food_item_id == item.id)
+        .order_by(EvidenceSource.created_at.desc())
+    ).first()
+    if evidence is None:
+        return False
+    if evidence.source_type in _ALWAYS_ELIGIBLE_SOURCE_TYPES:
+        return True
+    if evidence.source_type != SourceType.USER_TEXT.value:
+        return False
+    macros_incomplete = item.protein_g is None or item.carbs_g is None or item.fat_g is None
+    descriptor = source_descriptor(evidence.source_type, evidence.source_ref, evidence.assumptions)
+    has_rough_macro_fill = descriptor is not None and descriptor.estimate_basis is not None
+    return macros_incomplete or has_rough_macro_fill
 
 
 def serialize_proposal(
