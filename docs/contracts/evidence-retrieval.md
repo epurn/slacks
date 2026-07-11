@@ -60,12 +60,11 @@ Adapter — FTY-079 / FTY-164**.
 surfaces, and source-stated descriptors needed for interpretation, but never raw
 pages, snippets, queries, diary text, or provider output blobs. After an
 official/reference evidence dead end, the resolver may spend the session's one
-bounded re-interpretation pass and re-query once before falling to `model_prior`.
-The `model_prior` tool receives only sanitized identity, bounded structured
-portion fields, and evidence-view records; its terminal trace adds
-`provider_error`, `low_confidence`, `non_resolved_disposition`, or
-`unusable_facts`. Source hierarchy, statuses, egress, schema, provenance, and
-retention rules are unchanged.
+bounded re-interpretation pass and re-query once before falling to `model_prior`,
+which receives only sanitized identity, bounded structured portion fields, and
+evidence-view records; its terminal trace adds `provider_error`,
+`low_confidence`, `non_resolved_disposition`, or `unusable_facts`. Source
+hierarchy, statuses, egress, schema, provenance, and retention rules are unchanged.
 
 8 (FTY-348, contract only): relocates the global FTY-324 interpretation-loop framing
 to [interpretation-session.md](interpretation-session.md); page-local rules unchanged.
@@ -240,10 +239,9 @@ source hierarchy, statuses, egress/fetch gates, fact-schema validation, serving
 math, budget caps, and persisted provenance. FTY-326 records tier hits, misses,
 fetch/extraction failures, compatibility rejections, and snippet-surface outcomes as
 bounded sanitized evidence-view records; after an evidence dead end the resolver may
-re-open interpretation once and re-query with a revised identity.
-The ledger never carries raw diary text, raw search queries, raw pages, raw
-snippets, or provider output blobs, and it never changes the source hierarchy or
-math/provenance authority.
+re-open interpretation once and re-query with a revised identity. The ledger never
+carries raw diary text, search queries, pages, snippets, or provider output blobs,
+and it never changes the source hierarchy or math/provenance authority.
 
 **User-stated facts and the fallback rule (FTY-279).** A nutrition fact the user
 stated in the entry text (`user_text`) is the **highest-preference** source for
@@ -900,9 +898,8 @@ search adapter, FTY-079/164), fetches the bounded result page through the harden
 **searched-result** fetch policy, transcribes the facts the page states through the
 strict `NamedFoodEstimate` schema, and recomputes calories/macros with the FTY-044
 deterministic serving math. Only when this tier also produces nothing confident does
-the resolver fall to `model_prior` — after the bounded evidence-driven
-re-interpretation pass when a source result failed or was rejected, and with
-per-tier `assumptions` naming why.
+the resolver fall to `model_prior` — after the one bounded re-interpretation
+pass on a failed/rejected source read — with per-tier `assumptions` naming why.
 
 ### Tier order (pipeline, after a USDA/OFF miss)
 
@@ -1029,10 +1026,14 @@ pre-FTY-314 fetch-only behavior exactly.
   wholesale — only the fixed content-free `search_result_snippet` label is
   recorded — so a provider response echoing raw snippet text into its
   assumptions can never reach evidence/run assumptions.
-- Snippet/fetch/extraction dead ends still enter the interpretation loop only as
-  sanitized status labels such as `fetch_403`, `extract_unresolved`,
-  `extract_low_confidence`, or `snippet_unavailable`; the raw snippet/page text is
-  not copied into the session ledger or model-prior prompt.
+- Fetch/search dead ends enter the interpretation loop as sanitized status
+  labels such as `fetch_403` or `snippet_unavailable`; an ambiguous page or
+  snippet read (`extract_unresolved` / `extract_low_confidence` /
+  `extract_rejected_facts`) also carries a bounded schema-validated descriptor
+  (stated product name, disposition, confidence, facts basis) so the session
+  can interpret what the surface said, not a status label alone (FTY-326); raw
+  snippet/page text and provider assumption strings still never enter the
+  session ledger or model-prior prompt.
 - No egress change: snippets arrive on the existing search response; this adds
   no browser automation, redirects, allowlist widening, or new fetch surface.
 

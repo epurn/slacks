@@ -363,6 +363,121 @@ def test_tier_exhaustion_uses_session_ledger_then_rough_model_prior(
     assert _RAW_SENTINEL not in persisted
 
 
+def test_ambiguous_extract_reads_carry_bounded_descriptors_to_session(
+    client: TestClient, session: Session
+) -> None:
+    """Unresolved/low-confidence page and snippet reads reach the session as
+    bounded schema-validated descriptors, not status labels alone."""
+
+    snippet_sentinel = "RAW-SNIPPET-TEXT sk-snippetsecret456"
+    item: dict[str, Any] = {
+        "type": "food",
+        "name": "dill hummus",
+        "brand": "PC",
+        "quantity_text": "",
+    }
+    parse_responses: list[dict[str, Any] | LLMError] = []
+    parse_responses.extend(
+        _parsed_response([item], confidence=0.9) for _ in range(SELF_CONSISTENCY_FIRST_WINDOW)
+    )
+    parse_responses.append(_parsed_response([item], confidence=0.9))
+    parse_provider = FakeProvider(responses=parse_responses)
+    official_provider = FakeProvider(
+        responses=[
+            # Page read: schema-valid transcription below the confidence threshold.
+            {
+                "disposition": "resolved",
+                "confidence": 0.2,
+                "facts": {**_HUMMUS_FACTS, "product_name": "PC Hummus"},
+            },
+            # Snippet read: the transcriber found no clear facts on the surface.
+            {"disposition": "unresolved", "confidence": 0.4},
+            # Model-prior rough fallback after the requery keeps the identity.
+            {
+                "disposition": "resolved",
+                "confidence": 0.85,
+                "facts": _ROUGH_AS_LOGGED,
+                "assumptions": ["bounded rough hummus estimate"],
+            },
+        ]
+    )
+    search = ScriptedSearchProvider(
+        {
+            "dill hummus PC": SearchResult(
+                status=SearchStatus.SUCCESS,
+                candidates=(
+                    SearchCandidate(url=_HUMMUS_URL, title="result", snippet=snippet_sentinel),
+                ),
+            ),
+        }
+    )
+    fetcher = RecordingFetcher()
+    pipeline = Pipeline(
+        [
+            ParseStep(parse_provider),
+            FoodResolveStep(FoodResolver(session=session, source=FakeFoodSource())),
+            OfficialSourceResolveStep(
+                provider=official_provider,
+                search_provider=search,
+                fetch_settings=OfficialFetchSettings(
+                    allowed_hosts=frozenset({"source.example.com"})
+                ),
+                reference_fetch_settings=ReferenceFetchSettings(),
+                fetch_fn=fetcher,
+                reference_fetch_fn=fetcher,
+            ),
+        ]
+    )
+    user_id, event_id = _seed_event(
+        client, "fty326-ambiguous-read@example.com", f"PC dill hummus {_RAW_SENTINEL}"
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.event_status is LogEventStatus.COMPLETED
+    assert _questions(session, event_id) == []
+    evidence = _evidence(session, event_id)[0]
+    assert evidence.source_type == MODEL_PRIOR_SOURCE_TYPE
+
+    # The requery pass sees both ambiguous reads as interpretable descriptors.
+    requery_prompts = [prompt for prompt in parse_provider.prompts if "<evidence_status>" in prompt]
+    assert len(requery_prompts) == 1
+    evidence_view = requery_prompts[0]
+    assert "official_source: extract_low_confidence" in evidence_view
+    assert "surface=page" in evidence_view
+    assert (
+        'source_desc="product=PC Hummus; disposition=resolved; '
+        'confidence=0.20; basis=per_serving"' in evidence_view
+    )
+    assert "official_source: extract_unresolved" in evidence_view
+    assert "surface=snippet" in evidence_view
+    assert 'source_desc="disposition=unresolved; confidence=0.40"' in evidence_view
+
+    # The descriptors are schema fields only — never the raw snippet/page text.
+    run = _run(session, event_id)
+    persisted = json.dumps(
+        {
+            "trace": run.trace,
+            "source_refs": run.source_refs,
+            "assumptions": run.assumptions,
+            "evidence_assumptions": evidence.assumptions,
+        }
+    )
+    for surface in (evidence_view, official_provider.prompts[-1], persisted):
+        assert "RAW-SNIPPET-TEXT" not in surface
+        assert "sk-snippetsecret456" not in surface
+    # Raw diary text stays inside the session's own LLM boundary: never in the
+    # model-prior egress or persisted metadata.
+    assert _RAW_SENTINEL not in official_provider.prompts[-1]
+    assert _RAW_SENTINEL not in persisted
+    # The persisted run trace keeps its existing label vocabulary; the
+    # descriptor lives only on the session's evidence view.
+    entries = _decisions(run)
+    assert _find(entries, decision="extract", surface="page", outcome="extract_low_confidence")
+    assert _find(entries, decision="extract", surface="snippet", outcome="extract_unresolved")
+    assert "source_desc" not in persisted
+
+
 @pytest.mark.parametrize(
     ("responses", "detail"),
     [

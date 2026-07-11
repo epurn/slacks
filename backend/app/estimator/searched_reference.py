@@ -332,9 +332,14 @@ def _extract_accepted(  # noqa: PLR0913 - shared page/snippet extraction seam
 ) -> SearchedReferenceFacts | None:
     """Extract + validate + accept one untrusted text surface; ``None`` if unusable."""
 
-    def _note(outcome: str) -> None:
+    def _note(outcome: str, evidence_desc: str | None = None) -> None:
         _observe(
-            observe, decision="extract", source_ref=source_ref, surface=surface, outcome=outcome
+            observe,
+            decision="extract",
+            source_ref=source_ref,
+            surface=surface,
+            outcome=outcome,
+            evidence_desc=evidence_desc,
         )
 
     estimate, failure = _extract(
@@ -343,8 +348,12 @@ def _extract_accepted(  # noqa: PLR0913 - shared page/snippet extraction seam
         page_kind=page_kind,
         extract_prompt=extract_prompt,
     )
-    if estimate is None or estimate.facts is None:
-        _note(failure or "extract_unresolved")
+    if failure is not None or estimate is None or estimate.facts is None:
+        # An ambiguous read (unresolved / low-confidence) still carries the
+        # schema-validated fields the transcriber stated; thread them as a
+        # bounded descriptor so the session can interpret what the page or
+        # snippet said, not just that the read failed (FTY-326).
+        _note(failure or "extract_unresolved", _unaccepted_read_desc(estimate))
         return None
     # ``assumptions_override`` replaces the provider-stated assumptions wholesale.
     # The snippet fallback passes the fixed ``SNIPPET_ASSUMPTION`` label here: the
@@ -362,7 +371,7 @@ def _extract_accepted(  # noqa: PLR0913 - shared page/snippet extraction seam
         allow_count_serving=allow_count_serving,
     )
     if found is None:
-        _note("extract_rejected_facts")
+        _note("extract_rejected_facts", _unaccepted_read_desc(estimate))
         return None
     if accept_result is not None and not accept_result(found):
         # The gate itself records the specific rejection reason (it knows which
@@ -397,10 +406,13 @@ def _extract(
 ) -> tuple[NamedFoodEstimate | None, str | None]:
     """Transcribe nutrition facts from inert ``page_text``.
 
-    Returns ``(estimate, None)`` on a usable transcription, else ``(None,
+    Returns ``(estimate, None)`` on a usable transcription, else ``(estimate,
     outcome_label)`` where the label is one of the sanitized extract-outcome
     labels (``extract_error`` / ``extract_unresolved`` / ``extract_low_confidence``)
-    the decision trace records (FTY-255).
+    the decision trace records (FTY-255). An unresolved or low-confidence read
+    keeps its schema-validated estimate alongside the failure label so the caller
+    can describe the ambiguous read to the interpretation session (FTY-326); only
+    a provider/schema error has no estimate at all.
     """
 
     prompt = extract_prompt.format(page_kind=page_kind, page_text=page_text[:MAX_PAGE_TEXT_CHARS])
@@ -414,10 +426,35 @@ def _extract(
     ):
         return None, "extract_error"
     if estimate.disposition is not EstimateDisposition.RESOLVED or estimate.facts is None:
-        return None, "extract_unresolved"
+        return estimate, "extract_unresolved"
     if estimate.confidence < EXTRACT_CONFIDENCE_THRESHOLD:
-        return None, "extract_low_confidence"
+        return estimate, "extract_low_confidence"
     return estimate, None
+
+
+def _unaccepted_read_desc(estimate: NamedFoodEstimate | None) -> str | None:
+    """Bounded read descriptor for a page/snippet extraction that was not accepted.
+
+    An ambiguous read — unresolved, low-confidence, or implausible/unconvertible
+    facts — reaches the session ledger as this summary of what the transcriber
+    stated (product identity, disposition, confidence, facts basis) so the
+    interpretation loop can act on the read instead of a bare status label
+    (FTY-326). Only closed-vocabulary and length-bounded schema fields are used —
+    never raw page/snippet text or provider assumption strings — and the evidence
+    view bounds and redacts the descriptor again at the provider-egress seam.
+    ``None`` when there is no schema-valid estimate to describe (provider error).
+    """
+
+    if estimate is None:
+        return None
+    details: list[str] = []
+    if estimate.facts is not None and estimate.facts.product_name:
+        details.append(f"product={estimate.facts.product_name}")
+    details.append(f"disposition={estimate.disposition.value}")
+    details.append(f"confidence={estimate.confidence:.2f}")
+    if estimate.facts is not None:
+        details.append(f"basis={estimate.facts.basis.value}")
+    return "; ".join(details)
 
 
 def _identity_query(candidate: CandidateDraft) -> str:
