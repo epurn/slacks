@@ -235,7 +235,7 @@ def test_key_travels_in_header_never_in_the_url() -> None:
 
 def test_key_is_read_from_env_only() -> None:
     settings = load_search_settings(
-        {"FATTY_SEARCH_PROVIDER": "brave", "FATTY_SEARCH_API_KEY": _TEST_KEY}
+        {"SLACKS_SEARCH_PROVIDER": "brave", "SLACKS_SEARCH_API_KEY": _TEST_KEY}
     )
 
     assert settings.is_available is True
@@ -451,7 +451,7 @@ def test_query_url_carries_only_q_and_count() -> None:
 
 def test_load_search_settings_reads_env_prefix() -> None:
     settings = load_search_settings(
-        {"FATTY_SEARCH_ENABLED": "false", "FATTY_SEARCH_MAX_RESULTS": "7"}
+        {"SLACKS_SEARCH_ENABLED": "false", "SLACKS_SEARCH_MAX_RESULTS": "7"}
     )
 
     assert settings.enabled is False
@@ -641,8 +641,8 @@ def test_searxng_capability_reports_available_without_a_key() -> None:
 
 
 def test_none_provider_disables_search_explicitly() -> None:
-    # FTY-164 acceptance: FATTY_SEARCH_PROVIDER=none disables search explicitly.
-    settings = load_search_settings({"FATTY_SEARCH_PROVIDER": "none"})
+    # FTY-164 acceptance: SLACKS_SEARCH_PROVIDER=none disables search explicitly.
+    settings = load_search_settings({"SLACKS_SEARCH_PROVIDER": "none"})
     provider = build_search_provider(settings)
 
     assert isinstance(provider, NullSearchProvider)

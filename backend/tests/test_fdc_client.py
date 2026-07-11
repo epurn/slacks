@@ -313,7 +313,7 @@ def test_settings_allowed_hosts_derived_from_base_url() -> None:
 
 
 def test_load_fdc_settings_reads_env_prefix() -> None:
-    settings = load_fdc_settings({"FATTY_FDC_API_KEY": "from-env", "FATTY_FDC_MAX_RESULTS": "10"})
+    settings = load_fdc_settings({"SLACKS_FDC_API_KEY": "from-env", "SLACKS_FDC_MAX_RESULTS": "10"})
 
     assert settings.is_configured is True
     assert settings.max_results == 10

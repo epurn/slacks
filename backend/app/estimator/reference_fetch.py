@@ -28,7 +28,7 @@ boundary must hold even for attacker-chosen URLs:
 - **Raw pages never persisted** — callers store extracted facts, the URL, a
   timestamp, and a content hash only (``docs/security/data-retention.md``).
 
-Fail-closed switch: ``FATTY_REFERENCE_FETCH_ENABLED=false`` refuses every fetch,
+Fail-closed switch: ``SLACKS_REFERENCE_FETCH_ENABLED=false`` refuses every fetch,
 and the configured policy is surfaced (no URLs, no secrets) through
 ``GET /healthz/egress`` so an operator can see whether searched public result
 fetch is on without reading code.
@@ -54,8 +54,8 @@ from app.estimator.hardened_fetch import (
 from app.estimator.official_fetch import _parse_csv_lower
 
 #: Reference-source fetch settings are read from variables with this prefix, e.g.
-#: ``FATTY_REFERENCE_FETCH_ENABLED``.
-ENV_PREFIX = "FATTY_REFERENCE_FETCH_"
+#: ``SLACKS_REFERENCE_FETCH_ENABLED``.
+ENV_PREFIX = "SLACKS_REFERENCE_FETCH_"
 
 #: The only scheme a searched public result page may use — no exceptions: the
 #: local-HTTP carve-out (FTY-164) exists solely for the named local search service,
@@ -64,7 +64,7 @@ _ALLOWED_SCHEME = "https"
 
 
 class ReferenceFetchSettings(BaseModel):
-    """Validated searched-result fetch policy, read from ``FATTY_REFERENCE_FETCH_`` vars.
+    """Validated searched-result fetch policy, read from ``SLACKS_REFERENCE_FETCH_`` vars.
 
     Frozen and ``extra="forbid"`` so the egress policy is immutable and unknown keys
     are rejected. Unlike the official-source fetch there is **no host allowlist**:
@@ -78,7 +78,7 @@ class ReferenceFetchSettings(BaseModel):
 
     #: Whether searched public result pages may be fetched at all. On by default —
     #: reference-source fallback is a default capability like search itself
-    #: (FTY-164); set ``FATTY_REFERENCE_FETCH_ENABLED=false`` to turn the tier off.
+    #: (FTY-164); set ``SLACKS_REFERENCE_FETCH_ENABLED=false`` to turn the tier off.
     enabled: bool = True
     #: Per-request wall-clock timeout. A documented tunable.
     timeout_seconds: float = Field(default=10.0, gt=0, le=120)
@@ -101,7 +101,7 @@ class ReferenceFetchSettings(BaseModel):
 def load_reference_fetch_settings(
     environ: Mapping[str, str] | None = None,
 ) -> ReferenceFetchSettings:
-    """Build :class:`ReferenceFetchSettings` from ``FATTY_REFERENCE_FETCH_`` variables."""
+    """Build :class:`ReferenceFetchSettings` from ``SLACKS_REFERENCE_FETCH_`` variables."""
 
     source = os.environ if environ is None else environ
     data: dict[str, str] = {}

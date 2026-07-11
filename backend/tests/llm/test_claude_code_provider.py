@@ -298,19 +298,19 @@ def _capture_subprocess_env() -> tuple[dict[str, str], MagicMock]:
     return captured, fake_run  # type: ignore[return-value]
 
 
-def test_env_allowlist_excludes_fatty_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_env_allowlist_excludes_slacks_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
     # Inject known secrets into the process environment, then verify none reach
     # the subprocess via the env= argument that run_claude_code builds.
     secret_vars = {
-        "FATTY_AUTH_SECRET": "hmac-key-must-not-leak",
+        "SLACKS_AUTH_SECRET": "hmac-key-must-not-leak",
         "POSTGRES_PASSWORD": "db-pw-must-not-leak",
-        "FATTY_FDC_API_KEY": "fdc-key-must-not-leak",
-        "FATTY_SEARCH_API_KEY": "search-key-must-not-leak",
+        "SLACKS_FDC_API_KEY": "fdc-key-must-not-leak",
+        "SLACKS_SEARCH_API_KEY": "search-key-must-not-leak",
     }
     for k, v in secret_vars.items():
         monkeypatch.setenv(k, v)
-    monkeypatch.setenv("USER", "fattyuser")
-    monkeypatch.setenv("LOGNAME", "fattyuser")
+    monkeypatch.setenv("USER", "slacksuser")
+    monkeypatch.setenv("LOGNAME", "slacksuser")
 
     captured_env, fake_run = _capture_subprocess_env()
     invocation = Invocation(argv=("claude", "--print"), stdin="test")
@@ -320,18 +320,18 @@ def test_env_allowlist_excludes_fatty_secrets(monkeypatch: pytest.MonkeyPatch) -
 
     for key in secret_vars:
         assert key not in captured_env, f"Secret {key!r} must not reach the subprocess"
-    assert captured_env.get("USER") == "fattyuser"
-    assert captured_env.get("LOGNAME") == "fattyuser"
+    assert captured_env.get("USER") == "slacksuser"
+    assert captured_env.get("LOGNAME") == "slacksuser"
 
 
 def test_env_allowlist_forwards_required_vars(monkeypatch: pytest.MonkeyPatch) -> None:
     # Required vars present in the parent environment must reach the child.
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
-    monkeypatch.setenv("HOME", "/home/fattyuser")
+    monkeypatch.setenv("HOME", "/home/slacksuser")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/claude-config")
     monkeypatch.setenv("LANG", "en_US.UTF-8")
-    monkeypatch.setenv("USER", "fattyuser")
-    monkeypatch.setenv("LOGNAME", "fattyuser")
+    monkeypatch.setenv("USER", "slacksuser")
+    monkeypatch.setenv("LOGNAME", "slacksuser")
 
     captured_env, fake_run = _capture_subprocess_env()
     invocation = Invocation(argv=("claude", "--print"), stdin="test")
@@ -340,11 +340,11 @@ def test_env_allowlist_forwards_required_vars(monkeypatch: pytest.MonkeyPatch) -
         run_claude_code(invocation, timeout_seconds=5.0)
 
     assert captured_env.get("PATH") == "/usr/bin:/bin"
-    assert captured_env.get("HOME") == "/home/fattyuser"
+    assert captured_env.get("HOME") == "/home/slacksuser"
     assert captured_env.get("CLAUDE_CONFIG_DIR") == "/claude-config"
     assert captured_env.get("LANG") == "en_US.UTF-8"
-    assert captured_env.get("USER") == "fattyuser"
-    assert captured_env.get("LOGNAME") == "fattyuser"
+    assert captured_env.get("USER") == "slacksuser"
+    assert captured_env.get("LOGNAME") == "slacksuser"
 
 
 def test_env_allowlist_omits_absent_vars(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -366,10 +366,10 @@ def test_env_allowlist_omits_absent_vars(monkeypatch: pytest.MonkeyPatch) -> Non
     assert "LOGNAME" not in captured_env
 
 
-def test_env_allowlist_contains_no_fatty_or_postgres_keys() -> None:
-    # Sanity-check the constant itself: it must never contain FATTY_ or POSTGRES_.
+def test_env_allowlist_contains_no_slacks_or_postgres_keys() -> None:
+    # Sanity-check the constant itself: it must never contain SLACKS_ or POSTGRES_.
     for key in _ENV_ALLOWLIST:
-        assert not key.startswith("FATTY_"), f"{key!r} is a Fatty secret key"
+        assert not key.startswith("SLACKS_"), f"{key!r} is a Slacks secret key"
         assert not key.startswith("POSTGRES_"), f"{key!r} is a Postgres secret key"
 
 

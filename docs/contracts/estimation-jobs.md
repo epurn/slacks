@@ -288,7 +288,7 @@ even though no derived food rows are persisted.
 provider **selector** (`openai`, `openai_compatible`, `anthropic`,
 `claude_code`, `codex`, `fake`) — not the shared wire-format adapter label — and
 `estimation_runs.model` records the configured model string
-(`FATTY_LLM_MODEL`; empty only for CLI-session providers using their session
+(`SLACKS_LLM_MODEL`; empty only for CLI-session providers using their session
 default). Both are operator configuration, never secrets.
 
 Retention is unchanged: the trace lives on `estimation_runs`, cascades with the
@@ -400,3 +400,9 @@ POST /api/users/{uid}/log-events  →  201 pending event
   additive column). The estimator implementation is the downstream FTY-278
   follow-up; until then, FTY-301 rough-estimates recognizable amountless items by
   default and any remaining allowed clarification stays event-level.
+- **FTY-334 (brand cutover, mechanical rename).** The LLM model reference for
+  `estimation_runs.model` documented here now uses the `SLACKS_LLM_MODEL`
+  environment key, renamed from the legacy prefix as part of the repo-wide brand
+  cutover to Slacks. This is not a contract version bump — the field meaning,
+  its operator-configuration (non-secret) nature, and worker/retention semantics
+  are unchanged.

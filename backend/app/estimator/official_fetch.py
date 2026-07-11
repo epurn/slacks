@@ -11,7 +11,7 @@ Every fetch goes through FTY-044's :mod:`app.estimator.hardened_fetch`, so offic
 and USDA/OFF fetches share one audited egress boundary (HTTPS-only, public-IP-only,
 host allowlist, redirects refused, bounded time/size/content-type, content-free
 errors). This module adds only the **official-source configuration** — which hosts
-are reachable and the page-fetch limits — read from ``FATTY_OFFICIAL_FETCH_`` env
+are reachable and the page-fetch limits — read from ``SLACKS_OFFICIAL_FETCH_`` env
 vars and surfaced (host allowlist + limits, no secrets) through
 ``GET /healthz/egress`` so an operator can see the egress policy without reading code.
 
@@ -36,8 +36,8 @@ from app.estimator.hardened_fetch import (
 )
 
 #: Official-source fetch settings are read from variables with this prefix, e.g.
-#: ``FATTY_OFFICIAL_FETCH_ALLOWED_HOSTS``.
-ENV_PREFIX = "FATTY_OFFICIAL_FETCH_"
+#: ``SLACKS_OFFICIAL_FETCH_ALLOWED_HOSTS``.
+ENV_PREFIX = "SLACKS_OFFICIAL_FETCH_"
 
 
 def _parse_csv_lower(value: Any) -> Any:
@@ -53,7 +53,7 @@ def _parse_csv_lower(value: Any) -> Any:
 
 
 class OfficialFetchSettings(BaseModel):
-    """Validated official-source fetch policy, read from ``FATTY_OFFICIAL_FETCH_`` vars.
+    """Validated official-source fetch policy, read from ``SLACKS_OFFICIAL_FETCH_`` vars.
 
     Frozen and ``extra="forbid"`` so the egress policy is immutable and unknown keys
     are rejected. Fail-closed by default: an empty ``allowed_hosts`` means no page is
@@ -64,7 +64,7 @@ class OfficialFetchSettings(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     #: The official-source hosts that may be fetched (lower-cased). **Empty → nothing
-    #: is fetchable** (fail closed). Set ``FATTY_OFFICIAL_FETCH_ALLOWED_HOSTS`` to a
+    #: is fetchable** (fail closed). Set ``SLACKS_OFFICIAL_FETCH_ALLOWED_HOSTS`` to a
     #: comma-separated host list to enable specific official sources.
     allowed_hosts: frozenset[str] = frozenset()
     #: Per-request wall-clock timeout. A documented tunable.
@@ -89,7 +89,7 @@ class OfficialFetchSettings(BaseModel):
 def load_official_fetch_settings(
     environ: Mapping[str, str] | None = None,
 ) -> OfficialFetchSettings:
-    """Build :class:`OfficialFetchSettings` from ``FATTY_OFFICIAL_FETCH_`` variables."""
+    """Build :class:`OfficialFetchSettings` from ``SLACKS_OFFICIAL_FETCH_`` variables."""
 
     source = os.environ if environ is None else environ
     data: dict[str, str] = {}

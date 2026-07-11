@@ -126,7 +126,7 @@ def test_claude_code_descriptor_present() -> None:
 
 
 def test_claude_code_disabled_when_not_selected() -> None:
-    env = {"FATTY_LLM_PROVIDER": "fake"}
+    env = {"SLACKS_LLM_PROVIDER": "fake"}
     with patch("app.services.sources.shutil.which", return_value=None):
         result = sources_service.list_source_capabilities(env)
     cap = _claude_code_cap(result)
@@ -138,7 +138,7 @@ def test_claude_code_enabled_when_selected(tmp_path: Path) -> None:
     d = tmp_path / "claude"
     d.mkdir()
     (d / "credentials.json").write_text("{}")
-    env = {"FATTY_LLM_PROVIDER": "claude_code", "CLAUDE_CONFIG_DIR": str(d)}
+    env = {"SLACKS_LLM_PROVIDER": "claude_code", "CLAUDE_CONFIG_DIR": str(d)}
     with patch("app.services.sources.shutil.which", return_value="/usr/bin/claude"):
         result = sources_service.list_source_capabilities(env)
     cap = _claude_code_cap(result)
@@ -148,7 +148,7 @@ def test_claude_code_enabled_when_selected(tmp_path: Path) -> None:
 
 
 def test_claude_code_available_false_when_binary_absent(tmp_path: Path) -> None:
-    env = {"FATTY_LLM_PROVIDER": "claude_code", "CLAUDE_CONFIG_DIR": str(tmp_path)}
+    env = {"SLACKS_LLM_PROVIDER": "claude_code", "CLAUDE_CONFIG_DIR": str(tmp_path)}
     with patch("app.services.sources.shutil.which", return_value=None):
         result = sources_service.list_source_capabilities(env)
     cap = _claude_code_cap(result)
@@ -161,7 +161,7 @@ def test_claude_code_available_false_when_no_session(tmp_path: Path) -> None:
     d = tmp_path / "claude"
     d.mkdir()
     # No JSON files = no session
-    env = {"FATTY_LLM_PROVIDER": "claude_code", "CLAUDE_CONFIG_DIR": str(d)}
+    env = {"SLACKS_LLM_PROVIDER": "claude_code", "CLAUDE_CONFIG_DIR": str(d)}
     with patch("app.services.sources.shutil.which", return_value="/usr/bin/claude"):
         result = sources_service.list_source_capabilities(env)
     cap = _claude_code_cap(result)
@@ -175,7 +175,7 @@ def test_claude_code_available_true_not_selected(tmp_path: Path) -> None:
     d = tmp_path / "claude"
     d.mkdir()
     (d / "credentials.json").write_text("{}")
-    env = {"FATTY_LLM_PROVIDER": "fake", "CLAUDE_CONFIG_DIR": str(d)}
+    env = {"SLACKS_LLM_PROVIDER": "fake", "CLAUDE_CONFIG_DIR": str(d)}
     with patch("app.services.sources.shutil.which", return_value="/usr/bin/claude"):
         result = sources_service.list_source_capabilities(env)
     cap = _claude_code_cap(result)
@@ -198,7 +198,7 @@ def test_no_secret_in_claude_code_descriptor(tmp_path: Path) -> None:
     creds = {"token": "SECRET-TOKEN-MUST-NOT-LEAK", "account": "user@example.com"}
     (d / "credentials.json").write_text(json.dumps(creds))
 
-    env = {"FATTY_LLM_PROVIDER": "claude_code", "CLAUDE_CONFIG_DIR": str(d)}
+    env = {"SLACKS_LLM_PROVIDER": "claude_code", "CLAUDE_CONFIG_DIR": str(d)}
     with patch("app.services.sources.shutil.which", return_value="/usr/bin/claude"):
         result = sources_service.list_source_capabilities(env)
 

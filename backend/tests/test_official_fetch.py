@@ -48,9 +48,9 @@ def test_defaults_are_fail_closed_with_no_allowlist() -> None:
 def test_env_parses_csv_allowlist_lowercased_and_trimmed() -> None:
     settings = load_official_fetch_settings(
         {
-            "FATTY_OFFICIAL_FETCH_ALLOWED_HOSTS": " www.A.com , www.B.com ,",
-            "FATTY_OFFICIAL_FETCH_TIMEOUT_SECONDS": "7",
-            "FATTY_OFFICIAL_FETCH_MAX_BYTES": "1024",
+            "SLACKS_OFFICIAL_FETCH_ALLOWED_HOSTS": " www.A.com , www.B.com ,",
+            "SLACKS_OFFICIAL_FETCH_TIMEOUT_SECONDS": "7",
+            "SLACKS_OFFICIAL_FETCH_MAX_BYTES": "1024",
         }
     )
 

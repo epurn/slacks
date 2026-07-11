@@ -4,7 +4,7 @@ This is the trusted-nutrition-database adapter in the source hierarchy
 (``docs/architecture/system-overview.md``). It turns a sanitized food *name* into
 canonical per-100g facts through a hardened, allowlisted HTTPS client:
 
-- **Config** (:class:`FdcSettings`) is read from ``FATTY_FDC_``-prefixed environment
+- **Config** (:class:`FdcSettings`) is read from ``SLACKS_FDC_``-prefixed environment
   variables, mirroring the LLM provider config. The API key is a
   :class:`~pydantic.SecretStr`, read from the environment only, never logged or sent
   to clients. With no key configured the source is **disabled** and food candidates
@@ -51,8 +51,8 @@ from app.estimator.hardened_fetch import (
     post_json,
 )
 
-#: FDC settings are read from variables with this prefix, e.g. ``FATTY_FDC_API_KEY``.
-ENV_PREFIX = "FATTY_FDC_"
+#: FDC settings are read from variables with this prefix, e.g. ``SLACKS_FDC_API_KEY``.
+ENV_PREFIX = "SLACKS_FDC_"
 
 #: Default FDC API base (data.gov). Overridable for self-host proxies via env.
 DEFAULT_FDC_BASE_URL = "https://api.nal.usda.gov/fdc/v1"
@@ -174,7 +174,7 @@ def normalize_query(name: str) -> str:
 
 
 class FdcSettings(BaseModel):
-    """Validated FDC client configuration, read from ``FATTY_FDC_`` env vars.
+    """Validated FDC client configuration, read from ``SLACKS_FDC_`` env vars.
 
     Frozen and ``extra="forbid"`` so config is immutable and unknown keys are
     rejected. The base URL must be ``https`` (the hardened fetch refuses anything
@@ -195,7 +195,7 @@ class FdcSettings(BaseModel):
         """Fail closed on a non-https base URL (the hardened fetch would reject it)."""
 
         if not self.base_url.lower().startswith("https://"):
-            raise ValueError("FATTY_FDC_BASE_URL must be an https URL")
+            raise ValueError("SLACKS_FDC_BASE_URL must be an https URL")
         return self
 
     @property
@@ -219,7 +219,7 @@ class FdcSettings(BaseModel):
 
 
 def load_fdc_settings(environ: Mapping[str, str] | None = None) -> FdcSettings:
-    """Build :class:`FdcSettings` from ``FATTY_FDC_``-prefixed variables."""
+    """Build :class:`FdcSettings` from ``SLACKS_FDC_``-prefixed variables."""
 
     source = os.environ if environ is None else environ
     data: dict[str, str] = {}

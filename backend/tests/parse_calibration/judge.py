@@ -357,7 +357,7 @@ FORBIDDEN_KEY_ENV: frozenset[str] = frozenset(
         "OPENAI_API_KEY",
         "OPENAI_API_BASE",
         "ANTHROPIC_API_KEY",
-        "FATTY_LLM_API_KEY",
+        "SLACKS_LLM_API_KEY",
     }
 )
 

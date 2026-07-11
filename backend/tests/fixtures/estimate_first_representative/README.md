@@ -22,11 +22,11 @@ Example operator command:
 
 ```sh
 cd backend
-FATTY_ESTIMATE_FIRST_LIVE_SMOKE=1 \
-FATTY_ESTIMATE_FIRST_LIVE_SMOKE_SUMMARY=/tmp/estimate-first-smoke.json \
-FATTY_LLM_PROVIDER=openai \
-FATTY_LLM_MODEL=<structured-output-capable-model> \
-FATTY_LLM_API_KEY=<provider-key> \
+SLACKS_ESTIMATE_FIRST_LIVE_SMOKE=1 \
+SLACKS_ESTIMATE_FIRST_LIVE_SMOKE_SUMMARY=/tmp/estimate-first-smoke.json \
+SLACKS_LLM_PROVIDER=openai \
+SLACKS_LLM_MODEL=<structured-output-capable-model> \
+SLACKS_LLM_API_KEY=<provider-key> \
 uv run pytest tests/test_estimate_first_live_provider_smoke.py
 ```
 

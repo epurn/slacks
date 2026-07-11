@@ -45,7 +45,7 @@ logger = logging.getLogger("app.llm")
 
 # Full-jitter exponential backoff constants for transient-error retries.
 # base * 2**(attempt-1) seconds, capped at _BACKOFF_CAP, with uniform jitter.
-# These are intentionally internal — not promoted to FATTY_LLM_* config.
+# These are intentionally internal — not promoted to SLACKS_LLM_* config.
 _BACKOFF_BASE: float = 0.5
 _BACKOFF_CAP: float = 8.0
 
@@ -107,13 +107,13 @@ class Provider(ABC):
     ) -> None:
         self._timeout_seconds = timeout_seconds
         self._max_retries = max_retries
-        #: The configured model identifier (``FATTY_LLM_MODEL``), recorded on
+        #: The configured model identifier (``SLACKS_LLM_MODEL``), recorded on
         #: estimation runs for audit reproducibility (FTY-255). Operator config,
         #: not a secret; may be empty for CLI-session providers that pick their
         #: own default model.
         self.model = model
         #: Whether the configured model accepts image input. Declared by config
-        #: (``FATTY_LLM_SUPPORTS_VISION``); image input with a non-vision model
+        #: (``SLACKS_LLM_SUPPORTS_VISION``); image input with a non-vision model
         #: fails fast in :meth:`structured_completion` before any provider call.
         self._supports_vision = supports_vision
         # Injectable sleep seam: default is time.sleep in production; tests pass
@@ -153,7 +153,7 @@ class Provider(ABC):
             # ignoring an image would be a worse, late failure mode.
             raise LLMConfigurationError(
                 "image input requires a vision-capable configured model "
-                "(set FATTY_LLM_SUPPORTS_VISION=true for a vision model)"
+                "(set SLACKS_LLM_SUPPORTS_VISION=true for a vision model)"
             )
 
         raw = self._complete_with_retries(prompt, schema, images)

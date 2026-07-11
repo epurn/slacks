@@ -1,6 +1,6 @@
 """Build the configured :class:`Provider` from :class:`LLMSettings`.
 
-This is the single place provider selection happens: the ``FATTY_LLM_PROVIDER``
+This is the single place provider selection happens: the ``SLACKS_LLM_PROVIDER``
 value picks the adapter, and validated settings supply the key, model, base URL,
 timeout, and retry bound. Callers depend only on the :class:`Provider`
 interface, never on a concrete adapter.
@@ -34,7 +34,7 @@ def build_provider(settings: LLMSettings) -> Provider:
         )
 
     # Claude Code authenticates via its own local session, so it legitimately has
-    # no Fatty-side key and an optional model. Build it *before* the
+    # no Slacks-side key and an optional model. Build it *before* the
     # ``api_key is None`` guard, which must not reject it.
     if settings.provider == "claude_code":
         return ClaudeCodeProvider(

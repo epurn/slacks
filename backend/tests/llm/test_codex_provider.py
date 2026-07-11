@@ -218,11 +218,11 @@ def test_child_env_allowlist_excludes_parent_secrets_and_uses_child_only_key(
     tmp_path: Path,
 ) -> None:
     secret_vars = {
-        "FATTY_AUTH_SECRET": "auth-secret-must-not-leak",
-        "FATTY_LLM_API_KEY": "fatty-llm-key-must-not-leak",
+        "SLACKS_AUTH_SECRET": "auth-secret-must-not-leak",
+        "SLACKS_LLM_API_KEY": "slacks-llm-key-must-not-leak",
         "POSTGRES_PASSWORD": "postgres-password-must-not-leak",
-        "FATTY_FDC_API_KEY": "fdc-key-must-not-leak",
-        "FATTY_SEARCH_API_KEY": "search-key-must-not-leak",
+        "SLACKS_FDC_API_KEY": "fdc-key-must-not-leak",
+        "SLACKS_SEARCH_API_KEY": "search-key-must-not-leak",
         "OPENAI_API_KEY": "openai-key-must-not-leak",
         "ARBITRARY_PARENT_SECRET": "arbitrary-secret-must-not-leak",
         "CODEX_API_KEY": "parent-codex-key-must-not-leak",
@@ -230,7 +230,7 @@ def test_child_env_allowlist_excludes_parent_secrets_and_uses_child_only_key(
     for key, value in secret_vars.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
-    monkeypatch.setenv("HOME", "/home/fatty")
+    monkeypatch.setenv("HOME", "/home/slacks")
     monkeypatch.setenv("CODEX_HOME", "/codex-home")
     monkeypatch.setenv("CODEX_SQLITE_HOME", "/codex-sqlite")
     monkeypatch.setenv("CODEX_CA_CERTIFICATE", "/certs/ca.pem")
@@ -272,7 +272,7 @@ def test_child_env_allowlist_excludes_parent_secrets_and_uses_child_only_key(
         if key != "CODEX_API_KEY":
             assert key not in captured_env
     assert captured_env["PATH"] == "/usr/bin:/bin"
-    assert captured_env["HOME"] == "/home/fatty"
+    assert captured_env["HOME"] == "/home/slacks"
     assert captured_env["CODEX_HOME"] == "/codex-home"
     assert captured_env["CODEX_SQLITE_HOME"] == "/codex-sqlite"
     assert captured_env["CODEX_CA_CERTIFICATE"] == "/certs/ca.pem"
@@ -312,7 +312,7 @@ def test_parent_codex_api_key_is_not_forwarded_without_settings_key(
 
 def test_env_allowlist_contains_no_disallowed_secret_prefixes() -> None:
     for key in _ENV_ALLOWLIST:
-        assert not key.startswith("FATTY_")
+        assert not key.startswith("SLACKS_")
         assert not key.startswith("POSTGRES_")
         assert key != "OPENAI_API_KEY"
         assert "SECRET" not in key

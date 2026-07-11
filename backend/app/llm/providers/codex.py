@@ -3,7 +3,7 @@
 Runs a locally installed, first-party Codex CLI in non-interactive
 ``codex exec`` mode and reads one JSON object from stdout. Authentication is
 owned by Codex CLI saved state unless the operator supplies
-``FATTY_LLM_API_KEY``; when supplied, the key is exposed only to this child
+``SLACKS_LLM_API_KEY``; when supplied, the key is exposed only to this child
 process as ``CODEX_API_KEY``.
 
 Security-critical: the prompt is sent over stdin, never argv; the command runs
@@ -43,7 +43,7 @@ DEFAULT_BINARY = "codex"
 MAX_STDOUT_BYTES = 1_000_000
 
 #: Environment variables forwarded from the parent process to Codex. Every key
-#: absent from this set is withheld by construction, so FATTY_AUTH_SECRET,
+#: absent from this set is withheld by construction, so SLACKS_AUTH_SECRET,
 #: POSTGRES_PASSWORD, OPENAI_API_KEY, FDC/search keys, and arbitrary process
 #: secrets are not visible to the subprocess.
 _ENV_ALLOWLIST: frozenset[str] = frozenset(
@@ -239,7 +239,7 @@ class CodexProvider(Provider):
         images: Sequence[ImageInput] | None,
         timeout_seconds: float,
     ) -> dict[str, Any]:
-        with tempfile.TemporaryDirectory(prefix="fatty-codex-") as temp_root_name:
+        with tempfile.TemporaryDirectory(prefix="slacks-codex-") as temp_root_name:
             temp_root = Path(temp_root_name)
             workdir = temp_root / "work"
             workdir.mkdir(mode=0o700)

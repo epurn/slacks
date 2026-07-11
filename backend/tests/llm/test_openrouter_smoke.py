@@ -1,7 +1,7 @@
 """Optional manual OpenRouter structured-output smoke.
 
 This test is deliberately inert in normal CI: it skips unless an operator supplies
-``FATTY_OPENROUTER_SMOKE_API_KEY``. The prompt and schema are synthetic so no
+``SLACKS_OPENROUTER_SMOKE_API_KEY``. The prompt and schema are synthetic so no
 diary text or personal data is ever sent during the smoke.
 """
 
@@ -14,8 +14,8 @@ from pydantic import BaseModel
 
 from app.llm.providers.openai import OpenAIProvider
 
-_OPENROUTER_API_KEY_ENV = "FATTY_OPENROUTER_SMOKE_API_KEY"
-_OPENROUTER_MODEL_ENV = "FATTY_OPENROUTER_SMOKE_MODEL"
+_OPENROUTER_API_KEY_ENV = "SLACKS_OPENROUTER_SMOKE_API_KEY"
+_OPENROUTER_MODEL_ENV = "SLACKS_OPENROUTER_SMOKE_MODEL"
 _DEFAULT_OPENROUTER_MODEL = "deepseek/deepseek-v4-pro"
 
 
