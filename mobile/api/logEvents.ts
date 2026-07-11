@@ -23,13 +23,24 @@ import {
 import type { ApiSession } from "@/api/client";
 import type { DerivedItem } from "@/api/derivedItems";
 
-/** The FTY-030 event status state machine vocabulary (full v1 set). */
+/**
+ * The FTY-030 event status state machine vocabulary (full v1 set).
+ *
+ * `partially_resolved` (FTY-278) is the item-scoped partial-clarification state:
+ * a mixed log whose costable components are committed as `resolved` derived
+ * items (and counted) while a specific unresolved component owns an open
+ * item-scoped question. It differs from `needs_clarification` — the event-level,
+ * nothing-committed case — in that its resolved siblings render as normal
+ * counted rows on Today (FTY-330) and its open question surfaces through the
+ * status-gated clarification read.
+ */
 export type LogEventStatus =
   | "pending"
   | "processing"
   | "completed"
   | "failed"
-  | "needs_clarification";
+  | "needs_clarification"
+  | "partially_resolved";
 
 /** The FTY-030 event DTO, returned by create, each list element, and get. */
 export interface LogEventDTO {
@@ -62,7 +73,7 @@ export interface LogEventEntryDTO {
  * affordance only. Options are display candidates, never an enum — free text is
  * always an allowed answer (see `docs/contracts/log-events.md`).
  */
-interface ClarificationQuestionDTO {
+export interface ClarificationQuestionDTO {
   readonly id: string;
   readonly text: string;
   readonly options: readonly string[];

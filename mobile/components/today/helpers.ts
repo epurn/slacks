@@ -7,6 +7,7 @@ import {
 } from "@/api/derivedItems";
 import {
   LogEventApiError,
+  type ClarificationQuestionDTO,
   type LogEventDTO,
   type LogEventEntryDTO,
 } from "@/api/logEvents";
@@ -46,6 +47,19 @@ export function itemTimelineExtraRowTestID(
   itemId: string,
 ): string {
   return `item-timeline-row-${eventId}-${itemId}`;
+}
+
+/**
+ * Test id for a partially-resolved event's pending-question row (FTY-330): the
+ * item-scoped "needs a detail" row scoped to one still-open component. Keyed by
+ * the event and the clarification question id so a mixed log with more than one
+ * open component renders one stable, distinguishable row per question.
+ */
+export function pendingQuestionRowTestID(
+  eventId: string,
+  questionId: string,
+): string {
+  return `pending-question-row-${eventId}-${questionId}`;
 }
 
 /** Map an API/network failure to a plain, nonjudgmental message. */
@@ -149,6 +163,48 @@ export function clarificationPlaceholderItem(
 }
 
 /**
+ * Build the placeholder item a partially-resolved event's pending-question row
+ * renders against (FTY-330). Unlike `clarificationPlaceholderItem` (the
+ * event-level `needs_clarification` case, whose name is the raw phrase), an
+ * item-scoped question already names its specific component in the question
+ * `text` (e.g. "Which hummus was that?") — so the row's `name` is that question
+ * text, never the raw diary phrase (the privacy rule: the raw phrase appears
+ * only on the user's own entry row). The item carries no nutrition and its
+ * `status` is `unresolved`, so reusing the shared `ItemTimelineRow`'s
+ * needs-a-detail treatment keeps it muted, tagged, and visibly uncounted — the
+ * existing Today row visual language, not a new one.
+ */
+export function questionPlaceholderItem(
+  event: LogEventDTO,
+  question: ClarificationQuestionDTO,
+): DerivedFoodItemDTO {
+  return {
+    item_type: "food",
+    id: `clarify-${event.id}-${question.id}`,
+    user_id: event.user_id,
+    log_event_id: event.id,
+    name: question.text,
+    quantity_text: question.text,
+    unit: null,
+    amount: null,
+    status: "unresolved",
+    grams: null,
+    calories: null,
+    protein_g: null,
+    carbs_g: null,
+    fat_g: null,
+    calories_estimated: null,
+    protein_g_estimated: null,
+    carbs_g_estimated: null,
+    fat_g_estimated: null,
+    source: null,
+    is_edited: false,
+    created_at: event.created_at,
+    updated_at: event.updated_at,
+  };
+}
+
+/**
  * Drop an optimistic event and its synthetic saved-food item from Today's state
  * by optimistic id — shared by the server-error rollback and the unreachable
  * discard paths the submit machine drives through the bridge.
@@ -172,15 +228,19 @@ export function removeOptimisticEvent(
  * Recompute the daily summary locally for an optimistically deleted event
  * (FTY-322), so the hero/day totals drop the moment the row does — never only
  * after the DELETE round-trip and summary refetch. Mirrors the backend
- * finalized-state filter (`docs/contracts/daily-summary.md`): only `resolved`
- * items on a `completed`, non-voided event count toward intake/burn, while a
- * `needs_clarification` event and each `proposed` food item contribute one
- * uncounted unit. Anything else (pending/processing/failed events, unresolved
- * items) counts nothing, so deleting it changes no figure. Every subtraction
- * clamps at zero so drift between the local item feed and the server aggregate
- * can never show a negative total. `has_intake` is left as-is — whether *other*
- * finalized intake remains on the day is the server's call; the post-void
- * summary refetch reconciles it.
+ * finalized-state filter (`docs/contracts/daily-summary.md`): `resolved` items
+ * on a `completed` **or `partially_resolved`** (FTY-278/330), non-voided event
+ * count toward intake/burn — a partial event's committed siblings count
+ * immediately — while a `needs_clarification` event and each `proposed` food
+ * item contribute one uncounted unit. Anything else (pending/processing/failed
+ * events, unresolved items) counts nothing, so deleting it changes no figure.
+ * A partial event's still-open item-scoped question is also uncounted, but that
+ * count is not derivable from the resolved-sibling `items` passed here; the
+ * immediate post-void summary refetch reconciles `uncounted_entries` for it.
+ * Every subtraction clamps at zero so drift between the local item feed and the
+ * server aggregate can never show a negative total. `has_intake` is left as-is —
+ * whether *other* finalized intake remains on the day is the server's call; the
+ * post-void summary refetch reconciles it.
  */
 export function summaryMinusDeletedEvent(
   summary: DailySummaryDTO,
@@ -193,7 +253,10 @@ export function summaryMinusDeletedEvent(
   let fat = 0;
   let burn = 0;
   let uncounted = event.status === "needs_clarification" ? 1 : 0;
-  if (event.status === "completed") {
+  if (
+    event.status === "completed" ||
+    event.status === "partially_resolved"
+  ) {
     for (const item of items) {
       if (item.item_type === "food") {
         if (item.status === "resolved") {

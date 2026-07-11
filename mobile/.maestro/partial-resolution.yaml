@@ -1,0 +1,154 @@
+# FTY-330: Partially-resolved timeline end-to-end guard.
+#
+# Drives the highest-level story acceptance in hermetic fixture mode: submit a
+# mixed log, observe the partial render (one committed sibling counted + one
+# item-named pending-question row), answer the open component, and observe the
+# event complete IN PLACE (the sibling row unchanged, the answered component now
+# a counted row, no duplicate).
+#
+# Flow:
+#   Today (empty day) → submit "greek yogurt and some hummus" →
+#   partially_resolved event → pending-question row "How much hummus?" appears →
+#   refresh → committed sibling "Greek yogurt" counts (hero 140 kcal) →
+#   tap the question row → clarify sheet opens pre-targeted to that component's
+#   question + quick-pick chips → tap "2 tbsp" → answer round-trip resolves the
+#   SAME event in place → refresh → "Greek yogurt" still present AND "Hummus"
+#   now counted (hero 240 kcal), the pending question gone.
+#
+# Backend: hermetic E2E mock (createE2EMockFetch, keyed on the raw phrase's own
+# partial phase machine) — no live backend, no network. The mock serves the
+# committed sibling on the by-date feed, the open component's question on the
+# status-gated clarification read, and — once /clarification/answers lands —
+# the completed event with both siblings counted and no open question.
+#
+# Load-bearing assertions:
+#   • Step 5 — the full item-named question text "How much hummus?" is visible
+#     (the FTY-330 clarity requirement: never a clipped "How much hum…").
+#   • Steps 7-8 — the committed sibling counts immediately while the open
+#     question stays uncounted (per-question uncounted_entries semantics).
+#   • Steps 13-15 — after answering, the same sibling row is still present with
+#     the answered component now counted: completion in place, no duplicate.
+#
+# Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
+# directory-level Maestro runs launch the installed app under test reliably.
+appId: com.fatty
+---
+# Step 1: Launch in E2E mode. The mock starts with an empty day.
+- launchApp:
+    clearState: false
+
+# Step 2: Assert the app reaches Today in the ready, empty-day state.
+- extendedWaitUntil:
+    visible:
+      id: today-screen
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-ready
+    timeout: 15000
+
+# Step 3: Submit the mixed log. The mock POST handler transitions the partial
+#         phase machine to stage 1 and returns the partially_resolved event.
+- tapOn:
+    text: "Log food or exercise.*"
+- inputText: "greek yogurt and some hummus"
+- tapOn:
+    text: "Add entry"
+
+# Step 4: Wait for the timeline to show entries (optimistic event inserted, then
+#         reconciled to the partially_resolved event).
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-with-entries
+    timeout: 10000
+
+# Step 5: Assert the open component renders as one item-named pending-question
+#         row — the FULL question text, not a clipped "How much hum…". The
+#         question read is status-gated (usePartialClarifications), so a visible
+#         full question also proves that read landed.
+- extendedWaitUntil:
+    visible:
+      text: ".*How much hummus.*needs a detail.*uncounted.*"
+    timeout: 10000
+
+# Step 6: Pull to refresh so the item-forward by-date feed and the day summary
+#         load — the committed sibling and the counted hero. (FTY-185 replaced
+#         the header Refresh with the RefreshControl pull.)
+- swipe:
+    start: 50%, 35%
+    end: 50%, 90%
+    duration: 800
+
+# Step 7: Assert the committed sibling is a normal counted row — name + kcal +
+#         its trusted-source provenance, not muted.
+- extendedWaitUntil:
+    visible:
+      text: ".*Greek yogurt.*140 kcal.*"
+    timeout: 10000
+
+# Step 8: Assert the committed sibling counts immediately in the hero while the
+#         open component stays uncounted (140 of 2,000 kcal from the partial
+#         summary; the hummus is one uncounted unit, not yet in the total).
+- extendedWaitUntil:
+    visible:
+      text: ".*140 of 2,000 kcal.*"
+    timeout: 10000
+- assertVisible:
+    text: ".*How much hummus.*needs a detail.*uncounted.*"
+
+# Step 9: Tap the pending-question row to open the clarify sheet pre-targeted to
+#         that one component's question.
+- tapOn:
+    text: ".*How much hummus.*needs a detail.*uncounted.*"
+
+# Step 10: Assert the clarify sheet opened pre-targeted to THIS component's
+#          question, with its quick-pick chips (a data-starved sheet would show
+#          the generic fallback with no question/chips and fail here).
+- extendedWaitUntil:
+    visible:
+      text: ".*How much hummus.*"
+    timeout: 5000
+- extendedWaitUntil:
+    visible:
+      text: "2 tbsp"
+    timeout: 5000
+
+# Step 11: Tap the "2 tbsp" chip. The answer travels the FTY-170 answer
+#          round-trip (POST /clarification/answers) scoped to this question id —
+#          it resolves the SAME event in place, never a duplicate log create.
+- tapOn:
+    text: "2 tbsp"
+
+# Step 12: Assert the pending-question treatment dropped — the answered
+#          component left the "needs a detail" state (event → processing) without
+#          spawning a second row.
+- extendedWaitUntil:
+    notVisible:
+      text: ".*How much hummus.*needs a detail.*uncounted.*"
+    timeout: 10000
+
+# Step 13: Pull to refresh to load the completed state: the SAME event now
+#          completed, both siblings on the by-date feed, the counted summary.
+- swipe:
+    start: 50%, 35%
+    end: 50%, 90%
+    duration: 800
+
+# Step 14: Assert completion IN PLACE — the committed sibling row is unchanged
+#          (still "Greek yogurt · 140 kcal") AND the answered component is now a
+#          normal counted row ("Hummus · 100 kcal"). No open question remains.
+- extendedWaitUntil:
+    visible:
+      text: ".*Greek yogurt.*140 kcal.*"
+    timeout: 10000
+- assertVisible:
+    text: ".*Hummus.*100 kcal.*"
+- assertNotVisible:
+    text: ".*How much hummus.*needs a detail.*uncounted.*"
+
+# Step 15: Assert the answered component now counts — both siblings in the hero
+#          (240 of 2,000 kcal) and the open-question uncounted unit cleared.
+- extendedWaitUntil:
+    visible:
+      text: ".*240 of 2,000 kcal.*"
+    timeout: 10000

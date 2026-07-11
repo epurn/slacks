@@ -270,6 +270,34 @@ appId: com.fatty
     text: "Add a detail"
 - takeScreenshot: today-needs-clarification-dark
 
+# today.partially_resolved (FTY-330): a mixed log rendered inline from Today's
+# E2E-only fixture seam — the committed sibling as a normal counted row and the
+# open component as one item-named pending-question row. No live backend and no
+# scripted log/answer.
+- openLink: "fatty://__visual-review?preset=today.partially_resolved&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.partially_resolved"
+    timeout: 20000
+- assertVisible:
+    text: "Greek yogurt"
+- assertVisible:
+    text: "How much hummus?"
+- takeScreenshot: today-partially-resolved-light
+
+- openLink: "fatty://__visual-review?preset=today.partially_resolved&theme=dark"
+- runFlow: common/accept-open-in-fatty.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.partially_resolved"
+    timeout: 20000
+- assertVisible:
+    text: "Greek yogurt"
+- assertVisible:
+    text: "How much hummus?"
+- takeScreenshot: today-partially-resolved-dark
+
 # correction.detail (light): the correction lane's seam (FTY-263) — the
 # correction sheet opens directly over a synthetic resolved entry via the
 # E2E-only initial-state seam, never a scripted tap, registered through this

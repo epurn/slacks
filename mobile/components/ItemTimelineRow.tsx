@@ -221,10 +221,15 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
       {/* Provenance icon — always on */}
       <ProvenanceIcon source={source} is_edited={is_edited} />
 
-      {/* Name */}
+      {/* Name. A resolved/proposal row is a single value line and stays clamped
+          to one line (name · kcal · source). A needs-a-detail row's name is the
+          open component's *question* text (FTY-330) — the row's primary content,
+          not a label beside a value — so it wraps to as many lines as it needs
+          instead of clipping to "How much hum…", which stays legible as the
+          question grows and under Dynamic Type. */}
       <Text
         style={[styles.name, { color: textColor }]}
-        numberOfLines={1}
+        numberOfLines={needsClarification ? undefined : 1}
         accessibilityElementsHidden
       >
         {displayName}

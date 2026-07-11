@@ -58,6 +58,16 @@ const STATUS_PRESENTATION: Record<LogEventStatus, StatusPresentation> = {
     label: "Add a detail",
     accessibilityLabel: "Needs a quick detail",
   },
+  // A partially-resolved event (FTY-278/330) is never rendered as a single
+  // status row: its resolved siblings render as normal counted item rows and
+  // each open component renders its own pending-question row. This mapping is
+  // the exhaustive-Record fallback (e.g. a status icon on a bare card) and
+  // mirrors the needs-a-detail treatment for the still-open component.
+  partially_resolved: {
+    glyph: "?",
+    label: "Add a detail",
+    accessibilityLabel: "Needs a quick detail",
+  },
 };
 
 /** Presentation for a status. Total over the contract's status vocabulary. */
