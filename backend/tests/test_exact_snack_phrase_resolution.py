@@ -37,7 +37,8 @@ from app.db import create_session_factory
 from app.enums import DerivedItemStatus, EstimationJobStatus, LogEventStatus
 from app.estimator.branded_routing import RETAILER_BRAND_ALIASES
 from app.estimator.fdc import FdcClient, FdcSettings
-from app.estimator.food_step import FoodResolver, FoodResolveStep
+from app.estimator.food_resolvers import FoodResolver
+from app.estimator.food_step import FoodResolveStep
 from app.estimator.hardened_fetch import FetchResponseError
 from app.estimator.official_fetch import OfficialFetchSettings
 from app.estimator.official_step import QUANTITY_QUESTION, OfficialSourceResolveStep

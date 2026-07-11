@@ -45,7 +45,7 @@ from app.enums import (
     LogEventStatus,
 )
 from app.estimator.fdc import build_fdc_client
-from app.estimator.food_step import BarcodeResolver, FoodResolver
+from app.estimator.food_resolvers import BarcodeResolver, FoodResolver
 from app.estimator.label_step import LabelInput
 from app.estimator.off import build_off_client
 from app.estimator.official_fetch import load_official_fetch_settings

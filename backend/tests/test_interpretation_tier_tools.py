@@ -16,8 +16,9 @@ from sqlalchemy.orm import Session
 from app.db import create_session_factory
 from app.enums import EstimationJobStatus, LogEventStatus
 from app.estimator.fdc import FDC_SOURCE, FDC_SOURCE_TYPE, FdcLookup, ProductFacts
+from app.estimator.food_resolvers import FoodResolver
 from app.estimator.food_serving import NutritionFacts
-from app.estimator.food_step import FoodResolver, FoodResolveStep
+from app.estimator.food_step import FoodResolveStep
 from app.estimator.interpretation import MAX_EVIDENCE_EXCERPT_CHARS, InterpretationSession
 from app.estimator.interpretation_tools import current_food_candidate
 from app.estimator.model_prior import _model_prior
