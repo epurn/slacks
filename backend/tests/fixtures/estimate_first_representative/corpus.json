@@ -384,6 +384,84 @@
           "assumptions": ["synthetic_model_prior_portion"]
         }
       ]
+    },
+    {
+      "id": "brand_marker_counted_crackers_hummus",
+      "input": "4 Toppables brand crackers with 1 tbsp of PC dill pickle hummus",
+      "class": "counted_crackers_hummus",
+      "recognizable": true,
+      "smoke": false,
+      "expectations": {
+        "estimate_first": {"event_status": "completed", "foods": 2, "exercises": 0, "questions": 0, "rough_foods": 2},
+        "balanced": {"event_status": "completed", "foods": 2, "exercises": 0, "questions": 0, "rough_foods": 2},
+        "strict": {"event_status": "completed", "foods": 2, "exercises": 0, "questions": 0, "rough_foods": 2}
+      },
+      "parse_samples": [
+        {"disposition": "parsed", "confidence": 0.93, "items": [
+          {"type": "food", "name": "crackers", "brand": "Toppables", "quantity_text": "4", "unit": "crackers", "amount": 4},
+          {"type": "food", "name": "dill pickle hummus", "brand": "PC", "quantity_text": "1 tbsp", "unit": "tbsp", "amount": 1}
+        ]},
+        {"disposition": "parsed", "confidence": 0.93, "items": [
+          {"type": "food", "name": "crackers", "brand": "Toppables", "quantity_text": "4", "unit": "crackers", "amount": 4},
+          {"type": "food", "name": "dill pickle hummus", "brand": "PC", "quantity_text": "1 tbsp", "unit": "tbsp", "amount": 1}
+        ]}
+      ],
+      "model_prior_estimates": [
+        {"disposition": "resolved", "confidence": 0.84, "facts": {"basis": "as_logged", "calories": 72, "protein_g": 2, "carbs_g": 12, "fat_g": 2}, "assumptions": ["synthetic_model_prior_portion"]},
+        {"disposition": "resolved", "confidence": 0.84, "facts": {"basis": "as_logged", "calories": 40, "protein_g": 2, "carbs_g": 2, "fat_g": 3}, "assumptions": ["synthetic_model_prior_portion"]}
+      ]
+    },
+    {
+      "id": "misspelled_unit_crush_crackers_hummus",
+      "input": "4 toppabales crackers with 1tbsp of PC dill pickle hummus",
+      "class": "counted_crackers_hummus",
+      "recognizable": true,
+      "smoke": false,
+      "expectations": {
+        "estimate_first": {"event_status": "completed", "foods": 2, "exercises": 0, "questions": 0, "rough_foods": 2},
+        "balanced": {"event_status": "completed", "foods": 2, "exercises": 0, "questions": 0, "rough_foods": 2},
+        "strict": {"event_status": "completed", "foods": 2, "exercises": 0, "questions": 0, "rough_foods": 2}
+      },
+      "parse_samples": [
+        {"disposition": "parsed", "confidence": 0.92, "items": [
+          {"type": "food", "name": "crackers", "brand": "Toppables", "quantity_text": "4 toppabales", "unit": "crackers", "amount": 4},
+          {"type": "food", "name": "dill pickle hummus", "brand": "PC", "quantity_text": "1tbsp", "unit": "tbsp", "amount": 1}
+        ]},
+        {"disposition": "parsed", "confidence": 0.92, "items": [
+          {"type": "food", "name": "crackers", "brand": "Toppables", "quantity_text": "4 toppabales", "unit": "crackers", "amount": 4},
+          {"type": "food", "name": "dill pickle hummus", "brand": "PC", "quantity_text": "1tbsp", "unit": "tbsp", "amount": 1}
+        ]}
+      ],
+      "model_prior_estimates": [
+        {"disposition": "resolved", "confidence": 0.83, "facts": {"basis": "as_logged", "calories": 72, "protein_g": 2, "carbs_g": 12, "fat_g": 2}, "assumptions": ["synthetic_model_prior_portion"]},
+        {"disposition": "resolved", "confidence": 0.83, "facts": {"basis": "as_logged", "calories": 40, "protein_g": 2, "carbs_g": 2, "fat_g": 3}, "assumptions": ["synthetic_model_prior_portion"]}
+      ]
+    },
+    {
+      "id": "worded_portion_crackers_hummus",
+      "input": "four Toppables crackers and a tablespoon of PC dill pickle hummus",
+      "class": "counted_crackers_hummus",
+      "recognizable": true,
+      "smoke": false,
+      "expectations": {
+        "estimate_first": {"event_status": "completed", "foods": 2, "exercises": 0, "questions": 0, "rough_foods": 2},
+        "balanced": {"event_status": "completed", "foods": 2, "exercises": 0, "questions": 0, "rough_foods": 2},
+        "strict": {"event_status": "completed", "foods": 2, "exercises": 0, "questions": 0, "rough_foods": 2}
+      },
+      "parse_samples": [
+        {"disposition": "parsed", "confidence": 0.9, "items": [
+          {"type": "food", "name": "crackers", "brand": "Toppables", "quantity_text": "four", "unit": "crackers", "amount": 4},
+          {"type": "food", "name": "dill pickle hummus", "brand": "PC", "quantity_text": "a tablespoon", "unit": "tbsp", "amount": 1}
+        ]},
+        {"disposition": "parsed", "confidence": 0.9, "items": [
+          {"type": "food", "name": "crackers", "brand": "Toppables", "quantity_text": "four", "unit": "crackers", "amount": 4},
+          {"type": "food", "name": "dill pickle hummus", "brand": "PC", "quantity_text": "a tablespoon", "unit": "tbsp", "amount": 1}
+        ]}
+      ],
+      "model_prior_estimates": [
+        {"disposition": "resolved", "confidence": 0.82, "facts": {"basis": "as_logged", "calories": 72, "protein_g": 2, "carbs_g": 12, "fat_g": 2}, "assumptions": ["synthetic_model_prior_portion"]},
+        {"disposition": "resolved", "confidence": 0.82, "facts": {"basis": "as_logged", "calories": 40, "protein_g": 2, "carbs_g": 2, "fat_g": 3}, "assumptions": ["synthetic_model_prior_portion"]}
+      ]
     }
   ]
 }
