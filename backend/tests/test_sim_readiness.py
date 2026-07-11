@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.llm.config import ENV_PREFIX as LLM_ENV_PREFIX
 from app.ops import sim_readiness as sr
 
 # --------------------------------------------------------------------------- #
@@ -105,13 +106,16 @@ def test_redact_env_value_leaves_empty_unchanged() -> None:
 
 
 def test_reported_env_curates_and_redacts() -> None:
+    # The LLM provider key stays on the FTY-334-owned ``ENV_PREFIX`` until that
+    # story flips it; derive it here so the assertion tracks the real key.
+    llm_provider_key = f"{LLM_ENV_PREFIX}PROVIDER"
     env = {
-        "SLACKS_LLM_PROVIDER": "claude_code",
+        llm_provider_key: "claude_code",
         "SLACKS_AUTH_SECRET": "hunter2",
         "SLACKS_DATABASE_URL": "postgresql://slacks:slacks@postgres:5432/slacks",
     }
     pairs = dict(sr.reported_env(env))
-    assert pairs["SLACKS_LLM_PROVIDER"] == "claude_code"
+    assert pairs[llm_provider_key] == "claude_code"
     # Secrets and DSNs are never surfaced by the curated allowlist.
     assert "SLACKS_AUTH_SECRET" not in pairs
     assert "SLACKS_DATABASE_URL" not in pairs

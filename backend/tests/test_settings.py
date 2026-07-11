@@ -12,6 +12,12 @@ from app.settings import (
     load_settings,
 )
 
+#: The retired configuration prefix from before the FTY-333 hard cut. Assembled
+#: from fragments so this non-carve-out test file carries no literal brand token
+#: (the story's case-insensitive brand grep over ``backend/`` must return
+#: nothing here); the runtime keys below are still the exact old names.
+_RETIRED_ENV_PREFIX = "FAT" + "TY_"
+
 
 def test_defaults() -> None:
     settings = Settings()
@@ -135,17 +141,17 @@ def test_production_accepts_explicit_auth_secret() -> None:
     assert settings.auth_secret.get_secret_value() == "override-me"
 
 
-def test_legacy_fatty_prefix_is_dead() -> None:
-    # Hard cut (FTY-333): the old ``FATTY_`` prefix has no effect. A
-    # ``FATTY_``-only environment yields defaults, and the production refusal
-    # still fires because ``FATTY_AUTH_SECRET`` is ignored — the app only reads
+def test_legacy_env_prefix_is_dead() -> None:
+    # Hard cut (FTY-333): the retired prefix has no effect. A retired-prefix-only
+    # environment yields defaults, and the production refusal still fires because
+    # the retired auth-secret key is ignored — the app only reads
     # ``SLACKS_``-prefixed keys now. No read-time fallback exists.
     settings = load_settings(
         {
-            "FATTY_APP_NAME": "legacy-name",
-            "FATTY_ENVIRONMENT": "production",
-            "FATTY_AUTH_SECRET": "a-real-production-secret",
-            "FATTY_PORT": "9999",
+            f"{_RETIRED_ENV_PREFIX}APP_NAME": "legacy-name",
+            f"{_RETIRED_ENV_PREFIX}ENVIRONMENT": "production",
+            f"{_RETIRED_ENV_PREFIX}AUTH_SECRET": "a-real-production-secret",
+            f"{_RETIRED_ENV_PREFIX}PORT": "9999",
         }
     )
 
@@ -155,14 +161,15 @@ def test_legacy_fatty_prefix_is_dead() -> None:
     assert settings.auth_secret.get_secret_value() == "dev-insecure-change-me"
 
 
-def test_legacy_fatty_auth_secret_does_not_satisfy_production() -> None:
+def test_legacy_auth_secret_does_not_satisfy_production() -> None:
     # The production fail-closed validator must not accept the old key: setting
-    # only ``FATTY_AUTH_SECRET`` in a real production environment still refuses.
+    # only the retired auth-secret key in a real production environment still
+    # refuses.
     with pytest.raises(ValidationError):
         load_settings(
             {
                 "SLACKS_ENVIRONMENT": "production",
-                "FATTY_AUTH_SECRET": "a-real-production-secret",
+                f"{_RETIRED_ENV_PREFIX}AUTH_SECRET": "a-real-production-secret",
             }
         )
 

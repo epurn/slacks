@@ -43,6 +43,10 @@ from pathlib import Path
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
+from app.estimator.off import ENV_PREFIX as OFF_ENV_PREFIX
+from app.estimator.search_settings import ENV_PREFIX as SEARCH_ENV_PREFIX
+from app.llm.config import ENV_PREFIX as LLM_ENV_PREFIX
+
 #: The compose default published API port when ``API_PORT`` is unset in ``.env``.
 DEFAULT_API_PORT = 8000
 
@@ -74,11 +78,19 @@ _SECRET_KEY_MARKERS: tuple[str, ...] = (
 
 #: Non-secret env vars the report surfaces (each still passed through redaction as
 #: a defensive backstop). Deliberately excludes DSNs, which embed a password.
+#:
+#: The environment key follows this backend's ``SLACKS_`` settings prefix, but the
+#: LLM / search / OFF provider keys are read by the FTY-334-owned estimator/LLM
+#: config modules and still carry their pre-cutover prefixes until FTY-334 renames
+#: them. Derive those keys from each owner module's ``ENV_PREFIX`` so the smoke
+#: always surfaces the *actual* provider config a current ``.env`` sets — and
+#: follows FTY-334's rename automatically — instead of hard-coding a key the
+#: loaders do not read.
 _REPORTED_ENV_KEYS: tuple[str, ...] = (
     "SLACKS_ENVIRONMENT",
-    "SLACKS_LLM_PROVIDER",
-    "SLACKS_SEARCH_PROVIDER",
-    "SLACKS_OFF_ENABLED",
+    f"{LLM_ENV_PREFIX}PROVIDER",
+    f"{SEARCH_ENV_PREFIX}PROVIDER",
+    f"{OFF_ENV_PREFIX}ENABLED",
 )
 
 _REDACTED = "«redacted»"
