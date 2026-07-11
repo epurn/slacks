@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from app.enums import SourceType
+from app.ops import food_dogfood_api as api
 from app.ops import food_dogfood_smoke as smoke
 
 # --------------------------------------------------------------------------- #
@@ -59,18 +60,18 @@ def _fake_token(sub: str) -> str:
 
 
 def test_user_id_from_token_reads_subject() -> None:
-    assert smoke._user_id_from_token(_fake_token("11111111-2222-3333")) == "11111111-2222-3333"
+    assert api._user_id_from_token(_fake_token("11111111-2222-3333")) == "11111111-2222-3333"
 
 
 def test_user_id_from_token_rejects_malformed_payload() -> None:
-    with pytest.raises(smoke.SmokeError):
-        smoke._user_id_from_token("not-a-real-token")
+    with pytest.raises(api.SmokeError):
+        api._user_id_from_token("not-a-real-token")
 
 
 def test_user_id_from_token_rejects_missing_subject() -> None:
     payload = urlsafe_b64encode(json.dumps({"exp": 0}).encode()).rstrip(b"=").decode("ascii")
-    with pytest.raises(smoke.SmokeError):
-        smoke._user_id_from_token(f"{payload}.sig")
+    with pytest.raises(api.SmokeError):
+        api._user_id_from_token(f"{payload}.sig")
 
 
 # --------------------------------------------------------------------------- #
@@ -97,14 +98,14 @@ class _FakeAccountClient:
 
 def test_acquire_account_reuses_login_and_never_registers_on_repeat_runs() -> None:
     client = _FakeAccountClient(login_result="existing-user-id")
-    assert smoke.acquire_account(client) == "existing-user-id"  # type: ignore[arg-type]
+    assert api.acquire_account(client, "e", "p") == "existing-user-id"  # type: ignore[arg-type]
     # The steady-state path: login only, so no register-limiter slot is spent.
     assert client.calls == ["login"]
 
 
 def test_acquire_account_registers_once_when_account_absent() -> None:
     client = _FakeAccountClient(login_result=None, register_result="new-user-id")
-    assert smoke.acquire_account(client) == "new-user-id"  # type: ignore[arg-type]
+    assert api.acquire_account(client, "e", "p") == "new-user-id"  # type: ignore[arg-type]
     # First run only: login (401 → None) then a single bootstrap register.
     assert client.calls == ["login", "register"]
 
@@ -397,7 +398,7 @@ def test_compliments_fixture_forbids_generic_fdc() -> None:
 
 
 def test_extract_items_maps_source_and_calories() -> None:
-    items = smoke._extract_items(
+    items = api._extract_items(
         [
             {
                 "name": "white rice",
@@ -417,7 +418,7 @@ def test_extract_items_maps_source_and_calories() -> None:
 
 
 def test_extract_items_tolerates_missing_source() -> None:
-    items = smoke._extract_items([{"name": "mystery", "calories": None, "source": None}])
+    items = api._extract_items([{"name": "mystery", "calories": None, "source": None}])
     assert items[0].source_type is None
     assert items[0].calories is None
 
