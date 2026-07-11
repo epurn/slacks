@@ -389,10 +389,17 @@ def _finalize(
 ) -> ProcessResult:
     """Apply the pipeline outcome to the run, job, and event, and commit.
 
-    On a successful or needs-clarification outcome the parse step's structured
-    products (candidates / questions accumulated on ``context``) are persisted in
-    the same transaction as the terminal status. A failed outcome persists no
-    derived data — the step failed closed.
+    Each terminal outcome commits **atomically**: the parse step's structured
+    products (candidates / questions accumulated on ``context``), the run/job
+    status writes, and the event's status transition are all staged on the
+    session and flushed by a **single** commit — the one inside
+    :func:`~app.services.log_events.transition_event`. There is no intermediate
+    commit before the transition, so a crash or redelivery either sees the whole
+    finalized state or none of it; resolved rows can never be durably committed
+    while the event is still ``processing``. The transition is validated against
+    the legal-transition table before that commit runs, so an illegal transition
+    fails closed with nothing persisted. A failed (retry) outcome persists no
+    derived data — the step failed closed — and commits once directly.
     """
 
     outcome = result.outcome
@@ -402,7 +409,6 @@ def _finalize(
         run.status = EstimationRunStatus.COMPLETED
         job.status = EstimationJobStatus.SUCCEEDED
         session.add_all([run, job])
-        session.commit()
         transition_event(session, event, LogEventStatus.COMPLETED)
         return _result(job, event, run, should_retry=False)
 
@@ -411,7 +417,6 @@ def _finalize(
         run.status = EstimationRunStatus.NEEDS_CLARIFICATION
         job.status = EstimationJobStatus.NEEDS_CLARIFICATION
         session.add_all([run, job])
-        session.commit()
         transition_event(session, event, LogEventStatus.NEEDS_CLARIFICATION)
         return _result(job, event, run, should_retry=False)
 
@@ -423,7 +428,6 @@ def _finalize(
     if terminal:
         job.status = EstimationJobStatus.FAILED
         session.add_all([run, job])
-        session.commit()
         transition_event(session, event, LogEventStatus.FAILED)
         return _result(job, event, run, should_retry=False)
 
