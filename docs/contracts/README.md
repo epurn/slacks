@@ -55,6 +55,7 @@ Use contracts for:
 | [evidence-retrieval.md](evidence-retrieval.md) | Source-backed estimation contracts defining the evidence hierarchy and lookup rules |
 | [exercise-burn.md](exercise-burn.md) | Deterministic MET-based exercise burn calculation |
 | [food-resolution.md](food-resolution.md) | Deterministic generic-food resolution step using USDA and external sources |
+| [food-suggestions.md](food-suggestions.md) | Read-only contextual quick-add food suggestions ranked by deterministic time-aware frecency |
 | [goals-target-reveal.md](goals-target-reveal.md) | Goal direction input and target-calculation step turning user goals into calorie targets |
 | [identity-and-profile.md](identity-and-profile.md) | User identity, profile data model, and minimal local-mode profile defaults |
 | [interpretation-session.md](interpretation-session.md) | LLM-owned interpretation session: the revisable hypothesis, evidence-tiers-as-tools, and deterministic-code authority across an estimation run |
