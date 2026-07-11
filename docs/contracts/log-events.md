@@ -315,13 +315,21 @@ clarification answer):
 
 `items` uses the shared `DerivedFoodItemDTO | DerivedExerciseItemDTO` shape from
 `corrections.md` / `daily-summary.md`, but only for finalized item detail: the
-owning event must be `completed` **or** `partially_resolved` (the FTY-278 partial
-state), the item must be `resolved`, and its costed value must be present
-(`calories` for food, `active_calories` for exercise). This mirrors the
+owning event must be `completed`, `partially_resolved` (the FTY-278 partial
+state), **or** `processing` as an answer-triggered scoped re-estimate of a
+previously-partial event (FTY-349) — discriminated by the presence of ≥1
+already-committed `resolved` item on the event; the item must be `resolved`, and
+its costed value must be present (`calories` for food, `active_calories` for
+exercise). This mirrors the
 `daily-summary.md` finalized-state filter exactly — a `resolved`, costed item is
 surfaced whether it is the whole of a `completed` entry or a **costable sibling of
 a `partially_resolved` entry**, so a mixed log's resolved components appear in
-place while its unresolved component's question stays open. A pending, processing,
+place while its unresolved component's question stays open. The same committed
+siblings stay surfaced while the event momentarily flips `partially_resolved →
+processing` to re-cost the still-open component, so the by-date read never drops a
+committed sibling during the re-estimate window (no dip, matching the
+`daily-summary.md` no-dip guarantee). A pending, **first-pass** processing (no
+committed `resolved` item — nothing surfaces early),
 failed, `needs_clarification`, or completed/partial-with-no-finalized-item event is
 still returned with `items: []`, matching the Today timeline's status-row
 fallback. Non-finalized item rows — including the **unresolved component** that

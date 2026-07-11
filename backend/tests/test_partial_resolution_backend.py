@@ -225,6 +225,37 @@ def _resolve_open_component(
         session.commit()
 
 
+def _add_followup_question(
+    db_engine: Engine,
+    event_id: uuid.UUID,
+    user_id: uuid.UUID,
+    component_id: uuid.UUID,
+) -> None:
+    """Simulate a fresh clarification round on the same still-unresolved component.
+
+    The answer flow retains answered question rows
+    (``_persist_clarification_questions`` deletes only *unanswered* rows), so a new
+    round adds a second open question on the SAME component while the prior answered
+    row survives — two question rows linked to one unresolved component (FTY-349).
+    The question text names only the sanitized component ``name`` (never the raw
+    diary phrase), matching the FTY-278 redaction gate.
+    """
+
+    factory = create_session_factory(db_engine)
+    with factory() as session:
+        session.add(
+            ClarificationQuestion(
+                log_event_id=event_id,
+                user_id=user_id,
+                question_text="Was the milk whole or skim?",
+                options=["whole", "skim", "2%"],
+                derived_food_item_id=component_id,
+                position=1,
+            )
+        )
+        session.commit()
+
+
 def _assert_completed_counts_and_items(
     client: TestClient,
     user_id: str,
@@ -470,6 +501,71 @@ def test_daily_summary_no_dip_predicate_on_postgres(pg_engine: Engine) -> None:
     _resolve_open_component(pg_engine, event_id, unresolved_id)
     assert _read_summaries() == (300.0, True, 0)
     assert _by_date_item_ids() == {resolved_id, unresolved_id}
+
+
+def test_uncounted_entries_holds_at_one_component_across_fresh_round_on_postgres(
+    pg_engine: Engine,
+) -> None:
+    """FTY-349 Postgres parity: a fresh clarification round does not bump the count.
+
+    ``uncounted_entries`` is one per still-``unresolved`` **component**, not per
+    question row. When an answer-triggered re-estimate returns a fresh question on
+    the same still-open component, the answered prior row is retained alongside the
+    new open row, so two question rows link to one unresolved component. The count
+    is taken over **distinct** components, so it stays ``1`` across the round and
+    drops to ``0`` only when the component actually resolves — never the ``1 → 2``
+    bump the per-row count produced.
+    """
+
+    upgrade(pg_engine, "head")
+    user_id = _seed_pg_user(pg_engine)
+    event_id, _resolved_id, unresolved_id = _seed_partial_event(pg_engine, str(user_id))
+    day = date(2026, 7, 10)
+    factory = create_session_factory(pg_engine)
+
+    def _uncounted() -> int:
+        with factory() as session:
+            loaded_user = session.get(User, user_id)
+            assert loaded_user is not None
+            single = daily_summary_service.get_daily_summary(session, user_id, loaded_user, day)
+            ranged = daily_summary_service.get_daily_summaries(
+                session, user_id, loaded_user, day, day
+            )
+            assert ranged == [single]
+            return single.uncounted_entries
+
+    # One open question on the unresolved component → one uncounted entry.
+    assert _uncounted() == 1
+
+    # Answer it (retains the answered row, flips the event to ``processing``) and
+    # land a fresh round: a second open question on the SAME still-unresolved
+    # component.
+    with factory() as session:
+        loaded_user = session.get(User, user_id)
+        assert loaded_user is not None
+        questions = log_event_service.list_clarification_questions(
+            session, user_id, loaded_user, event_id
+        )
+        clarification_service.answer_clarification_question(
+            session, user_id, loaded_user, event_id, questions[0].id, "1 cup"
+        )
+    _add_followup_question(pg_engine, event_id, user_id, unresolved_id)
+
+    # Two question rows now link to the one still-unresolved component…
+    with factory() as session:
+        rows = list(
+            session.scalars(
+                select(ClarificationQuestion).where(ClarificationQuestion.log_event_id == event_id)
+            )
+        )
+        assert len(rows) == 2
+        assert {row.derived_food_item_id for row in rows} == {unresolved_id}
+    # …but the component is one uncounted entry — no ``1 → 2`` bump.
+    assert _uncounted() == 1
+
+    # It drops only when the component itself resolves.
+    _resolve_open_component(pg_engine, event_id, unresolved_id)
+    assert _uncounted() == 0
 
 
 def test_partial_resolution_state_machine_and_counts_on_postgres(pg_engine: Engine) -> None:

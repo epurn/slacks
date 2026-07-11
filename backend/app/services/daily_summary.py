@@ -365,13 +365,13 @@ def _needs_clarification_window_conditions(
 def _partial_question_window_conditions(
     owner_id: uuid.UUID, start_utc: datetime, end_utc: datetime
 ) -> tuple[ColumnElement[bool], ...]:
-    """WHERE conditions selecting open item-scoped questions on partial events.
+    """WHERE conditions selecting item-scoped questions on still-unresolved components.
 
-    The counting unit is unchanged — one per still-``unresolved`` component that
-    owns an item-scoped question. "Open" is keyed on the **component's**
-    resolution, never on the answer row: the real answer flow persists the
-    ``ClarificationAnswer`` in the same transaction that flips the event
-    ``partially_resolved → processing`` (:func:`app.services.clarification.
+    The counting unit is one per still-``unresolved`` **component** that owns an
+    item-scoped question — never one per question *row*. "Open" is keyed on the
+    **component's** resolution, never on the answer row: the real answer flow
+    persists the ``ClarificationAnswer`` in the same transaction that flips the
+    event ``partially_resolved → processing`` (:func:`app.services.clarification.
     answer_clarification_question`), so an answered-but-not-yet-resolved question
     must keep its uncounted entry for the whole re-estimate window and drop only
     when its own component resolves (FTY-349). The event-status gate mirrors the
@@ -379,6 +379,17 @@ def _partial_question_window_conditions(
     entry survives the window too. A first-pass ``processing`` event has no
     committed resolved sibling (and no item-scoped questions yet), so it adds
     nothing here.
+
+    A single unresolved component can accumulate **more than one** matching
+    question row across re-estimate rounds: a fresh clarification round inserts a
+    new open question while the prior answered question row is retained
+    (``_persist_clarification_questions`` deletes only *unanswered* rows), so both
+    rows link to the same still-unresolved component and match here. The count is
+    therefore taken over **distinct** ``derived_food_item_id`` (see the callers'
+    ``COUNT(DISTINCT …)`` / per-day component-id de-duplication), so an
+    unresolved component stays exactly one uncounted entry across the whole window
+    and does not bump when a new round is raised — it drops only when the
+    component resolves.
     """
 
     component = aliased(DerivedFoodItem)
@@ -587,7 +598,7 @@ def _aggregate_uncounted_entries(
     )
     partial_question_count = (
         session.scalar(
-            select(func.count())
+            select(func.count(func.distinct(ClarificationQuestion.derived_food_item_id)))
             .select_from(ClarificationQuestion)
             .join(LogEvent, ClarificationQuestion.log_event_id == LogEvent.id)
             .where(*_partial_question_window_conditions(owner_id, start_utc, end_utc))
@@ -632,14 +643,21 @@ def _aggregate_uncounted_entries_by_day(
     for (created_at,) in needs_clarification_rows:
         counts[_to_local_date(created_at, tz)] += 1
 
-    partial_question_rows = session.execute(
-        select(LogEvent.created_at)
+    # De-duplicate by component id within each local day: a still-unresolved
+    # component may own more than one matching question row across re-estimate
+    # rounds (a retained answered row plus a fresh open one), but it is one
+    # uncounted entry — the same DISTINCT rule the single-day COUNT applies.
+    partial_component_rows = session.execute(
+        select(ClarificationQuestion.derived_food_item_id, LogEvent.created_at)
         .select_from(ClarificationQuestion)
         .join(LogEvent, ClarificationQuestion.log_event_id == LogEvent.id)
         .where(*_partial_question_window_conditions(owner_id, start_utc, end_utc))
     ).all()
-    for (created_at,) in partial_question_rows:
-        counts[_to_local_date(created_at, tz)] += 1
+    components_by_day: dict[date, set[uuid.UUID]] = defaultdict(set)
+    for component_id, created_at in partial_component_rows:
+        components_by_day[_to_local_date(created_at, tz)].add(component_id)
+    for day, component_ids in components_by_day.items():
+        counts[day] += len(component_ids)
 
     proposed_rows = session.execute(
         select(LogEvent.created_at)
