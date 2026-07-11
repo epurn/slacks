@@ -586,9 +586,16 @@ curl -s ':8000/api/users/<uid>/daily-summary/range?from=2025-01-01&to=2026-06-01
   finalized-event gate in terms of **committed resolved items**: a `resolved` item
   counts when its event is `completed` / `partially_resolved` **or** is momentarily
   `processing` as an answer-triggered scoped re-estimate of a previously-partial
-  event (`log-events.md` v6 shape #1) — discriminated by ≥1 already-committed
-  `resolved` sibling on the event, which a first-pass `processing` event never has.
-  The same gate is applied to every intake surface (single-day `intake`, the
+  event (`log-events.md` v6 shape #1) — discriminated by **two** facts that must
+  both hold on that event: ≥1 already-committed `resolved` sibling **and** ≥1 open
+  item-scoped clarification question on a still-`unresolved` component. Committed
+  resolved rows **alone** do not admit a `processing` event: a first-pass
+  `processing` event owns no open item-scoped question, and neither does the
+  worker's two-commit completion window (where committed `resolved` rows land just
+  before the `processing → completed` transition, per FTY-358), so both fail the
+  second clause and nothing counts early. The bare committed-resolved-item test is
+  unsafe — `processing` + committed rows is not on its own the signature of an
+  answer-triggered scoped re-estimate. The same gate is applied to every intake surface (single-day `intake`, the
   by-date / range read, `has_intake`) and to the open-item-scoped-question
   `uncounted_entries` unit, so a partial event's already-counted siblings — and its
   still-open questions — do not dip and reappear while the answer re-estimates

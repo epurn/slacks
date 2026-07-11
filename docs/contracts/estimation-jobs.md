@@ -218,7 +218,9 @@ in the one transaction that persists the `clarification_answers` row:
   or counted twice. During the
   `processing` window the event's already-committed `resolved` siblings **stay
   counted** in every finalized read — the scoped re-estimate is admitted by the
-  committed-resolved-sibling discriminator (FTY-349, `daily-summary.md`), not
+  two-clause discriminator (a committed `resolved` sibling **and** an open
+  item-scoped question on a still-`unresolved` component; FTY-349,
+  `daily-summary.md`), not
   excluded — so the day total never dips and reappears; only the still-open
   component stays uncounted until it resolves. When the round commits, the
   siblings are still their original `resolved` rows and the answered component is
