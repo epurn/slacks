@@ -333,11 +333,13 @@ event's transient status alone:
   and never inflates intake until the user confirms it (`proposed → resolved`). This
   filter is **not relaxed** for the gate — the exclusion is a property of the
   existing predicate, not new logic.
-- A test proves this exclusion: items on `pending` / `processing` / `failed` /
-  `needs_clarification` events, `unresolved` items (including a partial event's
-  amountless component), and `proposed` (unconfirmed label) items never inflate a
-  total (single-day and range); a `partially_resolved` event's `resolved` siblings
-  do count.
+- A test proves this exclusion: items on `pending` / **first-pass** `processing`
+  (no committed `resolved` sibling) / `failed` / `needs_clarification` events,
+  `unresolved` items (including a partial event's amountless component), and
+  `proposed` (unconfirmed label) items never inflate a total (single-day and
+  range); a `partially_resolved` event's `resolved` siblings — **and the same
+  siblings while the event is momentarily `processing` for a scoped re-estimate
+  (FTY-349)** — do count.
 
 ## Day / timezone resolution
 

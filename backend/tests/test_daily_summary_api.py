@@ -786,6 +786,105 @@ def test_range_and_has_intake_match_single_day_during_scoped_reestimate(
     assert day_row["uncounted_entries"] == 1
 
 
+def test_by_date_read_keeps_committed_sibling_during_scoped_reestimate(
+    client: TestClient, db_engine: Engine
+) -> None:
+    """The ``/log-events/by-date`` item read keeps the committed sibling mid re-estimate.
+
+    The by-date day-listing read (``list_entries_for_day``) shares the finalized
+    rule (FTY-349): a committed ``resolved`` sibling must stay on the timeline
+    **before, during, and after** the answer-triggered scoped re-estimate — it must
+    not disappear while the event is momentarily ``processing``. The DURING state is
+    produced by the **real answer flow**, which flips the event
+    ``partially_resolved → processing`` in the same transaction it commits the
+    answer row. Resolving the open component surfaces both items with no duplicate.
+    """
+
+    user_id, auth = _register(client, "by-date-scoped-reestimate@example.com")
+    day = date(2026, 7, 10)
+    at = datetime(2026, 7, 10, 12, 0, tzinfo=UTC)
+    _set_timezone(client, user_id, auth, "UTC")
+
+    def _by_date_item_ids() -> list[str]:
+        resp = client.get(
+            f"/api/users/{user_id}/log-events/by-date",
+            headers={"Authorization": auth},
+            params={"day": str(day)},
+        )
+        assert resp.status_code == 200
+        entries = resp.json()
+        assert len(entries) == 1
+        return [item["id"] for item in entries[0]["items"]]
+
+    # BEFORE: partially_resolved — only the committed sibling is on the timeline.
+    event_id, sibling_id, unresolved_id = _seed_partial_like_event(
+        db_engine, user_id, status=LogEventStatus.PARTIALLY_RESOLVED, created_at=at
+    )
+    assert _by_date_item_ids() == [str(sibling_id)]
+
+    # DURING: answer through the real endpoint; the event flips to ``processing``
+    # with the answer committed and the component still unresolved. The by-date read
+    # must not drop the committed sibling from the timeline.
+    questions = client.get(
+        f"/api/users/{user_id}/log-events/{event_id}/clarification",
+        headers={"Authorization": auth},
+    )
+    assert questions.status_code == 200
+    question_id = questions.json()["questions"][0]["id"]
+    answered = client.post(
+        f"/api/users/{user_id}/log-events/{event_id}/clarification/answers",
+        headers={"Authorization": auth},
+        json={"question_id": question_id, "answer": "1 cup"},
+    )
+    assert answered.status_code == 201
+    assert answered.json()["status"] == "processing"
+    assert _by_date_item_ids() == [str(sibling_id)]
+
+    # AFTER: the open component resolves and the event completes; both items surface,
+    # the sibling never duplicated.
+    factory = create_session_factory(db_engine)
+    with factory() as session:
+        event = session.get(LogEvent, event_id)
+        item = session.get(DerivedFoodItem, unresolved_id)
+        assert event is not None and item is not None
+        item.status = DerivedItemStatus.RESOLVED
+        item.calories = 120.0
+        item.calories_estimated = 120.0
+        event.status = LogEventStatus.COMPLETED
+        session.commit()
+    assert set(_by_date_item_ids()) == {str(sibling_id), str(unresolved_id)}
+
+
+def test_by_date_read_excludes_first_pass_processing_items(
+    client: TestClient, db_engine: Engine
+) -> None:
+    """A first-pass ``processing`` event surfaces no items in the by-date read.
+
+    It has committed no resolved item, so the committed-resolved-item discriminator
+    (enforced by the per-item ``RESOLVED`` + costed-value filter) surfaces nothing —
+    the event appears on the timeline but carries no item rows early (FTY-349).
+    """
+
+    user_id, auth = _register(client, "by-date-first-pass@example.com")
+    today = datetime.now(UTC).date()
+    evt_id = _seed_completed_event(db_engine, user_id, status=LogEventStatus.PROCESSING)
+    _seed_food_item(
+        db_engine, user_id, evt_id, calories=None, item_status=DerivedItemStatus.UNRESOLVED
+    )
+
+    resp = client.get(
+        f"/api/users/{user_id}/log-events/by-date",
+        headers={"Authorization": auth},
+        params={"day": str(today)},
+    )
+
+    assert resp.status_code == 200
+    entries = resp.json()
+    assert len(entries) == 1
+    assert entries[0]["event"]["status"] == "processing"
+    assert entries[0]["items"] == []
+
+
 def test_unresolved_items_are_excluded(client: TestClient, db_engine: Engine) -> None:
     """Items with status='unresolved' and NULL calories are not counted."""
 

@@ -73,7 +73,21 @@ LEGAL_TRANSITIONS: dict[LogEventStatus, frozenset[LogEventStatus]] = {
     LogEventStatus.FAILED: frozenset(),
 }
 
-_FINALIZED_EVENT_STATUSES = (LogEventStatus.COMPLETED, LogEventStatus.PARTIALLY_RESOLVED)
+#: Event statuses whose committed ``resolved`` items surface in the by-date item
+#: read (:func:`list_entries_for_day`). Mirrors the daily-summary finalized-event
+#: gate (FTY-349): the terminal finalized statuses **plus** ``processing`` for an
+#: answer-triggered scoped re-estimate of a previously-partial event, so a
+#: committed sibling never disappears from the timeline during the in-flight
+#: re-estimate window. The committed-resolved-item discriminator is enforced by the
+#: per-item ``status == RESOLVED`` + costed-value filter, not the event status: a
+#: first-pass ``processing`` event has committed no resolved item, so it surfaces
+#: nothing (nothing counts early), exactly as the daily-summary gate. See
+#: ``docs/contracts/daily-summary.md`` (finalized-event gate) and ``log-events.md``.
+_ITEM_READ_EVENT_STATUSES = (
+    LogEventStatus.COMPLETED,
+    LogEventStatus.PARTIALLY_RESOLVED,
+    LogEventStatus.PROCESSING,
+)
 _CLARIFICATION_EVENT_STATUSES = (
     LogEventStatus.NEEDS_CLARIFICATION,
     LogEventStatus.PARTIALLY_RESOLVED,
@@ -235,29 +249,38 @@ def list_entries_for_day(
 
     This is the FTY-198 day-listing read for past-day timelines. It deliberately
     composes :func:`list_events_for_day` for authorization, default-day handling,
-    ordering, and profile-timezone day bounds, then enriches completed events
-    with finalized item rows from the shared serializer in
+    ordering, and profile-timezone day bounds, then enriches finalized events
+    with committed resolved item rows from the shared serializer in
     :mod:`app.services.item_read_model` so provenance is not re-derived here.
+
+    The item read shares the daily-summary finalized rule (FTY-349): a committed
+    ``resolved`` item surfaces on a ``completed`` / ``partially_resolved`` event
+    **or** on a ``processing`` event that is an answer-triggered scoped re-estimate
+    of a previously-partial event, so a committed sibling never disappears from the
+    timeline while the re-estimate is in flight. A first-pass ``processing`` event
+    has committed no resolved item, so the per-item ``RESOLVED`` + costed-value
+    filter surfaces nothing for it (nothing counts early). See
+    :data:`_ITEM_READ_EVENT_STATUSES`.
     """
 
     events = list_events_for_day(session, owner_id, current_user, day)
     if not events:
         return []
 
-    finalized_event_ids = [
-        event.id for event in events if LogEventStatus(event.status) in _FINALIZED_EVENT_STATUSES
+    item_bearing_event_ids = [
+        event.id for event in events if LogEventStatus(event.status) in _ITEM_READ_EVENT_STATUSES
     ]
     items_by_event: dict[uuid.UUID, list[DerivedFoodItemDTO | DerivedExerciseItemDTO]] = (
         defaultdict(list)
     )
-    if not finalized_event_ids:
+    if not item_bearing_event_ids:
         return [LogEventEntry(event=event, items=items_by_event[event.id]) for event in events]
 
     food_items = session.scalars(
         select(DerivedFoodItem)
         .where(
             DerivedFoodItem.user_id == owner_id,
-            DerivedFoodItem.log_event_id.in_(finalized_event_ids),
+            DerivedFoodItem.log_event_id.in_(item_bearing_event_ids),
             DerivedFoodItem.status == DerivedItemStatus.RESOLVED,
             DerivedFoodItem.calories.isnot(None),
         )
@@ -274,7 +297,7 @@ def list_entries_for_day(
         select(DerivedExerciseItem)
         .where(
             DerivedExerciseItem.user_id == owner_id,
-            DerivedExerciseItem.log_event_id.in_(finalized_event_ids),
+            DerivedExerciseItem.log_event_id.in_(item_bearing_event_ids),
             DerivedExerciseItem.status == DerivedItemStatus.RESOLVED,
             DerivedExerciseItem.active_calories.isnot(None),
         )

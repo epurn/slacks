@@ -379,16 +379,17 @@ def test_daily_summary_no_dip_predicate_on_postgres(pg_engine: Engine) -> None:
     """FTY-349 Postgres parity for the scoped-re-estimate read-model predicate.
 
     On the production engine: (a) the committed sibling stays in ``intake`` /
-    range / ``has_intake`` and the answered-but-unresolved question stays in
-    ``uncounted_entries`` while the **real answer flow** holds the event at
-    ``processing``; (b) a first-pass ``processing`` event with no committed
-    resolved item contributes nothing; (c) resolving the open component raises
-    the total by exactly the new item with the sibling unchanged.
+    range / ``has_intake`` **and in the ``/log-events/by-date`` item read** and the
+    answered-but-unresolved question stays in ``uncounted_entries`` while the **real
+    answer flow** holds the event at ``processing``; (b) a first-pass ``processing``
+    event with no committed resolved item contributes nothing; (c) resolving the
+    open component raises the total by exactly the new item with the sibling
+    unchanged.
     """
 
     upgrade(pg_engine, "head")
     user_id = _seed_pg_user(pg_engine)
-    event_id, _resolved_id, unresolved_id = _seed_partial_event(pg_engine, str(user_id))
+    event_id, resolved_id, unresolved_id = _seed_partial_event(pg_engine, str(user_id))
     day = date(2026, 7, 10)
     factory = create_session_factory(pg_engine)
 
@@ -405,12 +406,26 @@ def test_daily_summary_no_dip_predicate_on_postgres(pg_engine: Engine) -> None:
             assert ranged == [single]
             return single.intake.calories, single.has_intake, single.uncounted_entries
 
-    # BEFORE: the pinned partial state — sibling counted, one open question.
+    def _by_date_item_ids() -> set[uuid.UUID]:
+        """Item ids the ``/log-events/by-date`` day-listing read surfaces for the event."""
+
+        with factory() as session:
+            loaded_user = session.get(User, user_id)
+            assert loaded_user is not None
+            entries = log_event_service.list_entries_for_day(session, user_id, loaded_user, day)
+            event_entries = [entry for entry in entries if entry.event.id == event_id]
+            assert len(event_entries) == 1
+            return {item.id for item in event_entries[0].items}
+
+    # BEFORE: the pinned partial state — sibling counted, one open question, and the
+    # committed sibling on the timeline.
     assert _read_summaries() == (180.0, True, 1)
+    assert _by_date_item_ids() == {resolved_id}
 
     # DURING: the real answer flow commits the ClarificationAnswer row in the same
     # transaction that flips the event to ``processing``. The question is answered
-    # but its component is still unresolved — nothing may dip.
+    # but its component is still unresolved — nothing may dip, and the by-date read
+    # must keep the committed sibling on the timeline.
     with factory() as session:
         loaded_user = session.get(User, user_id)
         assert loaded_user is not None
@@ -423,6 +438,7 @@ def test_daily_summary_no_dip_predicate_on_postgres(pg_engine: Engine) -> None:
         assert resolved is True
         assert LogEventStatus(event.status) is LogEventStatus.PROCESSING
     assert _read_summaries() == (180.0, True, 1)
+    assert _by_date_item_ids() == {resolved_id}
 
     # A first-pass ``processing`` event (no committed resolved item) on the same
     # day still contributes nothing to any surface — the totals stay unchanged.
@@ -449,9 +465,11 @@ def test_daily_summary_no_dip_predicate_on_postgres(pg_engine: Engine) -> None:
 
     # AFTER: the open component resolves and the event completes (FTY-329's
     # terminal write). The total rises by exactly the newly-resolved 120 kcal —
-    # the sibling is never re-added — and the uncounted entry drops.
+    # the sibling is never re-added — and the uncounted entry drops. Both items now
+    # surface on the by-date timeline, the sibling never duplicated.
     _resolve_open_component(pg_engine, event_id, unresolved_id)
     assert _read_summaries() == (300.0, True, 0)
+    assert _by_date_item_ids() == {resolved_id, unresolved_id}
 
 
 def test_partial_resolution_state_machine_and_counts_on_postgres(pg_engine: Engine) -> None:
