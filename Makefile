@@ -33,8 +33,10 @@ sim-smoke:
 # Local v1 food dogfood smoke (FTY-256). Run AFTER the simulator-readiness smoke,
 # against a healthy local stack with a REAL LLM provider configured (claude_code
 # / codex / openai_compatible — the default `fake` provider cannot parse
-# natural-language food). It registers a throwaway account, submits a small set
-# of representative food logs to the LIVE local API, waits for estimation, and
+# natural-language food). It logs in to a reused throwaway account (registering
+# it only on the first run so it never trips the register rate limiter), submits
+# a small set of representative food logs to the LIVE local API, waits for
+# estimation, and
 # prints a sanitized pass/fail summary (source/provenance + calories). It catches
 # v1 dogfood regressions before a human opens the simulator. It prints no secrets
 # and is NOT part of `make verify` (never a CI gate that depends on live external

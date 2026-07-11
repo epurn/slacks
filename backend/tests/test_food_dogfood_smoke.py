@@ -12,7 +12,10 @@ makes flows through a function verified below.
 from __future__ import annotations
 
 import json
+from base64 import urlsafe_b64encode
 from pathlib import Path
+
+import pytest
 
 from app.enums import SourceType
 from app.ops import food_dogfood_smoke as smoke
@@ -26,15 +29,84 @@ def test_api_base_url_uses_configured_port() -> None:
     assert smoke.api_base_url(18000) == "http://localhost:18000"
 
 
-def test_throwaway_credentials_are_unique_per_token_and_valid() -> None:
-    email_a, password_a = smoke.throwaway_credentials("aaaa")
-    email_b, password_b = smoke.throwaway_credentials("bbbb")
-    # Unique email per run → repeatable without colliding with a prior account.
-    assert email_a != email_b
-    assert email_a == "dogfood-smoke+aaaa@fatty.local"
-    # Fixed non-secret password that satisfies the register bounds (8–128).
+def test_throwaway_credentials_are_deterministic_and_valid() -> None:
+    email_a, password_a = smoke.throwaway_credentials()
+    email_b, password_b = smoke.throwaway_credentials()
+    # Deterministic email+password → the smoke reuses one throwaway account
+    # (login-first) instead of registering a fresh one each run and tripping the
+    # register rate limiter.
+    assert email_a == email_b == "dogfood-smoke@fatty.local"
     assert password_a == password_b
+    # Fixed non-secret password that satisfies the register bounds (8–128).
     assert 8 <= len(password_a) <= 128
+
+
+# --------------------------------------------------------------------------- #
+# Token subject decoding (login returns only a token, not the user record)
+# --------------------------------------------------------------------------- #
+
+
+def _fake_token(sub: str) -> str:
+    """Build a smoke-decodable ``<payload_b64url>.<sig>`` token for ``sub``.
+
+    Mirrors :mod:`app.security.tokens` (padding-stripped url-safe base64); the
+    signature is never checked by the smoke, so any placeholder suffices.
+    """
+
+    payload = json.dumps({"sub": sub, "exp": 0}).encode("utf-8")
+    payload_b64 = urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+    return f"{payload_b64}.signature-not-checked"
+
+
+def test_user_id_from_token_reads_subject() -> None:
+    assert smoke._user_id_from_token(_fake_token("11111111-2222-3333")) == "11111111-2222-3333"
+
+
+def test_user_id_from_token_rejects_malformed_payload() -> None:
+    with pytest.raises(smoke.SmokeError):
+        smoke._user_id_from_token("not-a-real-token")
+
+
+def test_user_id_from_token_rejects_missing_subject() -> None:
+    payload = urlsafe_b64encode(json.dumps({"exp": 0}).encode()).rstrip(b"=").decode("ascii")
+    with pytest.raises(smoke.SmokeError):
+        smoke._user_id_from_token(f"{payload}.sig")
+
+
+# --------------------------------------------------------------------------- #
+# Account acquisition — login-first, register-once (the FTY-256 round-2 fix)
+# --------------------------------------------------------------------------- #
+
+
+class _FakeAccountClient:
+    """Records login/register calls so acquire_account's order is assertable."""
+
+    def __init__(self, *, login_result: str | None, register_result: str = "registered-id") -> None:
+        self._login_result = login_result
+        self._register_result = register_result
+        self.calls: list[str] = []
+
+    def login(self, email: str, password: str) -> str | None:
+        self.calls.append("login")
+        return self._login_result
+
+    def register(self, email: str, password: str) -> str:
+        self.calls.append("register")
+        return self._register_result
+
+
+def test_acquire_account_reuses_login_and_never_registers_on_repeat_runs() -> None:
+    client = _FakeAccountClient(login_result="existing-user-id")
+    assert smoke.acquire_account(client) == "existing-user-id"  # type: ignore[arg-type]
+    # The steady-state path: login only, so no register-limiter slot is spent.
+    assert client.calls == ["login"]
+
+
+def test_acquire_account_registers_once_when_account_absent() -> None:
+    client = _FakeAccountClient(login_result=None, register_result="new-user-id")
+    assert smoke.acquire_account(client) == "new-user-id"  # type: ignore[arg-type]
+    # First run only: login (401 → None) then a single bootstrap register.
+    assert client.calls == ["login", "register"]
 
 
 # --------------------------------------------------------------------------- #

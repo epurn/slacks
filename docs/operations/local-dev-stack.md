@@ -383,11 +383,13 @@ make food-smoke               # live food dogfood smoke (prints no secrets)
 ```
 
 `make food-smoke` runs `python -m app.ops.food_dogfood_smoke` in the backend uv
-environment. It registers a **throwaway local account** (a unique fixture email
-each run, a non-secret fixture password), submits a small set of representative
-food logs to the live API at `http://localhost:${API_PORT}`, waits for each
-event to reach a terminal estimation state, and prints a sanitized pass/fail
-summary — per-item source type/ref and calories, and any clarification text.
+environment. It logs in to a **reused throwaway local account** (a fixed fixture
+email, a non-secret fixture password), registering that account only on the
+first run so repeat runs never trip the backend's register rate limiter (default
+5/IP/hour); it then submits a small set of representative food logs to the live
+API at `http://localhost:${API_PORT}`, waits for each event to reach a terminal
+estimation state, and prints a sanitized pass/fail summary — per-item source
+type/ref and calories, and any clarification text.
 
 It catches the exact v1 dogfood regressions the hermetic suites cannot see (the
 2026-07-10 live failure was a clarify the fixture suites never triggered). The
@@ -457,12 +459,23 @@ pure parsing/assessment/redaction logic is unit-tested
 
 ### Safety
 
-The smoke operates on a **fresh throwaway account per run** (a unique fixture
-email, a non-secret fixture password), so it is safe to run repeatedly and never
-touches real user data. It never prints the bearer token, provider keys, DB
-passwords, `.env` contents, or raw provider output — output is built from
-structured fields (status, fixture text, source type/ref, calories, sanitized
-clarification text) only.
+The smoke reuses **one dedicated throwaway account** (a fixed fixture email, a
+non-secret fixture password), logging in each run and registering that account
+only when it does not exist yet. Reusing a login instead of registering a fresh
+account per run is what keeps it safe to run repeatedly: a fresh registration
+each run would consume the backend's register rate limiter (default 5/IP/hour)
+and make a healthy stack fail with HTTP 429 before any food fixture ran. The
+account is dedicated to the smoke and never a real user, so reusing it touches no
+real user data. It never prints the bearer token, provider keys, DB passwords,
+`.env` contents, or raw provider output — output is built from structured fields
+(status, fixture text, source type/ref, calories, sanitized clarification text)
+only.
+
+Interpreting the login limiter: if you run the smoke very frequently, the login
+rate limiter (default 5 per account / 15 min, 10 per IP / 15 min) can eventually
+429 — but that limiter refills every 15 minutes rather than being a hard hourly
+registration ceiling, and a `login … failed (HTTP 429)` message is explicit
+about the cause, so it is never mistaken for a food regression.
 
 ## Container User
 

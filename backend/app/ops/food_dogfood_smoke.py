@@ -1,43 +1,42 @@
 """Local v1 food dogfood smoke (FTY-256).
 
 Operator command that proves v1 **food logging is usable on the live local
-backend** before a human opens the simulator. It creates a throwaway local
-account, submits a small set of representative food logs to the running local
-API (derived from ``.env`` ``API_PORT``, exactly as :mod:`app.ops.sim_readiness`
-does), waits for each event to reach a terminal estimation state, and prints a
-sanitized pass/fail summary with per-item source/provenance and calories.
-
-It catches the exact v1 dogfood regressions the hermetic suites cannot see — a
-*live* clarify on an entry that carries a count, a branded item wrongly matched
-to a generic FDC row (the 2026-07-10 ``Compliments`` → ``DENNY'S`` failure), a
-banana costed as banana **powder**, or a branded snack that fails to complete
-with honest provenance.
+backend** before a human opens the simulator. It signs in to a dedicated
+throwaway account, submits a small set of representative food logs to the running
+local API (derived from ``.env`` ``API_PORT``, exactly as
+:mod:`app.ops.sim_readiness`), waits for each event to reach a terminal
+estimation state, and prints a sanitized pass/fail summary with per-item
+source/provenance and calories. It catches the v1 dogfood regressions the
+hermetic suites cannot see — a *live* clarify on a counted entry, a branded item
+matched to a generic FDC row (the 2026-07-10 ``Compliments`` → ``DENNY'S``
+failure), a banana costed as **powder**, or a branded snack that fails to
+complete with honest provenance.
 
 This is **live-local API smoke**, not the hermetic E2E fixture mode
-(``mobile/verify-e2e.sh``): every request hits FastAPI, Postgres, the worker,
-and the configured evidence/LLM providers. It therefore needs a healthy local
-stack with a **real LLM provider** configured (``claude_code`` / ``codex`` /
-``openai_compatible`` — the default ``fake`` provider cannot parse
-natural-language food). It is **not** wired into ``make verify`` and must never
-become a CI gate that depends on live external providers (see the story
-Non-Goals); only its pure parsing/redaction/assessment logic is unit-tested.
+(``mobile/verify-e2e.sh``): every request hits FastAPI, Postgres, the worker, and
+the configured evidence/LLM providers, so it needs a healthy stack with a **real
+LLM provider** (``claude_code`` / ``codex`` / ``openai_compatible`` — the default
+``fake`` cannot parse natural-language food). It is **not** wired into ``make
+verify`` and must never become a CI gate depending on live external providers
+(story Non-Goals); only its pure parsing/redaction/assessment logic is unit-tested.
 
 Design constraints (mirroring :mod:`app.ops.sim_readiness`):
 
-- **Throwaway, repeatable.** Each run registers a *fresh* throwaway account with
-  a unique fixture email, so it never touches real user data and is safe to run
-  repeatedly. Credentials are non-secret fixture values.
-- **No secrets.** It reads ``.env`` only to derive the non-secret ``API_PORT``;
-  it never prints ``.env`` contents, the bearer token, provider keys, DB
-  passwords, or raw provider output. Output is built from structured fields
-  only: event status, the submitted fixture text, source type/ref, calories,
-  and sanitized clarification text.
+- **Reused throwaway account, repeatable.** The smoke reuses one *deterministic*
+  throwaway account (fixed fixture email + non-secret password), logging in each
+  run and registering only when it does not exist yet. Login-first keeps repeat
+  runs off the register rate limiter (default 5/IP/hour) — registering afresh per
+  run would trip that ceiling and fail a *healthy* stack before any food fixture
+  ran. The account is dedicated to the smoke, never a real user, so reusing it
+  pollutes no real user data.
+- **No secrets.** It reads ``.env`` only for the non-secret ``API_PORT`` and never
+  prints ``.env`` contents, the bearer token, provider keys, DB passwords, or raw
+  provider output — output is built from structured fields only (status, fixture
+  text, source type/ref, calories, sanitized clarification text).
 
-Run it from the repo root once the stack is up and an LLM provider is logged in::
+Run it from the repo root once the stack is up and a provider is logged in::
 
-    make food-smoke
-    # or, directly:
-    cd backend && uv run python -m app.ops.food_dogfood_smoke
+    make food-smoke  # or: cd backend && uv run python -m app.ops.food_dogfood_smoke
 """
 
 from __future__ import annotations
@@ -48,18 +47,31 @@ import sys
 import time
 import urllib.error
 import urllib.request
-import uuid
+from base64 import urlsafe_b64decode
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 
-from app.enums import SourceType
+from app.ops.food_dogfood_fixtures import FIXTURES, FixtureSpec, ItemBand, load_fixtures
 from app.ops.sim_readiness import (
     parse_api_port,
     parse_env,
     read_env_file,
     simulator_url,
 )
+
+# ``FixtureSpec``/``ItemBand``/``load_fixtures``/``FIXTURES`` are the fixture
+# data-model + JSON loader, kept in a sibling module next to the JSON data
+# (``food_dogfood_fixtures.py`` / ``.json``) so this module stays focused on
+# orchestration + assessment. Re-exported here so the smoke's public surface and
+# its unit tests keep a single import point.
+__all__ = [
+    "FIXTURES",
+    "FixtureSpec",
+    "ItemBand",
+    "assess_fixture",
+    "load_fixtures",
+    "run",
+]
 
 # --------------------------------------------------------------------------- #
 # Tuning constants.
@@ -90,131 +102,20 @@ PER_ITEM_ABSURD_KCAL = 2000.0
 _HTTP_OK = 200
 _HTTP_CREATED = 201
 
-#: Fixture account password — a non-secret, safe-to-recreate fixture value that
-#: satisfies the register password bounds (8–128 chars). The email is unique per
-#: run so this fixed password never collides.
+#: HTTP 401: the login endpoint's answer for a missing account or bad credentials.
+#: The smoke reads it as "not registered yet".
+_HTTP_UNAUTHORIZED = 401
+
+#: The deterministic throwaway account, reused across runs (login-first) so the
+#: smoke registers at most once per stack. A dedicated fixture identity, never a
+#: real user. The password satisfies the register bounds (8–128 chars).
+_FIXTURE_EMAIL = "dogfood-smoke@fatty.local"
 _FIXTURE_PASSWORD = "dogfood-smoke-pw"  # noqa: S105 — non-secret local fixture
 
 
 # --------------------------------------------------------------------------- #
 # Fixtures + expected outcomes (pure data).
 # --------------------------------------------------------------------------- #
-
-
-@dataclass(frozen=True)
-class ItemBand:
-    """Per-item plausibility band for one expected derived item.
-
-    ``match`` is a lowercase substring located in the item's name/label/ref
-    (the same haystack ``forbid_substrings`` scans); the matched item's calories
-    must fall inside the inclusive ``[kcal_low, kcal_high]`` band. This is what
-    keeps a multi-item fixture honest — a total-only band would let a bad split
-    (e.g. crackers=1 kcal + hummus=399 kcal) pass.
-    """
-
-    match: str
-    kcal_low: float
-    kcal_high: float
-
-
-@dataclass(frozen=True)
-class FixtureSpec:
-    """One representative food log plus the outcome the live stack must deliver.
-
-    The assertions encode the FTY-252/253/254 dogfood regression class: a supplied
-    count/amount must resolve (never a generic no-option quantity clarification),
-    a branded item must not complete via a generic FDC row, a banana must not cost
-    as banana powder (caught by the plausible calorie band), and every completed
-    item must carry honest source provenance.
-    """
-
-    key: str
-    raw_text: str
-    #: Exact number of derived items expected, or ``None`` for "at least one".
-    expected_item_count: int | None
-    #: Inclusive plausible band for the entry's **total** calories.
-    total_kcal_low: float
-    total_kcal_high: float
-    #: ``source_type`` values that would be a wrong resolution for this fixture
-    #: (e.g. a generic ``trusted_nutrition_database`` row for a branded item).
-    forbid_source_types: tuple[SourceType, ...] = ()
-    #: Substrings that must not appear in an item's name/label/ref (defensive;
-    #: the calorie band is the primary detector for a wrong-form match).
-    forbid_substrings: tuple[str, ...] = ()
-    #: Per-item plausibility bands for multi-item fixtures. Each band must match
-    #: a derived item, and every matched item must cost inside its band, so the
-    #: total band cannot be satisfied by an implausible split.
-    expected_items: tuple[ItemBand, ...] = ()
-
-
-#: The representative fixtures live as **data**, not a Python literal, so the
-#: smoke code special-cases nothing and hardcodes no brand phrase — the exact
-#: 2026-07-10 snack phrase and its brand tokens stay out of ``backend/app``
-#: executable source, keeping the estimator's no-special-case scan
-#: (``test_exact_snack_phrase_resolution``) valid. See the ``_comment`` in the
-#: JSON for the field meanings.
-_FIXTURES_PATH = Path(__file__).with_name("food_dogfood_fixtures.json")
-
-
-def load_fixtures(path: Path | None = None) -> tuple[FixtureSpec, ...]:
-    """Load the representative food-log fixtures from the JSON data file (pure).
-
-    ``path`` is injectable for tests. Raises if the data is missing or malformed
-    — the smoke has no fixtures to run without it, so failing loudly beats a
-    silently empty run.
-    """
-
-    source = path or _FIXTURES_PATH
-    payload = json.loads(source.read_text(encoding="utf-8"))
-    raw_fixtures = payload["fixtures"]
-    return tuple(_fixture_from_dict(entry) for entry in raw_fixtures)
-
-
-def _str_list(value: object) -> tuple[str, ...]:
-    """Coerce a JSON list (or absent value) into a tuple of strings."""
-
-    if not isinstance(value, list):
-        return ()
-    return tuple(str(item) for item in value)
-
-
-def _item_bands(value: object) -> tuple[ItemBand, ...]:
-    """Coerce a JSON ``expected_items`` list (or absent value) into bands."""
-
-    if not isinstance(value, list):
-        return ()
-    return tuple(
-        ItemBand(
-            match=str(entry["match"]).lower(),
-            kcal_low=float(entry["kcal_low"]),
-            kcal_high=float(entry["kcal_high"]),
-        )
-        for entry in value
-        if isinstance(entry, Mapping)
-    )
-
-
-def _fixture_from_dict(entry: Mapping[str, object]) -> FixtureSpec:
-    """Build one :class:`FixtureSpec` from its JSON object."""
-
-    count = entry["expected_item_count"]
-    return FixtureSpec(
-        key=str(entry["key"]),
-        raw_text=str(entry["raw_text"]),
-        expected_item_count=int(count) if isinstance(count, (int, float)) else None,
-        total_kcal_low=float(entry["total_kcal_low"]),  # type: ignore[arg-type]
-        total_kcal_high=float(entry["total_kcal_high"]),  # type: ignore[arg-type]
-        forbid_source_types=tuple(
-            SourceType(value) for value in _str_list(entry.get("forbid_source_types"))
-        ),
-        forbid_substrings=_str_list(entry.get("forbid_substrings")),
-        expected_items=_item_bands(entry.get("expected_items")),
-    )
-
-
-#: The representative dogfood set (story Scope), ordered simplest → the
-#: 2026-07-10 branded-snack failure the smoke exists to catch.
-FIXTURES: tuple[FixtureSpec, ...] = load_fixtures()
 
 
 # --------------------------------------------------------------------------- #
@@ -233,15 +134,38 @@ def api_base_url(api_port: int) -> str:
     return simulator_url(api_port)
 
 
-def throwaway_credentials(token: str) -> tuple[str, str]:
-    """Return ``(email, password)`` for a fresh throwaway account.
+def throwaway_credentials() -> tuple[str, str]:
+    """Return the deterministic ``(email, password)`` for the throwaway account.
 
-    ``token`` makes the email unique per run so a repeat never collides with a
-    prior run's account and never pollutes a real user. The password is a fixed
-    non-secret fixture. Kept pure so both are unit-testable without a stack.
+    Fixed, non-secret fixture values reused across runs so the smoke logs in to
+    one dedicated account (never a real user) instead of registering afresh each
+    run — a fresh registration per run would trip the register rate limiter
+    (default 5/IP/hour) and fail a healthy stack before any food fixture ran.
     """
 
-    return (f"dogfood-smoke+{token}@fatty.local", _FIXTURE_PASSWORD)
+    return (_FIXTURE_EMAIL, _FIXTURE_PASSWORD)
+
+
+def _user_id_from_token(token: str) -> str:
+    """Extract the subject user id from a bearer token's payload segment (pure).
+
+    A token is ``<payload_b64url>.<signature>`` with payload ``{"sub": <user id>,
+    …}`` (see :mod:`app.security.tokens`). ``/api/auth/login`` returns only the
+    token, not the user record, so the smoke reads the ``sub`` claim to build the
+    ``/api/users/{id}`` path. The signature is not verified — the smoke trusts its
+    own local stack and the server re-checks ownership on every request.
+    """
+
+    try:
+        payload_b64 = token.split(".", 1)[0]
+        padding = "=" * (-len(payload_b64) % 4)
+        payload = json.loads(urlsafe_b64decode(payload_b64 + padding))
+        subject = payload["sub"]
+    except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+        raise SmokeError("login token payload was unreadable") from None
+    if not isinstance(subject, str) or not subject:
+        raise SmokeError("login token payload missing a subject")
+    return subject
 
 
 @dataclass(frozen=True)
@@ -348,10 +272,9 @@ def _item_failures(spec: FixtureSpec, item: SmokeItem) -> list[str]:
 def _expected_item_failures(spec: FixtureSpec, items: Sequence[SmokeItem]) -> list[str]:
     """Per-item plausibility bands for multi-item fixtures.
 
-    Each expected band must match at least one derived item, and every matched
-    item's calories must fall inside its band — so a bad split (one item
-    implausibly low, the other implausibly high) cannot hide behind a passing
-    **total** band.
+    Each band must match at least one derived item, and every matched item's
+    calories must fall inside its band — so a bad split cannot hide behind a
+    passing **total** band.
     """
 
     failures: list[str] = []
@@ -379,9 +302,8 @@ def _expected_item_failures(spec: FixtureSpec, items: Sequence[SmokeItem]) -> li
 def assess_fixture(spec: FixtureSpec, outcome: FixtureOutcome) -> FixtureAssessment:
     """Evaluate a fixture's live outcome against its expected behavior (pure).
 
-    Returns every failed assertion so the operator sees *all* the ways a run
-    regressed, not just the first. An empty failure list means the fixture
-    delivered the expected v1 behavior.
+    Returns every failed assertion (not just the first) so the operator sees all
+    the ways a run regressed; an empty list means expected v1 behavior.
     """
 
     failures: list[str] = []
@@ -417,10 +339,9 @@ def _format_item(item: SmokeItem) -> str:
 def format_assessment(assessment: FixtureAssessment) -> list[str]:
     """Render a fixture's verdict as sanitized operator-facing lines.
 
-    Prints only structured, non-secret fields: the submitted fixture text, event
-    status, per-item source/ref/calories, sanitized clarification text, and each
-    failed assertion. Never the bearer token, provider keys, or raw provider
-    output.
+    Prints only structured, non-secret fields (fixture text, status, per-item
+    source/ref/calories, sanitized clarification text, failed assertions) — never
+    the bearer token, provider keys, or raw provider output.
     """
 
     mark = "PASS" if assessment.passed else "FAIL"
@@ -442,8 +363,8 @@ def format_assessment(assessment: FixtureAssessment) -> list[str]:
 class SmokeError(Exception):
     """A fatal, operator-facing smoke error (stack down, auth failed, …).
 
-    Its message is sanitized — it never carries the bearer token, credentials,
-    or a raw response body — so it is safe to print directly.
+    Its message is sanitized (no bearer token, credentials, or raw response
+    body), so it is safe to print directly.
     """
 
 
@@ -452,8 +373,8 @@ class ApiClient:
     """Minimal bearer-authenticated JSON client over the live local API.
 
     Uses :mod:`urllib` (no new dependency), fixed URLs, and a short timeout. The
-    bearer token is held here and sent only in the ``Authorization`` header; it
-    is never returned in any string this module prints.
+    bearer token is sent only in the ``Authorization`` header, never returned in
+    any string this module prints.
     """
 
     base_url: str
@@ -503,6 +424,30 @@ class ApiClient:
             raise SmokeError("registration response missing a token or user id")
         self.token = token
         return user_id
+
+    def login(self, email: str, password: str) -> str | None:
+        """Log in to the throwaway account; return its user id, or ``None`` if absent.
+
+        ``None`` on HTTP 401 (the login endpoint's answer for both a missing
+        account and a bad password) signals the caller to register it once. Any
+        other failure (down stack, a 429 from the login limiter) raises.
+        """
+
+        status_code, payload = self._request(
+            "POST", "/api/auth/login", body={"email": email, "password": password}
+        )
+        if status_code == _HTTP_UNAUTHORIZED:
+            return None
+        if status_code != _HTTP_OK or not isinstance(payload, Mapping):
+            raise SmokeError(
+                f"login to the throwaway account failed (HTTP {status_code}); "
+                "the stack may be unhealthy or the login rate limit was hit"
+            )
+        token = payload.get("access_token")
+        if not isinstance(token, str):
+            raise SmokeError("login response missing an access token")
+        self.token = token
+        return _user_id_from_token(token)
 
     def submit(self, user_id: str, raw_text: str) -> str:
         """Submit one food log; return the created event id."""
@@ -647,6 +592,23 @@ def _poll_all(
 # --------------------------------------------------------------------------- #
 
 
+def acquire_account(client: ApiClient) -> str:
+    """Return the throwaway account's user id, bootstrapping it once if absent.
+
+    Login-first makes the smoke safe to run repeatedly: only the first run on a
+    stack registers (one register-limiter slot ever), every later run uses the
+    more generous login limiter, so the smoke never trips the default
+    5-registrations-per-hour ceiling before a food fixture is exercised.
+    """
+
+    email, password = throwaway_credentials()
+    user_id = client.login(email, password)
+    if user_id is not None:
+        return user_id
+    # First run on this stack (or the account was reset): register it once.
+    return client.register(email, password)
+
+
 def _emit(line: str = "") -> None:
     print(line)
 
@@ -692,11 +654,11 @@ def run() -> int:
     _emit(f"Target: {base_url}")
 
     client = ApiClient(base_url=base_url)
-    email, password = throwaway_credentials(uuid.uuid4().hex)
-    _emit(f"Throwaway account: {email}")
+    email, _ = throwaway_credentials()
+    _emit(f"Throwaway account: {email} (reused; registered once per stack)")
 
     try:
-        user_id = client.register(email, password)
+        user_id = acquire_account(client)
         submitted = [
             _EventUnderTest(spec=spec, event_id=client.submit(user_id, spec.raw_text))
             for spec in FIXTURES
