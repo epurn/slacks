@@ -30,7 +30,7 @@ function isColorSchemeOverride(v: unknown): v is ColorSchemeOverride {
 }
 
 function getSettingsFile(): File {
-  return new File(Paths.document, 'fatty-app-settings.json');
+  return new File(Paths.document, 'slacks-app-settings.json');
 }
 
 async function readStored(): Promise<StoredAppSettings> {

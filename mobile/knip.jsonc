@@ -8,7 +8,7 @@
     // Babel config consumed by Metro bundling and the jest-expo transform; it has
     // no importer in source, so it must be declared an entry, not deleted.
     "babel.config.js",
-    // E2E fixtures/harness are baked into the app only under EXPO_PUBLIC_FATTY_E2E
+    // E2E fixtures/harness are baked into the app only under EXPO_PUBLIC_SLACKS_E2E
     // and their constants are read literally by the Maestro flows in .maestro/
     // (e.g. E2E_CLARIFY_CHIP -> the "Large" chip in clarify.yaml). knip's static
     // graph can't follow the Maestro YAML or the E2E-only build, so these fixture

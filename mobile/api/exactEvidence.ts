@@ -5,7 +5,7 @@
  * For a **low-trust or incomplete** food item (`model_prior`, a `user_text` item
  * with rough/unknown macros, or a `reference_source` estimate) the user supplies
  * **product evidence** — a typed or scanned barcode, or a nutrition-label photo —
- * and Fatty builds a **server-held proposal** it can preview and then explicitly
+ * and Slacks builds a **server-held proposal** it can preview and then explicitly
  * apply in place. Three owner-scoped operations back the flow, per
  * `docs/contracts/evidence-retrieval.md` (**Exact Evidence Upgrade — FTY-306**)
  * and `docs/contracts/food-resolution.md` (**Exact Evidence Upgrade Routing**):

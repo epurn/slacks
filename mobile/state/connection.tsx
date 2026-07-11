@@ -1,8 +1,8 @@
 /**
  * The connected-server seam (FTY-107).
  *
- * Fatty is self-host-first (UX design §4d): before anyone can sign in, the app
- * must be pointed at the user's own Fatty server. That connection — a single
+ * Slacks is self-host-first (UX design §4d): before anyone can sign in, the app
+ * must be pointed at the user's own Slacks server. That connection — a single
  * non-secret base URL — is what this provider owns. It is the network target
  * every later request (including the FTY-091 credentials) is sent to, so it is
  * established deliberately on the connect screen after validation + a

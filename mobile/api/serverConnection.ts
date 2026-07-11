@@ -18,7 +18,7 @@
  * The reachability probe is an unauthenticated `GET {base}/healthz` (the
  * documented liveness endpoint, `docs/operations/local-dev-stack.md`) with a
  * timeout. It carries **no personal data** and confirms the host actually speaks
- * Fatty (`{"status":"ok"}`) — a reachable host that is not a Fatty server is
+ * Slacks (`{"status":"ok"}`) — a reachable host that is not a Slacks server is
  * treated as unreachable rather than silently accepted.
  */
 
@@ -88,9 +88,9 @@ interface HealthBody {
 
 /**
  * Probe a candidate base URL for reachability with a timeout. Resolves
- * `"reachable"` only when `GET {base}/healthz` answers `200` with the Fatty
+ * `"reachable"` only when `GET {base}/healthz` answers `200` with the Slacks
  * liveness body (`{"status":"ok"}`); a timeout, a network failure, a non-2xx
- * status, or a non-Fatty body all resolve `"unreachable"`. Never throws.
+ * status, or a non-Slacks body all resolve `"unreachable"`. Never throws.
  *
  * @param baseUrl A canonical base URL from {@link validateServerUrl}.
  */

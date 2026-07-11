@@ -12,7 +12,7 @@ import { formatValue } from "@/state/derivedItems";
 /**
  * Debounce for the Change-match search field. Each keystroke would otherwise
  * trigger a USDA FDC name-search fan-out server-side; waiting for a typing pause
- * keeps provider egress bounded (see evidence-retrieval.md `FATTY_FDC_MAX_RESULTS`).
+ * keeps provider egress bounded (see evidence-retrieval.md `SLACKS_FDC_MAX_RESULTS`).
  */
 export const SEARCH_DEBOUNCE_MS = 300;
 

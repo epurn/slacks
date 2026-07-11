@@ -26,7 +26,7 @@ export class ApiError extends Error {
 /**
  * Handler invoked when an authenticated request receives a `401`, i.e. the
  * stored bearer token is no longer valid (TTL expiry, or the self-hosted server
- * rotated `FATTY_AUTH_SECRET` so every existing token fails signature checks).
+ * rotated `SLACKS_AUTH_SECRET` so every existing token fails signature checks).
  *
  * `SessionProvider` registers its `signOut` here on mount so a dead token clears
  * the session — the existing auth-redirect then routes the user back to sign-in

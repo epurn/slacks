@@ -48,7 +48,7 @@ Retention defaults should minimize stored personal data while preserving user va
   normal `log_events` row and follows the server-side retention above; the
   on-device copy adds no server retention surface.
 - Appearance preference (on-device, FTY-102): the Light / Dark / System display
-  choice is stored in a small per-device file (`fatty-app-settings.json`) via
+  choice is stored in a small per-device file (`slacks-app-settings.json`) via
   expo-file-system. It is a non-sensitive UI preference — no body data, no
   personal data — held only on the device, never sent to the server, and never
   logged. It adds no server-side retention surface; reinstalling the app clears it.

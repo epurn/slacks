@@ -18,7 +18,7 @@ import * as SecureStore from "expo-secure-store";
 import type { SessionRecord } from "@/state/session";
 
 /** Single keychain key holding the whole session record as a JSON string. */
-const SESSION_KEY = "fatty.session.v1";
+const SESSION_KEY = "slacks.session.v1";
 
 /** The injectable persistence seam for the session record. */
 export interface SessionStore {

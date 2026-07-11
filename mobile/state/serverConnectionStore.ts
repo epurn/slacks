@@ -1,5 +1,5 @@
 /**
- * On-device persistence for the connected Fatty server URL (FTY-107).
+ * On-device persistence for the connected Slacks server URL (FTY-107).
  *
  * The server base URL is **non-secret configuration** (see `api/config.ts`): it
  * is the address of the user's own server, not a credential. So it is stored in
@@ -31,7 +31,7 @@ interface StoredConnection {
 }
 
 function getConnectionFile(): File {
-  return new File(Paths.document, "fatty-server-connection.json");
+  return new File(Paths.document, "slacks-server-connection.json");
 }
 
 async function readStored(): Promise<StoredConnection> {

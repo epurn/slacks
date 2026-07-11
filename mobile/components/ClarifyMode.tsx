@@ -11,7 +11,7 @@ import { useTheme, spacing, typeScale, radius } from "@/theme";
 /** Clarification data for an item in the needs_clarification state. */
 export interface ClarificationData {
   /**
-   * Fatty's specific question (e.g. "What kind of milk?"), or `null` while the
+   * Slacks's specific question (e.g. "What kind of milk?"), or `null` while the
    * clarification read is loading or when the event has no persisted question.
    * Clarify-mode falls back to the generic prompt + free-text when it is `null`.
    */

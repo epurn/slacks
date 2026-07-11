@@ -1,7 +1,7 @@
 /**
  * The offline logging outbox — pure model and drain algorithm (FTY-104).
  *
- * When the device cannot reach the Fatty server, a raw log entry is captured
+ * When the device cannot reach the Slacks server, a raw log entry is captured
  * into a durable on-device outbox instead of being dropped. Each queued item
  * carries a stable, client-generated idempotency key (created once at capture
  * time, never regenerated). On reconnect the outbox drains by submitting each
@@ -62,7 +62,7 @@ export interface OutboxEntry {
 }
 
 /**
- * Who a durable queue belongs to (FTY-277). Fatty is self-host-first, so a queue
+ * Who a durable queue belongs to (FTY-277). Slacks is self-host-first, so a queue
  * is scoped to the **server the user connected to** *and* the user id — a
  * `userId` alone is not a sufficient key, because the same `userId` on two
  * different self-hosted servers is two different owners whose queues must never
@@ -81,8 +81,8 @@ export interface OutboxOwner {
  * different spellings of the same server resolve to one owner while genuinely
  * different servers stay distinct.
  *
- * The path is deliberately case-*sensitive*: a self-hosted Fatty can live under
- * a base path, so `https://host/Fatty` and `https://host/fatty` are two distinct
+ * The path is deliberately case-*sensitive*: a self-hosted Slacks can live under
+ * a base path, so `https://host/Slacks` and `https://host/slacks` are two distinct
  * servers whose queues must not share storage. Lowercasing the whole URL would
  * collapse them onto one owner key, so only the case-insensitive scheme +
  * authority is folded; the path (and anything after it) keeps its original case.

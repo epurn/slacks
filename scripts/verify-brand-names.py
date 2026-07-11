@@ -66,10 +66,6 @@ LITERAL_EXCEPTIONS = (
         "current GitHub App slug",
     ),
     LiteralException(
-        re.compile(r"\bfatty-app-settings\.json\b"),
-        "current on-device settings file name",
-    ),
-    LiteralException(
         re.compile(r"postgresql://fatty:fatty@localhost:5432/fatty"),
         "documented local Postgres user/password/database default",
     ),

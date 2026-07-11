@@ -3,7 +3,7 @@ import * as Haptics from "expo-haptics";
 /**
  * Signature-beat haptics (FTY-181).
  *
- * Fatty is "calm ~95% of the time, branded at the few beats that matter"
+ * Slacks is "calm ~95% of the time, branded at the few beats that matter"
  * (docs/design/ux-design.md §5). Identity lives in three designed motion beats,
  * each carrying a matching haptic. This module is the single place those haptics
  * fire so the call sites stay one line and the expo-haptics surface — including

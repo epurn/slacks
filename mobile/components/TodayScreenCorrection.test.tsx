@@ -274,7 +274,7 @@ describe("TodayScreen needs-clarification entries", () => {
     });
 
     // Clarify-mode is shown: free-text fallback present, and the missing detail
-    // is never pre-filled (Fatty does not fabricate the answer).
+    // is never pre-filled (Slacks does not fabricate the answer).
     expect(hasA11yLabel(tree, "Your answer")).toBe(true);
     expect(inputValue(tree, "Your answer")).toBe("");
     // Clarify-mode only — the amount stepper / change-match levers stay hidden.
@@ -477,7 +477,7 @@ describe("TodayScreen needs-clarification entries", () => {
     }
   });
 
-  it("fetches the clarification read and shows Fatty's real question + quick-pick chips", async () => {
+  it("fetches the clarification read and shows Slacks's real question + quick-pick chips", async () => {
     const load = jest
       .fn()
       .mockResolvedValue([

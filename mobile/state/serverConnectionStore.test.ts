@@ -61,16 +61,16 @@ describe("fileServerConnectionStore", () => {
     await fileServerConnectionStore.save("https://my-server.example.com");
     // The non-secret connection lives in a plain document file, not under any
     // keychain/secure-store key.
-    expect(Object.keys(mockFiles)).toEqual(["fatty-server-connection.json"]);
+    expect(Object.keys(mockFiles)).toEqual(["slacks-server-connection.json"]);
   });
 
   it("treats a corrupt file as no connection", async () => {
-    mockFiles["fatty-server-connection.json"] = "{ not json";
+    mockFiles["slacks-server-connection.json"] = "{ not json";
     await expect(fileServerConnectionStore.load()).resolves.toBeNull();
   });
 
   it("treats a stored empty string as no connection", async () => {
-    mockFiles["fatty-server-connection.json"] = JSON.stringify({ baseUrl: "" });
+    mockFiles["slacks-server-connection.json"] = JSON.stringify({ baseUrl: "" });
     await expect(fileServerConnectionStore.load()).resolves.toBeNull();
   });
 });

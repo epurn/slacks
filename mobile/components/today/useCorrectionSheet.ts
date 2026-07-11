@@ -26,7 +26,7 @@ import {
 /**
  * The tapped correction/detail sheet target: the item plus its log phrase, and
  * — in clarify-mode — the needs_clarification event id, its (async-filled)
- * question id, and Fatty's question + quick-pick chips.
+ * question id, and Slacks's question + quick-pick chips.
  */
 export type SheetTarget = {
   item: DerivedItem;
@@ -42,7 +42,7 @@ export type SheetTarget = {
    */
   questionId?: string | null;
   /**
-   * Fatty's question + options for clarify-mode (FTY-153/170). Seeded with a
+   * Slacks's question + options for clarify-mode (FTY-153/170). Seeded with a
    * `null` question (the generic-prompt + free-text fallback) and filled in
    * place — question text + quick-pick chips — once the clarification read
    * resolves. Calm, no layout jump.
@@ -109,11 +109,11 @@ export function useCorrectionSheet({
 
   // Open the correction sheet in clarify-mode for a needs_clarification entry
   // (FTY-149/153). Reuses the single mounted sheet via a minimal placeholder item;
-  // clarify-mode shows Fatty's question (when known) + quick-pick chips + the
+  // clarify-mode shows Slacks's question (when known) + quick-pick chips + the
   // free-text fallback, and never auto-fills the missing detail.
   //
   // The sheet opens immediately at a usable height with the generic prompt, then
-  // fetches FTY-152's clarification read and fills Fatty's real question in place
+  // fetches FTY-152's clarification read and fills Slacks's real question in place
   // when it resolves (calm, no layout jump). A loading/empty/error read leaves the
   // generic prompt + free-text path intact — the user is never blocked.
   const openClarifySheet = useCallback(
@@ -146,7 +146,7 @@ export function useCorrectionSheet({
           const first = result.questions[0];
           if (!first) return;
           // Only fill if the sheet still targets this event (the user may have
-          // tapped a different entry while the read was in flight). Fill Fatty's
+          // tapped a different entry while the read was in flight). Fill Slacks's
           // real question + its candidate quick-pick chips in place — calm, no
           // layout jump — and stash the question id the answer round-trip needs.
           setSheetTarget((prev) =>

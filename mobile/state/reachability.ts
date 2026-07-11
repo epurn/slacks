@@ -1,7 +1,7 @@
 /**
  * Reachability state and the calm connection banner (FTY-104).
  *
- * Offline-queue logging needs to know one thing: can we reach the Fatty server
+ * Offline-queue logging needs to know one thing: can we reach the Slacks server
  * right now? Rather than depend on a separate network-status native module, this
  * is inferred from the outcome of the real create/submit attempts the queue
  * already makes — a network-layer failure means unreachable, while any HTTP

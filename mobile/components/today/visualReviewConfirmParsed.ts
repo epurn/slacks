@@ -33,7 +33,7 @@ import {
 import { useVisualReviewFetchTick } from "@/e2e/visualReview/hooks";
 import { QUIET_MS } from "@/e2e/visualReview/VisualReviewSettleOverlay";
 
-/** The deep-link preset name: `fatty://__visual-review?preset=today.confirm_parsed`. */
+/** The deep-link preset name: `slacks://__visual-review?preset=today.confirm_parsed`. */
 export const CONFIRM_PARSED_PRESET_NAME = "today.confirm_parsed";
 
 const EVENT_ID = "e2e-confirm-parsed-event-00000000-0000-0000-0000-000000000000";
