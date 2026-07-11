@@ -223,13 +223,15 @@ read path.)
   partial event's `resolved` siblings; `pending` and **first-pass** `processing`
   events (the estimator is still working — the client's loading path, not "awaiting
   details"); and `failed` events (a distinct retry state). **A scoped re-estimate
-  does not drop an open question (FTY-349):** while an item-scoped answer flips the
-  event `partially_resolved → processing` to re-cost one component, its *other*
-  still-open item-scoped questions keep contributing one uncounted entry each for
-  the whole window (the `processing` event is admitted here by the same
-  committed-resolved-sibling discriminator the finalized gate uses), and a question
-  drops only when its own component resolves — so the count does not dip and
-  reappear. A single partially-resolved entry can therefore contribute to **both**
+  does not drop an open question (FTY-349):** "open" keys on the **component's
+  resolution, never on the answer row** — the answer flow commits the
+  `clarification_answers` row in the same transaction that flips the event
+  `partially_resolved → processing` (`clarification.md`), so the answered
+  question's still-`unresolved` component keeps its uncounted entry for the whole
+  in-flight window, as do any *other* still-open item-scoped questions (the
+  `processing` event is admitted here by the same committed-resolved-sibling
+  discriminator the finalized gate uses). A question drops only when its own
+  component resolves — so the count does not dip and reappear. A single partially-resolved entry can therefore contribute to **both**
   `intake` (its resolved siblings) and `uncounted_entries` (its unresolved
   component) at once — the two sets are disjoint by item status, so nothing is
   double-counted. Day attribution is the owning
@@ -580,8 +582,10 @@ curl -s ':8000/api/users/<uid>/daily-summary/range?from=2025-01-01&to=2026-06-01
   still-open questions — do not dip and reappear while the answer re-estimates
   (calm-by-default). Still a **pure computed read** over existing rows — no new
   status, no new column, no DTO shape change, no migration; the `uncounted_entries`
-  counting **unit is unchanged** (one per still-open item-scoped question, one per
-  `needs_clarification` event, plus `proposed` items). This **refines — does not
+  counting **unit is unchanged** (one per still-open item-scoped question — "open"
+  meaning its component is not yet `resolved`, since the answer row commits before
+  the re-estimate window opens — one per `needs_clarification` event, plus
+  `proposed` items). This **refines — does not
   reopen — FTY-278**: the `partially_resolved → processing` transition is unchanged.
   Numerically inert until the FTY-329 estimator follow-up first drives a live
   answer→re-estimate; FTY-349 lands before FTY-329 so the correctness is in place

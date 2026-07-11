@@ -24,7 +24,12 @@ from sqlalchemy.engine import Engine
 
 from app.db import create_session_factory
 from app.enums import DerivedItemStatus, LogEventStatus
-from app.models.derived import ClarificationQuestion, DerivedExerciseItem, DerivedFoodItem
+from app.models.derived import (
+    ClarificationAnswer,
+    ClarificationQuestion,
+    DerivedExerciseItem,
+    DerivedFoodItem,
+)
 from app.models.log_events import LogEvent
 from app.models.targets import DailyTarget, Goal
 
@@ -534,15 +539,18 @@ def _seed_partial_like_event(
     *,
     status: str,
     created_at: datetime | None = None,
+    answered: bool = False,
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     """Seed a mixed log at ``status`` with a committed ``resolved`` sibling
     (180 kcal), a still-``unresolved`` component, and one open item-scoped question
     on it. Returns ``(event_id, sibling_id, unresolved_id)``.
 
     At ``partially_resolved`` this is the FTY-278 pinned partial state; at
-    ``processing`` it is the exact DB state mid answer-triggered scoped re-estimate
-    (the event has flipped ``partially_resolved → processing`` to re-cost the open
-    component while the committed sibling is left untouched — FTY-349).
+    ``processing`` with ``answered=True`` it is the exact DB state mid
+    answer-triggered scoped re-estimate: the real answer flow persists the
+    ``ClarificationAnswer`` in the same transaction that flips the event
+    ``partially_resolved → processing``, so the in-flight window has the question
+    answered but its component still ``unresolved`` (FTY-349).
     """
 
     factory = create_session_factory(db_engine)
@@ -576,16 +584,25 @@ def _seed_partial_like_event(
         )
         session.add_all([sibling, unresolved])
         session.flush()
-        session.add(
-            ClarificationQuestion(
-                log_event_id=event.id,
-                user_id=uuid.UUID(user_id),
-                question_text="How much milk?",
-                options=["a splash", "1/2 cup", "1 cup"],
-                derived_food_item_id=unresolved.id,
-                position=0,
-            )
+        question = ClarificationQuestion(
+            log_event_id=event.id,
+            user_id=uuid.UUID(user_id),
+            question_text="How much milk?",
+            options=["a splash", "1/2 cup", "1 cup"],
+            derived_food_item_id=unresolved.id,
+            position=0,
         )
+        session.add(question)
+        session.flush()
+        if answered:
+            session.add(
+                ClarificationAnswer(
+                    question_id=question.id,
+                    log_event_id=event.id,
+                    user_id=uuid.UUID(user_id),
+                    answer_text="1 cup",
+                )
+            )
         session.commit()
         return event.id, sibling.id, unresolved.id
 
@@ -596,14 +613,16 @@ def test_committed_sibling_stays_counted_during_scoped_reestimate(
     """A committed resolved sibling keeps counting while the event re-estimates.
 
     The event has flipped ``partially_resolved → processing`` to re-cost its open
-    component (an answer is in flight). The already-committed sibling must stay in
-    ``intake`` and its still-open question in ``uncounted_entries`` — no surface
+    component, and — as in the real answer flow — the question's
+    ``ClarificationAnswer`` row is already committed while the component is still
+    ``unresolved``. The already-committed sibling must stay in ``intake`` and the
+    answered-but-not-yet-resolved question in ``uncounted_entries`` — no surface
     dips and reappears (FTY-349, calm-by-default).
     """
 
     user_id, auth = _register(client, "scoped-reestimate@example.com")
     today = datetime.now(UTC).date()
-    _seed_partial_like_event(db_engine, user_id, status=LogEventStatus.PROCESSING)
+    _seed_partial_like_event(db_engine, user_id, status=LogEventStatus.PROCESSING, answered=True)
 
     resp = client.get(
         f"/api/users/{user_id}/daily-summary",
@@ -662,9 +681,12 @@ def test_day_total_is_flat_before_during_and_after_scoped_reestimate(
 ) -> None:
     """The day total is identical before, during, and after a scoped re-estimate.
 
-    Model the three moments as three DB states and assert the sibling's calories
-    hold flat across all of them, and that resolving the open component raises the
-    total by exactly the new item — never re-adding or double-counting the sibling.
+    The DURING state is produced by the **real answer flow** (the clarification
+    answers endpoint), which commits the ``ClarificationAnswer`` row in the same
+    transaction that flips the event to ``processing`` — the exact in-flight state
+    a scoped re-estimate leaves in the DB. The sibling's calories hold flat across
+    all three moments and resolving the open component raises the total by exactly
+    the new item — never re-adding or double-counting the sibling.
     """
 
     user_id, auth = _register(client, "flat-total@example.com")
@@ -688,18 +710,28 @@ def test_day_total_is_flat_before_during_and_after_scoped_reestimate(
     )
     assert _intake_and_uncounted() == (180.0, 1)
 
-    # DURING: an answer flips the event to processing to re-estimate; the sibling
-    # and the open component are untouched.
-    factory = create_session_factory(db_engine)
-    with factory() as session:
-        event = session.get(LogEvent, event_id)
-        assert event is not None
-        event.status = LogEventStatus.PROCESSING
-        session.commit()
+    # DURING: answer the open question through the real endpoint. The answer row
+    # commits in the same transaction that flips the event to ``processing``, so
+    # the question is answered while its component is still unresolved — the state
+    # the read model must not let dip.
+    questions = client.get(
+        f"/api/users/{user_id}/log-events/{event_id}/clarification",
+        headers={"Authorization": auth},
+    )
+    assert questions.status_code == 200
+    question_id = questions.json()["questions"][0]["id"]
+    answered = client.post(
+        f"/api/users/{user_id}/log-events/{event_id}/clarification/answers",
+        headers={"Authorization": auth},
+        json={"question_id": question_id, "answer": "1 cup"},
+    )
+    assert answered.status_code == 201
+    assert answered.json()["status"] == "processing"
     assert _intake_and_uncounted() == (180.0, 1)
 
     # AFTER: the open component resolves and the event completes; the total rises
     # by exactly the newly-resolved item and the sibling is unchanged.
+    factory = create_session_factory(db_engine)
     with factory() as session:
         event = session.get(LogEvent, event_id)
         item = session.get(DerivedFoodItem, unresolved_id)
@@ -719,7 +751,8 @@ def test_range_and_has_intake_match_single_day_during_scoped_reestimate(
 
     Every intake surface keys on committed resolved items, so the range read and
     ``has_intake`` keep the sibling counted during the scoped re-estimate exactly
-    like the single-day path — no surface dips (FTY-349).
+    like the single-day path — no surface dips (FTY-349). The seed carries the
+    committed answer row the real answer flow leaves in place mid-window.
     """
 
     user_id, auth = _register(client, "scoped-range-parity@example.com")
@@ -729,6 +762,7 @@ def test_range_and_has_intake_match_single_day_during_scoped_reestimate(
         user_id,
         status=LogEventStatus.PROCESSING,
         created_at=datetime(2026, 7, 10, 12, 0, tzinfo=UTC),
+        answered=True,
     )
 
     single = client.get(

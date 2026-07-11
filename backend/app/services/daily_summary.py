@@ -62,7 +62,6 @@ from sqlalchemy.orm import Session, aliased
 
 from app.enums import DerivedItemStatus, LogEventStatus
 from app.models.derived import (
-    ClarificationAnswer,
     ClarificationQuestion,
     DerivedExerciseItem,
     DerivedFoodItem,
@@ -334,12 +333,12 @@ def _exercise_window_conditions(
 #   1. ``needs_clarification`` LOG EVENTS — event-level clarification with no
 #      committed items, counted once per event. Attributed by the event's own
 #      ``created_at``.
-#   2. unanswered ITEM-SCOPED QUESTIONS on ``partially_resolved`` events — one per
-#      unresolved component that owns an open question; resolved siblings count in
-#      intake instead. This also holds for the whole window while a *sibling*
-#      answer flips the event ``partially_resolved → processing`` for a scoped
-#      re-estimate (FTY-349): a still-open question keeps its uncounted entry and
-#      drops only when its own component resolves.
+#   2. open ITEM-SCOPED QUESTIONS on ``partially_resolved`` events — one per
+#      still-unresolved component that owns a question; resolved siblings count in
+#      intake instead. "Open" keys on the component's resolution, not the answer
+#      row: the answer commits before the event flips ``partially_resolved →
+#      processing`` for the scoped re-estimate (FTY-349), so the entry survives
+#      the whole window and drops only when its own component resolves.
 #   3. ``proposed`` DERIVED FOOD ITEMS (FTY-196) — a costed-but-unconfirmed label
 #      parse, excluded from every finalized read by construction. Attributed by the
 #      owning event's ``created_at`` (the same day rule ``intake`` uses).
@@ -368,17 +367,30 @@ def _partial_question_window_conditions(
 ) -> tuple[ColumnElement[bool], ...]:
     """WHERE conditions selecting open item-scoped questions on partial events.
 
-    The counting unit is unchanged — one per still-`unresolved` component that owns
-    an open (unanswered) item-scoped question. The event-status gate mirrors the
-    finalized filter's scoped-re-estimate clause (FTY-349) so a **still-open**
-    question does not spuriously drop while a *sibling* question's answer flips the
-    event ``partially_resolved → processing``; it stays counted for the whole
-    re-estimate window and drops only when its own component resolves. A first-pass
-    ``processing`` event has no committed resolved sibling (and no clarification
-    questions yet), so it adds nothing here.
+    The counting unit is unchanged — one per still-``unresolved`` component that
+    owns an item-scoped question. "Open" is keyed on the **component's**
+    resolution, never on the answer row: the real answer flow persists the
+    ``ClarificationAnswer`` in the same transaction that flips the event
+    ``partially_resolved → processing`` (:func:`app.services.clarification.
+    answer_clarification_question`), so an answered-but-not-yet-resolved question
+    must keep its uncounted entry for the whole re-estimate window and drop only
+    when its own component resolves (FTY-349). The event-status gate mirrors the
+    finalized filter's scoped-re-estimate clause, so a *sibling* question's open
+    entry survives the window too. A first-pass ``processing`` event has no
+    committed resolved sibling (and no item-scoped questions yet), so it adds
+    nothing here.
     """
 
-    answered_ids = select(ClarificationAnswer.question_id)
+    component = aliased(DerivedFoodItem)
+    component_still_unresolved = (
+        select(1)
+        .where(
+            component.id == ClarificationQuestion.derived_food_item_id,
+            component.status == DerivedItemStatus.UNRESOLVED,
+        )
+        .correlate(ClarificationQuestion)
+        .exists()
+    )
     return (
         ClarificationQuestion.user_id == owner_id,
         LogEvent.user_id == owner_id,
@@ -388,7 +400,7 @@ def _partial_question_window_conditions(
             _scoped_reestimate_processing(),
         ),
         ClarificationQuestion.derived_food_item_id.isnot(None),
-        ClarificationQuestion.id.not_in(answered_ids),
+        component_still_unresolved,
         LogEvent.created_at >= start_utc,
         LogEvent.created_at < end_utc,
     )
