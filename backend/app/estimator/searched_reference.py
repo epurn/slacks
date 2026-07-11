@@ -22,6 +22,7 @@ from app.estimator.food_serving import (
     per_serving_to_per_100g,
     serving_size_grams,
 )
+from app.estimator.identity_sanitizer import sanitized_identity
 from app.estimator.pipeline import CandidateDraft
 from app.estimator.reference_fetch import ReferenceFetchSettings
 from app.estimator.search import SearchCandidate, SearchProvider, SearchStatus
@@ -167,6 +168,17 @@ BeforeFetch = Callable[[str], None]
 #: outside the run-trace surface (e.g. user-text macro estimation) are unchanged.
 ObserveSearchDecision = Callable[..., None]
 
+#: Optional transient model-facing surface hook (FTY-326): called with keyword
+#: fields (``surface=…``, ``outcome=…``, ``text=…``) when a page/snippet
+#: extraction read is not accepted, carrying the same bounded inert text the
+#: extraction prompt saw so the interpretation session can stage it for its next
+#: re-interpretation prompt. Deliberately distinct from ``observe``: the
+#: decision-trace hook carries sanitized labels/refs only, while this seam
+#: carries surface text to the model boundary alone — the receiver must never
+#: write it to the trace, evidence ledger, assumptions, source refs, persisted
+#: rows, search queries, or fetch URLs. ``None`` (the default) stages nothing.
+StageEvidenceText = Callable[..., None]
+
 #: The ``surface`` labels an extract decision carries: the fetched page body vs.
 #: the bounded search-result title+snippet fallback (FTY-314).
 _PAGE_SURFACE = "page"
@@ -225,6 +237,7 @@ def searched_reference_per_100g(  # noqa: PLR0913 - shared provider/fetch/extrac
     accept_result: AcceptSearchedReference | None = None,
     allow_count_serving: bool = False,
     observe: ObserveSearchDecision | None = None,
+    stage_text: StageEvidenceText | None = None,
 ) -> SearchedReferenceFacts | None:
     """Return the first confident, plausible searched-reference per-100g facts.
 
@@ -236,6 +249,9 @@ def searched_reference_per_100g(  # noqa: PLR0913 - shared provider/fetch/extrac
     title+snippet (FTY-314) before moving to the next result. ``observe``, when
     supplied, receives one sanitized decision per search/source/fetch/extract
     outcome (FTY-255) — labels and refs only, never query, page, or snippet text.
+    ``stage_text``, when supplied, receives an unaccepted read's bounded inert
+    page/snippet text for the session's transient model-facing evidence view
+    (FTY-326) and nothing else.
     """
 
     result = search_provider.search(query)
@@ -281,6 +297,7 @@ def searched_reference_per_100g(  # noqa: PLR0913 - shared provider/fetch/extrac
                 accept_result=accept_result,
                 observe=observe,
                 surface=_PAGE_SURFACE,
+                stage_text=stage_text,
             )
         if found is None:
             # FTY-314: the page fetch failed, returned no usable text, or extracted
@@ -299,9 +316,10 @@ def searched_reference_per_100g(  # noqa: PLR0913 - shared provider/fetch/extrac
                     hash_key=search_candidate.url,
                     allow_count_serving=allow_count_serving,
                     accept_result=accept_result,
-                    assumptions_override=(SNIPPET_ASSUMPTION,),
+                    assumptions=(SNIPPET_ASSUMPTION,),
                     observe=observe,
                     surface=_SNIPPET_SURFACE,
+                    stage_text=stage_text,
                 )
             else:
                 _observe(
@@ -326,16 +344,38 @@ def _extract_accepted(  # noqa: PLR0913 - shared page/snippet extraction seam
     hash_key: str,
     allow_count_serving: bool,
     accept_result: AcceptSearchedReference | None,
-    assumptions_override: tuple[str, ...] | None = None,
+    assumptions: tuple[str, ...] = (),
     observe: ObserveSearchDecision | None = None,
     surface: str = _PAGE_SURFACE,
+    stage_text: StageEvidenceText | None = None,
 ) -> SearchedReferenceFacts | None:
-    """Extract + validate + accept one untrusted text surface; ``None`` if unusable."""
+    """Extract + validate + accept one untrusted text surface; ``None`` if unusable.
 
-    def _note(outcome: str) -> None:
+    ``assumptions`` is the caller's fixed content-free label set for the carrier —
+    ``()`` for a fetched page, the ``SNIPPET_ASSUMPTION`` label for the snippet
+    fallback. The extraction provider reads raw page/snippet text, so the
+    ``assumptions`` it states are provider-controlled and could echo that text;
+    they are never read here, keeping provider output off the persisted
+    ``evidence_sources.assumptions`` / run-assumption surfaces (FTY-326).
+    """
+
+    def _note(outcome: str, evidence_desc: str | None = None) -> None:
         _observe(
-            observe, decision="extract", source_ref=source_ref, surface=surface, outcome=outcome
+            observe,
+            decision="extract",
+            source_ref=source_ref,
+            surface=surface,
+            outcome=outcome,
+            evidence_desc=evidence_desc,
         )
+
+    def _stage_unaccepted_read(outcome: str) -> None:
+        # The current read's own bounded inert text, handed to the transient
+        # model-facing evidence view (FTY-326) so a re-interpretation call can
+        # resolve what the surface said. The sanitized descriptor above is what
+        # the ledger/trace keep; this text never reaches those surfaces.
+        if stage_text is not None:
+            stage_text(surface=surface, outcome=outcome, text=page_text)
 
     estimate, failure = _extract(
         provider=provider,
@@ -343,17 +383,15 @@ def _extract_accepted(  # noqa: PLR0913 - shared page/snippet extraction seam
         page_kind=page_kind,
         extract_prompt=extract_prompt,
     )
-    if estimate is None or estimate.facts is None:
-        _note(failure or "extract_unresolved")
+    if failure is not None or estimate is None or estimate.facts is None:
+        # An ambiguous read (unresolved / low-confidence) still carries the
+        # schema-validated fields the transcriber stated; thread them as a
+        # bounded descriptor so the session can interpret what the page or
+        # snippet said, not just that the read failed (FTY-326).
+        outcome = failure or "extract_unresolved"
+        _note(outcome, _unaccepted_read_desc(estimate))
+        _stage_unaccepted_read(outcome)
         return None
-    # ``assumptions_override`` replaces the provider-stated assumptions wholesale.
-    # The snippet fallback passes the fixed ``SNIPPET_ASSUMPTION`` label here: the
-    # extraction provider controls ``estimate.assumptions`` and could echo raw
-    # snippet text into them, so a snippet-derived result persists only the
-    # content-free label — never provider-controlled assumption strings.
-    assumptions = (
-        tuple(estimate.assumptions) if assumptions_override is None else assumptions_override
-    )
     found = _searched_reference_from_facts(
         estimate.facts,
         source_ref=source_ref,
@@ -362,7 +400,8 @@ def _extract_accepted(  # noqa: PLR0913 - shared page/snippet extraction seam
         allow_count_serving=allow_count_serving,
     )
     if found is None:
-        _note("extract_rejected_facts")
+        _note("extract_rejected_facts", _unaccepted_read_desc(estimate))
+        _stage_unaccepted_read("extract_rejected_facts")
         return None
     if accept_result is not None and not accept_result(found):
         # The gate itself records the specific rejection reason (it knows which
@@ -397,10 +436,13 @@ def _extract(
 ) -> tuple[NamedFoodEstimate | None, str | None]:
     """Transcribe nutrition facts from inert ``page_text``.
 
-    Returns ``(estimate, None)`` on a usable transcription, else ``(None,
+    Returns ``(estimate, None)`` on a usable transcription, else ``(estimate,
     outcome_label)`` where the label is one of the sanitized extract-outcome
     labels (``extract_error`` / ``extract_unresolved`` / ``extract_low_confidence``)
-    the decision trace records (FTY-255).
+    the decision trace records (FTY-255). An unresolved or low-confidence read
+    keeps its schema-validated estimate alongside the failure label so the caller
+    can describe the ambiguous read to the interpretation session (FTY-326); only
+    a provider/schema error has no estimate at all.
     """
 
     prompt = extract_prompt.format(page_kind=page_kind, page_text=page_text[:MAX_PAGE_TEXT_CHARS])
@@ -414,10 +456,40 @@ def _extract(
     ):
         return None, "extract_error"
     if estimate.disposition is not EstimateDisposition.RESOLVED or estimate.facts is None:
-        return None, "extract_unresolved"
+        return estimate, "extract_unresolved"
     if estimate.confidence < EXTRACT_CONFIDENCE_THRESHOLD:
-        return None, "extract_low_confidence"
+        return estimate, "extract_low_confidence"
     return estimate, None
+
+
+def _unaccepted_read_desc(estimate: NamedFoodEstimate | None) -> str | None:
+    """Bounded read descriptor for a page/snippet extraction that was not accepted.
+
+    An ambiguous read — unresolved, low-confidence, or implausible/unconvertible
+    facts — reaches the session ledger as this summary of what the transcriber
+    stated (product identity, disposition, confidence, facts basis) so the
+    interpretation loop can act on the read instead of a bare status label
+    (FTY-326). The provider transcribes ``product_name`` from raw page/snippet
+    text, so it is provider-controlled: it enters the descriptor only through
+    :func:`sanitized_identity` (framing/instruction/personal-context vocabulary
+    stripped, hard token bound), never as the raw transcription string. The other
+    fields are closed-vocabulary or numeric schema fields, and the evidence view
+    bounds and redacts the descriptor again at the provider-egress seam.
+    ``None`` when there is no schema-valid estimate to describe (provider error).
+    """
+
+    if estimate is None:
+        return None
+    details: list[str] = []
+    if estimate.facts is not None and estimate.facts.product_name:
+        product_identity = sanitized_identity(estimate.facts.product_name)
+        if product_identity:
+            details.append(f"product={product_identity}")
+    details.append(f"disposition={estimate.disposition.value}")
+    details.append(f"confidence={estimate.confidence:.2f}")
+    if estimate.facts is not None:
+        details.append(f"basis={estimate.facts.basis.value}")
+    return "; ".join(details)
 
 
 def _identity_query(candidate: CandidateDraft) -> str:

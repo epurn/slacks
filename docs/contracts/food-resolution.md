@@ -39,6 +39,25 @@ estimator / contracts / backend-core / security-privacy lane:
 
 ## Version
 
+19 (FTY-326): implements evidence tiers as session tools: sanitized tier outcomes
+feed the ledger, official/reference dead ends get one bounded re-query before
+`model_prior`, `not_applicable_by_session` replaces frozen generic skips, and
+model-prior failures add sanitized detail. USDA row acceptance is
+session-consulted: the FTY-254 ranked compatibility gate now only *bounds* the
+option set — when it rejects every energy-bearing row, the bounded rejected rows
+feed the ledger as `rejected_incompatible_row` records (global row description +
+ref) and the session may spend its one re-interpretation pass to revise the
+identity for a single retried lookup, or keep it (a deliberate miss). An
+unaccepted page/snippet read's own bounded FTY-314-framed text transiently
+reaches the re-interpretation prompt only (never ledger/trace/persisted/query/
+fetch surfaces — see `evidence-retrieval.md`), and a revised identity is
+deterministically echo-filtered before it may drive any re-query or persistence:
+a staged-excerpt token survives only when the user's own words or a sanitized
+ledger descriptor (identity-sanitized extraction identity, trusted row
+description) authorized it, so a source-stated correction can revise the
+identity while an unvetted excerpt echo cannot. No schema/DTO/source/egress
+change.
+
 18 (FTY-348, contract only): the global FTY-324 interpretation-session semantics
 (the model-owned/deterministic-owned division of labour and the
 evidence-tiers-as-tools framing) move to
@@ -359,8 +378,8 @@ A failed or rejected read feeds the evidence view for re-interpretation:
   the next tool is chosen.
 - Search miss, fetch failure, snippet-only evidence, extraction
   `unresolved`/low-confidence, compatibility rejection, or implausible facts feed
-  back as sanitized evidence-status labels; they do not silently erase the user's
-  raw detail or force the remaining tiers to keep the stale item shape.
+  back as bounded sanitized evidence-view records; they do not silently erase the
+  user's raw detail or force the remaining tiers to keep the stale item shape.
 - A model-prior unavailable/unusable result is a feedback signal. It may lead to a
   revised hypothesis, an item-scoped clarification when allowed, or a fail-closed
   deterministic outcome; it is never persisted as trusted-looking nutrition.
@@ -411,7 +430,14 @@ energy-bearing result (FTY-254, `fdc_ranking.py` — head-noun identity match, n
 unstated density-changing form, stated added ingredients present; preferred by
 fewest unstated demoted forms, then query-token coverage, then relevance order —
 see **Version 15**), maps it to canonical per-100g facts, and caches it as a
-`products` row. Rejecting every result is a **miss**, not a wrong-food match. A
+`products` row. Rejecting every result is a **miss**, not a wrong-food match —
+but since FTY-326 the gate is a bounding pre-filter, not the final row-acceptance
+authority: the bounded rejected energy-bearing rows are first recorded on the
+interpretation-session ledger as `rejected_incompatible_row` evidence (sanitized
+outcome + global row description + source ref), and the session may spend its one
+bounded re-interpretation pass to revise the identity for a **single** retried
+lookup before the miss stands. If the session keeps its hypothesis, the rejection
+is deliberate and resolution falls forward exactly as before. A
 **compatible rank-stable** cache hit makes **no** external call. Incompatible
 cached rows are never served; compatible but non-rank-stable rows (e.g. `tuna`
 cached to canned tuna, `scrambled eggs` to raw egg) re-fetch once and refresh the
@@ -1011,15 +1037,18 @@ When the search provider is **disabled** or **unavailable** (no key), when a tie
 fetch is off (**official**: empty allowlist; **reference**:
 `FATTY_REFERENCE_FETCH_ENABLED=false`), or when **nothing confident is found** on
 either tier, the candidate falls through to a **model-prior** `NamedFoodEstimate`
-from sanitized identity plus bounded amount/unit fields, never raw diary text. It
-is recorded with `source_type = model_prior`, `source_ref = model_prior`, and an
+from sanitized identity, bounded amount/unit fields, and evidence-view records —
+never raw diary text, search queries, pages, or snippets. It is recorded with
+`source_type = model_prior`, `source_ref = model_prior`, and an
 explicit `assumptions` reason naming each tier's outcome
 (e.g. `"official_source returned no confident match; reference_source returned no
 confident match; estimated from model prior"`) plus the model's own assumptions,
 so the entry surfaces an explicit source status and stays user-editable — never a
 silent guess (per the `evidence-retrieval.md` Fallback Rule). If serving math
 cannot infer grams, it may record `estimated_default_serving` or bounded `basis =
-as_logged`; unusable estimates clarify.
+as_logged`; unusable estimates clarify with legacy unavailable/unusable labels
+plus sanitized detail (`provider_error`, `low_confidence`,
+`non_resolved_disposition`, or `unusable_facts`).
 
 ### Persistence
 

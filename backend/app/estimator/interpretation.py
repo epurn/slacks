@@ -39,6 +39,7 @@ pathological phrase cannot loop unbounded.
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -46,6 +47,7 @@ from typing import TYPE_CHECKING
 
 from app.enums import CandidateType
 from app.estimator.decision_trace import (
+    MAX_TRACE_DESC_LEN,
     amount_kind,
     sanitize_trace_label,
     sanitize_trace_source_ref,
@@ -76,6 +78,7 @@ if TYPE_CHECKING:
     from app.llm.base import Provider
 
 __all__ = [
+    "MAX_EVIDENCE_EXCERPT_CHARS",
     "MAX_HYPOTHESIS_REVISION_CALLS",
     "EvidenceRecord",
     "HypothesisItem",
@@ -99,6 +102,26 @@ MAX_HYPOTHESIS_REVISION_CALLS = 1
 #: single item-bearing sample has nothing to disagree with. Also the smallest
 #: "many" side of a split/merge (one item into at least two, or vice versa).
 _MIN_ITEMS_FOR_STRUCTURE = 2
+
+#: Bounds one staged model-facing evidence excerpt (FTY-326, documented
+#: tunable). Real search-result snippets sit entirely inside this (the snippet
+#: surface is already capped at 1,000 chars upstream); a fetched page
+#: contributes only its head. The excerpt exists so a re-interpretation call can
+#: resolve an ambiguous identity/acceptance read, not transcribe facts, so a
+#: tight bound keeps the re-ask prompt small.
+MAX_EVIDENCE_EXCERPT_CHARS = 1_000
+
+#: How many staged excerpts one re-interpretation prompt may carry. Older
+#: staged reads are dropped in favour of the most recent — the model-facing
+#: view is drawn from the *current* fetch/snippet results, not an unbounded
+#: history.
+_MAX_STAGED_EVIDENCE_TEXTS = 3
+
+# Mirrors the decision-trace count bound without importing its private constant.
+_MAX_EVIDENCE_COUNT = 9_999
+
+#: Tokenizer for the staged-excerpt echo taint (the estimator's identity vocabulary).
+_EXCERPT_TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
 @dataclass(frozen=True)
@@ -138,32 +161,45 @@ class InterpretationHypothesis:
 
 @dataclass(frozen=True)
 class EvidenceRecord:
-    """One bounded evidence-ledger entry: sanitized labels and refs only.
+    """One bounded evidence-ledger entry for the session's evidence view.
 
     Per the FTY-324 ``evidence_view`` contract this never carries raw fetched
-    pages, snippets, provider output, or search queries — the fields are the
-    same content-free vocabulary the decision trace uses.
+    pages, snippets, provider output blobs, or search queries. It may carry the
+    same bounded fields the decision trace already sanitizes, plus source-stated
+    descriptors — a global database row description, or a page/snippet
+    extraction's product identity reduced through
+    :func:`~app.estimator.identity_sanitizer.sanitized_identity` (never the
+    provider's raw transcription string) — so the session sees the evidence
+    surface it is being asked to interpret instead of a status label alone.
     """
 
     tier: str
     outcome: str
     source_ref: str | None = None
+    decision: str | None = None
+    query_variant: int | None = None
+    search_status: str | None = None
+    result_count: int | None = None
+    source_desc: str | None = None
+    surface: str | None = None
 
     def as_label(self) -> str:
-        """Render the record as one sanitized evidence-status prompt line.
+        """Render the record as one sanitized evidence-view prompt line.
 
         Provider calls may carry raw diary text but nothing else raw (FTY-325
         security requirement), so every field passes through the decision-trace
         sanitizers here — at the egress seam — rather than trusting the caller:
         a ``source_ref`` embedding a URL keeps only scheme/host/path with
-        secret-looking material redacted, and labels are bounded and redacted.
+        secret-looking material redacted, labels and descriptors are bounded and
+        redacted, and counts are clamped before rendering.
         """
 
         base = f"{sanitize_trace_label(self.tier)}: {sanitize_trace_label(self.outcome)}"
-        if self.source_ref is None:
-            return base
-        ref = sanitize_trace_source_ref(self.source_ref)
-        return f"{base} ({ref})" if ref else base
+        ref = "" if self.source_ref is None else sanitize_trace_source_ref(self.source_ref)
+        if ref:
+            base = f"{base} ({ref})"
+        details = _evidence_details(self)
+        return f"{base}; {'; '.join(details)}" if details else base
 
 
 @dataclass(frozen=True)
@@ -175,6 +211,36 @@ class PolicyView:
     verbalized_confidence: float
     hybrid: float
     samples_used: int
+
+
+def _evidence_details(record: EvidenceRecord) -> tuple[str, ...]:
+    """Sanitized optional evidence fields rendered after the status/ref prefix."""
+
+    details: list[str] = []
+    for key, value in (
+        ("decision", record.decision),
+        ("query_variant", record.query_variant),
+        ("search_status", record.search_status),
+        ("result_count", record.result_count),
+        ("surface", record.surface),
+    ):
+        if value is None:
+            continue
+        if isinstance(value, int):
+            rendered = str(_clamp_evidence_count(value))
+        else:
+            rendered = sanitize_trace_label(value)
+        if rendered:
+            details.append(f"{key}={rendered}")
+    if record.source_desc:
+        desc = sanitize_trace_label(record.source_desc, max_len=MAX_TRACE_DESC_LEN)
+        if desc:
+            details.append(f'source_desc="{desc}"')
+    return tuple(details)
+
+
+def _clamp_evidence_count(value: int) -> int:
+    return max(0, min(value, _MAX_EVIDENCE_COUNT))
 
 
 def representative_sample(samples: Sequence[ParseResult]) -> ParseResult:
@@ -257,6 +323,14 @@ class InterpretationSession:
         self.raw_text = raw_text
         self.clarification_answers = tuple(answered)
         self.evidence_ledger: list[EvidenceRecord] = []
+        #: Transient model-facing evidence excerpts (FTY-326): bounded inert
+        #: page/snippet text of unaccepted reads, consumed (and cleared) at the
+        #: next re-interpretation prompt's construction. Never persisted,
+        #: traced, or read back for queries/fetches.
+        self._staged_evidence_texts: list[str] = []
+        #: Every token any staged excerpt carried, retained for the run so a
+        #: revised hypothesis can be echo-checked (:meth:`evidence_echo_taint`).
+        self._staged_excerpt_tokens: set[str] = set()
         self.pending_questions: tuple[ClarificationDraft, ...] = ()
         self.signal: SelfConsistencySignal | None = None
         self.hypothesis: InterpretationHypothesis | None = None
@@ -339,6 +413,57 @@ class InterpretationSession:
 
         self.evidence_ledger.append(record)
 
+    def stage_evidence_text(self, *, tier: str, surface: str, outcome: str, text: str) -> None:
+        """Stage bounded page/snippet text for the next re-interpretation prompt.
+
+        The transient model-facing half of the FTY-326 evidence split: the
+        ledger/trace representation of a tier read stays sanitized labels, while
+        an unaccepted read's own bounded inert text is staged here and rendered
+        — FTY-314-framed as untrusted DATA — into the next re-interpretation
+        prompt only, so the model can resolve an ambiguous read. Staged text
+        lives in memory on the session, is consumed (and cleared) at
+        prompt-construction time, and is never written to the evidence ledger,
+        run trace, assumptions, source refs, persisted rows, search queries, or
+        fetch URLs.
+        """
+
+        excerpt = text.strip()[:MAX_EVIDENCE_EXCERPT_CHARS]
+        if not excerpt:
+            return
+        self._staged_excerpt_tokens.update(_EXCERPT_TOKEN_RE.findall(excerpt.lower()))
+        header = " ".join(
+            label
+            for label in (
+                sanitize_trace_label(tier),
+                sanitize_trace_label(surface),
+                sanitize_trace_label(outcome),
+            )
+            if label
+        )
+        self._staged_evidence_texts.append(f"[{header}]\n{excerpt}")
+        # Keep only the most recent staged reads so the re-ask stays bounded.
+        del self._staged_evidence_texts[:-_MAX_STAGED_EVIDENCE_TEXTS]
+
+    def evidence_echo_taint(self) -> frozenset[str]:
+        """Tokens seen only in staged evidence text, never in the user's own words.
+
+        The deterministic guard behind the FTY-326 egress rule that staged
+        page/snippet text "is never used to build a search query or fetch URL": a
+        re-interpretation call sees the staged excerpts, so its revised identity
+        fields could echo them. Any staged-excerpt token the raw entry text and
+        answered clarifications never contained is evidence-derived; the resolver
+        bridge drops identity words carrying one — unless a sanitized ledger
+        descriptor authorizes the token — before re-query or persistence.
+        """
+
+        if not self._staged_excerpt_tokens:
+            return frozenset()
+        own = set(_EXCERPT_TOKEN_RE.findall(self.raw_text.lower()))
+        for answered in self.clarification_answers:
+            own.update(_EXCERPT_TOKEN_RE.findall(answered.question_text.lower()))
+            own.update(_EXCERPT_TOKEN_RE.findall(answered.answer_text.lower()))
+        return frozenset(self._staged_excerpt_tokens - own)
+
     def note_pending_questions(
         self,
         context: EstimationContext,
@@ -399,11 +524,16 @@ class InterpretationSession:
             )
             return None
         self._revision_calls_used += 1
+        # Staged excerpts are consumed at prompt-construction time (ephemeral):
+        # they reach this one re-ask and are never read back afterwards.
+        evidence_texts = tuple(self._staged_evidence_texts)
+        self._staged_evidence_texts.clear()
         prompt = build_reinterpretation_prompt(
             self.raw_text,
             self.clarification_answers,
             hypothesis_items=[item.candidate for item in hypothesis.items],
             evidence_labels=[record.as_label() for record in self.evidence_ledger],
+            evidence_texts=evidence_texts,
         )
         schema = recoverable_parse_result_schema(self._policy.max_repair_attempts)
         try:

@@ -156,7 +156,9 @@ def test_primitive_skips_bad_candidates_and_returns_plausible_per_100g_facts() -
     assert found.facts.protein_g == pytest.approx(10.0)
     assert found.facts.carbs_g == pytest.approx(30.0)
     assert found.facts.fat_g == pytest.approx(5.0)
-    assert found.assumptions == ("source states one wrap serving",)
+    # The transcriber's stated assumptions are provider output from a prompt that
+    # carried raw page text; the accepted-page carrier never keeps them.
+    assert found.assumptions == ()
     assert search.queries == ["sobeys wrap nutrition facts"]
     assert fetcher.fetched == [low_confidence, implausible, good]
     assert before_fetch == [
@@ -297,6 +299,32 @@ def test_snippet_extraction_drops_provider_stated_assumptions() -> None:
 
     assert found is not None
     assert found.assumptions == (SNIPPET_ASSUMPTION,)
+
+
+def test_page_extraction_drops_provider_stated_assumptions() -> None:
+    # Fail-closed retention (FTY-326): the page transcriber saw the raw fetched
+    # page text in its prompt, so the ``assumptions`` it returns are
+    # provider-controlled and could echo that text. An accepted fetched-page
+    # result carries no provider-stated assumption strings at all.
+    page_sentinel = "RAW-PAGE-ECHO sk-pageassumption123"
+    search = _search(_snippet_candidate())
+    fetcher = RecordingFetcher({_SNIPPET_URL: f"nutrition facts page {page_sentinel}"})
+    echoing = _estimate()
+    echoing["assumptions"] = [f"transcribed from page: {page_sentinel}"]
+    provider = FakeProvider(responses=[echoing])
+
+    found = searched_reference_per_100g(
+        provider=provider,
+        search_provider=search,
+        fetch=fetcher,
+        query="toppables crackers nutrition facts",
+        page_kind=_REFERENCE_PAGE_KIND,
+        source_type=REFERENCE_SOURCE_TYPE,
+    )
+
+    assert found is not None
+    assert found.assumptions == ()
+    assert page_sentinel not in repr(found)
 
 
 def test_snippet_fallback_used_when_page_extraction_is_unresolved() -> None:

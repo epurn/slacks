@@ -55,6 +55,12 @@ from dataclasses import dataclass
 
 from app.estimator.branded_routing import identity_variants
 from app.estimator.evidence_utils import _record_source_ref
+from app.estimator.interpretation_tools import (
+    add_evidence_record,
+    current_food_candidate,
+    evidence_text_stager,
+    reinterpret_food_candidate,
+)
 from app.estimator.model_prior import _model_prior
 from app.estimator.official_fetch import OfficialFetchSettings, fetch_official_source
 from app.estimator.pipeline import (
@@ -152,7 +158,13 @@ class OfficialSourceResolveStep:
         context.pending_official_candidates.clear()
         context.record_step(self.name, "ok")
 
-    def _resolve(self, context: EstimationContext, candidate: CandidateDraft) -> ResolvedFoodItem:
+    def _resolve(
+        self,
+        context: EstimationContext,
+        candidate: CandidateDraft,
+        *,
+        allow_requery: bool = True,
+    ) -> ResolvedFoodItem:
         """Resolve one candidate: official source, else reference source, else model prior.
 
         A *branded* candidate is searched against official sources first (a named
@@ -164,21 +176,42 @@ class OfficialSourceResolveStep:
         """
 
         index = trace_candidate_index(context, candidate)
+        candidate = current_food_candidate(context, candidate, index)
+        ledger_start = _evidence_ledger_size(context)
         reasons: list[str] = []
         item = None
         if _has_brand(candidate):
             item = self._try_official_source(context, candidate, reasons, index)
         else:
-            reasons.append("generic food (no official page to search)")
+            reasons.append("generic food (official_source not applicable by session hypothesis)")
             context.record_decision(
                 self.name,
                 "source",
                 candidate_index=index,
                 tier=OFFICIAL_SOURCE_TYPE,
-                outcome="skipped_generic",
+                outcome="not_applicable_by_session",
+            )
+            add_evidence_record(
+                context,
+                tier=OFFICIAL_SOURCE_TYPE,
+                outcome="not_applicable_by_session",
             )
         if item is None:
             item = self._try_reference_source(context, candidate, reasons, index)
+        if (
+            item is None
+            and allow_requery
+            and _evidence_dead_end_recorded(context, ledger_start=ledger_start)
+        ):
+            revised = reinterpret_food_candidate(
+                context,
+                candidate,
+                index,
+                step_name=self.name,
+                trigger_tier=REFERENCE_SOURCE_TYPE,
+            )
+            if revised is not None:
+                return self._resolve(context, revised, allow_requery=False)
         if item is None:
             item = _model_prior(
                 context,
@@ -224,6 +257,7 @@ class OfficialSourceResolveStep:
                 tier=OFFICIAL_SOURCE_TYPE,
                 outcome=unavailable[1],
             )
+            add_evidence_record(context, tier=OFFICIAL_SOURCE_TYPE, outcome=unavailable[1])
             return None
 
         _record_source_ref(context, OFFICIAL_SOURCE)
@@ -272,6 +306,7 @@ class OfficialSourceResolveStep:
                 tier=REFERENCE_SOURCE_TYPE,
                 outcome=unavailable[1],
             )
+            add_evidence_record(context, tier=REFERENCE_SOURCE_TYPE, outcome=unavailable[1])
             return None
 
         _record_source_ref(context, REFERENCE_SOURCE)
@@ -333,6 +368,7 @@ class OfficialSourceResolveStep:
         decision is recorded on the sanitized run trace per query variant (FTY-255).
         """
 
+        candidate = current_food_candidate(context, candidate, candidate_index)
         for variant_index, query in enumerate(queries):
             note = decision_recorder(
                 self.name,
@@ -351,6 +387,7 @@ class OfficialSourceResolveStep:
                 allow_count_serving=True,
                 accept_result=acceptance_gate(candidate, note),
                 observe=note,
+                stage_text=evidence_text_stager(context, tier=source_type),
             )
             if found is None:
                 continue
@@ -407,3 +444,40 @@ def _has_brand(candidate: CandidateDraft) -> bool:
     """Whether ``candidate`` names a branded product (has a non-blank ``brand``)."""
 
     return bool(candidate.brand and candidate.brand.strip())
+
+
+_REQUERY_EVIDENCE_OUTCOMES = frozenset(
+    {
+        "miss",
+        "partial",
+        "failed",
+        "rejected_brand_mismatch",
+        "rejected_incompatible_serving",
+        "rejected_unresolvable_quantity",
+        "skipped_long_source_ref",
+        "fetch_empty_text",
+        "fetch_policy_blocked",
+        "fetch_transient_error",
+        "fetch_response_error",
+        "extract_error",
+        "extract_unresolved",
+        "extract_low_confidence",
+        "extract_rejected_facts",
+        "snippet_unavailable",
+    }
+)
+
+
+def _evidence_ledger_size(context: EstimationContext) -> int:
+    session = context.interpretation_session
+    return 0 if session is None else len(session.evidence_ledger)
+
+
+def _evidence_dead_end_recorded(context: EstimationContext, *, ledger_start: int) -> bool:
+    session = context.interpretation_session
+    if session is None:
+        return False
+    for record in session.evidence_ledger[ledger_start:]:
+        if record.outcome in _REQUERY_EVIDENCE_OUTCOMES or record.outcome.startswith("fetch_"):
+            return True
+    return False

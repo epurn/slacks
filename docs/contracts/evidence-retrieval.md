@@ -56,6 +56,36 @@ Adapter — FTY-079 / FTY-164**.
 
 ## Version
 
+9 (FTY-326): food-resolution evidence tiers now write bounded sanitized evidence-view records into the run-local `InterpretationSession` ledger. Records may include trace-safe source refs,
+surfaces, and source-stated descriptors needed for interpretation, but never raw
+pages, snippets, queries, diary text, or provider output blobs. After an
+official/reference evidence dead end, the resolver may spend the session's one
+bounded re-interpretation pass and re-query once before falling to `model_prior`,
+which receives only sanitized identity, bounded structured portion fields, and
+evidence-view records; its terminal trace adds `provider_error`,
+`low_confidence`, `non_resolved_disposition`, or `unusable_facts`. As the
+transient model-facing half of that split, an unaccepted page/snippet read's own
+bounded FTY-314-framed inert text may reach the session's re-interpretation
+prompt at prompt-construction time — model boundary only, consumed by that one
+re-ask; it is never written to ledger records, traces, assumptions, source refs,
+persisted rows, or the model-prior prompt, and is never used to build a search
+query or fetch URL. That last rule is enforced deterministically, not assumed of
+the model: the session retains the token set of every staged excerpt, and the
+resolver bridge drops any revised-identity word carrying a staged-excerpt token
+that no sanitized surface of the run authorized — the user's own entry/answers,
+or the ledger's sanitized source-stated descriptors (an extraction identity
+already reduced through identity sanitization, a trusted database row
+description) — before the revised hypothesis may drive a re-query, fetch, or
+persisted item field. A source-stated identity correction the descriptor also
+carries (`PC` → `Presidents Choice`) therefore survives to drive the bounded
+re-query, while an unvetted excerpt payload cannot reach an outbound query even
+if the provider returns it.
+USDA row acceptance joins the loop the same way: rows the FTY-254 ranked
+compatibility gate rejects are recorded as bounded `rejected_incompatible_row`
+ledger records (global row description + ref, no user data) and may trigger the
+same single bounded re-interpretation plus one retried lookup. Source hierarchy,
+statuses, egress, schema, provenance, and retention rules are unchanged.
+
 8 (FTY-348, contract only): relocates the global FTY-324 interpretation-loop framing
 to [interpretation-session.md](interpretation-session.md); page-local rules unchanged.
 
@@ -225,8 +255,13 @@ ordered by the hierarchy above, but they are bounded tools the
 rather than a blind one-way fall-through; the session/tool contract and its
 raw-text-egress limits are defined in
 [interpretation-session.md](interpretation-session.md). This page still owns the
-source hierarchy, lookup statuses, egress/fetch gates, fact-schema validation,
-serving math, budget caps, and persisted provenance.
+source hierarchy, statuses, egress/fetch gates, fact-schema validation, serving
+math, budget caps, and persisted provenance. FTY-326 records tier hits, misses,
+fetch/extraction failures, compatibility rejections, and snippet-surface outcomes as
+bounded sanitized evidence-view records; after an evidence dead end the resolver may
+re-open interpretation once and re-query with a revised identity. The ledger never
+carries raw diary text, search queries, pages, snippets, or provider output blobs,
+and it never changes the source hierarchy or math/provenance authority.
 
 **User-stated facts and the fallback rule (FTY-279).** A nutrition fact the user
 stated in the entry text (`user_text`) is the **highest-preference** source for
@@ -883,7 +918,8 @@ search adapter, FTY-079/164), fetches the bounded result page through the harden
 **searched-result** fetch policy, transcribes the facts the page states through the
 strict `NamedFoodEstimate` schema, and recomputes calories/macros with the FTY-044
 deterministic serving math. Only when this tier also produces nothing confident does
-the resolver fall to `model_prior` — with per-tier `assumptions` naming why.
+the resolver fall to `model_prior` — after the one bounded re-interpretation
+pass on a failed/rejected source read — with per-tier `assumptions` naming why.
 
 ### Tier order (pipeline, after a USDA/OFF miss)
 
@@ -1010,6 +1046,22 @@ pre-FTY-314 fetch-only behavior exactly.
   wholesale — only the fixed content-free `search_result_snippet` label is
   recorded — so a provider response echoing raw snippet text into its
   assumptions can never reach evidence/run assumptions.
+- Fetch/search dead ends enter the interpretation loop as sanitized status
+  labels such as `fetch_403` or `snippet_unavailable`; an ambiguous page or
+  snippet read (`extract_unresolved` / `extract_low_confidence` /
+  `extract_rejected_facts`) also carries a bounded descriptor the session can
+  interpret (FTY-326): stated product identity reduced through the same identity
+  sanitization as reference-search egress (never the raw transcription string),
+  disposition, confidence, and facts basis. Raw snippet/page text and provider
+  assumption strings still never enter the session ledger or model-prior prompt.
+  The unaccepted read's own bounded, FTY-314-framed snippet/page text is staged
+  transiently for the session's next re-interpretation prompt instead — the
+  permitted model surface for resolving an ambiguous read. It is consumed at
+  prompt-construction time and never persisted, traced, or echoed into a search
+  query or fetch URL: the resolver bridge deterministically drops any
+  revised-identity word carrying a token seen only in staged excerpt text, so a
+  re-ask reply echoing the staged surface cannot steer an outbound query or a
+  persisted item field.
 - No egress change: snippets arrive on the existing search response; this adds
   no browser automation, redirects, allowlist widening, or new fetch surface.
 

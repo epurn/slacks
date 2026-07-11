@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from app.estimator.evidence_utils import _record_source_ref
 from app.estimator.identity_sanitizer import sanitized_identity
+from app.estimator.interpretation_tools import add_evidence_record, evidence_status_labels
 from app.estimator.pipeline import (
     CandidateDraft,
     ClarificationDraft,
@@ -41,26 +42,27 @@ from app.settings import EstimatorClarifyMode
 
 
 def _estimate_model_prior(
-    provider: Provider, candidate: CandidateDraft
-) -> NamedFoodEstimate | None:
+    provider: Provider, candidate: CandidateDraft, *, evidence_labels: tuple[str, ...]
+) -> tuple[NamedFoodEstimate | None, str | None]:
     """Ask for a rough estimate from sanitized identity + structured portion."""
 
     identity = _sanitized_model_identity(candidate)
     if not identity:
-        return None
+        return None, "unusable_facts"
     prompt = _LOGGED_MODEL_PRIOR_PROMPT.format(
         identity=identity,
         portion=_structured_portion_for_prompt(candidate),
     )
+    prompt += _model_prior_evidence_block(evidence_labels)
     try:
-        return provider.structured_completion(prompt, NamedFoodEstimate)
+        return provider.structured_completion(prompt, NamedFoodEstimate), None
     except (
         StructuredOutputValidationError,
         LLMResponseError,
         LLMConfigurationError,
         LLMTransientError,
     ):
-        return None
+        return None, "provider_error"
 
 
 def _model_prior(  # noqa: PLR0913 - shared last-resort tier seam
@@ -93,8 +95,10 @@ def _model_prior(  # noqa: PLR0913 - shared last-resort tier seam
             tier=MODEL_PRIOR_SOURCE,
             outcome=outcome,
         )
+        add_evidence_record(context, tier=MODEL_PRIOR_SOURCE, outcome=outcome)
 
-    def _clarify(reason: str) -> NeedsClarification:
+    def _clarify(reason: str, *, legacy_outcome: str) -> NeedsClarification:
+        _record_prior(legacy_outcome)
         _record_prior(reason)
         context.record_decision(
             step_name,
@@ -103,17 +107,19 @@ def _model_prior(  # noqa: PLR0913 - shared last-resort tier seam
             outcome="clarified_unknown_food",
         )
         context.clarification_questions = [ClarificationDraft(text=unknown_food_question)]
-        return NeedsClarification(reason)
+        return NeedsClarification(legacy_outcome)
 
     _record_source_ref(context, MODEL_PRIOR_SOURCE)
     reason = "; ".join([*reasons, "estimated from model prior"])
-    estimate = _estimate_model_prior(provider, candidate)
-    if (
-        estimate is None
-        or estimate.disposition is not EstimateDisposition.RESOLVED
-        or estimate.confidence < model_prior_confidence_floor
-    ):
-        raise _clarify("model_prior_unavailable")
+    estimate, failure = _estimate_model_prior(
+        provider, candidate, evidence_labels=evidence_status_labels(context)
+    )
+    if failure is not None:
+        raise _clarify(failure, legacy_outcome="model_prior_unavailable")
+    if estimate is None or estimate.disposition is not EstimateDisposition.RESOLVED:
+        raise _clarify("non_resolved_disposition", legacy_outcome="model_prior_unavailable")
+    if estimate.confidence < model_prior_confidence_floor:
+        raise _clarify("low_confidence", legacy_outcome="model_prior_unavailable")
 
     reference = searched_reference_from_estimate(
         estimate,
@@ -121,7 +127,7 @@ def _model_prior(  # noqa: PLR0913 - shared last-resort tier seam
         hash_key=_identity_query(candidate),
     )
     if reference is None:
-        raise _clarify("model_prior_unusable")
+        raise _clarify("unusable_facts", legacy_outcome="model_prior_unusable")
 
     item = _build_item(
         context,
@@ -140,7 +146,7 @@ def _model_prior(  # noqa: PLR0913 - shared last-resort tier seam
     if item is None:
         # The estimate was unusable (e.g. per-serving facts with no gram serving
         # size); ask rather than guess the portion.
-        raise _clarify("model_prior_unusable")
+        raise _clarify("unusable_facts", legacy_outcome="model_prior_unusable")
     _record_prior("accepted")
     return item
 
@@ -158,3 +164,16 @@ def _structured_portion_for_prompt(candidate: CandidateDraft) -> str:
         unit = sanitized_identity(candidate.unit or "") or "count"
         return f"amount={candidate.amount:g}; unit={unit}"
     return "amount=unspecified; use one typical serving only if needed"
+
+
+def _model_prior_evidence_block(evidence_labels: tuple[str, ...]) -> str:
+    """Append sanitized evidence-view lines to the model-prior tool prompt."""
+
+    if not evidence_labels:
+        return "\nEvidence status: none recorded."
+    lines = "\n".join(f"- {label}" for label in evidence_labels)
+    return (
+        "\nEvidence gathered before this rough-estimate tool, as bounded sanitized "
+        "source/status records (no raw page, snippet, query, or diary text):\n"
+        f"{lines}"
+    )

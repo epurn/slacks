@@ -34,8 +34,7 @@ Routing follows FTY-042/043 conventions:
   restaurant/manufacturer/packaged product falls through to search + hardened fetch,
   then a model-prior estimate. For a branded candidate a generic FDC hit is a
   *candidate*, not an authority (FTY-253): a row naming a different product identity
-  fails the brand/product-compatibility gate
-  (:func:`~app.estimator.branded_routing.is_evidence_brand_compatible`) and is
+  fails :func:`~app.estimator.branded_routing.is_evidence_brand_compatible` and is
   treated as a miss, so brand-aware web/reference/model-prior resolution runs
   instead of completing or clarifying from the wrong product.
 - **no confident source match for a generic food** (incl. a barcode OFF cannot
@@ -46,9 +45,8 @@ Routing follows FTY-042/043 conventions:
 - **transient source failure** → raise :class:`~app.estimator.pipeline.StepError`
   (retryable); a **non-retryable source error** → :class:`StepFailed` (fail closed).
 
-The nutrition facts are never taken from the model — only from the trusted source —
-and the run records the source reference as evidence, never any raw page/response,
-the API key, or raw user text (security baseline + ``docs/security/data-retention.md``).
+The nutrition facts come only from the trusted source, never the model; the run
+records only the source reference as evidence (``docs/security/data-retention.md``).
 """
 
 from __future__ import annotations
@@ -72,6 +70,7 @@ from app.estimator.fdc import (
     FdcTransientError,
     FoodSource,
     ProductFacts,
+    RowFoodSource,
     normalize_query,
 )
 from app.estimator.fdc_ranking import (
@@ -79,6 +78,11 @@ from app.estimator.fdc_ranking import (
     is_fdc_description_rank_stable,
 )
 from app.estimator.food_serving import NutritionFacts, resolve_grams, scale_facts
+from app.estimator.interpretation_tools import (
+    add_evidence_record,
+    consult_rejected_rows,
+    current_food_candidate,
+)
 from app.estimator.off import (
     OFF_SOURCE,
     OFF_SOURCE_TYPE,
@@ -208,9 +212,8 @@ class FoodResolver:
     :class:`FoodSource` (USDA FDC). A *compatible* cache hit avoids any external
     call; a miss — or a stale cached row that fails the FTY-254 description
     compatibility gate — fetches from the source and caches/refreshes the global
-    facts (no user data) in the session for the worker's commit. New cache rows are
-    flushed so the worker can reference them from the user-owned
-    ``evidence_sources`` it writes on success.
+    facts (no user data) in the session for the worker's commit; new cache rows are
+    flushed so the worker can reference them from user-owned ``evidence_sources``.
     """
 
     def __init__(self, *, session: Session, source: FoodSource) -> None:
@@ -224,21 +227,27 @@ class FoodResolver:
         return self._source.enabled
 
     def resolve_product(self, name: str) -> _ResolvedProduct | None:
-        """Return the cached/fetched product for ``name``, or ``None`` if no match.
+        """Return the cached/fetched product for ``name``, or ``None`` if no match."""
 
-        Checks the ``products`` cache by normalized name first; on a miss, queries the
-        source and caches the result. A cached row must still pass today's FTY-254
-        compatibility gate (:func:`is_fdc_description_compatible`), and a compatible
-        but non-rank-stable row (unstated demoted form or incomplete query-token
-        coverage) is re-fetched once so the ranked lookup can replace it when FDC
-        now returns a better match. If the fresh lookup has no replacement, the
-        compatible cache row remains usable. Propagates :class:`FdcTransientError` /
-        :class:`FdcResponseError` from the source for the step to route.
+        return self.resolve_product_rows(name)[0]
+
+    def resolve_product_rows(
+        self, name: str
+    ) -> tuple[_ResolvedProduct | None, tuple[ProductFacts, ...]]:
+        """:meth:`resolve_product`, plus the rows the compatibility gate rejected.
+
+        Same cache-first behavior: a cached row must still pass the FTY-254 gate,
+        and a compatible but non-rank-stable row is re-fetched once so the ranked
+        lookup can replace it (else the compatible cache row stands). The second
+        element carries the bounded rejected rows a *fresh, matchless* source
+        lookup surfaced (FTY-326 session consult) — empty on any cache-served or
+        matched outcome and for a plain ``lookup``-only source. Propagates
+        :class:`FdcTransientError` / :class:`FdcResponseError` for the step to route.
         """
 
         query_key = normalize_query(name)
         if not query_key:
-            return None
+            return None, ()
 
         cached = self._session.scalars(
             select(Product).where(Product.source == FDC_SOURCE, Product.query_key == query_key)
@@ -249,20 +258,24 @@ class FoodResolver:
             if cached_is_compatible and is_fdc_description_rank_stable(
                 query_key, cached.description
             ):
-                return _ResolvedProduct(product=cached, fetched_at=cached.updated_at)
+                return _ResolvedProduct(product=cached, fetched_at=cached.updated_at), ()
 
-        facts = self._source.lookup(name)
+        if isinstance(self._source, RowFoodSource):
+            rows = self._source.lookup_rows(name)
+            facts, rejected = rows.match, rows.rejected
+        else:
+            facts, rejected = self._source.lookup(name), ()
         if facts is None:
             if cached is not None and cached_is_compatible:
-                return _ResolvedProduct(product=cached, fetched_at=cached.updated_at)
-            return None
+                return _ResolvedProduct(product=cached, fetched_at=cached.updated_at), ()
+            return None, rejected
         if cached is not None:
             return _ResolvedProduct(
                 product=_refresh_product(cached, facts), fetched_at=datetime.now(UTC)
-            )
+            ), ()
         return _ResolvedProduct(
             product=_cache_product(self._session, facts), fetched_at=datetime.now(UTC)
-        )
+        ), ()
 
 
 class BarcodeResolver:
@@ -359,6 +372,14 @@ class FoodResolveStep:
         ``unresolved`` and the event still completes.
         """
 
+        candidate = current_food_candidate(context, candidate, index)
+        # The session draft is a fresh value-equal object; write it back so the
+        # parse list and everything appended downstream (the pending-official /
+        # unresolved lists) share one object per position. Duplicate parsed
+        # foods compare equal, so only preserved object identity lets
+        # trace_candidate_index() attribute a later duplicate to its own
+        # position instead of the first equal one.
+        context.food_candidates[index] = candidate
         barcode_resolver = self.barcode_resolver
 
         if candidate.barcode and barcode_resolver is not None and barcode_resolver.enabled:
@@ -380,6 +401,9 @@ class FoodResolveStep:
 
         if self.resolver.enabled:
             item = self._try_generic(context, candidate, index)
+            # Re-read: a consult in the lookup may have revised this position's
+            # object, and the deferral lists must share it (duplicate attribution).
+            candidate = context.food_candidates[index]
             if item is not None:
                 context.resolved_food_items.append(item)
                 return
@@ -406,6 +430,7 @@ class FoodResolveStep:
             tier=FDC_SOURCE,
             outcome="source_unavailable",
         )
+        add_evidence_record(context, tier=FDC_SOURCE, outcome="source_unavailable")
         if _should_defer_after_source_gap(candidate, self.clarify_mode):
             self._record_deferral(context, index)
             context.pending_official_candidates.append(candidate)
@@ -448,6 +473,7 @@ class FoodResolveStep:
                 tier=OFF_SOURCE,
                 outcome="off_transient_error",
             )
+            add_evidence_record(context, tier=OFF_SOURCE, outcome="off_transient_error")
             raise StepError("off_transient_error") from exc
         except OffResponseError as exc:
             # OFF answered unusably; fail closed rather than guess a number.
@@ -458,12 +484,14 @@ class FoodResolveStep:
                 tier=OFF_SOURCE,
                 outcome="off_response_error",
             )
+            add_evidence_record(context, tier=OFF_SOURCE, outcome="off_response_error")
             raise StepFailed("off_response_error") from exc
 
         if resolved is None:
             context.record_decision(
                 self.name, "source", candidate_index=index, tier=OFF_SOURCE, outcome="miss"
             )
+            add_evidence_record(context, tier=OFF_SOURCE, outcome="miss")
             return None
         return self._build_item(
             context,
@@ -477,19 +505,26 @@ class FoodResolveStep:
         )
 
     def _try_generic(
-        self, context: EstimationContext, candidate: CandidateDraft, index: int
+        self,
+        context: EstimationContext,
+        candidate: CandidateDraft,
+        index: int,
+        *,
+        consult_session: bool = True,
     ) -> ResolvedFoodItem | None:
         """Resolve a generic-food candidate by name from USDA FDC; ``None`` on a miss.
 
-        The caller guarantees the source is enabled. Raises :class:`StepError` /
-        :class:`StepFailed` on a transient / non-retryable FDC error, and
-        in stricter modes, :class:`NeedsClarification` (via :meth:`_build_item`) on
-        an unresolvable quantity.
+        The caller guarantees the source is enabled. When ranked lookup rejects
+        every energy-bearing row, the rejected rows feed the interpretation session
+        (FTY-326 row-acceptance decision point) and a revised hypothesis gets one
+        retry (``consult_session=False``). Raises :class:`StepError` /
+        :class:`StepFailed` on a transient / non-retryable FDC error, and in stricter
+        modes :class:`NeedsClarification` on an unresolvable quantity.
         """
 
         _record_source_ref(context, FDC_SOURCE)
         try:
-            resolved = self.resolver.resolve_product(candidate.name)
+            resolved, rejected_rows = self.resolver.resolve_product_rows(candidate.name)
         except FdcTransientError as exc:
             context.record_decision(
                 self.name,
@@ -498,6 +533,7 @@ class FoodResolveStep:
                 tier=FDC_SOURCE,
                 outcome="fdc_transient_error",
             )
+            add_evidence_record(context, tier=FDC_SOURCE, outcome="fdc_transient_error")
             raise StepError("fdc_transient_error") from exc
         except FdcResponseError as exc:
             # The source answered unusably; fail closed rather than guess a number.
@@ -508,12 +544,27 @@ class FoodResolveStep:
                 tier=FDC_SOURCE,
                 outcome="fdc_response_error",
             )
+            add_evidence_record(context, tier=FDC_SOURCE, outcome="fdc_response_error")
             raise StepFailed("fdc_response_error") from exc
 
         if resolved is None:
+            if rejected_rows and consult_session:
+                # FTY-326: the ranked gate only bounds the option set; the session
+                # may revise the identity for one retry or keep it (deliberate miss).
+                revised = consult_rejected_rows(
+                    context,
+                    candidate,
+                    index,
+                    rejected=rejected_rows,
+                    step_name=self.name,
+                    tier=FDC_SOURCE,
+                )
+                if revised is not None:
+                    return self._try_generic(context, revised, index, consult_session=False)
             context.record_decision(
                 self.name, "source", candidate_index=index, tier=FDC_SOURCE, outcome="miss"
             )
+            add_evidence_record(context, tier=FDC_SOURCE, outcome="miss")
             return None
         if not is_evidence_brand_compatible(
             resolved.product.description, name=candidate.name, brand=candidate.brand
@@ -533,6 +584,13 @@ class FoodResolveStep:
                 source_ref=resolved.product.source_ref,
                 source_desc=resolved.product.description,
                 outcome="rejected_brand_mismatch",
+            )
+            add_evidence_record(
+                context,
+                tier=FDC_SOURCE,
+                outcome="rejected_brand_mismatch",
+                source_ref=resolved.product.source_ref,
+                source_desc=resolved.product.description,
             )
             return None
         return self._build_item(
@@ -590,7 +648,15 @@ class FoodResolveStep:
                     candidate_index=candidate_index,
                     tier=product.source,
                     source_ref=product.source_ref,
+                    source_desc=product.description,
                     outcome="rejected_unresolvable_quantity",
+                )
+                add_evidence_record(
+                    context,
+                    tier=product.source,
+                    outcome="rejected_unresolvable_quantity",
+                    source_ref=product.source_ref,
+                    source_desc=product.description,
                 )
                 return None
             context.record_decision(
@@ -620,6 +686,12 @@ class FoodResolveStep:
             tier=product.source,
             source_ref=product.source_ref,
             outcome="accepted",
+        )
+        add_evidence_record(
+            context,
+            tier=product.source,
+            outcome="accepted",
+            source_ref=product.source_ref,
         )
         product_id: uuid.UUID = product.id
 

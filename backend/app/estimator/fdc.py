@@ -76,6 +76,11 @@ _FAT_ID: Final[int] = 1004
 #: Bound the description we persist from the (untrusted) FDC payload.
 _MAX_DESCRIPTION_LEN: Final[int] = 300
 
+#: Bound on the incompatible rows one lookup surfaces to the interpretation
+#: session (FTY-326). The rejected set exists so the session can revise or
+#: deliberately keep its identity hypothesis, not to enumerate the page.
+_MAX_REJECTED_ROWS: Final[int] = 3
+
 #: Collapse a food name to a stable cache/query key.
 _WHITESPACE_RE: Final[re.Pattern[str]] = re.compile(r"\s+")
 
@@ -111,6 +116,22 @@ class ProductFacts:
     barcode: str | None = None
 
 
+@dataclass(frozen=True)
+class FdcLookup:
+    """One ranked lookup outcome: the best compatible match plus what was rejected.
+
+    ``rejected`` carries the bounded energy-bearing, plausible rows the FTY-254
+    compatibility gate turned away — populated only when there is **no** match,
+    so the interpretation session can see the candidate row evidence behind a
+    miss (FTY-326) instead of a bare status label. Row descriptions are global
+    source facts (no user data), the same trust class the trace already records
+    for a brand-mismatch rejection.
+    """
+
+    match: ProductFacts | None
+    rejected: tuple[ProductFacts, ...] = ()
+
+
 @runtime_checkable
 class FoodSource(Protocol):
     """A generic-food nutrition source the resolver queries (real FDC or a test fake)."""
@@ -125,6 +146,23 @@ class FoodSource(Protocol):
 
         Raises :class:`FdcTransientError` on a retryable failure and
         :class:`FdcResponseError` on a non-retryable one.
+        """
+        ...
+
+
+@runtime_checkable
+class RowFoodSource(Protocol):
+    """A :class:`FoodSource` that can also surface the rows its ranking rejected.
+
+    Optional capability (FTY-326): a resolver checks for it structurally, so a
+    plain ``lookup``-only source (or fake) keeps the pre-FTY-326 bare-miss
+    behavior with no session consultation.
+    """
+
+    def lookup_rows(self, query: str) -> FdcLookup:
+        """Ranked lookup returning the match plus bounded rejected rows.
+
+        Same error contract as :meth:`FoodSource.lookup`.
         """
         ...
 
@@ -301,10 +339,21 @@ class FdcClient:
         :class:`FdcResponseError`.
         """
 
+        return self.lookup_rows(query).match
+
+    def lookup_rows(self, query: str) -> FdcLookup:
+        """:meth:`lookup`, plus the bounded rows the compatibility gate rejected.
+
+        The FTY-326 row-acceptance seam: when every energy-bearing row fails the
+        FTY-254 gate, the rejected rows ride along so the interpretation session
+        can decide whether the miss stands. Same query/egress and error contract
+        as :meth:`lookup`; one search request either way.
+        """
+
         response = self._search(query)
         if response is None:
-            return None
-        return self._first_match(normalize_query(query), response)
+            return FdcLookup(match=None)
+        return self._rank_rows(normalize_query(query), response)
 
     def list_matches(self, query: str) -> list[ProductFacts]:
         """Search FDC for ``query`` and return **every** energy-bearing match.
@@ -380,8 +429,8 @@ class FdcClient:
             raise FdcResponseError("fdc_response_error") from exc
 
     @staticmethod
-    def _first_match(query_key: str, response: FdcSearchResponse) -> ProductFacts | None:
-        """Select the best-ranked compatible energy-bearing FDC food, or ``None``.
+    def _rank_rows(query_key: str, response: FdcSearchResponse) -> FdcLookup:
+        """Select the best-ranked compatible energy-bearing FDC food, if any.
 
         FTY-254: a trusted-database match must be the queried food in a
         compatible form, not merely USDA's top lexical hit. Each energy-bearing,
@@ -389,22 +438,27 @@ class FdcClient:
         identity, no unstated density-changing form, stated added ingredients
         present); the survivors are ordered by :func:`fdc_preference_key`
         (common/fresh/simple forms first, then query-token coverage), with the
-        source's own relevance order as the tie-break. Rejecting every row is a
-        clean miss, so the resolver falls forward to the rough-estimate tiers
-        instead of costing the wrong food.
+        source's own relevance order as the tie-break. Rejecting every row is
+        still a clean miss — the resolver never costs the wrong food — but since
+        FTY-326 the gate only *bounds* the option set: the rejected rows are
+        returned (capped at :data:`_MAX_REJECTED_ROWS`, source order) so the
+        interpretation session can revise the identity or deliberately keep it.
         """
 
         ranked: list[tuple[tuple[int, int], int, ProductFacts]] = []
+        rejected: list[ProductFacts] = []
         for index, food in enumerate(response.foods):
             facts = _food_to_facts(query_key, food)
             if facts is None:
                 continue
             if not is_fdc_description_compatible(query_key, food.description):
+                if len(rejected) < _MAX_REJECTED_ROWS:
+                    rejected.append(facts)
                 continue
             ranked.append((fdc_preference_key(query_key, food.description), index, facts))
         if not ranked:
-            return None
-        return min(ranked)[2]
+            return FdcLookup(match=None, rejected=tuple(rejected))
+        return FdcLookup(match=min(ranked)[2])
 
 
 def _food_to_facts(query_key: str, food: FdcFood) -> ProductFacts | None:
@@ -412,7 +466,7 @@ def _food_to_facts(query_key: str, food: FdcFood) -> ProductFacts | None:
 
     Returns ``None`` for a food with no per-100g energy (kcal) value, which cannot be
     costed deterministically and is therefore not an offerable match. Shared by the
-    first-match resolver (:meth:`FdcClient._first_match`) and the list-candidates path
+    ranked resolver (:meth:`FdcClient._rank_rows`) and the list-candidates path
     (:meth:`FdcClient.list_matches`) so both classify a food identically.
     """
 
