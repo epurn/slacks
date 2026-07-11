@@ -77,13 +77,33 @@ jest.mock("@/api/logEvents", () => {
   };
 });
 
+// FTY-345: fake timers own the whole file, installed once per test in
+// `beforeEach` and restored once per test in `afterEach` (after the tree
+// unmounts), rather than per-`it` in a `try`/`finally`. The per-test install/
+// restore made the file's timer mode depend on `it`-body sequencing: under
+// full-suite load, an `advanceTimersByTime` call could run after real timers had
+// been restored — through an async `act` flush or the `afterEach(cleanupTrees)`
+// unmount interleaving with a sibling test's `finally` — throwing "A function to
+// advance timers was called but the timers APIs are not replaced with fake
+// timers". With a single install edge (before every body) and a single restore
+// edge (after every body), no `advanceTimersByTime` can execute on real timers,
+// regardless of load. Promises still settle on their microtask queue under fake
+// timers, so the non-polling tests that only `await act` keep working unchanged;
+// the polling tests advance the same 1000/200 ms cadence they always did.
 beforeEach(() => {
+  jest.useFakeTimers();
   mockReduceMotion(false);
   mockEntryResolvedHaptic.mockClear();
   mockTargetReachedHaptic.mockClear();
 });
 
-afterEach(cleanupTrees);
+afterEach(() => {
+  // Unmount trees while fake timers are still installed so the polling
+  // `clearInterval` matches the fake interval it created, then hand the clock
+  // back to real timers for the next test's install edge.
+  cleanupTrees();
+  jest.useRealTimers();
+});
 
 describe("TodayScreen resolve in place (FTY-180)", () => {
   function entry(
@@ -123,102 +143,92 @@ describe("TodayScreen resolve in place (FTY-180)", () => {
   });
 
   it("resolves the pending skeleton into the value row in place on the pending→completed poll", async () => {
-    jest.useFakeTimers();
-    try {
-      const pending = event({ id: "a", raw_text: "Greek yogurt", status: "pending" });
-      const completed = event({ id: "a", raw_text: "Greek yogurt", status: "completed" });
-      const load = jest
-        .fn()
-        .mockResolvedValueOnce([pending])
-        .mockResolvedValueOnce([completed]);
-      // The feed reports no items while pending, then the resolved item once done.
-      const loadEntries = jest
-        .fn()
-        .mockResolvedValueOnce([entry(pending, [])])
-        .mockResolvedValueOnce([entry(completed, [foodItem()])]);
-      const tree = mount(
-        <TodayScreen
-          session={SESSION}
-          load={load}
-          loadEntries={loadEntries}
-          useActive={() => true}
-          pollIntervalMs={1000}
-        />,
-      );
-      await act(async () => {});
+    const pending = event({ id: "a", raw_text: "Greek yogurt", status: "pending" });
+    const completed = event({ id: "a", raw_text: "Greek yogurt", status: "completed" });
+    const load = jest
+      .fn()
+      .mockResolvedValueOnce([pending])
+      .mockResolvedValueOnce([completed]);
+    // The feed reports no items while pending, then the resolved item once done.
+    const loadEntries = jest
+      .fn()
+      .mockResolvedValueOnce([entry(pending, [])])
+      .mockResolvedValueOnce([entry(completed, [foodItem()])]);
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        loadEntries={loadEntries}
+        useActive={() => true}
+        pollIntervalMs={1000}
+      />,
+    );
+    await act(async () => {});
 
-      // Pending: the shimmer skeleton, no value, no raw phrase.
-      expect(hasProgressbar(tree)).toBe(true);
-      expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
-      expect(textContent(tree)).not.toContain("150 kcal");
+    // Pending: the shimmer skeleton, no value, no raw phrase.
+    expect(hasProgressbar(tree)).toBe(true);
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+    expect(textContent(tree)).not.toContain("150 kcal");
 
-      // One poll later the entry is completed and its item feed has the value.
-      act(() => jest.advanceTimersByTime(1000));
-      await act(async () => {});
+    // One poll later the entry is completed and its item feed has the value.
+    act(() => jest.advanceTimersByTime(1000));
+    await act(async () => {});
 
-      // The skeleton is fully gone (no lingering placeholder) and the resolved
-      // value row is now shown — the same row resolved in place (the shared-key
-      // instance-preservation is unit-tested in ItemTimelineRow.test.tsx).
-      expect(hasProgressbar(tree)).toBe(false);
-      expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(true);
-    } finally {
-      jest.useRealTimers();
-    }
+    // The skeleton is fully gone (no lingering placeholder) and the resolved
+    // value row is now shown — the same row resolved in place (the shared-key
+    // instance-preservation is unit-tested in ItemTimelineRow.test.tsx).
+    expect(hasProgressbar(tree)).toBe(false);
+    expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(true);
   });
 
   it("restores secondary item rows after a multi-item completion resolves from a pending skeleton", async () => {
-    jest.useFakeTimers();
-    try {
-      const pending = event({ id: "a", raw_text: "Greek yogurt and banana", status: "pending" });
-      const completed = event({
-        id: "a",
-        raw_text: "Greek yogurt and banana",
-        status: "completed",
-      });
-      const banana = foodItem({
-        id: "item-b",
-        name: "Banana",
-        calories: 105,
-      });
-      const load = jest
-        .fn()
-        .mockResolvedValueOnce([pending])
-        .mockResolvedValueOnce([completed]);
-      const loadEntries = jest
-        .fn()
-        .mockResolvedValueOnce([entry(pending, [])])
-        .mockResolvedValueOnce([entry(completed, [foodItem(), banana])]);
-      const tree = mount(
-        <TodayScreen
-          session={SESSION}
-          load={load}
-          loadEntries={loadEntries}
-          useActive={() => true}
-          pollIntervalMs={1000}
-        />,
-      );
-      await act(async () => {});
+    const pending = event({ id: "a", raw_text: "Greek yogurt and banana", status: "pending" });
+    const completed = event({
+      id: "a",
+      raw_text: "Greek yogurt and banana",
+      status: "completed",
+    });
+    const banana = foodItem({
+      id: "item-b",
+      name: "Banana",
+      calories: 105,
+    });
+    const load = jest
+      .fn()
+      .mockResolvedValueOnce([pending])
+      .mockResolvedValueOnce([completed]);
+    const loadEntries = jest
+      .fn()
+      .mockResolvedValueOnce([entry(pending, [])])
+      .mockResolvedValueOnce([entry(completed, [foodItem(), banana])]);
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        loadEntries={loadEntries}
+        useActive={() => true}
+        pollIntervalMs={1000}
+      />,
+    );
+    await act(async () => {});
 
-      expect(hasProgressbar(tree)).toBe(true);
-      expect(textContent(tree)).not.toContain("Greek yogurt and banana");
+    expect(hasProgressbar(tree)).toBe(true);
+    expect(textContent(tree)).not.toContain("Greek yogurt and banana");
 
-      act(() => jest.advanceTimersByTime(1000));
-      await act(async () => {});
+    act(() => jest.advanceTimersByTime(1000));
+    await act(async () => {});
 
-      expect(hasProgressbar(tree)).toBe(false);
+    expect(hasProgressbar(tree)).toBe(false);
 
-      act(() => jest.advanceTimersByTime(200));
-      await act(async () => {});
+    act(() => jest.advanceTimersByTime(200));
+    await act(async () => {});
 
-      expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(true);
-      expect(hasA11yLabel(tree, "Banana, 105 kcal")).toBe(true);
-      expect(textContent(tree)).toContain("Banana");
+    expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(true);
+    expect(hasA11yLabel(tree, "Banana, 105 kcal")).toBe(true);
+    expect(textContent(tree)).toContain("Banana");
 
-      press(tree, "Banana, 105 kcal");
-      expect(hasA11yLabel(tree, "Increase amount")).toBe(true);
-    } finally {
-      jest.useRealTimers();
-    }
+    press(tree, "Banana, 105 kcal");
+    expect(hasA11yLabel(tree, "Increase amount")).toBe(true);
   });
 
   it("holds the skeleton (never an EntryRow placeholder) when the event-list poll resolves completed before the by-date feed populates items", async () => {
@@ -229,75 +239,70 @@ describe("TodayScreen resolve in place (FTY-180)", () => {
     // placeholder — so the pending→resolved transition is one in-place fade with
     // zero layout shift (FTY-180 review). Resolving the two reads in a controlled
     // order reproduces the exact interleave.
-    jest.useFakeTimers();
-    try {
-      const pending = event({
-        id: "a",
-        raw_text: "grilled cheese sandwich",
-        status: "pending",
-      });
-      const completed = event({
-        id: "a",
-        raw_text: "grilled cheese sandwich",
-        status: "completed",
-      });
-      let resolveLoad!: (events: readonly LogEventDTO[]) => void;
-      const load = jest
-        .fn()
-        .mockResolvedValueOnce([pending])
-        .mockReturnValueOnce(
-          new Promise((resolve) => {
-            resolveLoad = resolve;
-          }),
-        )
-        .mockResolvedValue([completed]);
-      const loadEntries = jest
-        .fn()
-        .mockResolvedValueOnce([entry(pending, [])])
-        .mockReturnValueOnce(new Promise<readonly LogEventEntryDTO[]>(() => null))
-        .mockResolvedValue([entry(completed, [foodItem()])]);
-      const tree = mount(
-        <TodayScreen
-          session={SESSION}
-          load={load}
-          loadEntries={loadEntries}
-          useActive={() => true}
-          pollIntervalMs={1000}
-        />,
-      );
-      await act(async () => {});
+    const pending = event({
+      id: "a",
+      raw_text: "grilled cheese sandwich",
+      status: "pending",
+    });
+    const completed = event({
+      id: "a",
+      raw_text: "grilled cheese sandwich",
+      status: "completed",
+    });
+    let resolveLoad!: (events: readonly LogEventDTO[]) => void;
+    const load = jest
+      .fn()
+      .mockResolvedValueOnce([pending])
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveLoad = resolve;
+        }),
+      )
+      .mockResolvedValue([completed]);
+    const loadEntries = jest
+      .fn()
+      .mockResolvedValueOnce([entry(pending, [])])
+      .mockReturnValueOnce(new Promise<readonly LogEventEntryDTO[]>(() => null))
+      .mockResolvedValue([entry(completed, [foodItem()])]);
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        loadEntries={loadEntries}
+        useActive={() => true}
+        pollIntervalMs={1000}
+      />,
+    );
+    await act(async () => {});
 
-      // Pending: shimmer skeleton, no value, no raw phrase.
-      expect(hasProgressbar(tree)).toBe(true);
-      expect(textContent(tree)).not.toContain("grilled cheese sandwich");
+    // Pending: shimmer skeleton, no value, no raw phrase.
+    expect(hasProgressbar(tree)).toBe(true);
+    expect(textContent(tree)).not.toContain("grilled cheese sandwich");
 
-      // Poll fires both reads. The event-list read wins the race: the entry is
-      // now completed but its items have NOT arrived yet. The row must remain the
-      // loading skeleton — not the raw-text EntryRow — with no value.
-      act(() => jest.advanceTimersByTime(1000));
-      await act(async () => {
-        resolveLoad([completed]);
-      });
-      expect(hasProgressbar(tree)).toBe(true);
-      expect(textContent(tree)).not.toContain("grilled cheese sandwich");
-      expect(textContent(tree)).not.toContain("150 kcal");
+    // Poll fires both reads. The event-list read wins the race: the entry is
+    // now completed but its items have NOT arrived yet. The row must remain the
+    // loading skeleton — not the raw-text EntryRow — with no value.
+    act(() => jest.advanceTimersByTime(1000));
+    await act(async () => {
+      resolveLoad([completed]);
+    });
+    expect(hasProgressbar(tree)).toBe(true);
+    expect(textContent(tree)).not.toContain("grilled cheese sandwich");
+    expect(textContent(tree)).not.toContain("150 kcal");
 
-      // Even past the fade window, the row holds shared geometry until items arrive.
-      act(() => jest.advanceTimersByTime(200));
-      await act(async () => {});
-      expect(hasProgressbar(tree)).toBe(true);
-      expect(textContent(tree)).not.toContain("grilled cheese sandwich");
-      expect(textContent(tree)).not.toContain("150 kcal");
+    // Even past the fade window, the row holds shared geometry until items arrive.
+    act(() => jest.advanceTimersByTime(200));
+    await act(async () => {});
+    expect(hasProgressbar(tree)).toBe(true);
+    expect(textContent(tree)).not.toContain("grilled cheese sandwich");
+    expect(textContent(tree)).not.toContain("150 kcal");
 
-      expect(loadEntries).toHaveBeenCalledTimes(2);
-      act(() => jest.advanceTimersByTime(1000));
-      await act(async () => {});
-      expect(loadEntries).toHaveBeenCalledTimes(3);
-      expect(hasProgressbar(tree)).toBe(false);
-      expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(true);
-    } finally {
-      jest.useRealTimers();
-    }
+    expect(loadEntries).toHaveBeenCalledTimes(2);
+    act(() => jest.advanceTimersByTime(1000));
+    await act(async () => {});
+    expect(loadEntries).toHaveBeenCalledTimes(3);
+    expect(hasProgressbar(tree)).toBe(false);
+    expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(true);
   });
 
   it("holds the skeleton (no un-animated value swap) if the item feed wins the poll race before the event completes", async () => {
@@ -340,217 +345,192 @@ describe("TodayScreen — beat 1: entry resolve (FTY-181)", () => {
   });
 
   it("fires once when a pending entry resolves to completed on a poll", async () => {
-    jest.useFakeTimers();
-    try {
-      const pending = event({ id: "a", raw_text: "Oatmeal", status: "pending" });
-      const completed = event({
-        id: "a",
-        raw_text: "Oatmeal",
-        status: "completed",
-      });
-      // First load: pending (nothing resolved yet). Every poll after: completed.
-      const load = jest
-        .fn()
-        .mockResolvedValueOnce([pending])
-        .mockResolvedValue([completed]);
-      mount(
-        <TodayScreen
-          session={SESSION}
-          load={load}
-          useActive={() => true}
-          pollIntervalMs={1000}
-        />,
-      );
-      await act(async () => {});
-      // Seeded on the pending load — no resolve yet.
-      expect(mockEntryResolvedHaptic).not.toHaveBeenCalled();
+    const pending = event({ id: "a", raw_text: "Oatmeal", status: "pending" });
+    const completed = event({
+      id: "a",
+      raw_text: "Oatmeal",
+      status: "completed",
+    });
+    // First load: pending (nothing resolved yet). Every poll after: completed.
+    const load = jest
+      .fn()
+      .mockResolvedValueOnce([pending])
+      .mockResolvedValue([completed]);
+    mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        useActive={() => true}
+        pollIntervalMs={1000}
+      />,
+    );
+    await act(async () => {});
+    // Seeded on the pending load — no resolve yet.
+    expect(mockEntryResolvedHaptic).not.toHaveBeenCalled();
 
-      // Poll reconciles the same event as completed → the resolve beat fires once.
-      act(() => jest.advanceTimersByTime(1000));
-      await act(async () => {});
-      expect(mockEntryResolvedHaptic).toHaveBeenCalledTimes(1);
+    // Poll reconciles the same event as completed → the resolve beat fires once.
+    act(() => jest.advanceTimersByTime(1000));
+    await act(async () => {});
+    expect(mockEntryResolvedHaptic).toHaveBeenCalledTimes(1);
 
-      // A further poll returning the same completed event must not re-fire.
-      act(() => jest.advanceTimersByTime(1000));
-      await act(async () => {});
-      expect(mockEntryResolvedHaptic).toHaveBeenCalledTimes(1);
-    } finally {
-      jest.useRealTimers();
-    }
+    // A further poll returning the same completed event must not re-fire.
+    act(() => jest.advanceTimersByTime(1000));
+    await act(async () => {});
+    expect(mockEntryResolvedHaptic).toHaveBeenCalledTimes(1);
   });
 
   it("eases in the resolved value row from the real by-date item feed (not injected items)", async () => {
-    jest.useFakeTimers();
-    try {
-      // The value row's data comes from the item-forward by-date feed (FTY-198),
-      // NOT the injectable `items` prop — this is the real screen data path the
-      // reviewer flagged as unwired. First load: the entry is pending and the feed
-      // has no items. On the poll it resolves and the feed carries its derived
-      // item, so the resolved value row renders and the entry-resolve beat fires.
-      const pending = event({ id: "a", raw_text: "Yogurt", status: "pending" });
-      const completed = event({ id: "a", raw_text: "Yogurt", status: "completed" });
-      const load = jest
-        .fn()
-        .mockResolvedValueOnce([pending])
-        .mockResolvedValue([completed]);
-      const loadEntries = jest
-        .fn()
-        .mockResolvedValueOnce([{ event: pending, items: [] }])
-        .mockResolvedValue([{ event: completed, items: [foodItem()] }]);
-      const tree = mount(
-        <TodayScreen
-          session={SESSION}
-          load={load}
-          loadEntries={loadEntries}
-          useActive={() => true}
-          pollIntervalMs={1000}
-        />,
-      );
-      await act(async () => {});
-      // Pending: no value row yet, and no beat.
-      expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(false);
-      expect(mockEntryResolvedHaptic).not.toHaveBeenCalled();
+    // The value row's data comes from the item-forward by-date feed (FTY-198),
+    // NOT the injectable `items` prop — this is the real screen data path the
+    // reviewer flagged as unwired. First load: the entry is pending and the feed
+    // has no items. On the poll it resolves and the feed carries its derived
+    // item, so the resolved value row renders and the entry-resolve beat fires.
+    const pending = event({ id: "a", raw_text: "Yogurt", status: "pending" });
+    const completed = event({ id: "a", raw_text: "Yogurt", status: "completed" });
+    const load = jest
+      .fn()
+      .mockResolvedValueOnce([pending])
+      .mockResolvedValue([completed]);
+    const loadEntries = jest
+      .fn()
+      .mockResolvedValueOnce([{ event: pending, items: [] }])
+      .mockResolvedValue([{ event: completed, items: [foodItem()] }]);
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        loadEntries={loadEntries}
+        useActive={() => true}
+        pollIntervalMs={1000}
+      />,
+    );
+    await act(async () => {});
+    // Pending: no value row yet, and no beat.
+    expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(false);
+    expect(mockEntryResolvedHaptic).not.toHaveBeenCalled();
 
-      // Poll: the event completes and the feed supplies its item → the resolved
-      // value row is now on-screen, sourced entirely from the server feed.
-      act(() => jest.advanceTimersByTime(1000));
-      await act(async () => {});
-      expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(true);
-      expect(mockEntryResolvedHaptic).toHaveBeenCalledTimes(1);
-    } finally {
-      jest.useRealTimers();
-    }
+    // Poll: the event completes and the feed supplies its item → the resolved
+    // value row is now on-screen, sourced entirely from the server feed.
+    act(() => jest.advanceTimersByTime(1000));
+    await act(async () => {});
+    expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(true);
+    expect(mockEntryResolvedHaptic).toHaveBeenCalledTimes(1);
   });
 
   it("does not render a server-fed value row while the event list still has the entry pending (no un-animated resolve)", async () => {
-    jest.useFakeTimers();
-    try {
-      // The race the reviewer flagged: the by-date feed reports the entry
-      // completed-with-items while the event-list poll lags (or failed) and
-      // still holds it pending. The resolved value row must NOT render through
-      // the saved-food fallback — it can only surface once the event-list poll
-      // reconciles the entry to completed, so beat 1 fires on that transition
-      // instead of a row appearing un-animated (FTY-181 review).
-      const pending = event({ id: "a", raw_text: "Yogurt", status: "pending" });
-      const completed = event({ id: "a", raw_text: "Yogurt", status: "completed" });
-      // Event list lags on the first two loads, only catching up on the third.
-      const load = jest
-        .fn()
-        .mockResolvedValueOnce([pending])
-        .mockResolvedValueOnce([pending])
-        .mockResolvedValue([completed]);
-      // The by-date feed already reports the entry completed-with-items from the
-      // very first read — it won the race.
-      const loadEntries = jest
-        .fn()
-        .mockResolvedValue([{ event: completed, items: [foodItem()] }]);
-      const tree = mount(
-        <TodayScreen
-          session={SESSION}
-          load={load}
-          loadEntries={loadEntries}
-          useActive={() => true}
-          pollIntervalMs={1000}
-        />,
-      );
-      await act(async () => {});
-      // Feed already has the item, but the event is pending → no value row, no beat.
-      expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(false);
-      expect(mockEntryResolvedHaptic).not.toHaveBeenCalled();
+    // The race the reviewer flagged: the by-date feed reports the entry
+    // completed-with-items while the event-list poll lags (or failed) and
+    // still holds it pending. The resolved value row must NOT render through
+    // the saved-food fallback — it can only surface once the event-list poll
+    // reconciles the entry to completed, so beat 1 fires on that transition
+    // instead of a row appearing un-animated (FTY-181 review).
+    const pending = event({ id: "a", raw_text: "Yogurt", status: "pending" });
+    const completed = event({ id: "a", raw_text: "Yogurt", status: "completed" });
+    // Event list lags on the first two loads, only catching up on the third.
+    const load = jest
+      .fn()
+      .mockResolvedValueOnce([pending])
+      .mockResolvedValueOnce([pending])
+      .mockResolvedValue([completed]);
+    // The by-date feed already reports the entry completed-with-items from the
+    // very first read — it won the race.
+    const loadEntries = jest
+      .fn()
+      .mockResolvedValue([{ event: completed, items: [foodItem()] }]);
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        loadEntries={loadEntries}
+        useActive={() => true}
+        pollIntervalMs={1000}
+      />,
+    );
+    await act(async () => {});
+    // Feed already has the item, but the event is pending → no value row, no beat.
+    expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(false);
+    expect(mockEntryResolvedHaptic).not.toHaveBeenCalled();
 
-      // A poll where the event list still lags must not leak the row or a beat.
-      act(() => jest.advanceTimersByTime(1000));
-      await act(async () => {});
-      expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(false);
-      expect(mockEntryResolvedHaptic).not.toHaveBeenCalled();
+    // A poll where the event list still lags must not leak the row or a beat.
+    act(() => jest.advanceTimersByTime(1000));
+    await act(async () => {});
+    expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(false);
+    expect(mockEntryResolvedHaptic).not.toHaveBeenCalled();
 
-      // The event list catches up → the row renders and the resolve beat fires once.
-      act(() => jest.advanceTimersByTime(1000));
-      await act(async () => {});
-      expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(true);
-      expect(mockEntryResolvedHaptic).toHaveBeenCalledTimes(1);
-    } finally {
-      jest.useRealTimers();
-    }
+    // The event list catches up → the row renders and the resolve beat fires once.
+    act(() => jest.advanceTimersByTime(1000));
+    await act(async () => {});
+    expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(true);
+    expect(mockEntryResolvedHaptic).toHaveBeenCalledTimes(1);
   });
 
   it("fires once per event when two pending entries resolve in the same reconciliation", async () => {
-    jest.useFakeTimers();
-    try {
-      // Two entries are pending on the first load, then both reconcile to
-      // completed in the SAME poll batch. The resolve beat is once-per-event, so
-      // a batch of two fresh completions must fire two soft taps — not one tap
-      // coalesced across the batch (FTY-181 review).
-      const pendingA = event({ id: "a", raw_text: "Oatmeal", status: "pending" });
-      const pendingB = event({ id: "b", raw_text: "Yogurt", status: "pending" });
-      const completedA = event({ id: "a", raw_text: "Oatmeal", status: "completed" });
-      const completedB = event({ id: "b", raw_text: "Yogurt", status: "completed" });
-      const load = jest
-        .fn()
-        .mockResolvedValueOnce([pendingA, pendingB])
-        .mockResolvedValue([completedA, completedB]);
-      mount(
-        <TodayScreen
-          session={SESSION}
-          load={load}
-          useActive={() => true}
-          pollIntervalMs={1000}
-        />,
-      );
-      await act(async () => {});
-      // Both seeded pending on the first load — nothing resolved yet.
-      expect(mockEntryResolvedHaptic).not.toHaveBeenCalled();
+    // Two entries are pending on the first load, then both reconcile to
+    // completed in the SAME poll batch. The resolve beat is once-per-event, so
+    // a batch of two fresh completions must fire two soft taps — not one tap
+    // coalesced across the batch (FTY-181 review).
+    const pendingA = event({ id: "a", raw_text: "Oatmeal", status: "pending" });
+    const pendingB = event({ id: "b", raw_text: "Yogurt", status: "pending" });
+    const completedA = event({ id: "a", raw_text: "Oatmeal", status: "completed" });
+    const completedB = event({ id: "b", raw_text: "Yogurt", status: "completed" });
+    const load = jest
+      .fn()
+      .mockResolvedValueOnce([pendingA, pendingB])
+      .mockResolvedValue([completedA, completedB]);
+    mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        useActive={() => true}
+        pollIntervalMs={1000}
+      />,
+    );
+    await act(async () => {});
+    // Both seeded pending on the first load — nothing resolved yet.
+    expect(mockEntryResolvedHaptic).not.toHaveBeenCalled();
 
-      // One poll reconciles BOTH entries to completed at once → two beats.
-      act(() => jest.advanceTimersByTime(1000));
-      await act(async () => {});
-      expect(mockEntryResolvedHaptic).toHaveBeenCalledTimes(2);
+    // One poll reconciles BOTH entries to completed at once → two beats.
+    act(() => jest.advanceTimersByTime(1000));
+    await act(async () => {});
+    expect(mockEntryResolvedHaptic).toHaveBeenCalledTimes(2);
 
-      // A further poll returning the same completed pair must not re-fire.
-      act(() => jest.advanceTimersByTime(1000));
-      await act(async () => {});
-      expect(mockEntryResolvedHaptic).toHaveBeenCalledTimes(2);
-    } finally {
-      jest.useRealTimers();
-    }
+    // A further poll returning the same completed pair must not re-fire.
+    act(() => jest.advanceTimersByTime(1000));
+    await act(async () => {});
+    expect(mockEntryResolvedHaptic).toHaveBeenCalledTimes(2);
   });
 });
 
 describe("TodayScreen — beat 3: target reached through the real screen (FTY-181)", () => {
   it("fires the target-reached beat when a summary poll crosses the calorie target", async () => {
-    jest.useFakeTimers();
-    try {
-      // A pending event keeps polling active; the summary crosses the target on
-      // the poll (under budget → over budget) so the mounted hero beats once.
-      const load = jest
-        .fn()
-        .mockResolvedValue([event({ id: "a", raw_text: "Oatmeal", status: "pending" })]);
-      const getDailySummary = jest
-        .fn()
-        .mockResolvedValueOnce(
-          summary({ intake: { calories: 1600, protein_g: 70, carbs_g: 120, fat_g: 40 } }),
-        )
-        .mockResolvedValue(
-          summary({ intake: { calories: 2100, protein_g: 90, carbs_g: 160, fat_g: 55 } }),
-        );
-      mount(
-        <TodayScreen
-          session={SESSION}
-          load={load}
-          getDailySummary={getDailySummary}
-          useActive={() => true}
-          pollIntervalMs={1000}
-        />,
+    // A pending event keeps polling active; the summary crosses the target on
+    // the poll (under budget → over budget) so the mounted hero beats once.
+    const load = jest
+      .fn()
+      .mockResolvedValue([event({ id: "a", raw_text: "Oatmeal", status: "pending" })]);
+    const getDailySummary = jest
+      .fn()
+      .mockResolvedValueOnce(
+        summary({ intake: { calories: 1600, protein_g: 70, carbs_g: 120, fat_g: 40 } }),
+      )
+      .mockResolvedValue(
+        summary({ intake: { calories: 2100, protein_g: 90, carbs_g: 160, fat_g: 55 } }),
       );
-      await act(async () => {});
-      // Seeded under budget on the first summary — no beat yet.
-      expect(mockTargetReachedHaptic).not.toHaveBeenCalled();
+    mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        getDailySummary={getDailySummary}
+        useActive={() => true}
+        pollIntervalMs={1000}
+      />,
+    );
+    await act(async () => {});
+    // Seeded under budget on the first summary — no beat yet.
+    expect(mockTargetReachedHaptic).not.toHaveBeenCalled();
 
-      act(() => jest.advanceTimersByTime(1000));
-      await act(async () => {});
-      expect(mockTargetReachedHaptic).toHaveBeenCalledTimes(1);
-    } finally {
-      jest.useRealTimers();
-    }
+    act(() => jest.advanceTimersByTime(1000));
+    await act(async () => {});
+    expect(mockTargetReachedHaptic).toHaveBeenCalledTimes(1);
   });
 });

@@ -663,6 +663,64 @@
         "title": "EgressPolicy",
         "type": "object"
       },
+      "FoodSuggestionDTO": {
+        "description": "One ranked quick-add suggestion for the Today composer.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "saved_food_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saved Food Id"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "submit_phrase": {
+            "title": "Submit Phrase",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "submit_phrase",
+          "score"
+        ],
+        "title": "FoodSuggestionDTO",
+        "type": "object"
+      },
+      "FoodSuggestionResponse": {
+        "description": "Bounded contextual food-suggestion response.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FoodSuggestionDTO"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "limit"
+        ],
+        "title": "FoodSuggestionResponse",
+        "type": "object"
+      },
       "GoalDTO": {
         "description": "Response/representation of a persisted goal, built from the ORM row.",
         "properties": {
@@ -2215,6 +2273,70 @@
         "summary": "Register",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/food-suggestions": {
+      "get": {
+        "description": "Return ranked quick-add suggestions for the authenticated user.",
+        "operationId": "get_food_suggestions_api_food_suggestions_get",
+        "parameters": [
+          {
+            "description": "Maximum suggestions to return. Defaults to 8; values above 20 return 422.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 8,
+              "description": "Maximum suggestions to return. Defaults to 8; values above 20 return 422.",
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FoodSuggestionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Food Suggestions",
+        "tags": [
+          "food-suggestions"
         ]
       }
     },

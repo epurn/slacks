@@ -7,6 +7,7 @@ parses and verifies the token, then loads the owning user. Any failure raises
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Request, status
@@ -52,3 +53,9 @@ def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def get_current_time() -> datetime:
+    """Return the current UTC instant for route-level time injection."""
+
+    return datetime.now(UTC)
