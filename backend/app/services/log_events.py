@@ -28,7 +28,7 @@ from datetime import UTC, date, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.enums import DerivedItemStatus, LogEventStatus
 from app.models.derived import (
@@ -73,20 +73,17 @@ LEGAL_TRANSITIONS: dict[LogEventStatus, frozenset[LogEventStatus]] = {
     LogEventStatus.FAILED: frozenset(),
 }
 
-#: Event statuses whose committed ``resolved`` items surface in the by-date item
-#: read (:func:`list_entries_for_day`). Mirrors the daily-summary finalized-event
-#: gate (FTY-349): the terminal finalized statuses **plus** ``processing`` for an
-#: answer-triggered scoped re-estimate of a previously-partial event, so a
-#: committed sibling never disappears from the timeline during the in-flight
-#: re-estimate window. The committed-resolved-item discriminator is enforced by the
-#: per-item ``status == RESOLVED`` + costed-value filter, not the event status: a
-#: first-pass ``processing`` event has committed no resolved item, so it surfaces
-#: nothing (nothing counts early), exactly as the daily-summary gate. See
+#: Terminal-finalized event statuses whose committed ``resolved`` items always
+#: surface in the by-date item read (:func:`list_entries_for_day`). A ``processing``
+#: event surfaces items only when it is a genuine answer-triggered scoped re-estimate
+#: (FTY-349), discriminated at query time by
+#: :func:`_scoped_reestimate_processing_ids` — never by status membership here, so a
+#: first-pass ``processing`` event in the worker's two-commit completion window (which
+#: momentarily carries committed resolved rows) is excluded. See
 #: ``docs/contracts/daily-summary.md`` (finalized-event gate) and ``log-events.md``.
-_ITEM_READ_EVENT_STATUSES = (
+_FINALIZED_ITEM_READ_STATUSES = (
     LogEventStatus.COMPLETED,
     LogEventStatus.PARTIALLY_RESOLVED,
-    LogEventStatus.PROCESSING,
 )
 _CLARIFICATION_EVENT_STATUSES = (
     LogEventStatus.NEEDS_CLARIFICATION,
@@ -239,6 +236,38 @@ def list_events_for_day(
     )
 
 
+def _scoped_reestimate_processing_ids(
+    session: Session, owner_id: uuid.UUID, candidate_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """Of ``candidate_ids`` (``processing`` events), those that are genuine scoped re-estimates.
+
+    Mirrors the daily-summary finalized gate's scoped-``processing`` discriminator
+    (FTY-349, :func:`app.services.daily_summary._has_open_item_scoped_question`): a
+    ``processing`` event surfaces its committed resolved siblings only when it owns
+    ≥1 item-scoped clarification question on a still-``unresolved`` component — the
+    signature of a previously-``partially_resolved`` event being re-costed. A
+    **first-pass** ``processing`` event that momentarily carries committed resolved
+    rows during the worker's two-commit completion window owns no such question, so it
+    is excluded and surfaces nothing. The per-item ``RESOLVED`` + costed-value filter
+    is *not* a sufficient discriminator on its own, precisely because that window
+    exposes committed resolved rows before the terminal transition commits.
+    """
+
+    if not candidate_ids:
+        return set()
+    component = aliased(DerivedFoodItem)
+    rows = session.scalars(
+        select(ClarificationQuestion.log_event_id)
+        .join(component, ClarificationQuestion.derived_food_item_id == component.id)
+        .where(
+            ClarificationQuestion.user_id == owner_id,
+            ClarificationQuestion.log_event_id.in_(candidate_ids),
+            component.status == DerivedItemStatus.UNRESOLVED,
+        )
+    )
+    return set(rows)
+
+
 def list_entries_for_day(
     session: Session,
     owner_id: uuid.UUID,
@@ -257,10 +286,12 @@ def list_entries_for_day(
     ``resolved`` item surfaces on a ``completed`` / ``partially_resolved`` event
     **or** on a ``processing`` event that is an answer-triggered scoped re-estimate
     of a previously-partial event, so a committed sibling never disappears from the
-    timeline while the re-estimate is in flight. A first-pass ``processing`` event
-    has committed no resolved item, so the per-item ``RESOLVED`` + costed-value
-    filter surfaces nothing for it (nothing counts early). See
-    :data:`_ITEM_READ_EVENT_STATUSES`.
+    timeline while the re-estimate is in flight. The scoped-``processing`` case is
+    discriminated by :func:`_scoped_reestimate_processing_ids` (an open item-scoped
+    question on a still-unresolved component), so a first-pass ``processing`` event —
+    which momentarily carries committed resolved rows during the worker's two-commit
+    completion window but owns no such question — surfaces nothing (nothing counts
+    early). See :data:`_FINALIZED_ITEM_READ_STATUSES`.
     """
 
     events = list_events_for_day(session, owner_id, current_user, day)
@@ -268,8 +299,15 @@ def list_entries_for_day(
         return []
 
     item_bearing_event_ids = [
-        event.id for event in events if LogEventStatus(event.status) in _ITEM_READ_EVENT_STATUSES
+        event.id
+        for event in events
+        if LogEventStatus(event.status) in _FINALIZED_ITEM_READ_STATUSES
     ]
+    processing_ids = [
+        event.id for event in events if LogEventStatus(event.status) is LogEventStatus.PROCESSING
+    ]
+    scoped_ids = _scoped_reestimate_processing_ids(session, owner_id, processing_ids)
+    item_bearing_event_ids += [pid for pid in processing_ids if pid in scoped_ids]
     items_by_event: dict[uuid.UUID, list[DerivedFoodItemDTO | DerivedExerciseItemDTO]] = (
         defaultdict(list)
     )

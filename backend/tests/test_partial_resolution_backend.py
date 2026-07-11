@@ -503,6 +503,86 @@ def test_daily_summary_no_dip_predicate_on_postgres(pg_engine: Engine) -> None:
     assert _by_date_item_ids() == {resolved_id, unresolved_id}
 
 
+def test_first_pass_processing_commit_window_is_excluded_on_postgres(pg_engine: Engine) -> None:
+    """FTY-349 Postgres parity: the worker's real two-commit completion window.
+
+    The estimation worker commits a first-pass event's ``resolved`` derived rows in
+    the same transaction as the run/job status and then transitions the event
+    ``processing → completed`` in a *second* commit
+    (``app.estimator.processing._finalize``). Between those commits the event is
+    externally visible as ``processing`` **with a committed ``resolved`` item** — the
+    exact state the earlier seeded first-pass test (an ``unresolved`` row) never
+    exercised. The scoped-re-estimate gate must **not** match it: a first-pass event
+    owns no item-scoped clarification question on an unresolved component, so it
+    contributes nothing to ``intake`` / ``has_intake`` / ``uncounted_entries`` and
+    surfaces no item on ``/log-events/by-date`` — nothing counts early. A realistic
+    leftover ``unresolved`` component (no question) must not fake a re-estimate either.
+    """
+
+    upgrade(pg_engine, "head")
+    user_id = _seed_pg_user(pg_engine)
+    day = date(2026, 7, 10)
+    factory = create_session_factory(pg_engine)
+
+    with factory() as session:
+        first_pass = LogEvent(
+            user_id=user_id,
+            raw_text="oatmeal and a mystery topping",
+            status=LogEventStatus.PROCESSING,
+            created_at=datetime(2026, 7, 10, 8, 0, tzinfo=UTC),
+        )
+        session.add(first_pass)
+        session.flush()
+        session.add_all(
+            [
+                DerivedFoodItem(
+                    log_event_id=first_pass.id,
+                    user_id=user_id,
+                    name="oatmeal",
+                    quantity_text="1 cup",
+                    amount=1.0,
+                    status=DerivedItemStatus.RESOLVED,
+                    grams=234.0,
+                    calories=150.0,
+                    protein_g=5.0,
+                    carbs_g=27.0,
+                    fat_g=3.0,
+                    calories_estimated=150.0,
+                    protein_g_estimated=5.0,
+                    carbs_g_estimated=27.0,
+                    fat_g_estimated=3.0,
+                ),
+                DerivedFoodItem(
+                    log_event_id=first_pass.id,
+                    user_id=user_id,
+                    name="mystery topping",
+                    quantity_text="",
+                    status=DerivedItemStatus.UNRESOLVED,
+                ),
+            ]
+        )
+        session.commit()
+        first_pass_id = first_pass.id
+
+    with factory() as session:
+        loaded_user = session.get(User, user_id)
+        assert loaded_user is not None
+        single = daily_summary_service.get_daily_summary(session, user_id, loaded_user, day)
+        ranged = daily_summary_service.get_daily_summaries(session, user_id, loaded_user, day, day)
+        entries = log_event_service.list_entries_for_day(session, user_id, loaded_user, day)
+
+    # Nothing counts early: the committed 150 kcal resolved row stays out of every
+    # surface while the event is still ``processing`` mid-completion.
+    assert ranged == [single]
+    assert single.intake.calories == 0.0
+    assert single.has_intake is False
+    assert single.uncounted_entries == 0
+    # The by-date read surfaces the event envelope but no item detail.
+    first_pass_entries = [entry for entry in entries if entry.event.id == first_pass_id]
+    assert len(first_pass_entries) == 1
+    assert first_pass_entries[0].items == []
+
+
 def test_uncounted_entries_holds_at_one_component_across_fresh_round_on_postgres(
     pg_engine: Engine,
 ) -> None:
