@@ -102,6 +102,22 @@ _FIXTURE_PASSWORD = "dogfood-smoke-pw"  # noqa: S105 — non-secret local fixtur
 
 
 @dataclass(frozen=True)
+class ItemBand:
+    """Per-item plausibility band for one expected derived item.
+
+    ``match`` is a lowercase substring located in the item's name/label/ref
+    (the same haystack ``forbid_substrings`` scans); the matched item's calories
+    must fall inside the inclusive ``[kcal_low, kcal_high]`` band. This is what
+    keeps a multi-item fixture honest — a total-only band would let a bad split
+    (e.g. crackers=1 kcal + hummus=399 kcal) pass.
+    """
+
+    match: str
+    kcal_low: float
+    kcal_high: float
+
+
+@dataclass(frozen=True)
 class FixtureSpec:
     """One representative food log plus the outcome the live stack must deliver.
 
@@ -125,6 +141,10 @@ class FixtureSpec:
     #: Substrings that must not appear in an item's name/label/ref (defensive;
     #: the calorie band is the primary detector for a wrong-form match).
     forbid_substrings: tuple[str, ...] = ()
+    #: Per-item plausibility bands for multi-item fixtures. Each band must match
+    #: a derived item, and every matched item must cost inside its band, so the
+    #: total band cannot be satisfied by an implausible split.
+    expected_items: tuple[ItemBand, ...] = ()
 
 
 #: The representative fixtures live as **data**, not a Python literal, so the
@@ -158,6 +178,22 @@ def _str_list(value: object) -> tuple[str, ...]:
     return tuple(str(item) for item in value)
 
 
+def _item_bands(value: object) -> tuple[ItemBand, ...]:
+    """Coerce a JSON ``expected_items`` list (or absent value) into bands."""
+
+    if not isinstance(value, list):
+        return ()
+    return tuple(
+        ItemBand(
+            match=str(entry["match"]).lower(),
+            kcal_low=float(entry["kcal_low"]),
+            kcal_high=float(entry["kcal_high"]),
+        )
+        for entry in value
+        if isinstance(entry, Mapping)
+    )
+
+
 def _fixture_from_dict(entry: Mapping[str, object]) -> FixtureSpec:
     """Build one :class:`FixtureSpec` from its JSON object."""
 
@@ -172,6 +208,7 @@ def _fixture_from_dict(entry: Mapping[str, object]) -> FixtureSpec:
             SourceType(value) for value in _str_list(entry.get("forbid_source_types"))
         ),
         forbid_substrings=_str_list(entry.get("forbid_substrings")),
+        expected_items=_item_bands(entry.get("expected_items")),
     )
 
 
@@ -268,6 +305,14 @@ def _count_failures(spec: FixtureSpec, items: Sequence[SmokeItem]) -> list[str]:
     return []
 
 
+def _item_haystack(item: SmokeItem) -> str:
+    """The lowercase name/label/ref text substring checks scan."""
+
+    return " ".join(
+        part.lower() for part in (item.name, item.source_label, item.source_ref) if part
+    )
+
+
 def _item_failures(spec: FixtureSpec, item: SmokeItem) -> list[str]:
     """Per-item provenance, calories, and forbidden-match checks."""
 
@@ -291,14 +336,43 @@ def _item_failures(spec: FixtureSpec, item: SmokeItem) -> list[str]:
             f"plausibility ceiling {PER_ITEM_ABSURD_KCAL:.0f}"
         )
 
-    haystack = " ".join(
-        part.lower() for part in (item.name, item.source_label, item.source_ref) if part
-    )
+    haystack = _item_haystack(item)
     failures.extend(
         f"item '{item.name}' matched forbidden form '{sub}'"
         for sub in spec.forbid_substrings
         if sub in haystack
     )
+    return failures
+
+
+def _expected_item_failures(spec: FixtureSpec, items: Sequence[SmokeItem]) -> list[str]:
+    """Per-item plausibility bands for multi-item fixtures.
+
+    Each expected band must match at least one derived item, and every matched
+    item's calories must fall inside its band — so a bad split (one item
+    implausibly low, the other implausibly high) cannot hide behind a passing
+    **total** band.
+    """
+
+    failures: list[str] = []
+    for band in spec.expected_items:
+        matched = [item for item in items if band.match in _item_haystack(item)]
+        if not matched:
+            failures.append(
+                f"no derived item matched expected item '{band.match}' "
+                "(the multi-item split did not produce it)"
+            )
+            continue
+        for item in matched:
+            # Missing/zero calories are already flagged by the per-item check.
+            if not _finite_positive(item.calories):
+                continue
+            if not (band.kcal_low <= (item.calories or 0.0) <= band.kcal_high):
+                failures.append(
+                    f"item '{item.name}' calories {item.calories:.0f} outside the "
+                    f"per-item plausible band [{band.kcal_low:.0f}, "
+                    f"{band.kcal_high:.0f}] for '{band.match}'"
+                )
     return failures
 
 
@@ -315,6 +389,7 @@ def assess_fixture(spec: FixtureSpec, outcome: FixtureOutcome) -> FixtureAssessm
     failures += _count_failures(spec, outcome.items)
     for item in outcome.items:
         failures += _item_failures(spec, item)
+    failures += _expected_item_failures(spec, outcome.items)
 
     # Total calorie band — the primary detector for a wrong-form match (e.g.
     # banana powder). Only checked once real calories were produced.

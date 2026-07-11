@@ -10,7 +10,11 @@
     "the verification, never a nutrition table the estimator reads.",
     "expected_item_count: exact number of derived items, or null for 'at least one'.",
     "forbid_source_types: source_type values that would be a WRONG resolution.",
-    "forbid_substrings: tokens that must not appear in an item name/label/ref."
+    "forbid_substrings: tokens that must not appear in an item name/label/ref.",
+    "expected_items: per-item plausibility bands for multi-item fixtures. Each",
+    "band's lowercase 'match' substring must locate a derived item (name/label/",
+    "ref), and every matched item's calories must sit inside [kcal_low,",
+    "kcal_high] — so a bad split cannot hide behind a passing total band."
   ],
   "fixtures": [
     {
@@ -56,7 +60,11 @@
       "total_kcal_low": 120.0,
       "total_kcal_high": 520.0,
       "forbid_source_types": [],
-      "forbid_substrings": []
+      "forbid_substrings": [],
+      "expected_items": [
+        { "match": "egg", "kcal_low": 100.0, "kcal_high": 380.0 },
+        { "match": "toast", "kcal_low": 40.0, "kcal_high": 250.0 }
+      ]
     },
     {
       "key": "100g-banana",
@@ -74,7 +82,11 @@
       "total_kcal_low": 40.0,
       "total_kcal_high": 400.0,
       "forbid_source_types": [],
-      "forbid_substrings": []
+      "forbid_substrings": [],
+      "expected_items": [
+        { "match": "cracker", "kcal_low": 30.0, "kcal_high": 250.0 },
+        { "match": "hummus", "kcal_low": 10.0, "kcal_high": 120.0 }
+      ]
     }
   ]
 }

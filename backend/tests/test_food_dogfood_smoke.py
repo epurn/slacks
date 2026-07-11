@@ -73,8 +73,21 @@ def test_completed_fixture_with_plausible_item_passes() -> None:
     assert assessment.failures == ()
 
 
+def _snack_spec() -> smoke.FixtureSpec:
+    """The two-item branded snack shape: total band plus per-item bands."""
+
+    return _spec(
+        expected_item_count=2,
+        total_kcal_low=40.0,
+        total_kcal_high=400.0,
+        expected_items=(
+            smoke.ItemBand(match="cracker", kcal_low=30.0, kcal_high=250.0),
+            smoke.ItemBand(match="hummus", kcal_low=10.0, kcal_high=120.0),
+        ),
+    )
+
+
 def test_two_item_snack_passes_when_both_costed() -> None:
-    spec = _spec(expected_item_count=2, total_kcal_low=40.0, total_kcal_high=400.0)
     outcome = smoke.FixtureOutcome(
         status="completed",
         items=(
@@ -82,7 +95,7 @@ def test_two_item_snack_passes_when_both_costed() -> None:
             _item(name="hummus", source_type=SourceType.REFERENCE_SOURCE.value, calories=45.0),
         ),
     )
-    assert smoke.assess_fixture(spec, outcome).passed
+    assert smoke.assess_fixture(_snack_spec(), outcome).passed
 
 
 # --------------------------------------------------------------------------- #
@@ -171,6 +184,51 @@ def test_wrong_item_count_fails() -> None:
     assert any("expected 2 derived item(s)" in f for f in assessment.failures)
 
 
+def test_two_item_snack_bad_split_fails_per_item_bands() -> None:
+    # crackers=1 kcal + hummus=399 kcal satisfies the total band [40, 400] but
+    # both items are individually implausible — the per-item bands must catch it.
+    outcome = smoke.FixtureOutcome(
+        status="completed",
+        items=(
+            _item(name="crackers", source_type=SourceType.MODEL_PRIOR.value, calories=1.0),
+            _item(name="hummus", source_type=SourceType.REFERENCE_SOURCE.value, calories=399.0),
+        ),
+    )
+    assessment = smoke.assess_fixture(_snack_spec(), outcome)
+    assert not assessment.passed
+    band_failures = [f for f in assessment.failures if "per-item plausible band" in f]
+    assert any("'crackers' calories 1" in f for f in band_failures)
+    assert any("'hummus' calories 399" in f for f in band_failures)
+    # The total band alone would have passed — no total-band failure expected.
+    assert not any("total calories" in f for f in assessment.failures)
+
+
+def test_two_item_snack_missing_expected_item_fails() -> None:
+    # Two items derived, but nothing matches 'hummus' — the split is wrong even
+    # if the count and totals look right.
+    outcome = smoke.FixtureOutcome(
+        status="completed",
+        items=(
+            _item(name="crackers", calories=80.0),
+            _item(name="dill pickle dip", calories=45.0),
+        ),
+    )
+    assessment = smoke.assess_fixture(_snack_spec(), outcome)
+    assert not assessment.passed
+    assert any("no derived item matched expected item 'hummus'" in f for f in assessment.failures)
+
+
+def test_expected_item_band_matches_are_case_insensitive() -> None:
+    outcome = smoke.FixtureOutcome(
+        status="completed",
+        items=(
+            _item(name="Toppables Crackers", calories=80.0),
+            _item(name="PC Dill Pickle Hummus", calories=45.0),
+        ),
+    )
+    assert smoke.assess_fixture(_snack_spec(), outcome).passed
+
+
 def test_absurd_calories_fail_per_item_ceiling() -> None:
     spec = _spec(total_kcal_low=0.0, total_kcal_high=1e9)
     outcome = smoke.FixtureOutcome(
@@ -209,6 +267,7 @@ def test_load_fixtures_parses_data_file(tmp_path: Path) -> None:
                 "total_kcal_high": 200.0,
                 "forbid_source_types": ["trusted_nutrition_database"],
                 "forbid_substrings": ["powder"],
+                "expected_items": [{"match": "Banana", "kcal_low": 50.0, "kcal_high": 200.0}],
             },
             {
                 "key": "any",
@@ -225,9 +284,14 @@ def test_load_fixtures_parses_data_file(tmp_path: Path) -> None:
     assert len(fixtures) == 2
     assert fixtures[0].forbid_source_types == (SourceType.TRUSTED_NUTRITION_DATABASE,)
     assert fixtures[0].forbid_substrings == ("powder",)
+    # Band match substrings are lowercased at load so haystack checks line up.
+    assert fixtures[0].expected_items == (
+        smoke.ItemBand(match="banana", kcal_low=50.0, kcal_high=200.0),
+    )
     # A null expected_item_count means "at least one".
     assert fixtures[1].expected_item_count is None
     assert fixtures[1].forbid_source_types == ()
+    assert fixtures[1].expected_items == ()
 
 
 def test_shipped_fixture_data_file_loads() -> None:
@@ -238,6 +302,16 @@ def test_shipped_fixture_data_file_loads() -> None:
 def test_branded_snack_fixture_expects_two_items() -> None:
     snack = next(f for f in smoke.FIXTURES if f.key == "branded-crackers-and-hummus")
     assert snack.expected_item_count == 2
+
+
+def test_multi_item_fixtures_carry_per_item_bands() -> None:
+    # Every multi-item fixture must band each expected item, so a bad split
+    # can never pass on the total band alone (FTY-256 review round 1).
+    for fixture in smoke.FIXTURES:
+        if fixture.expected_item_count is not None and fixture.expected_item_count > 1:
+            assert len(fixture.expected_items) == fixture.expected_item_count, fixture.key
+    snack = next(f for f in smoke.FIXTURES if f.key == "branded-crackers-and-hummus")
+    assert {band.match for band in snack.expected_items} == {"cracker", "hummus"}
 
 
 def test_compliments_fixture_forbids_generic_fdc() -> None:

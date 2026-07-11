@@ -399,9 +399,9 @@ representative fixtures and what each proves:
 | `one banana` | Completes; costs as fresh banana, **not** dehydrated/powdered banana (a plausible calorie band is the detector). |
 | `2 large eggs` | Completes; a supplied count resolves — no generic quantity clarification. |
 | `1 slice wheat toast` | Completes; a stated slice resolves. |
-| `two scrambled eggs and one slice buttered toast` | Completes with **two** derived items, each costed with honest provenance. |
+| `two scrambled eggs and one slice buttered toast` | Completes with **two** derived items, each costed with honest provenance and inside its **own** plausible calorie band (eggs and toast are banded separately). |
 | `100 grams banana` | Completes; measured amount resolves; not banana powder. |
-| `4 toppables brand crackers with 1tbsp of loblaws store brand (PC/presidents choice) dill pickle hummus` | The 2026-07-10 live failure — completes with **two** derived items (no `needs_clarification`, no `failed`), each with a plausible calorie band and honest source/provenance. |
+| `4 toppables brand crackers with 1tbsp of loblaws store brand (PC/presidents choice) dill pickle hummus` | The 2026-07-10 live failure — completes with **two** derived items (no `needs_clarification`, no `failed`), each inside its **own** plausible calorie band (crackers and hummus are banded separately, so a bad split cannot hide behind a passing total) with honest source/provenance. |
 
 For every fixture the smoke also asserts that a log carrying a count or measured
 amount **never** produces a generic no-option quantity clarification, and that
@@ -438,6 +438,10 @@ silent zero is not an acknowledgement).
     printed under the fixture.
   - **`forbidden source` / calorie band** — a branded item matched a generic FDC
     row, or a banana costed as powder — the exact regressions this smoke guards.
+  - **`per-item plausible band` / `no derived item matched expected item`** — a
+    multi-item entry produced a bad split: one item costed implausibly low/high
+    even though the entry **total** looked fine, or an expected item (e.g. the
+    hummus) never appeared as its own derived item.
 
 ### Live-local vs. hermetic E2E
 
