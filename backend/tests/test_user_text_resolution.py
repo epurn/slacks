@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from app.db import create_session_factory
 from app.enums import (
+    ESTIMATE_BASIS_ASSUMPTION_PREFIX,
     DerivedItemStatus,
     EstimationJobStatus,
     LogEventStatus,
@@ -415,6 +416,22 @@ def test_missing_macros_filled_from_reference_page(client: TestClient, session: 
     assert _RAW_PAGE_SENTINEL not in str(evidence.assumptions)
     assert reference_fetcher.fetched == [_REFERENCE_URL]
 
+    # FTY-350: the single-source reference fill rides the content-free estimate-basis
+    # marker alongside its prose assumption, so the read-model surfaces
+    # estimate_basis = reference_source. The marker suffix is a plain enum value —
+    # never the source_ref / URL / provider text.
+    basis_markers = [
+        a for a in evidence.assumptions if a.startswith(ESTIMATE_BASIS_ASSUMPTION_PREFIX)
+    ]
+    assert basis_markers == [
+        f"{ESTIMATE_BASIS_ASSUMPTION_PREFIX}{MacroEstimateBasis.REFERENCE_SOURCE.value}"
+    ]
+    assert _REFERENCE_URL not in basis_markers[0]
+    descriptor = build_item_source(session, food)
+    assert descriptor is not None
+    assert descriptor.source_type is SourceType.USER_TEXT
+    assert descriptor.estimate_basis is MacroEstimateBasis.REFERENCE_SOURCE
+
 
 def test_missing_macros_from_model_prior_cold_pass_agreement(
     client: TestClient, session: Session
@@ -445,6 +462,19 @@ def test_missing_macros_from_model_prior_cold_pass_agreement(
     assert evidence.field_provenance is not None
     assert evidence.field_provenance["protein_g"] == "estimated"
     assert any("model_prior" in a for a in (evidence.assumptions or []))
+
+    # FTY-350: the model-prior cold-pass fill rides the content-free estimate-basis marker,
+    # so the read-model surfaces estimate_basis = model_prior (the item stays user_text).
+    basis_markers = [
+        a for a in (evidence.assumptions or []) if a.startswith(ESTIMATE_BASIS_ASSUMPTION_PREFIX)
+    ]
+    assert basis_markers == [
+        f"{ESTIMATE_BASIS_ASSUMPTION_PREFIX}{MacroEstimateBasis.MODEL_PRIOR.value}"
+    ]
+    descriptor = build_item_source(session, food)
+    assert descriptor is not None
+    assert descriptor.source_type is SourceType.USER_TEXT
+    assert descriptor.estimate_basis is MacroEstimateBasis.MODEL_PRIOR
 
 
 def test_missing_macros_left_unknown_when_cold_passes_disagree(
@@ -1047,11 +1077,12 @@ def test_exact_reference_wins_over_comparable_aggregate(
     assert evidence.assumptions is not None
     assert any("reference_source" in a for a in evidence.assumptions)
     assert not any("comparable-reference aggregate" in a for a in evidence.assumptions)
-    # A single-source reference fill is not the comparable-reference aggregate: the
-    # read-model exposes no comparable-reference estimate basis.
+    # FTY-350: a single-source reference fill is distinct from the comparable-reference
+    # aggregate — the read-model surfaces estimate_basis = reference_source (not
+    # comparable_reference), so the item is still distinguishable from a plain user-stated one.
     descriptor = build_item_source(session, food)
     assert descriptor is not None
-    assert descriptor.estimate_basis is None
+    assert descriptor.estimate_basis is MacroEstimateBasis.REFERENCE_SOURCE
 
 
 def test_empty_sanitized_identity_fails_closed_without_a_broad_source_lookup(

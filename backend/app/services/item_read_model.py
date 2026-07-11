@@ -135,20 +135,27 @@ def _macro_estimate_basis(
 ) -> MacroEstimateBasis | None:
     """Recover a ``user_text`` item's macro estimate basis from its own evidence row.
 
-    Derived **at read time** from the already-stored ``assumptions`` — the FTY-281
-    comparable-reference tier records an ``ESTIMATE_BASIS_ASSUMPTION_PREFIX`` marker
-    there, so the read-model can distinguish a rough comparable-reference macro estimate
-    from a plain user_text item with **no** new persisted column (the same derive-don't-
-    store philosophy as ``is_edited``). An absent or unrecognized marker yields ``None``
-    defensively rather than failing the read.
+    Derived **at read time** from the already-stored ``assumptions`` — the ``user_text``
+    macro-fill tiers record an ``ESTIMATE_BASIS_ASSUMPTION_PREFIX`` marker there with a
+    :class:`MacroEstimateBasis` suffix (the comparable-reference aggregate via
+    ``build_missing_macro_fill``, FTY-281; the single-source reference lookup and the
+    model-prior cold-pass via ``_scale_missing``, FTY-350), so the read-model can
+    distinguish a rough gap-filled macro estimate from a plain user_text item whose macros
+    are unknown, with **no** new persisted column (the same derive-don't-store philosophy
+    as ``is_edited``). An absent or unrecognized marker yields ``None`` defensively rather
+    than failing the read.
 
-    The derivation is **gated on ``source_type == user_text``** — the trusted signal for
-    the comparable-reference path. A comparable aggregate only ever backs a user-stated
-    calorie item, and a ``user_text`` row's ``assumptions`` are exclusively code-emitted
-    (``build_missing_macro_fill`` / ``_scale_missing``). The non-aggregate tiers
-    (``model_prior``/``official_source``/``reference_source``) persist **provider-generated**
+    The derivation is **gated on ``source_type == user_text``** — the trusted signal. A
+    ``user_text`` row's ``assumptions`` are exclusively **code-emitted** by that macro-fill
+    path, so a recognized marker on one is trustworthy (the fill tier only ever backs the
+    missing macros of a user-stated calorie item; the item's own ``source_type`` stays
+    ``user_text``). Every other source type — including an actual ``model_prior`` /
+    ``reference_source`` / ``official_source`` evidence row — persists **provider-generated**
     free-form assumptions (the model is asked to "list the assumptions you made"), which
-    must never be read as this trusted basis even if their text mimics the marker.
+    must never be read as this trusted basis even if their text mimics the marker; the
+    ``user_text`` gate is what excludes them. (A :attr:`MacroEstimateBasis.REFERENCE_SOURCE`
+    / :attr:`MacroEstimateBasis.MODEL_PRIOR` value therefore names the *tier that filled the
+    macro*, not the row's own ``source_type``.)
     """
 
     if source_type is not SourceType.USER_TEXT:
