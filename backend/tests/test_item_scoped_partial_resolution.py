@@ -526,8 +526,12 @@ def test_no_costable_component_lands_whole_event_needs_clarification(
     assert _foods(session, event_id) == []
     assert _evidence(session, event_id) == []
     questions = _questions(session, event_id)
-    assert questions != []
-    assert all(question.derived_food_item_id is None for question in questions)
+    # "Exactly as today": before FTY-329 the first un-costable component raised a
+    # whole-event clarification that aborted the pipeline, so the event carried a single
+    # first-clarification question. The no-costable fallback must preserve that boundary
+    # and NOT promote a second, duplicate carrier-less event-level question per component.
+    assert len(questions) == 1
+    assert questions[0].derived_food_item_id is None
 
 
 def test_safety_gate_stays_whole_event_even_with_a_costable_sibling(

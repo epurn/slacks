@@ -608,15 +608,20 @@ def _terminal_outcome(context: EstimationContext) -> PipelineResult:
             result_count=len(context.resolved_food_items),
         )
         return PipelineResult(PipelineOutcome.PARTIALLY_RESOLVED, None)
-    # Nothing costable → whole-event clarification. Promote the collected drafts to the
-    # event-level questions the ``needs_clarification`` finalize persists (no carrier),
-    # preserving the un-named generic wording that path has always used. The collected
-    # ``item_scoped_clarifications`` are left in place (unused by that finalize) so a
-    # scoped re-estimate — where a single component's un-costable outcome is not
-    # "whole-event" — can still read back its component-named question.
-    context.clarification_questions = [
-        clarification.event_level_question for clarification in context.item_scoped_clarifications
-    ]
+    # Nothing costable → whole-event clarification, exactly as today (FTY-329 criterion).
+    # Before FTY-329 the first un-costable component raised a whole-event
+    # ``NeedsClarification`` that aborted the pipeline, so the event carried a **single**
+    # first-clarification question with the un-named generic wording. The steps now
+    # collect each component instead of aborting, but the no-costable fallback must
+    # preserve that boundary: promote only the *first* collected draft's event-level
+    # question (components are collected in step-execution order, so ``[0]`` is the same
+    # component the old first-raise boundary stopped on). Promoting every collected draft
+    # would surface multiple duplicate, carrier-less event-level questions the old path
+    # never produced. The remaining ``item_scoped_clarifications`` are left in place
+    # (unused by the ``needs_clarification`` finalize) so a scoped re-estimate — where a
+    # single component's un-costable outcome is not "whole-event" — can still read back
+    # its component-named question.
+    context.clarification_questions = [context.item_scoped_clarifications[0].event_level_question]
     return PipelineResult(PipelineOutcome.NEEDS_CLARIFICATION, None)
 
 
