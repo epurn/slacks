@@ -20,15 +20,17 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.enums import DerivedItemStatus
 from app.estimator.label_step import LabelInput
 from app.estimator.pipeline import (
     CandidateDraft,
+    ClarificationDraft,
     EstimationContext,
     PipelineOutcome,
+    ResolvedFoodItem,
 )
 from app.models.derived import (
     ClarificationAnswer,
@@ -106,7 +108,13 @@ def _persist_food(session: Session, run: EstimationRun, context: EstimationConte
     """
 
     leftover = context.unresolved_food_candidates + context.pending_official_candidates
-    if context.resolved_food_items or leftover:
+    # Item-scoped clarified components (FTY-329) are persisted separately (as
+    # ``unresolved`` rows owning their question) by
+    # :func:`_persist_item_scoped_clarifications`; counting them here keeps the food
+    # step's "sort every candidate into exactly one bucket" invariant, so the
+    # all-candidates fallback below never re-persists a component that already resolved
+    # or already owns an item-scoped question.
+    if context.resolved_food_items or leftover or context.item_scoped_clarifications:
         _persist_resolved_food(session, run, context)
         for draft in leftover:
             session.add(_unresolved_food_row(run, draft))
@@ -326,3 +334,149 @@ def _persist_clarification_questions(
                 position=position,
             )
         )
+
+
+def _persist_item_scoped_clarifications(
+    session: Session, run: EstimationRun, context: EstimationContext
+) -> None:
+    """Persist each un-costable component as an ``unresolved`` row owning its question.
+
+    The emit half of item-scoped partial resolution (FTY-329): the costable siblings are
+    already persisted ``resolved`` by :func:`_persist_candidates`; here each collected
+    :class:`~app.estimator.pipeline.ComponentClarification` becomes an ``unresolved``
+    ``derived_food_items`` row (no calories) plus a single **item-scoped**
+    ``clarification_questions`` row carrying the ``derived_food_item_id`` carrier, so the
+    answer-triggered re-estimate can re-cost exactly that component. As with the
+    event-level path a fresh round first replaces the event's unanswered question rows
+    (answered rows and their answers are kept — they carry accumulated detail); on a
+    first-pass partial there are no prior rows and the delete is a no-op. The question
+    text names the component by its bounded, schema-validated parse ``name`` only — never
+    raw diary text (the ``before_insert`` guard on the carrier fails closed otherwise).
+    """
+
+    answered_ids = select(ClarificationAnswer.question_id)
+    session.execute(
+        delete(ClarificationQuestion).where(
+            ClarificationQuestion.log_event_id == run.log_event_id,
+            ClarificationQuestion.id.not_in(answered_ids),
+        )
+    )
+    for position, clarification in enumerate(context.item_scoped_clarifications):
+        food = _unresolved_food_row(run, clarification.candidate)
+        session.add(food)
+        session.flush()  # assign food.id for the item-scoped carrier
+        session.add(
+            ClarificationQuestion(
+                log_event_id=run.log_event_id,
+                user_id=run.user_id,
+                question_text=clarification.question.text,
+                options=clarification.question.options,
+                derived_food_item_id=food.id,
+                position=position,
+            )
+        )
+
+
+def _delete_component_open_questions(
+    session: Session, log_event_id: uuid.UUID, component_id: uuid.UUID
+) -> None:
+    """Drop a component's still-**unanswered** item-scoped questions (FTY-329).
+
+    Answered rows are retained — the unique ``question_id`` on
+    ``clarification_answers`` is the answer-flow idempotency anchor and the row carries
+    accumulated detail — so only the open questions this scoped round supersedes are
+    removed. Used both when the component finally resolves (its open ask is moot) and
+    when a fresh scoped round replaces it with a new question.
+    """
+
+    answered_ids = select(ClarificationAnswer.question_id)
+    session.execute(
+        delete(ClarificationQuestion).where(
+            ClarificationQuestion.log_event_id == log_event_id,
+            ClarificationQuestion.derived_food_item_id == component_id,
+            ClarificationQuestion.id.not_in(answered_ids),
+        )
+    )
+
+
+def apply_scoped_resolution(
+    session: Session, run: EstimationRun, component: DerivedFoodItem, item: ResolvedFoodItem
+) -> None:
+    """Advance one open component to ``resolved`` **in place** (FTY-329 scoped re-estimate).
+
+    The answered component's own row is updated — never deleted and re-inserted — so its
+    id (and the ``derived_food_item_id`` carrier of its answered question) is preserved
+    and the component stays represented exactly once. The row gets the re-costed
+    calories/macros/grams and an original-value snapshot, plus a fresh
+    ``evidence_sources`` provenance row; the already-``resolved`` siblings are never
+    touched. The component's still-open questions are dropped (the ask is answered); the
+    answered question row and its answer are kept.
+    """
+
+    component.status = DerivedItemStatus.RESOLVED
+    component.name = item.name
+    component.quantity_text = item.quantity_text
+    component.unit = item.unit
+    component.amount = item.amount
+    component.grams = item.grams
+    component.calories = item.calories
+    component.protein_g = item.protein_g
+    component.carbs_g = item.carbs_g
+    component.fat_g = item.fat_g
+    component.calories_estimated = item.calories
+    component.protein_g_estimated = item.protein_g
+    component.carbs_g_estimated = item.carbs_g
+    component.fat_g_estimated = item.fat_g
+    session.add(component)
+    session.add(
+        EvidenceSource(
+            user_id=run.user_id,
+            log_event_id=run.log_event_id,
+            derived_food_item_id=component.id,
+            product_id=item.product_id,
+            source_type=item.source_type,
+            source_ref=item.source_ref,
+            content_hash=item.content_hash,
+            fetched_at=item.fetched_at,
+            calories_per_100g=item.calories_per_100g,
+            protein_per_100g=item.protein_per_100g,
+            carbs_per_100g=item.carbs_per_100g,
+            fat_per_100g=item.fat_per_100g,
+            basis=item.basis,
+            field_provenance=item.field_provenance,
+            assumptions=list(item.assumptions) or None,
+        )
+    )
+    _delete_component_open_questions(session, run.log_event_id, component.id)
+
+
+def replace_component_question(
+    session: Session, run: EstimationRun, component: DerivedFoodItem, question: ClarificationDraft
+) -> None:
+    """Keep a component ``unresolved`` and swap its open ask for a fresh one (FTY-329).
+
+    When a scoped re-estimate still cannot cost the answered component, the component
+    stays ``unresolved`` and its still-open questions are replaced by ``question`` (the
+    accumulated answered rows are retained). ``position`` is placed after any retained
+    rows so ordering stays stable.
+    """
+
+    _delete_component_open_questions(session, run.log_event_id, component.id)
+    next_position = (
+        session.scalar(
+            select(func.max(ClarificationQuestion.position)).where(
+                ClarificationQuestion.log_event_id == run.log_event_id
+            )
+        )
+        or 0
+    )
+    session.add(
+        ClarificationQuestion(
+            log_event_id=run.log_event_id,
+            user_id=run.user_id,
+            question_text=question.text,
+            options=question.options,
+            derived_food_item_id=component.id,
+            position=next_position + 1,
+        )
+    )

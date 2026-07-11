@@ -86,6 +86,7 @@ from app.estimator.pipeline import (
     ResolvedFoodItem,
     StepError,
     StepFailed,
+    collect_component_clarification,
 )
 from app.settings import EstimatorClarifyMode
 
@@ -169,7 +170,16 @@ class FoodResolveStep:
                 has_brand=_is_official_eligible(candidate),
                 amount_kind=amount_kind(candidate.unit, candidate.amount, candidate.quantity_text),
             )
-            self._dispatch(context, candidate, index)
+            try:
+                self._dispatch(context, candidate, index)
+            except NeedsClarification as exc:
+                # FTY-329: an un-costable component is collected as its own item-scoped
+                # outcome rather than aborting the whole pipeline, so the entry's
+                # costable siblings still resolve. The worker decides mixed
+                # (partially_resolved) vs. nothing-costable (needs_clarification).
+                collect_component_clarification(
+                    context, context.food_candidates[index], exc.reason, step=self.name
+                )
 
         context.record_step(self.name, "ok")
 
