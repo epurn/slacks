@@ -258,7 +258,15 @@ def decode_proposal_ref(
     except (ValueError, AttributeError) as exc:
         raise InvalidProposalRef("malformed proposal reference") from exc
 
-    if not hmac.compare_digest(signature, _sign(payload_b64, secret)):
+    # Both segments are still untrusted client bytes here: a non-ASCII payload
+    # segment breaks ``_sign``'s ASCII encoding, and a non-ASCII signature segment
+    # breaks ``compare_digest`` (str comparison is ASCII-only). Both must fail closed
+    # as a malformed reference, not escape as an unmapped ``UnicodeError``/``TypeError``.
+    try:
+        signature_ok = hmac.compare_digest(signature, _sign(payload_b64, secret))
+    except (UnicodeError, TypeError) as exc:
+        raise InvalidProposalRef("malformed proposal reference") from exc
+    if not signature_ok:
         raise InvalidProposalRef("bad signature")
 
     try:

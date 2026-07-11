@@ -180,6 +180,21 @@ def test_tampered_reference_is_rejected() -> None:
         decode_proposal_ref(tampered, SECRET)
 
 
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        "é.c2ln",  # non-ASCII payload segment: breaks _sign's ASCII encode
+        "cGF5.é",  # non-ASCII signature segment: breaks compare_digest (ASCII-only)
+        "é.é",  # both segments non-ASCII
+    ],
+)
+def test_non_ascii_reference_fails_closed_not_with_a_server_error(malformed: str) -> None:
+    # Untrusted, non-ASCII proposal refs must raise InvalidProposalRef (→ 422), never
+    # escape as an unmapped UnicodeError/TypeError (→ 500): the fail-closed contract.
+    with pytest.raises(InvalidProposalRef):
+        decode_proposal_ref(malformed, SECRET)
+
+
 def test_reference_signed_with_another_secret_is_rejected() -> None:
     proposal = _exact_proposal(uuid.uuid4(), uuid.uuid4())
     ref = encode_proposal_ref(proposal, "a-different-secret")
@@ -660,6 +675,31 @@ def test_apply_api_unknown_reference_is_422(client: TestClient, db_engine: Engin
 
     assert resp.status_code == 422
     assert resp.json()["detail"]["error"] == "proposal_not_resolvable"
+
+
+@pytest.mark.parametrize(
+    ("case", "malformed_ref"),
+    [("payload", "é.c2ln"), ("signature", "cGF5.é"), ("both", "é.é")],
+)
+def test_apply_api_non_ascii_reference_is_422_no_mutation(
+    client: TestClient, db_engine: Engine, session: Session, case: str, malformed_ref: str
+) -> None:
+    # A malformed non-ASCII proposal_ref must render the contracted 422
+    # proposal_not_resolvable with no mutation — never a 500 from an unmapped
+    # UnicodeError/TypeError in signature verification.
+    user_id, auth = register(client, f"ee-api-nonascii-{case}@example.com")
+    item_id = seed_food_item(db_engine, user_id, calories=300.0)
+
+    resp = client.post(
+        _apply_url(user_id, item_id),
+        headers={"Authorization": auth},
+        json={"proposal_ref": malformed_ref},
+    )
+
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["error"] == "proposal_not_resolvable"
+    session.expire_all()
+    assert session.get(DerivedFoodItem, item_id).calories == pytest.approx(300.0)  # type: ignore[union-attr]
 
 
 def test_apply_api_expired_reference_is_422(client: TestClient, db_engine: Engine) -> None:
