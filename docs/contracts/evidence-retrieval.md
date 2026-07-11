@@ -1268,8 +1268,9 @@ Only **low-trust or incomplete** food items are eligible for the entry point:
   rough totals (FTY-301);
 - **`user_text`** items with missing or roughly gap-filled macros — a user-stated
   calorie total whose macros are `unknown`/`null` in the read shape, or carry a
-  non-null `estimate_basis` (today only the `comparable_reference` aggregate
-  basis, FTY-281);
+  non-null `estimate_basis`: `comparable_reference` for the comparable aggregate
+  (FTY-281), `reference_source` for the single-source reference lookup, or
+  `model_prior` for the model-prior cold-pass (FTY-350);
 - **`reference_source`** items — rough estimates transcribed from searched
   public reference pages, including snippet-derived records (FTY-314).
 
@@ -1284,13 +1285,12 @@ source-hierarchy tier. `daily-summary.md` contracts the matching client-side
 nudge signal in the same terms, and the propose route evaluates the same rule
 server-side from the item's `evidence_sources` row (rejecting an ineligible
 target with `not_upgradeable`, `food-resolution.md`), so the rendered nudge and
-the server-validated eligibility can never disagree. One deliberate boundary: a
-`user_text` macro gap-filled by a single-source reference lookup or a
-model-prior cold-pass records `field_provenance = estimated` only on the
-evidence row and surfaces **no** `estimate_basis` in the read shape today, so
-such an item keeps the normal correction levers; if a later story surfaces those
-fills through the existing `estimate_basis` seam, they become eligible under
-this same rule with no new contract surface.
+the server-validated eligibility can never disagree. For a `user_text` macro
+gap-filled by the comparable aggregate, a single-source reference lookup, or the
+model-prior cold-pass, `estimate_basis` is still **read-time-derived** from the
+item's own content-free assumptions marker and records only the fill tier; it
+adds no persisted column and does not change the item's `source_type`, which
+stays `user_text`.
 
 ### Proposal (read shape)
 
