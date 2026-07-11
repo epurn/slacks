@@ -8,6 +8,7 @@ import {
   getDailySummary as getDailySummaryApi,
   type DailySummaryDTO,
 } from "@/api/dailySummary";
+import { getFoodSuggestions as getFoodSuggestionsApi } from "@/api/foodSuggestions";
 import { getLabelProposal as getLabelProposalApi } from "@/api/labelProposal";
 import {
   answerClarification as answerClarificationApi,
@@ -18,7 +19,10 @@ import {
   listTodayLogEventEntries as listTodayLogEventEntriesApi,
   type LogEventDTO,
 } from "@/api/logEvents";
-import { type SavedFoodDTO } from "@/api/savedFoods";
+import {
+  searchSavedFoods as searchSavedFoodsApi,
+  type SavedFoodDTO,
+} from "@/api/savedFoods";
 import { useCorrectionVisualReviewSeam } from "@/components/correction/visualReviewSeam";
 import {
   type OutboxStore,
@@ -51,6 +55,7 @@ import {
 } from "./helpers";
 import { useCorrectionSheet } from "./useCorrectionSheet";
 import { useDeleteEvent } from "./useDeleteEvent";
+import { useQuickAddSuggestions } from "./useQuickAddSuggestions";
 import { useEntryResolveBeats } from "./useEntryResolveBeats";
 import { useLabelProposal } from "./useLabelProposal";
 import "./visualReviewEntryRows";
@@ -69,6 +74,10 @@ export type UseTodayDataParams = {
   pollIntervalMs: number;
   getLabelProposal: typeof getLabelProposalApi;
   getDailySummary: typeof getDailySummaryApi;
+  /** Quick-add suggestions read (FTY-341) — injectable for tests. */
+  getSuggestions: typeof getFoodSuggestionsApi;
+  /** Saved-food typeahead used to hydrate a saved-food chip (FTY-341/053). */
+  searchSavedFoods: typeof searchSavedFoodsApi;
   outboxStore: OutboxStore;
   retryIntervalMs?: number;
   generateKey: () => string;
@@ -97,6 +106,8 @@ export function useTodayData({
   pollIntervalMs,
   getLabelProposal,
   getDailySummary,
+  getSuggestions,
+  searchSavedFoods,
   outboxStore,
   retryIntervalMs,
   generateKey,
@@ -186,6 +197,10 @@ export function useTodayData({
   });
   const pendingSavedFoodById = useRef(new Map<string, SavedFoodDTO | null>());
 
+  // Quick-add suggestions refresh (FTY-341), called from the submit-success path
+  // below. Held behind a ref so the memoized submit bridge never re-creates.
+  const refreshSuggestionsRef = useRef<() => void>(() => {});
+
   // Today's optimistic-timeline operations, handed to the shared submit machine
   // (FTY-147). The machine owns create/optimistic/offline/rollback; the
   // saved-food synthetic item (FTY-053) stays here, behind these callbacks.
@@ -224,6 +239,8 @@ export function useTodayData({
           return { ...rest, [server.id]: updated };
         });
         pendingSavedFoodById.current.delete(optimisticId);
+        // Refresh quick-add suggestions (FTY-341): the rank just changed.
+        refreshSuggestionsRef.current();
       },
       rollbackOptimistic(optimisticId) {
         removeOptimisticEvent(setEvents, setItemsByEvent, optimisticId);
@@ -256,7 +273,7 @@ export function useTodayData({
     setSubmitting,
     submitError,
     setSubmitError,
-    handleSubmit,
+    handleSubmit: submitLogEntry,
     reachability,
     offlineEntries,
     queuedCount,
@@ -615,6 +632,26 @@ export function useTodayData({
     (hasPendingWork(events) || hasFreshResolveAwaitingItems);
   useIntervalPolling(shouldPoll, pollIntervalMs, pollOnce);
 
+  // Quick-add suggestion chips (FTY-341): focus-edge + post-submit fetches,
+  // the deliberate prefill-on-tap, and the submit/typeahead wrappers that
+  // join or supersede an in-flight saved-food hydration (FTY-053 skip path).
+  const { suggestions, refreshSuggestions, handleSelectSuggestion, handleComposerTextChange, handleSubmit, selectSavedFood } =
+    useQuickAddSuggestions({
+    apiSession,
+    isActive,
+    getSuggestions,
+    searchSavedFoods,
+    setText,
+    setSubmitting,
+    inputRef,
+    setSelectedSavedFood,
+    selectedSavedFoodRef,
+    submitLogEntry,
+  });
+  useEffect(() => {
+    refreshSuggestionsRef.current = refreshSuggestions;
+  });
+
   // Offline-queued captures (FTY-104, harvested onto Today in FTY-147). Each
   // renders as a dedicated, uncounted OfflineEntryRow in the timeline — never an
   // offline branch inside EntryRow (which carries FTY-148/149 behaviour). They
@@ -684,12 +721,14 @@ export function useTodayData({
     sheetVisible,
     inputRef,
     text,
-    setText,
+    setText, handleComposerTextChange,
     submitting,
     submitError,
     reachability,
     queuedCount,
-    setSelectedSavedFood,
+    setSelectedSavedFood: selectSavedFood,
+    suggestions,
+    handleSelectSuggestion,
     refresh,
     handleSubmit,
     handleBarcodeScanned,

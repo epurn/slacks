@@ -1,0 +1,65 @@
+# FTY-341: Today quick-add suggestion chips. Opens the `today.suggestions`
+# visual-review preset (a populated /food-suggestions ranking on an otherwise
+# empty day) by deep link, proves the chip row renders above the composer in
+# both themes, and proves a chip tap PREFILLS the composer (never a one-tap
+# log): after tapping the saved-food chip, its `submit_phrase` appears in the
+# composer, ready for the user's own "Add" tap.
+#
+# Hermetic: the preset seeds its ranking through the shared visual-review
+# registry (e2e/visualReview/presets.ts) against the E2E mock fetch — no live
+# backend, no scripted logging. The `visual-review-settled:today.suggestions`
+# marker only appears once Today has navigated, loaded, and gone network-quiet,
+# so each `extendedWaitUntil` on it is the load-bearing assertion.
+#
+# Dialog-free iOS launch (FTY-269): every `openLink` is followed by the tolerant
+# `common/accept-open-in-fatty.yaml` subflow.
+#
+# Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
+# directory-level Maestro runs launch the installed app under test reliably.
+appId: com.fatty
+---
+- launchApp:
+    clearState: false
+
+# today.suggestions (light): the chip row renders above the composer in server
+# order — the saved food first, then history-only candidates.
+- openLink: "fatty://__visual-review?preset=today.suggestions&theme=light"
+- runFlow: common/accept-open-in-fatty.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.suggestions"
+    timeout: 20000
+- assertVisible:
+    id: today-screen
+- assertVisible:
+    id: quick-add-chips
+# iOS folds each chip's visible text into its parent Pressable's
+# accessibilityLabel ("Suggestion: <label>"), so assert the folded label with a
+# full-string regex rather than the bare glyph string (see e2e/visualReview and
+# docs/verification/FTY-341/README.md).
+- assertVisible:
+    text: ".*Suggestion: Chicken burrito bowl.*"
+- assertVisible:
+    text: ".*Suggestion: Greek yogurt.*"
+- takeScreenshot: today-quick-add-light
+
+# Prefill (light): tapping the saved-food chip drops its phrase into the
+# composer — the deliberate one-more-tap-to-submit behaviour, not a silent log.
+- tapOn:
+    text: ".*Suggestion: Chicken burrito bowl.*"
+- assertVisible:
+    text: ".*my usual burrito bowl.*"
+- takeScreenshot: today-quick-add-prefilled-light
+
+# today.suggestions (dark): the same calm row in dark mode.
+- openLink: "fatty://__visual-review?preset=today.suggestions&theme=dark"
+- runFlow: common/accept-open-in-fatty.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.suggestions"
+    timeout: 20000
+- assertVisible:
+    id: quick-add-chips
+- assertVisible:
+    text: ".*Suggestion: Chicken burrito bowl.*"
+- takeScreenshot: today-quick-add-dark

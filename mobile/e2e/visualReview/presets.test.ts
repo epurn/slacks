@@ -21,6 +21,7 @@ import { toApiSession } from '@/state/session';
 import { listTodayLogEventEntries } from '@/api/logEvents';
 import { getDailySummary, getDailySummaryRange } from '@/api/dailySummary';
 import { listWeightEntries } from '@/api/weightEntries';
+import { getFoodSuggestions } from '@/api/foodSuggestions';
 
 const apiSession = toApiSession(E2E_SESSION);
 const to = '2026-06-29';
@@ -33,6 +34,7 @@ afterEach(() => {
 const IN_SCOPE = [
   'today.populated',
   'today.empty',
+  'today.suggestions',
   'today.signed_out',
   'trends.populated',
   'trends.empty',
@@ -81,6 +83,21 @@ describe('today.empty seeds the calm empty day', () => {
     const summary = await getDailySummary(apiSession, '2026-01-01', mockFetch);
     expect(summary.has_intake).toBe(false);
     expect(summary.intake.calories).toBe(0);
+  });
+});
+
+describe('today.suggestions seeds the quick-add ranking through the real client', () => {
+  it('serves a populated, ordered suggestion list on an empty day', async () => {
+    activateVisualReviewPreset('today.suggestions', null);
+    const mockFetch = createE2EMockFetch();
+    const response = await getFoodSuggestions(apiSession, undefined, mockFetch);
+    expect(response.items.length).toBeGreaterThan(1);
+    // The saved food ranks first and carries a saved_food_id (estimator-skip path);
+    // the row renders this exact server order.
+    expect(response.items[0]?.saved_food_id).not.toBeNull();
+    // The day itself stays empty so the shot focuses on the chips.
+    const entries = await listTodayLogEventEntries(apiSession, '2026-01-01', mockFetch);
+    expect(entries).toHaveLength(0);
   });
 });
 

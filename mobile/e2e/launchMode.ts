@@ -598,6 +598,14 @@ export function createE2EMockFetch(): typeof fetch {
       return json(E2E_RERESOLVED_ITEM);
     }
 
+    // /food-suggestions — the FTY-340 quick-add ranking read (FTY-341 chip row).
+    // The default is an empty list so the chip row silently absents in every flow
+    // that does not seed it; the `today.suggestions` visual-review preset seeds a
+    // populated ranking via its `responses` override (handled above).
+    if (pathEnd.endsWith('/food-suggestions') && method === 'GET') {
+      return json({ items: [], limit: 8 });
+    }
+
     // /saved-foods — the FTY-053 typeahead search backing the correction flow's
     // saved-food pick. Returns the seeded saved food when the query prefix/
     // substring matches its name (mirrors the server's contains semantics), so

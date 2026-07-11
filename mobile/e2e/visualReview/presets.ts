@@ -20,12 +20,33 @@
 
 import { registerVisualReviewPreset } from './registry';
 import type { VisualReviewFetchContext, VisualReviewResponse } from './types';
+import type { FoodSuggestionsResponse } from '@/api/foodSuggestions';
 import {
   E2E_DAILY_SUMMARY,
   E2E_RESOLVE_ENTRY,
   E2E_RESOLVE_EVENT,
   E2E_RESOLVE_SUMMARY,
+  E2E_SAVED_FOOD,
 } from '../fixtures';
+
+// Quick-add suggestions (FTY-341) the `today.suggestions` preset seeds. Server
+// order is canonical, so this is exactly what the chip row renders. The saved
+// food ranks first — its `label` is E2E_SAVED_FOOD.name, so the mock
+// `/saved-foods?q=<label>` search hydrates it for the estimator-skip path; the
+// rest are history-only candidates with no saved_food_id.
+const E2E_FOOD_SUGGESTIONS: FoodSuggestionsResponse = {
+  items: [
+    {
+      label: E2E_SAVED_FOOD.name,
+      submit_phrase: 'my usual burrito bowl',
+      saved_food_id: E2E_SAVED_FOOD.id,
+      score: 3.1416,
+    },
+    { label: 'Greek yogurt', submit_phrase: 'greek yogurt', saved_food_id: null, score: 2.2 },
+    { label: 'Black coffee', submit_phrase: 'black coffee', saved_food_id: null, score: 1.4 },
+  ],
+  limit: 8,
+};
 
 /** Match a GET request whose path ends with `suffix`. */
 function get(suffix: string): (ctx: VisualReviewFetchContext) => boolean {
@@ -59,6 +80,22 @@ registerVisualReviewPreset({
   route: '/',
   settledPath: '/',
   responses: [
+    { match: get('/log-events/by-date'), body: EMPTY_LIST },
+    { match: get('/log-events'), body: EMPTY_LIST },
+    { match: get('/daily-summary'), body: E2E_DAILY_SUMMARY },
+  ],
+});
+
+// today.suggestions — the quick-add chip row (FTY-341) populated: /food-suggestions
+// serves a ranked list (a saved food first, then history-only candidates), on the
+// otherwise-empty calm day, so Today renders the scrollable chip row above the
+// composer. The empty day + zero-intake hero keep the shot focused on the chips.
+registerVisualReviewPreset({
+  name: 'today.suggestions',
+  route: '/',
+  settledPath: '/',
+  responses: [
+    { match: get('/food-suggestions'), body: E2E_FOOD_SUGGESTIONS },
     { match: get('/log-events/by-date'), body: EMPTY_LIST },
     { match: get('/log-events'), body: EMPTY_LIST },
     { match: get('/daily-summary'), body: E2E_DAILY_SUMMARY },
