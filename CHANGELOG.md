@@ -12,8 +12,17 @@
   the matching `SLACKS_*` key — e.g. `FATTY_AUTH_SECRET` → `SLACKS_AUTH_SECRET`,
   `FATTY_DATABASE_URL` → `SLACKS_DATABASE_URL`. Backend tooling variables move
   too: `FATTY_VERIFY_SKIP_INSTALL` → `SLACKS_VERIFY_SKIP_INSTALL` and
-  `FATTY_TEST_DATABASE_URL` → `SLACKS_TEST_DATABASE_URL`. (The estimator/LLM keys
-  and the Docker Compose stack are renamed in immediately-following stories.)
+  `FATTY_TEST_DATABASE_URL` → `SLACKS_TEST_DATABASE_URL`.
+- **Self-host Docker identity renamed to Slacks (FTY-335).** The compose project is
+  now `slacks`, `.env.example` documents only `SLACKS_*` application/provider
+  keys, local Postgres defaults are `POSTGRES_USER=slacks`,
+  `POSTGRES_PASSWORD=slacks`, `POSTGRES_DB=slacks`, and
+  `SLACKS_DATABASE_URL=postgresql://slacks:slacks@postgres:5432/slacks`. The
+  backend image runs as `slacks` (UID/GID 10001) with `HOME=/home/slacks`, and
+  the SearXNG dev placeholder uses the Slacks name. Existing local stacks must
+  rename `.env` keys and recreate the Postgres volume with `docker compose down
+  -v && cp .env.example .env && docker compose up`, or manually rename the
+  database role/database before restarting.
 
 ## v1.0.0 — 2026-06-28
 
@@ -83,15 +92,15 @@ First stable release of Slacks, an iOS-first, self-hostable calorie and macro tr
 
 - Docker Compose self-host stack: Postgres, Redis, FastAPI, and a Celery worker over plain HTTP from a clean checkout (FTY-011).
 - Alembic migrations run automatically on first `docker compose up` via a dedicated `migrate` service; the API and worker do not start until migrations complete (FTY-072).
-- `.env.example` template with inline documentation for all `FATTY_*` configuration variables (FTY-072).
+- `.env.example` template with inline documentation for all `SLACKS_*` configuration variables (FTY-072).
 - Health endpoints: `GET /healthz` (stack liveness) and `GET /healthz/sources` (per-provider availability and configuration status).
 - Egress policy visibility: `GET /healthz/egress` reports the active official-fetch host allowlist.
-- **Claude subscription provider** (`FATTY_LLM_PROVIDER=claude_code`): runs estimation through a locally installed Claude Code CLI on the operator's own Claude monthly plan — no API key, no per-token billing. The backend image ships a pinned Claude Code CLI; a one-time `claude login` establishes a session in a persistent Docker volume shared by `api` and `worker` (FTY-087, FTY-088).
-- **Keyless local-model provider** (`FATTY_LLM_PROVIDER=openai_compatible`, no `FATTY_LLM_API_KEY`): point Slacks at a local Ollama, LM Studio, or vLLM instance with no API key — the adapter omits the `Authorization` header for keyless local runtimes (FTY-089).
+- **Claude subscription provider** (`SLACKS_LLM_PROVIDER=claude_code`): runs estimation through a locally installed Claude Code CLI on the operator's own Claude monthly plan — no API key, no per-token billing. The backend image ships a pinned Claude Code CLI; a one-time `claude login` establishes a session in a persistent Docker volume shared by `api` and `worker` (FTY-087, FTY-088).
+- **Keyless local-model provider** (`SLACKS_LLM_PROVIDER=openai_compatible`, no `SLACKS_LLM_API_KEY`): point Slacks at a local Ollama, LM Studio, or vLLM instance with no API key — the adapter omits the `Authorization` header for keyless local runtimes (FTY-089).
 - `GET /healthz/sources` now reports the `claude_code` LLM provider's `enabled`/`available` status so operators can confirm the CLI is installed and the session is valid without making any estimation calls (FTY-088).
 - Compose network hardening: Postgres and Redis are no longer exposed to the host; worker container has restart policies and health-check probes (FTY-109).
 - Database readiness probe: `/readyz` endpoint waits for Postgres to be ready before reporting the backend as alive (FTY-117).
-- Non-root backend container: the API and worker run as a dedicated non-root user `fatty` (UID/GID 10001) for improved container security posture (FTY-116).
+- Non-root backend container: the API and worker run as a dedicated non-root user `slacks` (UID/GID 10001) for improved container security posture (FTY-116).
 - Baseline security headers: production-grade HTTP security headers (HSTS, X-Content-Type-Options, Content-Security-Policy, X-Frame-Options) and interactive API docs gated to localhost-only in production (FTY-112).
 - Auth endpoint rate-limiting: per-IP and per-account rate limits on `/login` and `/register` endpoints prevent brute-force attacks (FTY-118).
 - Dependabot expansion: Dependabot coverage extended to backend Python, frontend JavaScript, and Docker ecosystem dependencies, with Expo-SDK-specific ignores to prevent breaking changes in SDK-managed mobile code (FTY-108, FTY-121, FTY-125, FTY-126).

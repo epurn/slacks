@@ -149,14 +149,14 @@ and `test` the docs remain available.
 
 ## Container Security
 
-- The backend image runs as a dedicated non-root system user (`fatty`, UID/GID
+- The backend image runs as a dedicated non-root system user (`slacks`, UID/GID
   10001) rather than root (FTY-116). A fixed UID/GID keeps ownership stable
   across rebuilds and named-volume mounts.
-- All runtime paths owned by the `fatty` user: `/app` (app source + `.venv`),
-  `/home/fatty` (CLI scratch / cache), `/claude-config` (Claude Code session
+- All runtime paths owned by the `slacks` user: `/app` (app source + `.venv`),
+  `/home/slacks` (CLI scratch / cache), `/claude-config` (Claude Code session
   volume mountpoint — inherits owner on first use), and `/codex-config`
   (`CODEX_HOME` for Codex CLI state — inherits owner on first use).
-- `HOME` is set to `/home/fatty` so local CLI providers have a writable home
+- `HOME` is set to `/home/slacks` so local CLI providers have a writable home
   directory without falling back to root-owned paths.
 - The backend image includes pinned first-party CLI runtimes for `claude_code`
   and `codex`, but no provider credentials. Claude Code session state lives only

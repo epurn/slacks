@@ -1,7 +1,7 @@
-# SearXNG settings for the Fatty local / self-host dev stack (FTY-165).
+# SearXNG settings for the Slacks local / self-host dev stack (FTY-165).
 #
 # This is a MINIMAL private-instance configuration. It inherits every upstream
-# default (`use_default_settings: true`) and overrides only what Fatty's
+# default (`use_default_settings: true`) and overrides only what Slacks'
 # official-source search adapter (FTY-164) requires:
 #
 #   - JSON output format, which the adapter consumes at
@@ -26,7 +26,7 @@ server:
   # reproducible. If you ever expose this instance (this stack deliberately does
   # not), override it with a real random value via the ${SEARXNG_SECRET}
   # environment variable. Do NOT treat this value as a credential.
-  secret_key: "fatty-dev-searxng-placeholder-not-a-secret"
+  secret_key: "slacks-dev-searxng-placeholder-not-a-secret"
 
   # Keep the bot limiter off: the only caller is the trusted backend on the
   # internal network, and the limiter would otherwise rate-limit / block it as a
