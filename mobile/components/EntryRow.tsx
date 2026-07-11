@@ -282,9 +282,23 @@ export function EntryRow({
     );
   }
 
+  // Plain terminal-status row (e.g. completed with no items to show). When the
+  // swipe wrapper supplies the Delete custom action (FTY-322), the row becomes a
+  // single accessible element carrying its text + status so VoiceOver has a
+  // focusable target to expose the action on; without it (past-day/read-only or
+  // no delete handler) the row renders exactly as before.
   return (
     <View style={styles.container}>
-      <View style={styles.row}>
+      <View
+        style={styles.row}
+        {...(deleteA11y
+          ? {
+              accessible: true,
+              accessibilityLabel: `${event.raw_text}, ${label}`,
+              ...deleteA11y,
+            }
+          : null)}
+      >
         <StatusIcon status={event.status} />
         <View style={styles.body}>
           <Text style={styles.text} numberOfLines={3}>

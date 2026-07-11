@@ -26,6 +26,7 @@
 import { AccessibilityInfo } from 'react-native';
 import type { PermissionResponse } from 'expo';
 import type { useCameraPermissions } from 'expo-camera';
+import type { LogEventDTO } from '@/api/logEvents';
 import { markOnboardingComplete } from '@/state/onboardingComplete';
 import type { SessionStore } from '@/state/sessionStore';
 import type { ServerConnectionStore } from '@/state/serverConnectionStore';
@@ -66,6 +67,9 @@ import {
   E2E_DELETE_EVENT,
   E2E_DELETE_ENTRY,
   E2E_DELETE_SUMMARY,
+  E2E_PENDING_DELETE_RAW_TEXT,
+  E2E_PENDING_DELETE_EVENT_ID,
+  E2E_PENDING_DELETE_EVENT,
   e2eWeightEntries,
   e2eDailySummaryRange,
   E2E_SAVED_FOOD,
@@ -233,6 +237,13 @@ export function createE2EMockFetch(): typeof fetch {
   // zero — the running-app proof the row stays gone. Keyed on its own raw_text.
   let deleteStage: 0 | 1 = 0;
   let deleteVoided = false;
+  // FTY-322 pending-row deletion: 0 before the log, 1 once the forever-pending
+  // entry is created; `pendingDeleteVoided` flips when ITS DELETE lands. The
+  // event stays `pending` on every read until then — deterministic proof that a
+  // still-estimating server row is deletable (no race against the poll that
+  // resolves the main delete entry). Keyed on its own raw_text.
+  let pendingDeleteStage: 0 | 1 = 0;
+  let pendingDeleteVoided = false;
   // How phase 2 was reached — decides which day-list GET serves (see above).
   let resolvedVia: 'answer' | 'resubmit' | null = null;
   // FTY-183 correction flow: set once the saved food is submitted so GET
@@ -306,7 +317,13 @@ export function createE2EMockFetch(): typeof fetch {
       pathEnd.includes('/log-events/') &&
       !pathEnd.endsWith('/by-date')
     ) {
-      deleteVoided = true;
+      // Id-aware: voiding the still-pending entry must not also empty the main
+      // delete entry's reads (delete.yaml exercises both, one after the other).
+      if (pathEnd.endsWith(`/${E2E_PENDING_DELETE_EVENT_ID}`)) {
+        pendingDeleteVoided = true;
+      } else {
+        deleteVoided = true;
+      }
       return new Response(null, { status: 204 });
     }
 
@@ -325,8 +342,13 @@ export function createE2EMockFetch(): typeof fetch {
       if (correctionStage === 1) return json([E2E_CORRECTION_ENTRY]);
       if (targetStage === 1) return json([E2E_TARGET_ENTRY]);
       if (barcodeStage === 1) return json([E2E_BARCODE_ENTRY]);
-      // FTY-322 delete flow: the item row until the void lands, then nothing.
-      if (deleteStage === 1) return json(deleteVoided ? [] : [E2E_DELETE_ENTRY]);
+      // FTY-322 delete flows: the item row until the void lands, then nothing.
+      // The pending-deletion entry never appears here — it never completes.
+      if (deleteStage === 1 || pendingDeleteStage === 1) {
+        return json(
+          deleteStage === 1 && !deleteVoided ? [E2E_DELETE_ENTRY] : [],
+        );
+      }
       if (phase === 0) return json([]);
       if (phase === 1) return json([{ event: E2E_CLARIFY_EVENT, items: [] }]);
       return json([
@@ -399,6 +421,13 @@ export function createE2EMockFetch(): typeof fetch {
           deleteStage = 1;
           return json(E2E_DELETE_PENDING_EVENT, 201);
         }
+        // FTY-322 pending-row deletion: the entry stays pending on every read
+        // (the estimate never lands), so the flow deterministically swipes and
+        // deletes a genuinely still-estimating skeleton row.
+        if (rawTextOf(init) === E2E_PENDING_DELETE_RAW_TEXT) {
+          pendingDeleteStage = 1;
+          return json(E2E_PENDING_DELETE_EVENT, 201);
+        }
         if (phase === 0) {
           phase = 1;
           return json(E2E_CLARIFY_EVENT, 201);
@@ -424,9 +453,18 @@ export function createE2EMockFetch(): typeof fetch {
       // The barcode flow's GET likewise lists its completed entry so a
       // refresh/poll keeps the reconciled row (items ride the feed above).
       if (barcodeStage === 1) return json([E2E_BARCODE_EVENT]);
-      // FTY-322 delete flow: list the completed entry until the void lands, then
-      // an empty day — the soft-void excludes it from the list read (FTY-321).
-      if (deleteStage === 1) return json(deleteVoided ? [] : [E2E_DELETE_EVENT]);
+      // FTY-322 delete flows: list each entry until its own void lands — the
+      // soft-void excludes a voided event from the list read (FTY-321). The
+      // pending-deletion entry is served `pending` forever; only its DELETE
+      // removes it.
+      if (deleteStage === 1 || pendingDeleteStage === 1) {
+        const dayEvents: LogEventDTO[] = [];
+        if (deleteStage === 1 && !deleteVoided) dayEvents.push(E2E_DELETE_EVENT);
+        if (pendingDeleteStage === 1 && !pendingDeleteVoided) {
+          dayEvents.push(E2E_PENDING_DELETE_EVENT);
+        }
+        return json(dayEvents);
+      }
       if (phase === 0) return json([]);
       if (phase === 1) return json([E2E_CLARIFY_EVENT]);
       // Resolved via the answer round-trip → the SAME event, now completed

@@ -9,6 +9,8 @@
 #   swipe the row left to reveal Delete → tap Delete → the row leaves the
 #   timeline and the hero drops back to 0 → a final pull-to-refresh proves the
 #   soft-void keeps it gone (FTY-321 excludes a voided event from every read).
+#   Then log the forever-pending "mystery smoothie" and delete its skeleton row
+#   mid-estimate — every server-backed row is deletable, not just resolved ones.
 #
 # If the swipe affordance were missing, or the delete didn't wire through to the
 # FTY-321 endpoint / optimistic removal, the post-delete assertions below would
@@ -95,3 +97,43 @@ appId: com.fatty
     duration: 800
 - assertNotVisible:
     text: ".*Greek yogurt, 140 kcal.*"
+
+# Step 9: A still-estimating row is deletable too — FTY-322 covers every
+#         server-backed Today row, not just resolved ones (only offline-queued
+#         and optimistic local rows are excluded). Log the forever-pending
+#         fixture: the mock never resolves "mystery smoothie", so the skeleton
+#         row is deterministically mid-estimate when it is swiped.
+- tapOn:
+    text: "Log food or exercise.*"
+- inputText: "mystery smoothie"
+- tapOn:
+    text: "Add entry"
+- extendedWaitUntil:
+    visible:
+      id: "item-timeline-row-e2e-pending-delete-event-00000000-0000-0000-0000-000000000000"
+    timeout: 10000
+
+# Step 10: Swipe the pending skeleton row left — the destructive Delete reveals
+#          on a row that is still estimating.
+- swipe:
+    from:
+      id: "item-timeline-row-e2e-pending-delete-event-00000000-0000-0000-0000-000000000000"
+    direction: LEFT
+- assertVisible:
+    id: "swipe-delete-action"
+
+# Step 11: Tap Delete: the pending row leaves the timeline immediately, and a
+#          refresh proves the void keeps it gone (FTY-321 excludes it from
+#          every read).
+- tapOn:
+    id: "swipe-delete-action"
+- extendedWaitUntil:
+    notVisible:
+      id: "item-timeline-row-e2e-pending-delete-event-00000000-0000-0000-0000-000000000000"
+    timeout: 10000
+- swipe:
+    start: 50%, 35%
+    end: 50%, 90%
+    duration: 800
+- assertNotVisible:
+    id: "item-timeline-row-e2e-pending-delete-event-00000000-0000-0000-0000-000000000000"

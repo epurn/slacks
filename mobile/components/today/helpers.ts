@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 
+import { type DailySummaryDTO } from "@/api/dailySummary";
 import {
   type DerivedItem,
   type DerivedFoodItemDTO,
@@ -165,6 +166,64 @@ export function removeOptimisticEvent(
     const { [optimisticId]: _removed, ...rest } = prev;
     return rest;
   });
+}
+
+/**
+ * Recompute the daily summary locally for an optimistically deleted event
+ * (FTY-322), so the hero/day totals drop the moment the row does — never only
+ * after the DELETE round-trip and summary refetch. Mirrors the backend
+ * finalized-state filter (`docs/contracts/daily-summary.md`): only `resolved`
+ * items on a `completed`, non-voided event count toward intake/burn, while a
+ * `needs_clarification` event and each `proposed` food item contribute one
+ * uncounted unit. Anything else (pending/processing/failed events, unresolved
+ * items) counts nothing, so deleting it changes no figure. Every subtraction
+ * clamps at zero so drift between the local item feed and the server aggregate
+ * can never show a negative total. `has_intake` is left as-is — whether *other*
+ * finalized intake remains on the day is the server's call; the post-void
+ * summary refetch reconciles it.
+ */
+export function summaryMinusDeletedEvent(
+  summary: DailySummaryDTO,
+  event: LogEventDTO,
+  items: readonly DerivedItem[],
+): DailySummaryDTO {
+  let calories = 0;
+  let protein = 0;
+  let carbs = 0;
+  let fat = 0;
+  let burn = 0;
+  let uncounted = event.status === "needs_clarification" ? 1 : 0;
+  if (event.status === "completed") {
+    for (const item of items) {
+      if (item.item_type === "food") {
+        if (item.status === "resolved") {
+          calories += item.calories ?? 0;
+          protein += item.protein_g ?? 0;
+          carbs += item.carbs_g ?? 0;
+          fat += item.fat_g ?? 0;
+        } else if (item.status === "proposed") {
+          uncounted += 1;
+        }
+      } else if (item.status === "resolved") {
+        burn += item.active_calories ?? 0;
+      }
+    }
+  }
+  const minus = (from: number, amount: number): number =>
+    Math.max(0, Math.round(from - amount));
+  return {
+    ...summary,
+    intake: {
+      calories: minus(summary.intake.calories, calories),
+      protein_g: minus(summary.intake.protein_g, protein),
+      carbs_g: minus(summary.intake.carbs_g, carbs),
+      fat_g: minus(summary.intake.fat_g, fat),
+    },
+    uncounted_entries: minus(summary.uncounted_entries, uncounted),
+    exercise: {
+      active_calories: minus(summary.exercise.active_calories, burn),
+    },
+  };
 }
 
 export function hasOwn(object: object, key: PropertyKey): boolean {

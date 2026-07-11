@@ -948,6 +948,31 @@ export const E2E_DELETE_SUMMARY: DailySummaryDTO = {
 };
 
 /**
+ * FTY-322 pending-row deletion: a second entry the flow deletes while it is
+ * still estimating. Every server-backed Today row is deletable — including a
+ * pending/processing skeleton — so the mock keeps this event `pending` on
+ * every read (its estimate never lands within the flow) and only its DELETE
+ * removes it; that determinism is what lets delete.yaml swipe a genuinely
+ * pending row instead of racing the poll that resolves the main delete entry.
+ * Keyed on its own raw_text/id so it never disturbs the other phase machines.
+ */
+export const E2E_PENDING_DELETE_RAW_TEXT = 'mystery smoothie';
+
+/** Stable id for the pending-deletion event (pending → voided, never resolved). */
+export const E2E_PENDING_DELETE_EVENT_ID =
+  'e2e-pending-delete-event-00000000-0000-0000-0000-000000000000';
+
+/** The forever-pending event the pending-deletion POST returns and GETs keep. */
+export const E2E_PENDING_DELETE_EVENT: LogEventDTO = {
+  id: E2E_PENDING_DELETE_EVENT_ID,
+  user_id: E2E_SESSION.userId,
+  raw_text: E2E_PENDING_DELETE_RAW_TEXT,
+  status: 'pending',
+  created_at: '2026-01-01T10:30:00Z',
+  updated_at: '2026-01-01T10:30:00Z',
+};
+
+/**
  * Daily summary after the large entry resolves: 2,100 kcal against the 2,000
  * target, so the hero crosses into its over-budget state ("2,100 of 2,000 kcal,
  * 100 over budget") — the crossing that arms beat 3.

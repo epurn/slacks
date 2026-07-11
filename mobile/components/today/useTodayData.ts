@@ -50,6 +50,7 @@ import {
   type Phase,
 } from "./helpers";
 import { useCorrectionSheet } from "./useCorrectionSheet";
+import { useDeleteEvent } from "./useDeleteEvent";
 import { useEntryResolveBeats } from "./useEntryResolveBeats";
 import { useLabelProposal } from "./useLabelProposal";
 import "./visualReviewEntryRows";
@@ -151,19 +152,29 @@ export function useTodayData({
     ReadonlySet<string>
   >(() => new Set());
 
-  // Soft-voided (deleted) server events (FTY-322). Adding an id hides the row
-  // immediately (optimistic removal) via `displayEvents`, and — because this
-  // filter is applied on every render regardless of what a poll writes back into
-  // `events` — it also guards the poll-resurrect race: an in-flight list/poll
-  // that still carries a just-deleted event can never flash the row back. A
-  // failed delete removes the id again, restoring the row. Once the server
-  // confirms the void the event is excluded from every read, so keeping its
-  // (unique UUID) id here indefinitely is harmless. Mirrors the
-  // `supersededFailedIds` in-place-hide pattern above.
-  const [deletedEventIds, setDeletedEventIds] = useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  // The delete (soft-void) flow (FTY-322) lives in a focused sub-hook: hiding
+  // the row, recomputing the hero/day totals in the same beat, the
+  // poll-resurrect guards for both, and the failure restore. `beginSummaryRead`
+  // wraps every daily-summary read below so a response that raced a delete can
+  // never land stale totals that still count the deleted row.
+  const {
+    deletedEventIds,
+    deleteError,
+    displaySummary,
+    beginSummaryRead,
+    handleDeleteEvent,
+  } = useDeleteEvent({
+    apiSession,
+    deleteEvent,
+    loadEntries,
+    getDailySummary,
+    itemsByEvent,
+    summary,
+    setEvents,
+    setItemsByEvent,
+    setSummary,
+    setSummaryError,
+  });
 
   // The submit machine reads the latest selected saved food at submit time, and
   // each in-flight submit stashes its saved food by optimistic id so the right
@@ -320,10 +331,11 @@ export function useTodayData({
       return;
     }
     let active = true;
+    const landSummary = beginSummaryRead();
     getDailySummary(apiSession).then(
       (loaded) => {
         if (!active) return;
-        setSummary(loaded);
+        landSummary(loaded);
         setSummaryError(null);
       },
       () => {
@@ -336,7 +348,7 @@ export function useTodayData({
     return () => {
       active = false;
     };
-  }, [apiSession, getDailySummary, reloadKey]);
+  }, [apiSession, getDailySummary, reloadKey, beginSummaryRead]);
 
   // Beat 1 — entry resolve (FTY-181): detect pending→completed transitions,
   // fire the soft-tap haptic once per resolved event, and ease the value row in.
@@ -523,9 +535,10 @@ export function useTodayData({
         // Keep the current items; retry on the next interval.
       },
     );
+    const landSummary = beginSummaryRead();
     getDailySummary(apiSession).then(
       (loaded) => {
-        setSummary(loaded);
+        landSummary(loaded);
         // Clear any stale error so a recovered poll drops the inline summary
         // error once good data arrives.
         setSummaryError(null);
@@ -534,7 +547,7 @@ export function useTodayData({
         // Keep the current summary and any existing error; retry next interval.
       },
     );
-  }, [apiSession, load, loadEntries, getDailySummary]);
+  }, [apiSession, load, loadEntries, getDailySummary, beginSummaryRead]);
 
   // Retry a failed parse as a fresh attempt (FTY-176). There is no server-side
   // resubmit endpoint (a non-goal), so this reuses the existing create path: the
@@ -589,55 +602,6 @@ export function useTodayData({
       inputRef.current?.focus();
     },
     [setText],
-  );
-
-  // Delete (soft-void) a server-backed timeline row (FTY-322). The row is hidden
-  // immediately (optimistic) via `deletedEventIds`, then the void round-trips to
-  // the FTY-321 endpoint. On success the event and its items are dropped from
-  // local state and the item feed + daily totals refetch in place so the hero
-  // reflects the removal without a jump; the `deletedEventIds` guard means an
-  // in-flight poll can never resurrect the row. On failure the row is restored
-  // and a calm inline error surfaces — never a crash, never a silent loss.
-  const handleDeleteEvent = useCallback(
-    async (target: LogEventDTO) => {
-      if (!apiSession) return;
-      setDeleteError(null);
-      setDeletedEventIds((prev) => new Set(prev).add(target.id));
-      try {
-        await deleteEvent(apiSession, target.id);
-        setEvents((prev) => prev.filter((event) => event.id !== target.id));
-        setItemsByEvent((prev) => {
-          if (!(target.id in prev)) return prev;
-          const { [target.id]: _removed, ...rest } = prev;
-          return rest;
-        });
-        // Refresh the day feed and totals in place so the removal is reflected
-        // everywhere the entry counted (server is the source of truth post-void).
-        loadEntries(apiSession).then(
-          (entries) => setItemsByEvent((prev) => mergeServerItems(prev, entries)),
-          () => {
-            // Keep the current items; the next poll retries.
-          },
-        );
-        getDailySummary(apiSession).then(
-          (loaded) => {
-            setSummary(loaded);
-            setSummaryError(null);
-          },
-          () => {
-            // Keep the current summary; the next poll retries.
-          },
-        );
-      } catch (error) {
-        setDeletedEventIds((prev) => {
-          const next = new Set(prev);
-          next.delete(target.id);
-          return next;
-        });
-        setDeleteError(messageFor(error, "delete"));
-      }
-    },
-    [apiSession, deleteEvent, loadEntries, getDailySummary],
   );
 
   // Poll while an event is in flight, or while a fresh completion is still
@@ -707,7 +671,7 @@ export function useTodayData({
     displayEvents,
     offlineStateById,
     resolveAnimIds,
-    summary,
+    summary: displaySummary,
     summaryError,
     scannerOpen,
     setScannerOpen,

@@ -204,4 +204,33 @@ describe("EntryRow — delete custom action (FTY-322)", () => {
     );
     expect(onDelete).toHaveBeenCalledTimes(1);
   });
+
+  it("exposes Delete on the plain completed-with-no-items row as one accessible element", () => {
+    // A completed entry that produced nothing to show still renders a
+    // server-backed row the user may want gone; with the delete props supplied
+    // the row groups into a single accessible element carrying the action.
+    const onDelete = jest.fn();
+    const tree = renderWith(baseEvent({ status: "completed" }), {
+      ...deleteA11y(onDelete),
+    });
+
+    const node = tree.root.find(
+      (n) =>
+        n.props.accessible === true &&
+        Array.isArray(n.props.accessibilityActions) &&
+        typeof n.props.onAccessibilityAction === "function",
+    );
+    expect(node.props.accessibilityLabel).toContain("milk");
+    act(() =>
+      node.props.onAccessibilityAction({ nativeEvent: { actionName: "delete" } }),
+    );
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the plain completed row unchanged when no delete props are supplied", () => {
+    const tree = renderWith(baseEvent({ status: "completed" }), {});
+    expect(
+      tree.root.findAll((n) => Array.isArray(n.props.accessibilityActions)),
+    ).toHaveLength(0);
+  });
 });

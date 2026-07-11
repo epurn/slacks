@@ -37,6 +37,14 @@ type ItemTimelineRowProps =
       loading: true;
       /** Screen-reader label conveying the in-progress status (e.g. "Estimating"). */
       accessibilityLabel: string;
+      /**
+       * Delete custom action (FTY-322) for a server-backed row that is still
+       * estimating — deletable like any other server row. Supplied by the swipe
+       * wrapper and attached to the loading row's own accessible element so
+       * VoiceOver can delete without the pointer-only gesture.
+       */
+      accessibilityActions?: readonly { name: string; label: string }[];
+      onAccessibilityAction?: (event: AccessibilityActionEvent) => void;
       /** Stable row id for E2E checks that assert the skeleton resolves in place. */
       testID?: string;
     }
@@ -122,8 +130,11 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
       <View
         testID={props.testID}
         style={[styles.row, { borderBottomColor: colors.separator }]}
+        accessible
         accessibilityRole="progressbar"
         accessibilityLabel={props.accessibilityLabel}
+        accessibilityActions={props.accessibilityActions}
+        onAccessibilityAction={props.onAccessibilityAction}
       >
         <View style={styles.iconSlot}>
           <Skeleton

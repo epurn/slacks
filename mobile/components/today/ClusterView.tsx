@@ -14,7 +14,11 @@ import {
   type SwipeDeleteAccessibilityProps,
 } from "@/components/SwipeableRow";
 import { type OutboxSyncState } from "@/state/outbox";
-import { formatWallClockTime, statusPresentation } from "@/state/today";
+import {
+  formatWallClockTime,
+  isOptimisticId,
+  statusPresentation,
+} from "@/state/today";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
 
 import {
@@ -25,11 +29,15 @@ import {
 
 /**
  * Wrap a deletable timeline row in the swipe-left-to-delete gesture (FTY-322),
- * or render it plain when deletion doesn't apply (the read-only past-day
- * timeline, or a caller that passes no `onDeleteEvent`). The render-prop hands
- * the child row the Delete custom-action props so the destructive action stays
- * reachable by VoiceOver on the row's own accessible control, not just via the
- * pointer-only swipe.
+ * or render it plain when deletion doesn't apply: the read-only past-day
+ * timeline, a caller that passes no `onDeleteEvent`, or an optimistic
+ * (not-yet-created) local entry — there is no server event to void until the
+ * create acknowledges, and the submit machine already owns that entry's
+ * rollback. Every server-backed row is wrapped; offline-queued captures never
+ * reach this component (they return through `OfflineEntryRow` first). The
+ * render-prop hands the child row the Delete custom-action props so the
+ * destructive action stays reachable by VoiceOver on the row's own accessible
+ * control, not just via the pointer-only swipe.
  */
 function MaybeSwipeable({
   event,
@@ -44,7 +52,7 @@ function MaybeSwipeable({
   readOnly: boolean;
   children: (a11y: SwipeDeleteAccessibilityProps | undefined) => ReactNode;
 }) {
-  if (readOnly || !onDeleteEvent) {
+  if (readOnly || !onDeleteEvent || isOptimisticId(event.id)) {
     return <>{children(undefined)}</>;
   }
   return (
@@ -229,16 +237,34 @@ export function ClusterView({
           // poll, or the event-list poll failed (FTY-181 review).
           const syntheticItems = items.filter(isSyntheticSavedFoodItem);
           if (syntheticItems.length > 0) {
-            return syntheticItems.map((item) => (
-              <ItemTimelineRow
-                key={item.id}
-                item={item}
-                needsClarification={false}
-                onPress={onOpenItem ? () => onOpenItem(item, event.raw_text) : undefined}
+            const firstSynthetic = syntheticItems[0];
+            return (
+              <MaybeSwipeable
+                key={event.id}
+                event={event}
+                deleteLabel={
+                  firstSynthetic ? `Delete ${firstSynthetic.name}` : "Delete entry"
+                }
+                onDeleteEvent={onDeleteEvent}
                 readOnly={readOnly}
-                testID={itemTimelineExtraRowTestID(event.id, item.id)}
-              />
-            ));
+              >
+                {(a11y) =>
+                  syntheticItems.map((item) => (
+                    <ItemTimelineRow
+                      key={item.id}
+                      item={item}
+                      needsClarification={false}
+                      onPress={
+                        onOpenItem ? () => onOpenItem(item, event.raw_text) : undefined
+                      }
+                      readOnly={readOnly}
+                      testID={itemTimelineExtraRowTestID(event.id, item.id)}
+                      {...a11y}
+                    />
+                  ))
+                }
+              </MaybeSwipeable>
+            );
           }
 
           // needs_clarification → legible, inviting "needs a detail" row whose
@@ -295,15 +321,30 @@ export function ClusterView({
           // pending / processing with no resolved item yet → the "thinking"
           // state: a Skeleton shimmer sized to the resolved ItemTimelineRow it
           // will become (FTY-180), so the row resolves in place with no
-          // layout shift. Never the literal "Waiting"/"Estimating" text.
+          // layout shift. Never the literal "Waiting"/"Estimating" text. A
+          // server-backed row is deletable even mid-estimate (FTY-322): only
+          // pending *offline* and optimistic rows are excluded, and those never
+          // reach this branch wrapped (see MaybeSwipeable).
           if (event.status === "pending" || event.status === "processing") {
             return (
-              <ItemTimelineRow
+              <MaybeSwipeable
                 key={event.id}
-                loading
-                accessibilityLabel={statusPresentation(event.status).accessibilityLabel}
-                testID={itemTimelineRowTestID(event.id)}
-              />
+                event={event}
+                deleteLabel="Delete entry"
+                onDeleteEvent={onDeleteEvent}
+                readOnly={readOnly}
+              >
+                {(a11y) => (
+                  <ItemTimelineRow
+                    loading
+                    accessibilityLabel={
+                      statusPresentation(event.status).accessibilityLabel
+                    }
+                    testID={itemTimelineRowTestID(event.id)}
+                    {...a11y}
+                  />
+                )}
+              </MaybeSwipeable>
             );
           }
 
@@ -311,19 +352,43 @@ export function ClusterView({
           // loading row. Items fade in; confirmed no-items falls through below.
           if (resolveAnimIds.has(event.id)) {
             return (
-              <ItemTimelineRow
+              <MaybeSwipeable
                 key={event.id}
-                loading
-                accessibilityLabel={statusPresentation("processing").accessibilityLabel}
-                testID={itemTimelineRowTestID(event.id)}
-              />
+                event={event}
+                deleteLabel="Delete entry"
+                onDeleteEvent={onDeleteEvent}
+                readOnly={readOnly}
+              >
+                {(a11y) => (
+                  <ItemTimelineRow
+                    loading
+                    accessibilityLabel={
+                      statusPresentation("processing").accessibilityLabel
+                    }
+                    testID={itemTimelineRowTestID(event.id)}
+                    {...a11y}
+                  />
+                )}
+              </MaybeSwipeable>
             );
           }
 
           // completed with no items and no in-flight resolve — an entry already
           // completed on initial load, or the rare estimate that produced nothing
-          // to show → terminal status placeholder, not a permanent shimmer.
-          return <EntryRow key={event.id} event={event} />;
+          // to show → terminal status placeholder, not a permanent shimmer. Still
+          // a server-backed row the user may want gone, so it keeps the swipe
+          // Delete and its VoiceOver custom action (FTY-322).
+          return (
+            <MaybeSwipeable
+              key={event.id}
+              event={event}
+              deleteLabel="Delete entry"
+              onDeleteEvent={onDeleteEvent}
+              readOnly={readOnly}
+            >
+              {(a11y) => <EntryRow event={event} readOnly={readOnly} {...a11y} />}
+            </MaybeSwipeable>
+          );
         })}
       </View>
     </View>

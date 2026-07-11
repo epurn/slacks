@@ -327,6 +327,37 @@ describe("ItemTimelineRow — loading (FTY-180)", () => {
     expect(node.props.accessibilityLabel).toBe("Estimating");
   });
 
+  it("exposes the Delete custom action on the loading row when supplied (FTY-322)", () => {
+    // A server-backed pending/processing row is deletable mid-estimate; the
+    // custom action must live on the loading row's own accessible element so
+    // VoiceOver can delete without the pointer-only swipe.
+    const onDelete = jest.fn();
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(
+        <ItemTimelineRow
+          loading
+          accessibilityLabel="Waiting to estimate"
+          accessibilityActions={[{ name: "delete", label: "Delete" }]}
+          onAccessibilityAction={(e) => {
+            if (e.nativeEvent.actionName === "delete") onDelete();
+          }}
+        />,
+      );
+    });
+
+    const node = tree!.root.find(
+      (n) =>
+        n.props.accessibilityRole === "progressbar" &&
+        Array.isArray(n.props.accessibilityActions) &&
+        typeof n.props.onAccessibilityAction === "function",
+    );
+    act(() => {
+      node.props.onAccessibilityAction({ nativeEvent: { actionName: "delete" } });
+    });
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
   it("hides each shimmer placeholder from the accessibility tree so VoiceOver reads one loading state, not three", () => {
     let tree: ReactTestRenderer;
     act(() => {
