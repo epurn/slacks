@@ -41,6 +41,9 @@ MAX_AMOUNT = 100_000.0
 #: legitimate proposal while capping the untrusted oversized-request path (HMAC
 #: signing + base64/JSON decode) before it can burn CPU/memory. Mirrors the
 #: ``max_length`` guard on the sibling trust-boundary ref ``ReResolveRequest.source_ref``.
+#: The over-limit rejection response is sanitized so the signed ``proposal_ref`` is
+#: never echoed back — see
+#: ``app.routers.exact_evidence.sanitized_apply_validation_handler``.
 MAX_PROPOSAL_REF_LENGTH = 4096
 
 

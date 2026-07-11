@@ -796,6 +796,7 @@ def test_apply_api_rejects_client_supplied_facts(client: TestClient, db_engine: 
     )
 
     assert resp.status_code == 422  # extra=forbid: no fact injection
+    assert resp.json() == {"detail": {"error": "invalid_request"}}  # sanitized: fact not echoed
 
 
 def test_apply_api_unknown_reference_is_422(client: TestClient, db_engine: Engine) -> None:
@@ -815,8 +816,8 @@ def test_apply_api_unknown_reference_is_422(client: TestClient, db_engine: Engin
 def test_apply_api_oversized_reference_is_422_no_mutation(
     client: TestClient, db_engine: Engine, session: Session
 ) -> None:
-    # An oversized proposal_ref is rejected at the request boundary (before any HMAC
-    # signing / base64+JSON decode), capping the unbounded CPU/memory path — 422, no mutation.
+    # Oversized proposal_ref rejected at the request boundary (before HMAC/base64/JSON
+    # decode) — 422, no mutation, sanitized stable-code body that never echoes the ref.
     user_id, auth = register(client, "ee-api-oversized@example.com")
     item_id = seed_food_item(db_engine, user_id, calories=300.0)
     resp = client.post(
@@ -826,6 +827,7 @@ def test_apply_api_oversized_reference_is_422_no_mutation(
     )
 
     assert resp.status_code == 422
+    assert resp.json() == {"detail": {"error": "invalid_request"}}
     session.expire_all()
     assert session.get(DerivedFoodItem, item_id).calories == pytest.approx(300.0)  # type: ignore[union-attr]
 

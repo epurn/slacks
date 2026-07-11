@@ -21,6 +21,16 @@ wrong-user, or wrong-item proposal reference renders ``422 proposal_not_resolvab
 an uncostable current/adjusted amount renders ``422 amount_required``. Every error
 shape carries a stable code only — never nutrition values, a source ref, or the
 proposal payload.
+
+That last invariant also covers **request-schema** rejections. The signed
+``proposal_ref`` is untrusted, potentially sensitive input, so a request that trips
+Pydantic request validation on this endpoint (an oversized ``proposal_ref``, a
+client-injected nutrition fact caught by ``extra="forbid"``, a malformed ``amount``)
+must NOT fall through to FastAPI's default ``RequestValidationError`` response —
+that body echoes the rejected ``input`` verbatim, reflecting the submitted
+``proposal_ref`` or injected facts back to the caller. :func:`sanitized_apply_validation_handler`
+replaces it with a content-free ``422 {"error": "invalid_request"}`` for this route
+only; every other endpoint keeps FastAPI's default validation body.
 """
 
 from __future__ import annotations
@@ -29,6 +39,9 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
 from app.db import get_session
@@ -49,6 +62,41 @@ from app.settings import Settings
 router = APIRouter(prefix="/api/users", tags=["exact-evidence"])
 
 _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="derived item not found")
+
+#: Path suffix that identifies the exact-evidence apply route. The router has a
+#: single POST endpoint, so matching the suffix uniquely selects it without
+#: coupling the sanitizer to the full parameterised path.
+_APPLY_PATH_SUFFIX = "/exact-upgrade/apply"
+
+
+def _is_apply_request(request: Request) -> bool:
+    """True when ``request`` targets the exact-evidence apply endpoint."""
+
+    return request.method == "POST" and request.url.path.endswith(_APPLY_PATH_SUFFIX)
+
+
+async def sanitized_apply_validation_handler(
+    request: Request, exc: RequestValidationError
+) -> Response:
+    """Content-free ``422`` for apply request-validation failures; default elsewhere.
+
+    Registered app-wide for :class:`RequestValidationError` (see
+    ``app.main.create_app``), but only overrides the response for the apply route.
+    FastAPI's default validation body echoes the rejected ``input`` — for this
+    endpoint that would reflect the submitted signed ``proposal_ref`` or a
+    client-injected nutrition fact (``extra="forbid"``) straight back to the caller,
+    violating the stable-code-only error contract. For the apply route we return
+    ``{"detail": {"error": "invalid_request"}}`` — a stable code carrying no
+    submitted value. Every other endpoint falls through to FastAPI's default handler
+    so their validation-error contracts are unchanged.
+    """
+
+    if _is_apply_request(request):
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": {"error": "invalid_request"}},
+        )
+    return await request_validation_exception_handler(request, exc)
 
 
 def _refuse_voided_parent(session: Session, item_id: uuid.UUID, owner_id: uuid.UUID) -> None:
