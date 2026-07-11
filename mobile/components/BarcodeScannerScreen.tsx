@@ -38,7 +38,7 @@ import { AppIcon } from "@/components/ui";
 import { CameraCapture, type CameraCaptureProps } from "@/components/CameraCapture";
 
 const RATIONALE =
-  "Fatty uses the camera to scan product barcodes so you can log packaged foods quickly.";
+  "Slacks uses the camera to scan product barcodes so you can log packaged foods quickly.";
 
 /** Guidance copy shown over the live feed so the user knows what to do. */
 const GUIDANCE = "Point at a barcode";

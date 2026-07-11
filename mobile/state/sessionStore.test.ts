@@ -25,7 +25,7 @@ const getItemAsync = SecureStore.getItemAsync as jest.Mock;
 const deleteItemAsync = SecureStore.deleteItemAsync as jest.Mock;
 
 const SESSION: SessionRecord = {
-  serverUrl: "https://fatty.example.test",
+  serverUrl: "https://slacks.example.test",
   token: "header.signature",
   userId: "11111111-1111-1111-1111-111111111111",
 };
@@ -52,7 +52,7 @@ describe("secureSessionStore", () => {
     await secureSessionStore.save(SESSION);
     expect(setItemAsync).toHaveBeenCalledTimes(1);
     const [key, value] = setItemAsync.mock.calls[0] as [string, string];
-    expect(typeof key).toBe("string");
+    expect(key).toBe("slacks.session.v1");
     expect(JSON.parse(value)).toEqual(SESSION);
   });
 

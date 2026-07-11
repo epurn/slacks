@@ -55,7 +55,7 @@ export const expoNotificationsAdapter: NotificationsAdapter = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function getCadenceFile(): File {
-  return new File(Paths.document, "fatty-cadence.json");
+  return new File(Paths.document, "slacks-cadence.json");
 }
 
 interface StoredCadenceData {

@@ -66,7 +66,7 @@ function ownerDigest(input: string): string {
  */
 function outboxFileName(owner: OutboxOwner): string {
   const readable = owner.userId.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 40);
-  return `fatty-outbox-${readable}-${ownerDigest(outboxOwnerKey(owner))}.json`;
+  return `slacks-outbox-${readable}-${ownerDigest(outboxOwnerKey(owner))}.json`;
 }
 
 function outboxFile(owner: OutboxOwner): File {

@@ -49,7 +49,7 @@ afterEach(() => {
 });
 
 const RECORD: SessionRecord = {
-  serverUrl: "https://fatty.example.test",
+  serverUrl: "https://slacks.example.test",
   token: "header.signature",
   userId: "11111111-1111-1111-1111-111111111111",
 };

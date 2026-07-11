@@ -65,7 +65,7 @@ export interface LogEventEntryDTO {
 }
 
 /**
- * A single clarification question Fatty needs answered (FTY-170). Each question
+ * A single clarification question Slacks needs answered (FTY-170). Each question
  * carries a stable `id` — the key an answer submission references — the specific
  * question `text`, and an `options` array of candidate quick-pick values the
  * clarify sheet renders as one-tap chips. `options` MAY be empty (deterministic
@@ -226,7 +226,7 @@ export async function deleteLogEvent(
 }
 
 /**
- * Read the clarification questions Fatty persisted for a `needs_clarification`
+ * Read the clarification questions Slacks persisted for a `needs_clarification`
  * event (FTY-152). The clarify sheet (FTY-153) fetches this lazily when it opens
  * so the Today list/poll stays lean. Owner-scoped and fail-closed server-side: a
  * cross-user or unknown `eventId` is a `404`; an event with no clarification rows

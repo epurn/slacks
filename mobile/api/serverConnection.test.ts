@@ -4,8 +4,8 @@
  * Validation is a trust boundary: both the typed address and the scanned QR
  * payload are untrusted, so non-`http(s)` schemes, malformed strings, and empty
  * input must be rejected *before* any network call. The probe must treat a
- * timeout, a network failure, a non-2xx status, and a non-Fatty body all as
- * unreachable, and confirm Fatty via the `{"status":"ok"}` liveness body.
+ * timeout, a network failure, a non-2xx status, and a non-Slacks body all as
+ * unreachable, and confirm Slacks via the `{"status":"ok"}` liveness body.
  */
 
 import {
@@ -17,23 +17,23 @@ import {
 
 describe("validateServerUrl — accepted + normalized", () => {
   it("accepts an https URL and strips a trailing slash", () => {
-    expect(validateServerUrl("https://fatty.example.com/")).toEqual({
+    expect(validateServerUrl("https://slacks.example.com/")).toEqual({
       ok: true,
-      url: "https://fatty.example.com",
+      url: "https://slacks.example.com",
     });
   });
 
   it("accepts http with an explicit port and a path", () => {
-    expect(validateServerUrl("http://192.168.1.10:8000/fatty/")).toEqual({
+    expect(validateServerUrl("http://192.168.1.10:8000/slacks/")).toEqual({
       ok: true,
-      url: "http://192.168.1.10:8000/fatty",
+      url: "http://192.168.1.10:8000/slacks",
     });
   });
 
   it("lowercases the scheme and host and trims surrounding whitespace", () => {
-    expect(validateServerUrl("  HTTPS://Fatty.Example.COM  ")).toEqual({
+    expect(validateServerUrl("  HTTPS://Slacks.Example.COM  ")).toEqual({
       ok: true,
-      url: "https://fatty.example.com",
+      url: "https://slacks.example.com",
     });
   });
 
@@ -67,7 +67,7 @@ describe("validateServerUrl — rejected (untrusted input)", () => {
 
   it("rejects file: and app deep-link schemes", () => {
     expect(validateServerUrl("file:///etc/passwd").ok).toBe(false);
-    expect(validateServerUrl("fatty://connect?url=evil").ok).toBe(false);
+    expect(validateServerUrl("slacks://connect?url=evil").ok).toBe(false);
     expect(validateServerUrl("ftp://host/x").ok).toBe(false);
   });
 
@@ -80,7 +80,7 @@ describe("validateServerUrl — rejected (untrusted input)", () => {
   });
 });
 
-/** A fetch stub returning a Fatty-shaped healthz response. */
+/** A fetch stub returning a Slacks-shaped healthz response. */
 function jsonFetch(
   status: number,
   body: unknown,
@@ -93,7 +93,7 @@ function jsonFetch(
 }
 
 describe("probeServer", () => {
-  it("returns reachable on 200 with the Fatty liveness body and hits /healthz", async () => {
+  it("returns reachable on 200 with the Slacks liveness body and hits /healthz", async () => {
     const fetchImpl = jsonFetch(200, { status: "ok" });
     await expect(
       probeServer("https://srv.example.com", { fetchImpl }),
@@ -104,7 +104,7 @@ describe("probeServer", () => {
     );
   });
 
-  it("returns unreachable on a 200 whose body is not the Fatty health shape", async () => {
+  it("returns unreachable on a 200 whose body is not the Slacks health shape", async () => {
     const fetchImpl = jsonFetch(200, { hello: "world" });
     await expect(
       probeServer("https://srv.example.com", { fetchImpl }),
@@ -152,10 +152,10 @@ describe("probeServer", () => {
 
 describe("displayHost", () => {
   it("returns the host (with port) for the error message", () => {
-    expect(displayHost("http://192.168.1.10:8000/fatty")).toBe(
+    expect(displayHost("http://192.168.1.10:8000/slacks")).toBe(
       "192.168.1.10:8000",
     );
-    expect(displayHost("https://fatty.example.com")).toBe("fatty.example.com");
+    expect(displayHost("https://slacks.example.com")).toBe("slacks.example.com");
   });
 
   it("exposes a sensible default timeout", () => {

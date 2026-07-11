@@ -74,6 +74,11 @@ describe("fileOutboxStore", () => {
     });
   });
 
+  it("names the on-device queue file with the slacks-outbox- prefix", async () => {
+    await fileOutboxStore.save(OWNER_A, [entry()]);
+    expect(onlyFileName()).toMatch(/^slacks-outbox-.+\.json$/);
+  });
+
   it("returns an empty queue when nothing is stored", async () => {
     expect(await fileOutboxStore.load(OWNER_A)).toEqual([]);
   });
@@ -118,16 +123,16 @@ describe("fileOutboxStore", () => {
   });
 
   it("keeps path-case-distinct servers on separate queues for the same user id (FTY-277)", async () => {
-    // A self-hosted Fatty can live under a base path, and paths are
-    // case-sensitive: https://host/Fatty and https://host/fatty are two distinct
+    // A self-hosted Slacks can live under a base path, and paths are
+    // case-sensitive: https://host/Slacks and https://host/slacks are two distinct
     // servers. The owner key lowercases only scheme + host, so these must not
     // collapse onto one file even though the user id is identical.
     const upper: OutboxOwner = {
-      serverUrl: "https://self.example.test/Fatty",
+      serverUrl: "https://self.example.test/Slacks",
       userId: USER_A,
     };
     const lower: OutboxOwner = {
-      serverUrl: "https://self.example.test/fatty",
+      serverUrl: "https://self.example.test/slacks",
       userId: USER_A,
     };
     await fileOutboxStore.save(upper, [entry({ idempotencyKey: "upper-path" })]);

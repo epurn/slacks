@@ -1,6 +1,6 @@
 # mobile
 
-The Fatty mobile app: an Expo / React Native, iOS-first client. The **Today
+The Slacks mobile app: an Expo / React Native, iOS-first client. The **Today
 shell** renders the user's real log events from the backend (FTY-031): it lists
 today's events with accessible per-entry status and lets the user submit
 natural-language input to create a new `pending` event. While any entry is still

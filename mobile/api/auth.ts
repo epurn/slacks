@@ -2,7 +2,7 @@
  * Typed client for the FTY-020 local email + password auth path
  * (`docs/contracts/identity-and-profile.md`).
  *
- * Fatty is self-host-first with no hosted instance (UX design §4d), so an auth
+ * Slacks is self-host-first with no hosted instance (UX design §4d), so an auth
  * call is always made against the user's *own* server: every call takes the
  * bound server base URL as an explicit argument and returns a normalized
  * session `{ serverUrl, token, userId }` that ties the issued token to the

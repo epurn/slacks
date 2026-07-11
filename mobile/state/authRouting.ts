@@ -2,7 +2,7 @@
  * Signed-out routing decision for the self-host-first first run (FTY-091),
  * extended with onboarding routing (FTY-103).
  *
- * Fatty's launch gate is four-state, and there must be no reachable dead-end
+ * Slacks's launch gate is four-state, and there must be no reachable dead-end
  * (UX design §4d):
  *
  *   1. no server connected (FTY-107)        → the connect screen,

@@ -1,17 +1,17 @@
 /**
  * Connect-to-your-server screen (FTY-107) — the self-host-first first step.
  *
- * The first thing a new user sees: point the app at their own Fatty server by
+ * The first thing a new user sees: point the app at their own Slacks server by
  * **typing or scanning** its address. The connected server is the network target
  * every later request (including the FTY-091 credentials) is sent to, so both
  * inputs are treated as **untrusted** and pass strict `http(s)`-only validation
  * (`api/serverConnection`) *before* any network call. A reachability probe
- * (`GET /healthz`) confirms the host is a live Fatty server; only then is the
+ * (`GET /healthz`) confirms the host is a live Slacks server; only then is the
  * normalized base URL persisted and the flow advanced to sign-in (FTY-091).
  *
  * - The setup QR carries the **server URL only** — scanning just fills the field;
  *   no secret is consumed, and the user still creates the account manually later.
- * - An unreachable / timed-out / non-Fatty server shows "Can't reach {host}" with
+ * - An unreachable / timed-out / non-Slacks server shows "Can't reach {host}" with
  *   a Retry, keeps the URL editable, and is never a dead-end.
  *
  * Built from FTY-097 primitives (themed Text / Button / Card, amber accent),
@@ -117,7 +117,7 @@ export function ConnectScreen({
     const result = validateServerUrl(value);
     if (!result.ok) {
       setPhase("invalid");
-      setError("That QR isn't a Fatty server URL.");
+      setError("That QR isn't a Slacks server URL.");
       return;
     }
     setUrl(result.url);
@@ -156,7 +156,7 @@ export function ConnectScreen({
     >
       <View style={styles.content}>
         <ThemedText scale="largeTitle" bold style={styles.title}>
-          Connect to your Fatty server
+          Connect to your Slacks server
         </ThemedText>
         <ThemedText variant="textSecondary" style={styles.subtitle}>
           {"Enter your server's address, or scan its setup QR. Your account lives on your own server."}
@@ -168,7 +168,7 @@ export function ConnectScreen({
             value={url}
             onChangeText={handleChangeText}
             onSubmitEditing={() => void handleConnect()}
-            placeholder="https://fatty.example.com"
+            placeholder="https://slacks.example.com"
             placeholderTextColor={colors.textMuted}
             autoCapitalize="none"
             autoCorrect={false}

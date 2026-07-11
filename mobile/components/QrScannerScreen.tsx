@@ -24,7 +24,7 @@ import {
 } from "@/components/CameraCapture";
 
 const RATIONALE =
-  "Fatty uses the camera to scan your server's setup QR so you can connect without typing its address.";
+  "Slacks uses the camera to scan your server's setup QR so you can connect without typing its address.";
 
 export interface QrScannerScreenProps {
   /**

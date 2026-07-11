@@ -18,7 +18,7 @@ export const BODY_FONT_FAMILY: string | undefined = undefined;
 
 /**
  * Typography scale. Sizes follow the iOS Dynamic Type size chart, plus three
- * Fatty-specific sizes (`title2Large`, `iconGlyph`, `detail`) that fill gaps
+ * Slacks-specific sizes (`title2Large`, `iconGlyph`, `detail`) that fill gaps
  * the Dynamic Type chart doesn't name but the app's own audited fontSize
  * literals need a home for. This is the single place a size is added — screen
  * stories reference these tokens, they never add new sizes to theme.

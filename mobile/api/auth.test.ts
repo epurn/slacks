@@ -7,7 +7,7 @@ import {
 } from "./auth";
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
-const SERVER = "https://fatty.example.test";
+const SERVER = "https://slacks.example.test";
 
 /** Encode a string as base64url (no padding), the token segment encoding. */
 function base64url(value: string): string {

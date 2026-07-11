@@ -61,7 +61,7 @@ import {
 } from "@/components/CameraCapture";
 
 const RATIONALE =
-  "Fatty uses the camera to photograph nutrition labels so you can log packaged foods accurately.";
+  "Slacks uses the camera to photograph nutrition labels so you can log packaged foods accurately.";
 
 const FRAMING_HINT = "Fit the nutrition label inside the frame";
 

@@ -4,7 +4,7 @@
  *
  * A legible nutrition-label parse lands as an **uncounted proposal** (a
  * `proposed` derived food item that does not count toward totals) rather than an
- * immediately-counted `resolved` item, because "OCR is fallible — Fatty never
+ * immediately-counted `resolved` item, because "OCR is fallible — Slacks never
  * silently trusts a fallible parse" (`docs/design-philosophy.md`). Two
  * owner-scoped operations from `docs/contracts/label-upload.md` back the sheet:
  *

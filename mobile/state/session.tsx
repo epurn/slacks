@@ -1,7 +1,7 @@
 /**
  * The authenticated-session seam (FTY-090).
  *
- * Fatty is self-host-first with no hosted instance (UX design §4d), so a
+ * Slacks is self-host-first with no hosted instance (UX design §4d), so a
  * session is **bound to the user's own server**: the unit that persists is
  * `{ serverUrl, token, userId }`, not a token alone. A token issued by one
  * self-hosted server is meaningless against another, so the server URL the user
