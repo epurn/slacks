@@ -61,6 +61,11 @@ import {
   E2E_TARGET_EVENT,
   E2E_TARGET_ENTRY,
   E2E_TARGET_SUMMARY,
+  E2E_DELETE_RAW_TEXT,
+  E2E_DELETE_PENDING_EVENT,
+  E2E_DELETE_EVENT,
+  E2E_DELETE_ENTRY,
+  E2E_DELETE_SUMMARY,
   e2eWeightEntries,
   e2eDailySummaryRange,
   E2E_SAVED_FOOD,
@@ -222,6 +227,12 @@ export function createE2EMockFetch(): typeof fetch {
   // by-date feed carries the resolved packaged-food item, and the day summary
   // counts it. Keyed on its own raw_text.
   let barcodeStage: 0 | 1 = 0;
+  // FTY-322 swipe-to-delete flow: 0 before the log, 1 once the entry is created;
+  // `deleteVoided` flips when the row's DELETE (soft-void) lands, after which the
+  // event and its item drop out of every read and the day summary returns to
+  // zero — the running-app proof the row stays gone. Keyed on its own raw_text.
+  let deleteStage: 0 | 1 = 0;
+  let deleteVoided = false;
   // How phase 2 was reached — decides which day-list GET serves (see above).
   let resolvedVia: 'answer' | 'resubmit' | null = null;
   // FTY-183 correction flow: set once the saved food is submitted so GET
@@ -284,6 +295,21 @@ export function createE2EMockFetch(): typeof fetch {
     const visualReviewResponse = resolveVisualReviewFetch({ url, method, pathEnd });
     if (visualReviewResponse) return visualReviewResponse;
 
+    // DELETE /log-events/{id} — the FTY-322 swipe-to-delete soft-void (FTY-321
+    // contract). Marks the delete-flow event voided so every read below excludes
+    // it and the day summary returns to zero, then answers 204 No Content
+    // (idempotent, empty body) exactly as the contract specifies. Matched on the
+    // method + the `/log-events/{id}` shape (a trailing id segment), so it never
+    // intercepts the id-less list/create route.
+    if (
+      method === 'DELETE' &&
+      pathEnd.includes('/log-events/') &&
+      !pathEnd.endsWith('/by-date')
+    ) {
+      deleteVoided = true;
+      return new Response(null, { status: 204 });
+    }
+
     // /log-events/by-date — the item-forward day feed (FTY-198): each event with
     // its derived items. This is the read the entry-resolve beat (FTY-181) needs,
     // since the value row only renders when the feed carries the entry's items.
@@ -299,6 +325,8 @@ export function createE2EMockFetch(): typeof fetch {
       if (correctionStage === 1) return json([E2E_CORRECTION_ENTRY]);
       if (targetStage === 1) return json([E2E_TARGET_ENTRY]);
       if (barcodeStage === 1) return json([E2E_BARCODE_ENTRY]);
+      // FTY-322 delete flow: the item row until the void lands, then nothing.
+      if (deleteStage === 1) return json(deleteVoided ? [] : [E2E_DELETE_ENTRY]);
       if (phase === 0) return json([]);
       if (phase === 1) return json([{ event: E2E_CLARIFY_EVENT, items: [] }]);
       return json([
@@ -364,6 +392,13 @@ export function createE2EMockFetch(): typeof fetch {
           barcodeStage = 1;
           return json(E2E_BARCODE_PENDING_EVENT, 201);
         }
+        // FTY-322 delete flow: POST returns the pending event so the skeleton is
+        // visible; a refresh GET then serves the completed event whose by-date
+        // feed carries the resolved item the flow swipes to delete.
+        if (rawTextOf(init) === E2E_DELETE_RAW_TEXT) {
+          deleteStage = 1;
+          return json(E2E_DELETE_PENDING_EVENT, 201);
+        }
         if (phase === 0) {
           phase = 1;
           return json(E2E_CLARIFY_EVENT, 201);
@@ -389,6 +424,9 @@ export function createE2EMockFetch(): typeof fetch {
       // The barcode flow's GET likewise lists its completed entry so a
       // refresh/poll keeps the reconciled row (items ride the feed above).
       if (barcodeStage === 1) return json([E2E_BARCODE_EVENT]);
+      // FTY-322 delete flow: list the completed entry until the void lands, then
+      // an empty day — the soft-void excludes it from the list read (FTY-321).
+      if (deleteStage === 1) return json(deleteVoided ? [] : [E2E_DELETE_EVENT]);
       if (phase === 0) return json([]);
       if (phase === 1) return json([E2E_CLARIFY_EVENT]);
       // Resolved via the answer round-trip → the SAME event, now completed
@@ -459,6 +497,10 @@ export function createE2EMockFetch(): typeof fetch {
       if (targetStage === 1) return json(E2E_TARGET_SUMMARY);
       if (correctionStage === 1) return json(E2E_CORRECTION_SUMMARY);
       if (barcodeStage === 1) return json(E2E_BARCODE_SUMMARY);
+      // FTY-322 delete flow: the 140-kcal entry counts until the void, then the
+      // day returns to zero — the hero drop is the running-app proof of removal.
+      if (deleteStage === 1)
+        return json(deleteVoided ? E2E_DAILY_SUMMARY : E2E_DELETE_SUMMARY);
       return json(phase === 2 ? E2E_RESOLVED_SUMMARY : E2E_DAILY_SUMMARY);
     }
 

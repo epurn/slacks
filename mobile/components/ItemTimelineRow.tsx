@@ -1,4 +1,11 @@
-import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Animated,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type AccessibilityActionEvent,
+} from "react-native";
 
 import type { DerivedItem } from "@/api/derivedItems";
 import { ProvenanceIcon, provenancePresentation, Skeleton } from "@/components/ui";
@@ -57,6 +64,15 @@ type ItemTimelineRowProps =
        * Default off, so Today's interactive rows are unchanged.
        */
       readOnly?: boolean;
+      /**
+       * Delete custom action (FTY-322), supplied by the swipe wrapper so the
+       * destructive Delete stays reachable by VoiceOver on this row's own
+       * accessible element — the swipe gesture is pointer-only. Spread onto the
+       * interactive Pressable; absent (and inert) for the read-only past-day row,
+       * which is not deletable.
+       */
+      accessibilityActions?: readonly { name: string; label: string }[];
+      onAccessibilityAction?: (event: AccessibilityActionEvent) => void;
       /** Stable row id for E2E checks that assert the value resolves in place. */
       testID?: string;
       /**
@@ -145,6 +161,8 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
     onPress,
     testID,
     readOnly = false,
+    accessibilityActions,
+    onAccessibilityAction,
   } = props;
   const allItems = additionalItems.length > 0
     ? [item, ...additionalItems]
@@ -255,6 +273,8 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
         accessibilityRole="button"
         accessibilityLabel={a11yLabel}
         accessibilityHint={a11yHint}
+        accessibilityActions={accessibilityActions}
+        onAccessibilityAction={onAccessibilityAction}
       >
         {rowContent}
       </Pressable>

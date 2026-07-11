@@ -48,13 +48,21 @@ export function itemTimelineExtraRowTestID(
 }
 
 /** Map an API/network failure to a plain, nonjudgmental message. */
-export function messageFor(error: unknown, kind: "load" | "save"): string {
+export function messageFor(
+  error: unknown,
+  kind: "load" | "save" | "delete",
+): string {
   if (error instanceof LogEventApiError) {
     return error.message;
   }
-  return kind === "load"
-    ? "We couldn't load your day. Check your connection and try again."
-    : "We couldn't save that entry. Please try again.";
+  switch (kind) {
+    case "load":
+      return "We couldn't load your day. Check your connection and try again.";
+    case "delete":
+      return "We couldn't delete that entry. Please try again.";
+    default:
+      return "We couldn't save that entry. Please try again.";
+  }
 }
 
 /**

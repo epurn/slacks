@@ -2,6 +2,7 @@ import {
   LogEventApiError,
   answerClarification,
   createLogEvent,
+  deleteLogEvent,
   getLogEventClarification,
   listTodayLogEvents,
   listTodayLogEventEntries,
@@ -307,5 +308,54 @@ describe("answerClarification", () => {
     await expect(
       answerClarification(SESSION, "event-1", "q-1", "2 tbsp", fetchMock),
     ).rejects.toMatchObject({ name: "LogEventApiError", status: 404 });
+  });
+});
+
+describe("deleteLogEvent", () => {
+  // The FTY-321 soft-void contract answers 204 No Content with an empty body,
+  // so the client must not try to parse a body on success.
+  function noContentResponse(): Response {
+    return {
+      ok: true,
+      status: 204,
+      json: async () => {
+        throw new Error("204 has no body to parse");
+      },
+    } as unknown as Response;
+  }
+
+  it("DELETEs the owner-scoped event and resolves void on 204", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(noContentResponse());
+
+    await expect(
+      deleteLogEvent(SESSION, "44444444-4444-4444-4444-444444444444", fetchMock),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      "https://api.example.test/api/users/11111111-1111-1111-1111-111111111111/log-events/44444444-4444-4444-4444-444444444444",
+    );
+    expect(init.method).toBe("DELETE");
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      "Bearer test-token",
+    );
+    // No request body on a delete.
+    expect(init.body).toBeUndefined();
+  });
+
+  it("maps a 404 (cross-user / unknown id) to a fail-closed LogEventApiError", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(errorResponse(404));
+    await expect(
+      deleteLogEvent(SESSION, "unknown-id", fetchMock),
+    ).rejects.toMatchObject({ name: "LogEventApiError", status: 404 });
+  });
+
+  it("maps a 401 to a session-expired error", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(errorResponse(401));
+    const error = await deleteLogEvent(SESSION, "event-1", fetchMock).catch(
+      (e: LogEventApiError) => e,
+    );
+    expect((error as LogEventApiError).status).toBe(401);
+    expect((error as LogEventApiError).message).toMatch(/session has expired/i);
   });
 });

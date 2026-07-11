@@ -25,6 +25,7 @@ import {
 import {
   answerClarification as answerClarificationApi,
   createLogEvent as createLogEventApi,
+  deleteLogEvent as deleteLogEventApi,
   getLogEventClarification as getLogEventClarificationApi,
   listTodayLogEvents as listTodayLogEventsApi,
   listTodayLogEventEntries as listTodayLogEventEntriesApi,
@@ -84,6 +85,7 @@ export function TodayScreen({
   load = listTodayLogEventsApi,
   loadEntries = listTodayLogEventEntriesApi,
   create = createLogEventApi,
+  deleteEvent = deleteLogEventApi,
   getClarification = getLogEventClarificationApi,
   answerClarification = answerClarificationApi,
   editItem = editDerivedItemApi,
@@ -116,6 +118,8 @@ export function TodayScreen({
    */
   loadEntries?: typeof listTodayLogEventEntriesApi;
   create?: typeof createLogEventApi;
+  /** Injectable soft-void (delete) client for swipe-to-delete (FTY-322). */
+  deleteEvent?: typeof deleteLogEventApi;
   /** Injectable clarification-question read for the clarify sheet (FTY-153). */
   getClarification?: typeof getLogEventClarificationApi;
   /** Injectable clarification answer round-trip for the clarify sheet (FTY-170/175). */
@@ -168,6 +172,7 @@ export function TodayScreen({
     apiSession,
     phase,
     loadError,
+    deleteError,
     itemsByEvent,
     displayEvents,
     offlineStateById,
@@ -206,12 +211,14 @@ export function TodayScreen({
     handleClarificationResolved,
     handleRetryFailed,
     handleEditFailedAsText,
+    handleDeleteEvent,
     handleItemChange,
   } = useTodayData({
     sessionOverride,
     load,
     loadEntries,
     create,
+    deleteEvent,
     getClarification,
     answerClarification,
     itemsOverride,
@@ -388,8 +395,10 @@ export function TodayScreen({
           onOpenClarify={openClarifySheet}
           onRetryFailed={(event) => void handleRetryFailed(event)}
           onEditFailedAsText={handleEditFailedAsText}
+          onDeleteEvent={(event) => void handleDeleteEvent(event)}
           phase={phase}
           loadError={loadError}
+          deleteError={deleteError}
           onRetry={() => void refresh()}
         />
       </ScrollView>

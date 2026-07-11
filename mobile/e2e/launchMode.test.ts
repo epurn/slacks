@@ -79,6 +79,7 @@ import {
   listTodayLogEvents,
   listTodayLogEventEntries,
   createLogEvent,
+  deleteLogEvent,
   getLogEventClarification,
   answerClarification,
 } from '@/api/logEvents';
@@ -463,6 +464,34 @@ describe('E2E mock serves the URLs the real API clients request', () => {
     const summary = await getDailySummary(apiSession, '2026-01-01', mockFetch);
     expect(summary.has_intake).toBe(false);
     expect(summary.target?.calories.effective).toBe(2000);
+  });
+
+  // FTY-322 swipe-to-delete: the delete.yaml flow soft-voids a row via the real
+  // deleteLogEvent client's DELETE. The mock must answer that exact DELETE with
+  // a 204 (a 404 here would make the row appear undeletable on-device), and the
+  // isolated mock instance below proves the void then empties the day read.
+  it('deleteLogEvent resolves (204) and the void empties the delete flow read', async () => {
+    const isolated = createE2EMockFetch();
+    // Create the delete-flow entry, then soft-void it by id.
+    await createLogEvent(apiSession, 'yogurt to delete', undefined, isolated);
+    await expect(
+      deleteLogEvent(
+        apiSession,
+        'e2e-delete-event-00000000-0000-0000-0000-000000000000',
+        isolated,
+      ),
+    ).resolves.toBeUndefined();
+    // After the void the entry and its item drop out of every read.
+    const events = await listTodayLogEvents(apiSession, '2026-01-01', isolated);
+    expect(events).toHaveLength(0);
+    const entries = await listTodayLogEventEntries(
+      apiSession,
+      '2026-01-01',
+      isolated,
+    );
+    expect(entries).toHaveLength(0);
+    const summary = await getDailySummary(apiSession, '2026-01-01', isolated);
+    expect(summary.has_intake).toBe(false);
   });
 
   // FTY-187 Trends reads: the weight series and the adherence range back the

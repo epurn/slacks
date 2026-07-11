@@ -447,3 +447,35 @@ describe("ItemTimelineRow — beat 1: resolve fade (FTY-180/181)", () => {
     expect(Animated.timing).toHaveBeenCalled();
   });
 });
+
+describe("ItemTimelineRow — delete custom action (FTY-322)", () => {
+  it("exposes a Delete custom action on the interactive row and invokes it", () => {
+    const onDelete = jest.fn();
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(
+        <ItemTimelineRow
+          item={foodItem()}
+          onPress={jest.fn()}
+          accessibilityActions={[{ name: "delete", label: "Delete" }]}
+          onAccessibilityAction={(e) => {
+            if (e.nativeEvent.actionName === "delete") onDelete();
+          }}
+        />,
+      );
+    });
+
+    const node = tree!.root.find(
+      (n) =>
+        Array.isArray(n.props.accessibilityActions) &&
+        n.props.accessibilityActions.some(
+          (a: { name: string }) => a.name === "delete",
+        ) &&
+        typeof n.props.onAccessibilityAction === "function",
+    );
+    act(() => {
+      node.props.onAccessibilityAction({ nativeEvent: { actionName: "delete" } });
+    });
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+});

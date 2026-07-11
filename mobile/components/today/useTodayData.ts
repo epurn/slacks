@@ -12,6 +12,7 @@ import { getLabelProposal as getLabelProposalApi } from "@/api/labelProposal";
 import {
   answerClarification as answerClarificationApi,
   createLogEvent as createLogEventApi,
+  deleteLogEvent as deleteLogEventApi,
   getLogEventClarification as getLogEventClarificationApi,
   listTodayLogEvents as listTodayLogEventsApi,
   listTodayLogEventEntries as listTodayLogEventEntriesApi,
@@ -59,6 +60,7 @@ export type UseTodayDataParams = {
   load: typeof listTodayLogEventsApi;
   loadEntries: typeof listTodayLogEventEntriesApi;
   create: typeof createLogEventApi;
+  deleteEvent: typeof deleteLogEventApi;
   getClarification: typeof getLogEventClarificationApi;
   answerClarification: typeof answerClarificationApi;
   itemsOverride?: Readonly<Record<string, readonly DerivedItem[]>>;
@@ -86,6 +88,7 @@ export function useTodayData({
   load,
   loadEntries,
   create,
+  deleteEvent,
   getClarification,
   answerClarification,
   itemsOverride,
@@ -147,6 +150,20 @@ export function useTodayData({
   const [supersededFailedIds, setSupersededFailedIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
+
+  // Soft-voided (deleted) server events (FTY-322). Adding an id hides the row
+  // immediately (optimistic removal) via `displayEvents`, and — because this
+  // filter is applied on every render regardless of what a poll writes back into
+  // `events` — it also guards the poll-resurrect race: an in-flight list/poll
+  // that still carries a just-deleted event can never flash the row back. A
+  // failed delete removes the id again, restoring the row. Once the server
+  // confirms the void the event is excluded from every read, so keeping its
+  // (unique UUID) id here indefinitely is harmless. Mirrors the
+  // `supersededFailedIds` in-place-hide pattern above.
+  const [deletedEventIds, setDeletedEventIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // The submit machine reads the latest selected saved food at submit time, and
   // each in-flight submit stashes its saved food by optimistic id so the right
@@ -574,6 +591,55 @@ export function useTodayData({
     [setText],
   );
 
+  // Delete (soft-void) a server-backed timeline row (FTY-322). The row is hidden
+  // immediately (optimistic) via `deletedEventIds`, then the void round-trips to
+  // the FTY-321 endpoint. On success the event and its items are dropped from
+  // local state and the item feed + daily totals refetch in place so the hero
+  // reflects the removal without a jump; the `deletedEventIds` guard means an
+  // in-flight poll can never resurrect the row. On failure the row is restored
+  // and a calm inline error surfaces — never a crash, never a silent loss.
+  const handleDeleteEvent = useCallback(
+    async (target: LogEventDTO) => {
+      if (!apiSession) return;
+      setDeleteError(null);
+      setDeletedEventIds((prev) => new Set(prev).add(target.id));
+      try {
+        await deleteEvent(apiSession, target.id);
+        setEvents((prev) => prev.filter((event) => event.id !== target.id));
+        setItemsByEvent((prev) => {
+          if (!(target.id in prev)) return prev;
+          const { [target.id]: _removed, ...rest } = prev;
+          return rest;
+        });
+        // Refresh the day feed and totals in place so the removal is reflected
+        // everywhere the entry counted (server is the source of truth post-void).
+        loadEntries(apiSession).then(
+          (entries) => setItemsByEvent((prev) => mergeServerItems(prev, entries)),
+          () => {
+            // Keep the current items; the next poll retries.
+          },
+        );
+        getDailySummary(apiSession).then(
+          (loaded) => {
+            setSummary(loaded);
+            setSummaryError(null);
+          },
+          () => {
+            // Keep the current summary; the next poll retries.
+          },
+        );
+      } catch (error) {
+        setDeletedEventIds((prev) => {
+          const next = new Set(prev);
+          next.delete(target.id);
+          return next;
+        });
+        setDeleteError(messageFor(error, "delete"));
+      }
+    },
+    [apiSession, deleteEvent, loadEntries, getDailySummary],
+  );
+
   // Poll while an event is in flight, or while a fresh completion is still
   // waiting for the item-forward feed to settle. That keeps the skeleton on the
   // same row if `/log-events/by-date` lags the event list.
@@ -609,10 +675,14 @@ export function useTodayData({
     // status. Answered needs_clarification entries need no such filter: the
     // FTY-170 resolve transitions the same event in place (→ processing), so the
     // real server row already drops its needs-a-detail treatment (FTY-175).
-    const visible =
-      supersededFailedIds.size === 0
-        ? events
-        : events.filter((event) => !supersededFailedIds.has(event.id));
+    const hidden = supersededFailedIds.size === 0 && deletedEventIds.size === 0;
+    const visible = hidden
+      ? events
+      : events.filter(
+          (event) =>
+            !supersededFailedIds.has(event.id) &&
+            !deletedEventIds.has(event.id),
+        );
     if (offlineEntries.length === 0) return visible;
     const offlineEvents = offlineEntries
       .filter((entry) => entry.syncState !== "accepted")
@@ -625,13 +695,14 @@ export function useTodayData({
         }),
       );
     return sortByNewest([...visible, ...offlineEvents]);
-  }, [events, offlineEntries, supersededFailedIds]);
+  }, [events, offlineEntries, supersededFailedIds, deletedEventIds]);
 
   return {
     session,
     apiSession,
     phase,
     loadError,
+    deleteError,
     itemsByEvent,
     displayEvents,
     offlineStateById,
@@ -670,6 +741,7 @@ export function useTodayData({
     handleClarificationResolved,
     handleRetryFailed,
     handleEditFailedAsText,
+    handleDeleteEvent,
     handleItemChange,
   };
 }

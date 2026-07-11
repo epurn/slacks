@@ -17,6 +17,7 @@ import {
   ApiError,
   authHeaders,
   request,
+  requestNoContent,
   userScopedUrl,
 } from "@/api/client";
 import type { ApiSession } from "@/api/client";
@@ -181,6 +182,33 @@ export async function createLogEvent(
     headers: authHeaders(session),
     body: JSON.stringify(body),
     action: "save your entry",
+    onError: logEventError,
+    fetchImpl,
+  });
+}
+
+/**
+ * Soft-void (delete) a log event (FTY-321): `DELETE .../log-events/{eventId}`.
+ * The user is removing a mislogged entry; the backend sets a terminal
+ * `voided_at` marker so the event and its derived items drop out of every read
+ * model and the day's totals, without hard-deleting any row (the append-only
+ * audit/provenance stance holds — see `docs/contracts/log-events.md`).
+ *
+ * Returns `void`: the contract answers `204 No Content` on both the first void
+ * and every idempotent repeat. The operation is owner-scoped — a cross-user or
+ * unknown id fails closed as `404` (no existence oracle), surfaced here as the
+ * shared "couldn't find your log" message. `eventId` is not sensitive, but the
+ * error carries only the status and action, never any log content.
+ */
+export async function deleteLogEvent(
+  session: LogEventSession,
+  eventId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  return requestNoContent(userScopedUrl(session, "log-events", eventId), {
+    method: "DELETE",
+    headers: authHeaders(session),
+    action: "delete your entry",
     onError: logEventError,
     fetchImpl,
   });

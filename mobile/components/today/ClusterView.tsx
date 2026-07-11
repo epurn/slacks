@@ -1,3 +1,4 @@
+import { type ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
 import {
@@ -8,6 +9,10 @@ import { type LogEventDTO } from "@/api/logEvents";
 import { EntryRow } from "@/components/EntryRow";
 import { ItemTimelineRow } from "@/components/ItemTimelineRow";
 import { OfflineEntryRow } from "@/components/OfflineEntryRow";
+import {
+  SwipeableRow,
+  type SwipeDeleteAccessibilityProps,
+} from "@/components/SwipeableRow";
 import { type OutboxSyncState } from "@/state/outbox";
 import { formatWallClockTime, statusPresentation } from "@/state/today";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
@@ -17,6 +22,42 @@ import {
   itemTimelineExtraRowTestID,
   itemTimelineRowTestID,
 } from "./helpers";
+
+/**
+ * Wrap a deletable timeline row in the swipe-left-to-delete gesture (FTY-322),
+ * or render it plain when deletion doesn't apply (the read-only past-day
+ * timeline, or a caller that passes no `onDeleteEvent`). The render-prop hands
+ * the child row the Delete custom-action props so the destructive action stays
+ * reachable by VoiceOver on the row's own accessible control, not just via the
+ * pointer-only swipe.
+ */
+function MaybeSwipeable({
+  event,
+  deleteLabel,
+  onDeleteEvent,
+  readOnly,
+  children,
+}: {
+  event: LogEventDTO;
+  deleteLabel: string;
+  onDeleteEvent?: (event: LogEventDTO) => void;
+  readOnly: boolean;
+  children: (a11y: SwipeDeleteAccessibilityProps | undefined) => ReactNode;
+}) {
+  if (readOnly || !onDeleteEvent) {
+    return <>{children(undefined)}</>;
+  }
+  return (
+    <SwipeableRow
+      onDelete={() => onDeleteEvent(event)}
+      deleteAccessibilityLabel={deleteLabel}
+      deleteAnnouncement="Entry removed"
+      testID={`swipe-row-${event.id}`}
+    >
+      {children}
+    </SwipeableRow>
+  );
+}
 
 /**
  * One time-anchored cluster card of timeline rows (FTY-031). Each event renders
@@ -34,6 +75,7 @@ export function ClusterView({
   onOpenClarify,
   onRetryFailed,
   onEditFailedAsText,
+  onDeleteEvent,
   readOnly = false,
   colors,
 }: {
@@ -46,6 +88,13 @@ export function ClusterView({
   onOpenClarify?: (event: LogEventDTO) => void;
   onRetryFailed?: (event: LogEventDTO) => void;
   onEditFailedAsText?: (event: LogEventDTO) => void;
+  /**
+   * Soft-void a server-backed row via swipe-left-to-delete (FTY-322). Absent on
+   * the read-only past-day timeline (historical days are view-only). Given, each
+   * deletable row is wrapped so a left swipe reveals a destructive Delete and a
+   * VoiceOver custom action deletes the owning event.
+   */
+  onDeleteEvent?: (event: LogEventDTO) => void;
   /**
    * Read-only past-day timeline (FTY-199): render the same rows non-interactively
    * (no correction/clarify/retry affordances) because a historical day is
@@ -84,58 +133,89 @@ export function ClusterView({
             // Beat 1 — only genuine pending→resolved counted rows animate.
             const animateResolve = resolveAnimIds.has(event.id);
             const rowTestID = itemTimelineRowTestID(event.id);
-            if (animateResolve && items.length > 1) {
-              const firstItem = items[0];
-              if (!firstItem) return null;
-              return firstItem.item_type === "food" && firstItem.status === "proposed" ? (
-                <ItemTimelineRow
-                  key={event.id}
-                  item={firstItem}
-                  proposal
-                  onPress={onOpenProposal ? () => onOpenProposal(firstItem) : undefined}
-                  readOnly={readOnly}
-                  testID={rowTestID}
-                />
-              ) : (
-                <ItemTimelineRow
-                  key={event.id}
-                  item={firstItem}
-                  additionalItems={items.slice(1)}
-                  needsClarification={false}
-                  onPress={onOpenItem ? () => onOpenItem(firstItem, event.raw_text) : undefined}
-                  readOnly={readOnly}
-                  animateResolve
-                  testID={rowTestID}
-                />
-              );
-            }
-            return items.map((item, index) => {
-              const key = index === 0 ? event.id : item.id;
-              const testID =
-                index === 0
-                  ? rowTestID
-                  : itemTimelineExtraRowTestID(event.id, item.id);
-              return item.item_type === "food" && item.status === "proposed" ? (
-                <ItemTimelineRow
-                  key={key}
-                  item={item}
-                  proposal
-                  onPress={onOpenProposal ? () => onOpenProposal(item) : undefined}
-                  readOnly={readOnly}
-                  testID={testID}
-                />
-              ) : (
-                <ItemTimelineRow
-                  key={key}
-                  item={item}
-                  needsClarification={false}
-                  onPress={onOpenItem ? () => onOpenItem(item, event.raw_text) : undefined}
-                  readOnly={readOnly}
-                  animateResolve={animateResolve}
-                  testID={testID}
-                />
-              );
-            });
+            const firstItem = items[0];
+            const deleteLabel = firstItem
+              ? `Delete ${firstItem.name}`
+              : "Delete entry";
+            return (
+              <MaybeSwipeable
+                key={event.id}
+                event={event}
+                deleteLabel={deleteLabel}
+                onDeleteEvent={onDeleteEvent}
+                readOnly={readOnly}
+              >
+                {(a11y) => {
+                  if (animateResolve && items.length > 1) {
+                    if (!firstItem) return null;
+                    return firstItem.item_type === "food" &&
+                      firstItem.status === "proposed" ? (
+                      <ItemTimelineRow
+                        item={firstItem}
+                        proposal
+                        onPress={
+                          onOpenProposal ? () => onOpenProposal(firstItem) : undefined
+                        }
+                        readOnly={readOnly}
+                        testID={rowTestID}
+                        {...a11y}
+                      />
+                    ) : (
+                      <ItemTimelineRow
+                        item={firstItem}
+                        additionalItems={items.slice(1)}
+                        needsClarification={false}
+                        onPress={
+                          onOpenItem
+                            ? () => onOpenItem(firstItem, event.raw_text)
+                            : undefined
+                        }
+                        readOnly={readOnly}
+                        animateResolve
+                        testID={rowTestID}
+                        {...a11y}
+                      />
+                    );
+                  }
+                  return items.map((item, index) => {
+                    const key = index === 0 ? event.id : item.id;
+                    const testID =
+                      index === 0
+                        ? rowTestID
+                        : itemTimelineExtraRowTestID(event.id, item.id);
+                    return item.item_type === "food" &&
+                      item.status === "proposed" ? (
+                      <ItemTimelineRow
+                        key={key}
+                        item={item}
+                        proposal
+                        onPress={
+                          onOpenProposal ? () => onOpenProposal(item) : undefined
+                        }
+                        readOnly={readOnly}
+                        testID={testID}
+                        {...a11y}
+                      />
+                    ) : (
+                      <ItemTimelineRow
+                        key={key}
+                        item={item}
+                        needsClarification={false}
+                        onPress={
+                          onOpenItem
+                            ? () => onOpenItem(item, event.raw_text)
+                            : undefined
+                        }
+                        readOnly={readOnly}
+                        animateResolve={animateResolve}
+                        testID={testID}
+                        {...a11y}
+                      />
+                    );
+                  });
+                }}
+              </MaybeSwipeable>
+            );
           }
 
           // Optimistic / saved-food synthetic items (before the server feed
@@ -165,12 +245,22 @@ export function ClusterView({
           // tap opens the clarify-mode sheet (FTY-149).
           if (event.status === "needs_clarification") {
             return (
-              <EntryRow
+              <MaybeSwipeable
                 key={event.id}
                 event={event}
-                onPress={onOpenClarify ? () => onOpenClarify(event) : undefined}
+                deleteLabel="Delete entry"
+                onDeleteEvent={onDeleteEvent}
                 readOnly={readOnly}
-              />
+              >
+                {(a11y) => (
+                  <EntryRow
+                    event={event}
+                    onPress={onOpenClarify ? () => onOpenClarify(event) : undefined}
+                    readOnly={readOnly}
+                    {...a11y}
+                  />
+                )}
+              </MaybeSwipeable>
             );
           }
 
@@ -178,15 +268,27 @@ export function ClusterView({
           // Edit as text; never a static dead-end (FTY-176).
           if (event.status === "failed") {
             return (
-              <EntryRow
+              <MaybeSwipeable
                 key={event.id}
                 event={event}
-                onRetry={onRetryFailed ? () => onRetryFailed(event) : undefined}
-                onEditAsText={
-                  onEditFailedAsText ? () => onEditFailedAsText(event) : undefined
-                }
+                deleteLabel="Delete entry"
+                onDeleteEvent={onDeleteEvent}
                 readOnly={readOnly}
-              />
+              >
+                {(a11y) => (
+                  <EntryRow
+                    event={event}
+                    onRetry={onRetryFailed ? () => onRetryFailed(event) : undefined}
+                    onEditAsText={
+                      onEditFailedAsText
+                        ? () => onEditFailedAsText(event)
+                        : undefined
+                    }
+                    readOnly={readOnly}
+                    {...a11y}
+                  />
+                )}
+              </MaybeSwipeable>
             );
           }
 
