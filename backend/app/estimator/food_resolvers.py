@@ -37,6 +37,7 @@ from app.estimator.fdc_ranking import (
 from app.estimator.off import (
     OFF_SOURCE,
     BarcodeSource,
+    OffMissReason,
     normalize_barcode,
 )
 from app.models.food_sources import Product
@@ -198,19 +199,34 @@ class BarcodeResolver:
         :class:`OffResponseError` from the source for the step to route.
         """
 
+        return self.resolve_product_outcome(barcode)[0]
+
+    def resolve_product_outcome(
+        self, barcode: str
+    ) -> tuple[_ResolvedProduct | None, OffMissReason | None]:
+        """:meth:`resolve_product`, plus *why* a lookup missed (FTY-308).
+
+        Same cache-first behavior — a cache hit makes **no** external call and yields
+        ``(product, None)``. On a miss the OFF outcome distinguishes a genuine miss
+        (:attr:`OffMissReason.NO_MATCH`) from a found-but-unusable product
+        (:attr:`OffMissReason.NO_USABLE_FACTS`), so the barcode exact-evidence proposal
+        can label its ``failure_reason`` precisely. A fetched match is cached (flushed)
+        as before. Propagates :class:`OffTransientError` / :class:`OffResponseError`.
+        """
+
         normalized = normalize_barcode(barcode)
         if normalized is None:
-            return None
+            return None, OffMissReason.NO_MATCH
 
         cached = self._session.scalars(
             select(Product).where(Product.source == OFF_SOURCE, Product.barcode == normalized)
         ).one_or_none()
         if cached is not None:
-            return _ResolvedProduct(product=cached, fetched_at=cached.updated_at)
+            return _ResolvedProduct(product=cached, fetched_at=cached.updated_at), None
 
-        facts = self._source.lookup(normalized)
+        facts, miss_reason = self._source.lookup_outcome(normalized)
         if facts is None:
-            return None
+            return None, miss_reason
         return _ResolvedProduct(
             product=_cache_product(self._session, facts), fetched_at=datetime.now(UTC)
-        )
+        ), None

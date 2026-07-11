@@ -25,7 +25,7 @@ from app.estimator.fdc import FDC_SOURCE, ProductFacts
 from app.estimator.food_resolvers import BarcodeResolver, FoodResolver
 from app.estimator.food_serving import NutritionFacts
 from app.estimator.food_step import FoodResolveStep
-from app.estimator.off import OFF_SOURCE, normalize_barcode
+from app.estimator.off import OFF_SOURCE, OffMissReason, normalize_barcode
 from app.estimator.official_fetch import OfficialFetchSettings
 from app.estimator.official_step import (
     QUANTITY_QUESTION,
@@ -91,6 +91,10 @@ class FakeBarcodeSource:
     def lookup(self, barcode: str) -> ProductFacts | None:
         self.lookups.append(barcode)
         return self._facts.get(normalize_barcode(barcode) or "")
+
+    def lookup_outcome(self, barcode: str) -> tuple[ProductFacts | None, OffMissReason | None]:
+        facts = self.lookup(barcode)
+        return facts, (None if facts is not None else OffMissReason.NO_MATCH)
 
 
 class DisabledSearchProvider:

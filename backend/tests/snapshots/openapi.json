@@ -43,6 +43,23 @@
         "title": "AlternativesResponse",
         "type": "object"
       },
+      "BarcodeProposalRequest": {
+        "additionalProperties": false,
+        "description": "Request body for ``.../food/{item_id}/exact-upgrade/barcode`` (FTY-308).\n\n``barcode`` is the untrusted typed/scanned UPC/EAN the server normalizes and\nvalidates before any use. ``extra=\"forbid\"`` rejects any client-supplied nutrition\nfacts or unknown keys with a ``422`` \u2014 the client supplies the barcode only; the\nfacts are always server-generated.",
+        "properties": {
+          "barcode": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Barcode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "barcode"
+        ],
+        "title": "BarcodeProposalRequest",
+        "type": "object"
+      },
       "CandidateType": {
         "description": "Kind of a parsed estimation candidate (FTY-042).\n\nThe structured parse step classifies each extracted item as :attr:`FOOD` or\n:attr:`EXERCISE`. The two kinds persist into separate derived-item tables, so\nthis discriminator is the shared vocabulary for both the LLM output schema and\nthe routing that splits candidates into ``derived_food_items`` /\n``derived_exercise_items``.",
         "enum": [
@@ -690,6 +707,137 @@
         ],
         "title": "ExactEvidenceApplyRequest",
         "type": "object"
+      },
+      "ExactEvidenceKind": {
+        "description": "Which evidence kind produced an exact-evidence proposal (FTY-306/307).\n\nThe ``Make it exact`` lever builds a server-held proposal from user-supplied\n**product evidence**; this names the evidence source that produced it so the\nread shape and the apply audit can tell a barcode upgrade from a label one:\n\n- :attr:`BARCODE` \u2014 a typed or scanned barcode, resolved server-side through\n  the hardened Open Food Facts path (generation is FTY-308).\n- :attr:`LABEL` \u2014 a nutrition-label photo, resolved server-side through the\n  schema-validated label-extraction path (generation is FTY-309).",
+        "enum": [
+          "barcode",
+          "label"
+        ],
+        "title": "ExactEvidenceKind",
+        "type": "string"
+      },
+      "ExactEvidenceProposalDTO": {
+        "additionalProperties": false,
+        "description": "The proposal read shape a propose route returns (FTY-306).\n\nThe client receives this preview plus the opaque ``proposal_ref`` \u2014 never a\nwritable fact set. ``quality`` / ``failure_reason`` keep a fallback plainly\ndistinct from an exact match: ``failure_reason`` is ``None`` for ``exact`` and a\nclosed, content-free label for ``fallback`` / ``none``. ``preview`` is ``None``\nonly for a ``none`` (nothing-applyable) outcome. ``can_cost_current_amount`` is\n``false`` when apply will require an explicit amount from the user.",
+        "properties": {
+          "can_cost_current_amount": {
+            "title": "Can Cost Current Amount",
+            "type": "boolean"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ExactEvidenceKind"
+          },
+          "preview": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExactEvidenceProposalPreviewDTO"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "proposal_ref": {
+            "title": "Proposal Ref",
+            "type": "string"
+          },
+          "quality": {
+            "$ref": "#/components/schemas/ExactEvidenceQuality"
+          }
+        },
+        "required": [
+          "proposal_ref",
+          "kind",
+          "quality",
+          "can_cost_current_amount"
+        ],
+        "title": "ExactEvidenceProposalDTO",
+        "type": "object"
+      },
+      "ExactEvidenceProposalPreviewDTO": {
+        "additionalProperties": false,
+        "description": "The would-be applied item, previewed before an explicit apply (FTY-306).\n\nA **read projection** \u2014 previewing mutates nothing. ``source`` is the read-model\ndescriptor the applied item would carry (so a fallback shows its honest rough\nsource label, never an exact one); the nutrition fields are the item costed at\nits current ``amount`` when possible, else the proposal's source facts on its own\n``basis`` (see :attr:`ExactEvidenceProposalDTO.can_cost_current_amount`).",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "basis": {
+            "title": "Basis",
+            "type": "string"
+          },
+          "calories": {
+            "title": "Calories",
+            "type": "number"
+          },
+          "carbs_g": {
+            "title": "Carbs G",
+            "type": "number"
+          },
+          "fat_g": {
+            "title": "Fat G",
+            "type": "number"
+          },
+          "protein_g": {
+            "title": "Protein G",
+            "type": "number"
+          },
+          "serving_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serving Label"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ItemSourceDTO"
+          }
+        },
+        "required": [
+          "source",
+          "basis",
+          "calories",
+          "protein_g",
+          "carbs_g",
+          "fat_g",
+          "amount",
+          "serving_label"
+        ],
+        "title": "ExactEvidenceProposalPreviewDTO",
+        "type": "object"
+      },
+      "ExactEvidenceQuality": {
+        "description": "Trust quality of an exact-evidence proposal (FTY-306/307).\n\nFixes whether the supplied evidence resolved through its **exact** source or\nfell back to an honestly lower-trust one, so a fallback can never masquerade as\nexact in the proposal, preview, or applied provenance:\n\n- :attr:`EXACT` \u2014 the evidence resolved through its exact source (barcode \u2192\n  ``product_database``, label \u2192 ``user_label``).\n- :attr:`FALLBACK` \u2014 exact evidence failed but a lower-trust estimator source\n  (``reference_source`` / ``model_prior`` / a comparable-reference aggregate)\n  produced a better rough result; it stays visibly rough and editable.\n- :attr:`NONE` \u2014 neither exact evidence nor a usable fallback could be produced;\n  a failure read with nothing to apply.",
+        "enum": [
+          "exact",
+          "fallback",
+          "none"
+        ],
+        "title": "ExactEvidenceQuality",
+        "type": "string"
       },
       "FoodSuggestionDTO": {
         "description": "One ranked quick-add suggestion for the Today composer.",
@@ -2612,6 +2760,86 @@
           }
         },
         "summary": "Apply Exact Evidence",
+        "tags": [
+          "exact-evidence"
+        ]
+      }
+    },
+    "/api/users/{user_id}/derived-items/food/{item_id}/exact-upgrade/barcode": {
+      "post": {
+        "description": "Build an exact-or-fallback barcode proposal for the caller's own food item.\n\nResolves the barcode through the hardened, cache-first Open Food Facts path and\nreturns a server-signed **proposal** the user previews and applies via FTY-307 \u2014 a\nread-only operation that never mutates the item. A confident OFF match yields an\n``exact`` ``product_database`` proposal costed at the item's current amount (or a\nproposal requiring an amount when the current amount is uncostable); no usable exact\nmatch yields a clearly-labelled ``fallback`` proposal from the item's identity when\nthe estimator can produce one, else a ``none`` (no-proposal) response with a\ncontent-free reason.\n\nCross-user / unknown / non-food items \u2014 and items whose parent log event is voided \u2014\nfail closed as ``404``; an already-source-backed (ineligible) item returns ``422\n{\"error\": \"not_upgradeable\"}``; a transient/terminal OFF source failure surfaces a\nretryable ``503`` rather than a disguised miss. Nothing mutates on any path.",
+        "operationId": "propose_barcode_evidence_api_users__user_id__derived_items_food__item_id__exact_upgrade_barcode_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BarcodeProposalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExactEvidenceProposalDTO"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Propose Barcode Evidence",
         "tags": [
           "exact-evidence"
         ]

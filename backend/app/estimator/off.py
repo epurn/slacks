@@ -35,6 +35,7 @@ import os
 import re
 import socket
 from collections.abc import Mapping
+from enum import Enum
 from typing import Any, Final, Protocol, runtime_checkable
 from urllib.parse import urlsplit
 
@@ -95,6 +96,25 @@ class OffResponseError(Exception):
     """A non-retryable OFF failure (4xx, oversized/non-JSON body, policy violation)."""
 
 
+class OffMissReason(Enum):
+    """Why an OFF barcode lookup yielded no usable product (FTY-308 vocabulary).
+
+    Distinguishes a genuine miss from a found-but-unusable product so the barcode
+    exact-evidence proposal can label its ``failure_reason`` precisely
+    (``docs/contracts/evidence-retrieval.md`` — Exact Evidence Upgrade): a product
+    absent from OFF is a ``barcode_no_match``, while a product present but carrying no
+    plausible per-100g energy facts is ``no_usable_facts``. It is **not** an error: a
+    transient/terminal OFF failure still raises :class:`OffTransientError` /
+    :class:`OffResponseError` so the route surfaces a retryable ``503``.
+    """
+
+    #: OFF has no product for this barcode (``status != found``) — a genuine miss.
+    NO_MATCH = "no_match"
+    #: OFF returned a product, but its facts are unusable/implausible (no energy on a
+    #: usable basis, or the existing plausibility gate rejected them).
+    NO_USABLE_FACTS = "no_usable_facts"
+
+
 def normalize_barcode(barcode: str | None) -> str | None:
     """Return the sanitized, digits-only barcode, or ``None`` if it is not valid.
 
@@ -125,6 +145,17 @@ class BarcodeSource(Protocol):
 
         Raises :class:`OffTransientError` on a retryable failure and
         :class:`OffResponseError` on a non-retryable one.
+        """
+        ...
+
+    def lookup_outcome(self, barcode: str) -> tuple[ProductFacts | None, OffMissReason | None]:
+        """:meth:`lookup`, plus *why* a miss occurred (``None`` reason on a match).
+
+        Returns ``(facts, None)`` for a usable match and ``(None, reason)`` for a miss,
+        where ``reason`` distinguishes a product absent from OFF
+        (:attr:`OffMissReason.NO_MATCH`) from a product present but carrying no usable
+        facts (:attr:`OffMissReason.NO_USABLE_FACTS`). Raises the same
+        :class:`OffTransientError` / :class:`OffResponseError` as :meth:`lookup`.
         """
         ...
 
@@ -309,12 +340,24 @@ class OffClient:
         :class:`OffTransientError` / :class:`OffResponseError`.
         """
 
+        return self.lookup_outcome(barcode)[0]
+
+    def lookup_outcome(self, barcode: str) -> tuple[ProductFacts | None, OffMissReason | None]:
+        """:meth:`lookup`, distinguishing a genuine miss from found-but-unusable facts.
+
+        Only the normalized, digits-only barcode is sent. Returns ``(facts, None)`` on a
+        usable match; ``(None, NO_MATCH)`` when the source is disabled/invalid-barcode or
+        the product is absent from OFF; ``(None, NO_USABLE_FACTS)`` when OFF returns a
+        product whose facts are unusable/implausible. Transport/policy failures still
+        raise :class:`OffTransientError` / :class:`OffResponseError`.
+        """
+
         if not self.enabled:
-            return None
+            return None, OffMissReason.NO_MATCH
 
         normalized = normalize_barcode(barcode)
         if normalized is None:
-            return None
+            return None, OffMissReason.NO_MATCH
 
         headers = {"User-Agent": self._settings.user_agent}
         try:
@@ -337,17 +380,21 @@ class OffClient:
         return _map_product(normalized, response)
 
 
-def _map_product(barcode: str, response: OffProductResponse) -> ProductFacts | None:
-    """Map a found OFF product to canonical per-100g :class:`ProductFacts`, or ``None``.
+def _map_product(
+    barcode: str, response: OffProductResponse
+) -> tuple[ProductFacts | None, OffMissReason | None]:
+    """Map a found OFF product to canonical per-100g :class:`ProductFacts`, or a miss.
 
     Prefers per-100g facts. When OFF supplies only per-serving facts plus a gram
-    serving size, converts them to per-100g for canonical storage. If neither a
-    per-100g basis nor a gram serving size with energy is derivable, returns ``None``
-    (a non-match, routed deterministically). Missing macros default to 0.
+    serving size, converts them to per-100g for canonical storage. Returns
+    ``(facts, None)`` on a usable match; ``(None, NO_MATCH)`` when OFF has no product;
+    ``(None, NO_USABLE_FACTS)`` when a product is present but neither a per-100g basis
+    nor a gram serving size with plausible energy is derivable. Missing macros default
+    to 0.
     """
 
     if response.status != _OFF_STATUS_FOUND or response.product is None:
-        return None
+        return None, OffMissReason.NO_MATCH
 
     product = response.product
     nutriments = product.nutriments
@@ -355,11 +402,12 @@ def _map_product(barcode: str, response: OffProductResponse) -> ProductFacts | N
 
     facts = _facts_per_100g(nutriments, serving_g)
     if facts is None:
-        # No energy on a usable basis: cannot compute calories deterministically.
-        return None
+        # A product exists in OFF but carries no plausible energy on a usable basis:
+        # unusable facts, not a genuine miss (distinct FTY-308 failure_reason).
+        return None, OffMissReason.NO_USABLE_FACTS
 
     source_ref = f"{OFF_SOURCE}:{barcode}"
-    return ProductFacts(
+    facts_row = ProductFacts(
         source=OFF_SOURCE,
         source_ref=source_ref,
         query_key=barcode,
@@ -369,6 +417,7 @@ def _map_product(barcode: str, response: OffProductResponse) -> ProductFacts | N
         content_hash=_content_hash(source_ref, facts),
         barcode=barcode,
     )
+    return facts_row, None
 
 
 def _facts_per_100g(nutriments: OffNutriments, serving_g: float | None) -> NutritionFacts | None:

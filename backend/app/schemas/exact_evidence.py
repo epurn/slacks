@@ -43,8 +43,16 @@ MAX_AMOUNT = 100_000.0
 #: ``max_length`` guard on the sibling trust-boundary ref ``ReResolveRequest.source_ref``.
 #: The over-limit rejection response is sanitized so the signed ``proposal_ref`` is
 #: never echoed back — see
-#: ``app.routers.exact_evidence.sanitized_apply_validation_handler``.
+#: ``app.routers.exact_evidence.sanitized_exact_evidence_validation_handler``.
 MAX_PROPOSAL_REF_LENGTH = 4096
+
+#: Generous upper bound on the untrusted barcode string at the propose trust
+#: boundary. A UPC/EAN/GTIN is at most 14 digits; 64 leaves ample headroom for
+#: separators/whitespace a client might submit while capping the untrusted input the
+#: OFF barcode normalizer bounds again to 8/12/13/14 digits. The over-limit / injected
+#: -key rejection response is sanitized so no submitted value is echoed back — see
+#: ``app.routers.exact_evidence.sanitized_exact_evidence_validation_handler``.
+MAX_BARCODE_LENGTH = 64
 
 
 class ExactEvidenceApplyRequest(BaseModel):
@@ -74,6 +82,20 @@ class ExactEvidenceApplyRequest(BaseModel):
         if value > MAX_AMOUNT:
             raise ValueError("amount is out of range")
         return value
+
+
+class BarcodeProposalRequest(BaseModel):
+    """Request body for ``.../food/{item_id}/exact-upgrade/barcode`` (FTY-308).
+
+    ``barcode`` is the untrusted typed/scanned UPC/EAN the server normalizes and
+    validates before any use. ``extra="forbid"`` rejects any client-supplied nutrition
+    facts or unknown keys with a ``422`` — the client supplies the barcode only; the
+    facts are always server-generated.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    barcode: str = Field(min_length=1, max_length=MAX_BARCODE_LENGTH)
 
 
 class ExactEvidenceProposalPreviewDTO(BaseModel):
