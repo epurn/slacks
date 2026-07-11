@@ -679,6 +679,7 @@
             "title": "Amount"
           },
           "proposal_ref": {
+            "maxLength": 4096,
             "minLength": 1,
             "title": "Proposal Ref",
             "type": "string"

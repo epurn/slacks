@@ -54,6 +54,7 @@ from app.models.derived import DerivedFoodItem
 from app.models.food_sources import EvidenceSource
 from app.models.identity import User
 from app.models.log_events import LogEvent
+from app.schemas.exact_evidence import MAX_PROPOSAL_REF_LENGTH
 from app.security.tokens import mint_token
 from app.services import item_read_model
 from app.services.exact_evidence import serialize_proposal
@@ -809,6 +810,24 @@ def test_apply_api_unknown_reference_is_422(client: TestClient, db_engine: Engin
 
     assert resp.status_code == 422
     assert resp.json()["detail"]["error"] == "proposal_not_resolvable"
+
+
+def test_apply_api_oversized_reference_is_422_no_mutation(
+    client: TestClient, db_engine: Engine, session: Session
+) -> None:
+    # An oversized proposal_ref is rejected at the request boundary (before any HMAC
+    # signing / base64+JSON decode), capping the unbounded CPU/memory path — 422, no mutation.
+    user_id, auth = register(client, "ee-api-oversized@example.com")
+    item_id = seed_food_item(db_engine, user_id, calories=300.0)
+    resp = client.post(
+        _apply_url(user_id, item_id),
+        headers={"Authorization": auth},
+        json={"proposal_ref": "a" * (MAX_PROPOSAL_REF_LENGTH + 1)},
+    )
+
+    assert resp.status_code == 422
+    session.expire_all()
+    assert session.get(DerivedFoodItem, item_id).calories == pytest.approx(300.0)  # type: ignore[union-attr]
 
 
 @pytest.mark.parametrize(

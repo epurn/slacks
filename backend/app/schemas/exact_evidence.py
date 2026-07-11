@@ -35,6 +35,14 @@ from app.schemas.corrections import ItemSourceDTO
 #: range bound (``app/services/corrections.py``); a value above it is rejected.
 MAX_AMOUNT = 100_000.0
 
+#: Generous upper bound on the opaque signed ``proposal_ref`` at the apply trust
+#: boundary. A real server-signed reference — even a fallback carrying assumptions
+#: and per-field provenance — is well under 1 KiB; 4096 leaves ~4x headroom for any
+#: legitimate proposal while capping the untrusted oversized-request path (HMAC
+#: signing + base64/JSON decode) before it can burn CPU/memory. Mirrors the
+#: ``max_length`` guard on the sibling trust-boundary ref ``ReResolveRequest.source_ref``.
+MAX_PROPOSAL_REF_LENGTH = 4096
+
 
 class ExactEvidenceApplyRequest(BaseModel):
     """Request body for ``.../food/{item_id}/exact-upgrade/apply``.
@@ -48,7 +56,7 @@ class ExactEvidenceApplyRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    proposal_ref: str = Field(min_length=1)
+    proposal_ref: str = Field(min_length=1, max_length=MAX_PROPOSAL_REF_LENGTH)
     amount: float | None = None
 
     @field_validator("amount")
