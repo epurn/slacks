@@ -9,6 +9,7 @@ import { act, type ReactTestRenderer } from "react-test-renderer";
 
 import { getDailySummary } from "@/api/dailySummary";
 import {
+  getLogEventClarification,
   listTodayLogEventEntries,
   listTodayLogEvents,
 } from "@/api/logEvents";
@@ -35,6 +36,7 @@ import {
 import {
   TODAY_FAILED_PRESET_NAME,
   TODAY_NEEDS_CLARIFICATION_PRESET_NAME,
+  TODAY_PARTIALLY_RESOLVED_PRESET_NAME,
 } from "./visualReviewEntryRows";
 
 jest.mock("expo-router", () => ({
@@ -101,6 +103,9 @@ function mountTodayWithPreset(presetName: string): ReactTestRenderer {
         getDailySummary={(session) =>
           getDailySummary(session, undefined, mockFetch)
         }
+        getClarification={(session, eventId) =>
+          getLogEventClarification(session, eventId, mockFetch)
+        }
         useActive={INACTIVE}
       />
       <VisualReviewSettleOverlay />
@@ -124,10 +129,11 @@ afterEach(() => {
 });
 
 describe("today failed / needs_clarification visual-review EntryRow presets", () => {
-  it("registers both presets through the FTY-247 API with the shared Today settled path", () => {
+  it("registers all three presets through the FTY-247 API with the shared Today settled path", () => {
     for (const name of [
       TODAY_FAILED_PRESET_NAME,
       TODAY_NEEDS_CLARIFICATION_PRESET_NAME,
+      TODAY_PARTIALLY_RESOLVED_PRESET_NAME,
     ]) {
       const preset = getVisualReviewPreset(name);
       expect(preset).toBeDefined();
@@ -150,10 +156,15 @@ describe("today failed / needs_clarification visual-review EntryRow presets", ()
     };
 
     // daily-summary.md excludes `failed` events (a distinct retry state) from
-    // uncounted_entries; an event-level needs_clarification contributes one.
+    // uncounted_entries; an event-level needs_clarification contributes one, and
+    // a partially_resolved event's single open component contributes one (its
+    // resolved sibling counts in intake instead).
     expect(summaryFor(TODAY_FAILED_PRESET_NAME).uncounted_entries).toBe(0);
     expect(
       summaryFor(TODAY_NEEDS_CLARIFICATION_PRESET_NAME).uncounted_entries,
+    ).toBe(1);
+    expect(
+      summaryFor(TODAY_PARTIALLY_RESOLVED_PRESET_NAME).uncounted_entries,
     ).toBe(1);
   });
 
@@ -197,6 +208,40 @@ describe("today failed / needs_clarification visual-review EntryRow presets", ()
       expect(hasA11yLabel(tree, "coffee, needs a detail, uncounted")).toBe(true);
 
       const marker = `visual-review-settled:${TODAY_NEEDS_CLARIFICATION_PRESET_NAME}`;
+      expect(hasA11yLabel(tree, marker)).toBe(false);
+
+      await act(async () => {
+        jest.advanceTimersByTime(QUIET_MS + 50);
+        await Promise.resolve();
+      });
+      expect(hasA11yLabel(tree, marker)).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("opens today.partially_resolved: counted sibling row + item-named pending-question row, then the settled marker", async () => {
+    jest.useFakeTimers();
+    try {
+      setE2E(true);
+      const tree = mountTodayWithPreset(TODAY_PARTIALLY_RESOLVED_PRESET_NAME);
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      const content = textContent(tree);
+      // The committed sibling renders as a normal counted row (name · kcal)...
+      expect(content).toContain("Greek yogurt");
+      expect(content).toContain("140 kcal");
+      // ...and the open component renders one item-named pending-question row.
+      expect(content).toContain("How much hummus?");
+      expect(hasA11yLabel(tree, "How much hummus?, needs a detail, uncounted")).toBe(
+        true,
+      );
+      // The raw diary phrase is never surfaced as a row on a partial event.
+      expect(content).not.toContain("greek yogurt and some hummus");
+
+      const marker = `visual-review-settled:${TODAY_PARTIALLY_RESOLVED_PRESET_NAME}`;
       expect(hasA11yLabel(tree, marker)).toBe(false);
 
       await act(async () => {

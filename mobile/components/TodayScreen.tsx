@@ -179,6 +179,7 @@ export function TodayScreen({
     loadError,
     deleteError,
     itemsByEvent,
+    questionsByEvent,
     displayEvents,
     offlineStateById,
     resolveAnimIds,
@@ -403,6 +404,7 @@ export function TodayScreen({
         <Timeline
           events={displayEvents}
           itemsByEvent={itemsByEvent}
+          questionsByEvent={questionsByEvent}
           offlineStateById={offlineStateById}
           resolveAnimIds={resolveAnimIds}
           onOpenItem={openItemSheet}

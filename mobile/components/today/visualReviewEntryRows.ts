@@ -21,10 +21,18 @@ import {
   E2E_DAILY_SUMMARY,
   E2E_FAILED_EVENT,
 } from "@/e2e/fixtures";
+import {
+  E2E_PARTIAL_CLARIFICATION,
+  E2E_PARTIAL_EVENT,
+  E2E_PARTIAL_RESOLVED_ITEM,
+  E2E_PARTIAL_SUMMARY,
+} from "@/e2e/partialResolutionFixtures";
 
 export const TODAY_FAILED_PRESET_NAME = "today.failed";
 export const TODAY_NEEDS_CLARIFICATION_PRESET_NAME =
   "today.needs_clarification";
+export const TODAY_PARTIALLY_RESOLVED_PRESET_NAME =
+  "today.partially_resolved";
 
 const EMPTY_LIST: unknown[] = [];
 
@@ -70,5 +78,28 @@ registerVisualReviewPreset({
     },
     { match: get("/log-events"), body: [E2E_CLARIFY_EVENT] },
     { match: get("/daily-summary"), body: CLARIFY_UNCOUNTED_SUMMARY },
+  ],
+});
+
+/**
+ * Partially-resolved timeline preset (FTY-330). The by-date feed carries the
+ * committed sibling as a normal counted row; the status-gated clarification read
+ * carries the open component's question, which renders as one pending-question
+ * row. `/clarification` must be matched *before* `/log-events` — the clarify URL
+ * also contains "log-events", but `get()` matches on `endsWith`, so the specific
+ * suffix wins regardless of order; it is listed first for clarity.
+ */
+registerVisualReviewPreset({
+  name: TODAY_PARTIALLY_RESOLVED_PRESET_NAME,
+  route: "/",
+  settledPath: "/",
+  responses: [
+    { match: get("/clarification"), body: E2E_PARTIAL_CLARIFICATION },
+    {
+      match: get("/log-events/by-date"),
+      body: [{ event: E2E_PARTIAL_EVENT, items: [E2E_PARTIAL_RESOLVED_ITEM] }],
+    },
+    { match: get("/log-events"), body: [E2E_PARTIAL_EVENT] },
+    { match: get("/daily-summary"), body: E2E_PARTIAL_SUMMARY },
   ],
 });

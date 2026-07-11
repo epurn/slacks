@@ -5,7 +5,10 @@ import {
   type DerivedItem,
   type DerivedFoodItemDTO,
 } from "@/api/derivedItems";
-import { type LogEventDTO } from "@/api/logEvents";
+import {
+  type ClarificationQuestionDTO,
+  type LogEventDTO,
+} from "@/api/logEvents";
 import { EntryRow } from "@/components/EntryRow";
 import { ItemTimelineRow } from "@/components/ItemTimelineRow";
 import { OfflineEntryRow } from "@/components/OfflineEntryRow";
@@ -25,7 +28,10 @@ import {
   isSyntheticSavedFoodItem,
   itemTimelineExtraRowTestID,
   itemTimelineRowTestID,
+  pendingQuestionRowTestID,
+  questionPlaceholderItem,
 } from "./helpers";
+import { type QuestionsByEvent } from "./usePartialClarifications";
 
 /**
  * Wrap a deletable timeline row in the swipe-left-to-delete gesture (FTY-322),
@@ -68,6 +74,100 @@ function MaybeSwipeable({
 }
 
 /**
+ * The rows of a partially-resolved entry (FTY-330): the mixed log's committed
+ * `resolved` siblings as normal counted item rows, followed by one
+ * pending-question row per still-open component (or, during a scoped
+ * re-estimate, a single loading skeleton where the answered component resolves
+ * in place).
+ *
+ * The committed siblings and the open component reuse the *existing* Today row
+ * language: siblings are ordinary `ItemTimelineRow`s (provenance icon, kcal,
+ * tap-to-correct), and each open question is an `ItemTimelineRow` in its
+ * needs-a-detail treatment — muted, tagged, visibly uncounted — whose `name` is
+ * the question `text` (which already names the component, e.g. "Which hummus was
+ * that?"), never the raw diary phrase. Tapping a question row opens the clarify
+ * sheet pre-targeted to that one question, so its answer resolves that exact
+ * component and leaves the siblings untouched.
+ */
+function PartialEntryRows({
+  event,
+  items,
+  questions,
+  reestimating,
+  onOpenItem,
+  onOpenClarify,
+  readOnly,
+  a11y,
+}: {
+  event: LogEventDTO;
+  items: readonly DerivedItem[];
+  questions: readonly ClarificationQuestionDTO[];
+  /** True while a just-answered component re-estimates (`processing`), FTY-349. */
+  reestimating: boolean;
+  onOpenItem?: (item: DerivedItem, logPhrase: string) => void;
+  onOpenClarify?: (
+    event: LogEventDTO,
+    question?: ClarificationQuestionDTO,
+  ) => void;
+  readOnly: boolean;
+  a11y: SwipeDeleteAccessibilityProps | undefined;
+}) {
+  return (
+    <>
+      {/* Committed siblings — counted, tappable, provenance unchanged. The first
+          reuses the event-keyed test id so a pending skeleton resolves into it
+          in place (FTY-180), never a swap between differently-keyed rows. */}
+      {items.map((item, index) => {
+        const key = index === 0 ? event.id : item.id;
+        const testID =
+          index === 0
+            ? itemTimelineRowTestID(event.id)
+            : itemTimelineExtraRowTestID(event.id, item.id);
+        return (
+          <ItemTimelineRow
+            key={key}
+            item={item}
+            needsClarification={false}
+            onPress={
+              onOpenItem ? () => onOpenItem(item, event.raw_text) : undefined
+            }
+            readOnly={readOnly}
+            testID={testID}
+            {...a11y}
+          />
+        );
+      })}
+
+      {reestimating ? (
+        // The answered component is being re-costed: its question row resolves
+        // in place into a loading skeleton, while the siblings above stay put.
+        <ItemTimelineRow
+          loading
+          accessibilityLabel={statusPresentation("processing").accessibilityLabel}
+          testID={itemTimelineExtraRowTestID(event.id, "reestimate")}
+          {...a11y}
+        />
+      ) : (
+        // One pending-question row per still-open component.
+        questions.map((question) => (
+          <ItemTimelineRow
+            key={question.id}
+            item={questionPlaceholderItem(event, question)}
+            needsClarification
+            onPress={
+              onOpenClarify ? () => onOpenClarify(event, question) : undefined
+            }
+            readOnly={readOnly}
+            testID={pendingQuestionRowTestID(event.id, question.id)}
+            {...a11y}
+          />
+        ))
+      )}
+    </>
+  );
+}
+
+/**
  * One time-anchored cluster card of timeline rows (FTY-031). Each event renders
  * through the row that matches its status: an offline-queued capture, a resolved
  * item-forward row, an uncounted label proposal, a needs-a-detail row, an
@@ -76,6 +176,7 @@ function MaybeSwipeable({
 export function ClusterView({
   cluster,
   itemsByEvent,
+  questionsByEvent = {},
   offlineStateById,
   resolveAnimIds,
   onOpenItem,
@@ -89,11 +190,16 @@ export function ClusterView({
 }: {
   cluster: { anchorTime: string; events: readonly LogEventDTO[] };
   itemsByEvent: Readonly<Record<string, readonly DerivedItem[]>>;
+  /** Open item-scoped clarification questions per partially-resolved event (FTY-330). */
+  questionsByEvent?: QuestionsByEvent;
   offlineStateById: ReadonlyMap<string, OutboxSyncState>;
   resolveAnimIds: ReadonlySet<string>;
   onOpenItem?: (item: DerivedItem, logPhrase: string) => void;
   onOpenProposal?: (item: DerivedFoodItemDTO) => void;
-  onOpenClarify?: (event: LogEventDTO) => void;
+  onOpenClarify?: (
+    event: LogEventDTO,
+    question?: ClarificationQuestionDTO,
+  ) => void;
   onRetryFailed?: (event: LogEventDTO) => void;
   onEditFailedAsText?: (event: LogEventDTO) => void;
   /**
@@ -263,6 +369,47 @@ export function ClusterView({
                     />
                   ))
                 }
+              </MaybeSwipeable>
+            );
+          }
+
+          // partially_resolved (FTY-278/330): a mixed log whose costable
+          // siblings are committed and counted, with one open item-scoped
+          // question per still-unresolved component. Render the committed
+          // siblings as normal counted rows plus one pending-question row per
+          // open component. A scoped re-estimate (the event momentarily flips
+          // `partially_resolved → processing` after the user answers, per
+          // FTY-349) keeps the same committed siblings on the by-date feed, so
+          // it renders here too — the answered component's row becomes a loading
+          // skeleton in place while the siblings stay put (calm, no dip).
+          const questions = questionsByEvent[event.id] ?? [];
+          const isScopedReestimate =
+            event.status === "processing" && items.length > 0;
+          if (event.status === "partially_resolved" || isScopedReestimate) {
+            const firstItem = items[0];
+            const deleteLabel = firstItem
+              ? `Delete ${firstItem.name}`
+              : "Delete entry";
+            return (
+              <MaybeSwipeable
+                key={event.id}
+                event={event}
+                deleteLabel={deleteLabel}
+                onDeleteEvent={onDeleteEvent}
+                readOnly={readOnly}
+              >
+                {(a11y) => (
+                  <PartialEntryRows
+                    event={event}
+                    items={items}
+                    questions={questions}
+                    reestimating={isScopedReestimate}
+                    onOpenItem={onOpenItem}
+                    onOpenClarify={onOpenClarify}
+                    readOnly={readOnly}
+                    a11y={a11y}
+                  />
+                )}
               </MaybeSwipeable>
             );
           }
