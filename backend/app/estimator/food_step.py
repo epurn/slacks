@@ -177,7 +177,9 @@ class FoodResolveStep:
                 # outcome rather than aborting the whole pipeline, so the entry's
                 # costable siblings still resolve. The worker decides mixed
                 # (partially_resolved) vs. nothing-costable (needs_clarification).
-                collect_component_clarification(context, context.food_candidates[index], exc.reason)
+                collect_component_clarification(
+                    context, context.food_candidates[index], exc.reason, step=self.name
+                )
 
         context.record_step(self.name, "ok")
 

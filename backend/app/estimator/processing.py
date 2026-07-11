@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -45,6 +46,7 @@ from app.enums import (
     EstimationRunStatus,
     LogEventStatus,
 )
+from app.estimator.decision_trace import MAX_TRACE_ENTRIES
 from app.estimator.fdc import build_fdc_client
 from app.estimator.food_resolvers import BarcodeResolver, FoodResolver
 from app.estimator.label_step import LabelInput
@@ -302,6 +304,23 @@ def _has_open_item_scoped_question(session: Session, log_event_id: uuid.UUID) ->
     )
 
 
+def _scoped_failure_question(component: DerivedFoodItem) -> ClarificationDraft:
+    """A fresh, answerable item-scoped ask for a scoped re-estimate that failed closed.
+
+    A deterministic (or retry-exhausted) scoped failure must not leave the component's
+    only question already answered — that is an inert ``partially_resolved`` state the
+    user cannot act on. This re-opens an answerable ask naming the component by its
+    bounded, schema-validated parse ``name`` (already the ``derived_food_items.name`` the
+    user sees, never raw diary text — the carrier's ``before_insert`` guard fails closed
+    otherwise), so a new answer can drive a fresh scoped re-estimate.
+    """
+
+    name = component.name.strip() or "that item"
+    return ClarificationDraft(
+        text=f'We couldn\'t work out "{name}" from that answer. Which food was it, and how much?'
+    )
+
+
 def _apply_scoped_component_outcome(
     session: Session,
     run: EstimationRun,
@@ -314,21 +333,49 @@ def _apply_scoped_component_outcome(
     Resolved → advance the row in place to ``resolved`` with the newly-costed values +
     evidence (:func:`apply_scoped_resolution`). Still un-costable → keep the row
     ``unresolved`` and replace its open ask with the fresh component-named question
-    (:func:`replace_component_question`). A transient/deterministic failure leaves the
-    row and its existing question untouched, so no committed detail is lost.
+    (:func:`replace_component_question`). A deterministic (or retry-exhausted) failure is
+    *not* left inert: the answered question is replaced with a fresh answerable ask and
+    the failure is recorded in the sanitized trace, so the event never becomes a
+    ``partially_resolved`` dead end with no answerable question. Each branch emits the
+    ``scoped_reestimate`` per-component trace vocabulary (FTY-329).
     """
 
     if context.resolved_food_items:
         apply_scoped_resolution(session, run, component, context.resolved_food_items[0])
+        context.record_decision(
+            "scoped_reestimate",
+            "outcome",
+            outcome="component_resolved",
+            source_ref=context.resolved_food_items[0].source_ref,
+        )
     elif context.item_scoped_clarifications:
         replace_component_question(
             session, run, component, context.item_scoped_clarifications[0].question
         )
+        context.record_decision("scoped_reestimate", "outcome", outcome="component_clarified")
     elif result.outcome is PipelineOutcome.NEEDS_CLARIFICATION and context.clarification_questions:
         # A parse-level safety gate (e.g. implausible re-read) asked whole-event; keep
         # the component open with that question re-scoped to its carrier.
         fresh = ClarificationDraft(text=context.clarification_questions[0].text)
         replace_component_question(session, run, component, fresh)
+        context.record_decision("scoped_reestimate", "outcome", outcome="component_clarified")
+    else:
+        # Any terminal scoped outcome that did **not** resolve the component and did not
+        # re-open a scoped question above — a deterministic :class:`StepFailed` (or a
+        # retryable failure whose retries are exhausted; the retry-with-attempts-left case
+        # is handled by the caller), or a rare re-estimate that costed nothing — must not
+        # be left untouched: the component's only question is now answered, and the
+        # clarification read filters answered questions, so the event would be a
+        # ``partially_resolved`` dead end with nothing the user can answer. Record the
+        # failure and re-open an answerable ask (a new answer is fresh input; the failure
+        # was about the prior one).
+        outcome = (
+            "component_reestimate_failed"
+            if result.outcome is PipelineOutcome.FAILED
+            else "component_reestimate_unresolved"
+        )
+        replace_component_question(session, run, component, _scoped_failure_question(component))
+        context.record_decision("scoped_reestimate", "outcome", outcome=outcome)
 
 
 def _finalize_scoped_reestimate(
@@ -389,6 +436,14 @@ def _finalize_scoped_reestimate(
 
     if contexts:
         _record_run_metadata(run, contexts[-1])
+        # ``_record_run_metadata`` copies only the last context's trace; concatenate every
+        # scoped component's sanitized trace so a ``component_clarified`` /
+        # ``component_reestimate_failed`` outcome on a non-last component is still recorded
+        # (bounded like any run trace, defence in depth over the per-context bound).
+        merged: list[dict[str, Any]] = []
+        for scoped in contexts:
+            merged.extend(scoped.trace)
+        run.trace = merged[:MAX_TRACE_ENTRIES]
 
     # The session runs ``autoflush=False``, so flush the in-place component status
     # updates before the completion query reads them — otherwise it sees the stale

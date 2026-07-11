@@ -159,7 +159,7 @@ class OfficialSourceResolveStep:
                 # FTY-329: a component the web-evidence/model-prior tiers cannot cost is
                 # collected as its own item-scoped outcome rather than aborting the
                 # whole pipeline, so the entry's costable siblings still resolve.
-                collect_component_clarification(context, candidate, exc.reason)
+                collect_component_clarification(context, candidate, exc.reason, step=self.name)
                 continue
             context.resolved_food_items.append(item)
 

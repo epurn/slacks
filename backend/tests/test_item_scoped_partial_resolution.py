@@ -590,6 +590,134 @@ def test_run_trace_never_carries_raw_diary_text_on_partial(
     assert any(entry.get("decision") == "outcome" for entry in run.trace)
 
 
+def _latest_run(session: Session, event_id: uuid.UUID) -> EstimationRun:
+    """The most recent estimation run for an event (highest attempt)."""
+
+    return session.scalars(
+        select(EstimationRun)
+        .where(EstimationRun.log_event_id == event_id)
+        .order_by(EstimationRun.attempt.desc())
+        .limit(1)
+    ).one()
+
+
+def _trace_outcomes(run: EstimationRun) -> set[str | None]:
+    return {entry.get("outcome") for entry in run.trace if entry.get("decision") == "outcome"}
+
+
+def test_partial_run_emits_per_component_trace_labels(client: TestClient, session: Session) -> None:
+    """The mixed first pass emits the required sanitized per-component partial labels."""
+
+    _user, event_id, _resolved, _unresolved = _run_mixed_first_pass(
+        client, session, "fty329-trace-labels@example.com"
+    )
+    run = _latest_run(session, event_id)
+    outcomes = _trace_outcomes(run)
+
+    # FTY-329 vocabulary: the resolved sibling, the clarified component, and the
+    # partial-finalization marker are all recorded, and sanitized (no diary phrase).
+    assert "component_resolved" in outcomes
+    assert "component_clarified" in outcomes
+    assert "partial_finalized" in outcomes
+    assert "grilled chicken 150g and a glass of milk" not in repr(run.trace)
+
+
+def test_scoped_reestimate_resolution_emits_trace_label(
+    client: TestClient, session: Session
+) -> None:
+    """The scoped re-estimate that completes the event records a scoped-resolve label."""
+
+    user_id, event_id, _resolved, _unresolved = _run_mixed_first_pass(
+        client, session, "fty329-scoped-trace@example.com"
+    )
+    question = _questions(session, event_id)[0]
+    current_user = session.get(User, user_id)
+    assert current_user is not None
+    clarification_service.answer_clarification_question(
+        session, user_id, current_user, event_id, question.id, "1 cup"
+    )
+    scoped_pipeline = _pipeline(
+        session=session,
+        parse_provider=_parse_provider(
+            [{"type": "food", "name": "milk", "quantity_text": "1 cup", "unit": "cup", "amount": 1}]
+        ),
+        estimates=[],
+        food_source=FakeFoodSource({"milk": _fdc_facts("milk", calories_per_100g=50.0)}),
+    )
+    result = process_estimation(
+        session, log_event_id=event_id, user_id=user_id, pipeline=scoped_pipeline
+    )
+
+    assert result.event_status is LogEventStatus.COMPLETED
+    run = _latest_run(session, event_id)
+    scoped = [entry for entry in run.trace if entry.get("step") == "scoped_reestimate"]
+    assert any(entry.get("outcome") == "component_resolved" for entry in scoped)
+
+
+def test_scoped_deterministic_failure_reopens_answerable_question(
+    client: TestClient, session: Session
+) -> None:
+    """A deterministic scoped failure never leaves an inert answerless partial.
+
+    The 2026-07-10 failure class extended: when a component's answered scoped re-estimate
+    fails closed (unparseable), the event stays ``partially_resolved`` but re-opens a
+    *fresh, answerable* item-scoped question — the committed sibling is preserved — instead
+    of stranding the user with a ``partially_resolved`` event and no answerable question.
+    """
+
+    user_id, event_id, resolved, unresolved = _run_mixed_first_pass(
+        client, session, "fty329-dead-partial@example.com"
+    )
+    question = _questions(session, event_id)[0]
+    current_user = session.get(User, user_id)
+    assert current_user is not None
+    clarification_service.answer_clarification_question(
+        session, user_id, current_user, event_id, question.id, "some nonsense"
+    )
+
+    # A deterministic parse failure (unparseable) on the scoped re-estimate: non-retryable.
+    failing_parse = FakeProvider(
+        responses=[{"disposition": "unparseable", "confidence": 0.0, "reason": "not a log"}]
+        * SELF_CONSISTENCY_FIRST_WINDOW
+    )
+    scoped_pipeline = _pipeline(
+        session=session,
+        parse_provider=failing_parse,
+        estimates=[],
+        food_source=FakeFoodSource({"milk": _fdc_facts("milk", calories_per_100g=50.0)}),
+    )
+    result = process_estimation(
+        session, log_event_id=event_id, user_id=user_id, pipeline=scoped_pipeline
+    )
+
+    # Not a whole-event failure and not a dead partial: the event stays partial and the
+    # committed sibling is untouched.
+    assert result.event_status is LogEventStatus.PARTIALLY_RESOLVED
+    assert result.should_retry is False
+    chicken_after = session.get(DerivedFoodItem, resolved.id)
+    milk_after = session.get(DerivedFoodItem, unresolved.id)
+    assert chicken_after is not None and chicken_after.status == DerivedItemStatus.RESOLVED
+    assert chicken_after.calories == pytest.approx(300.0)
+    assert milk_after is not None and milk_after.status == DerivedItemStatus.UNRESOLVED
+
+    # The user is not stranded: a fresh, answerable item-scoped question is served on the
+    # still-open component (the read model filters the already-answered one).
+    open_questions = log_event_service.list_clarification_questions(
+        session, user_id, current_user, event_id
+    )
+    assert [q.derived_food_item_id for q in open_questions] == [unresolved.id]
+    answered_ids = set(
+        session.scalars(
+            select(ClarificationAnswer.question_id).where(
+                ClarificationAnswer.log_event_id == event_id
+            )
+        )
+    )
+    assert open_questions[0].id not in answered_ids
+    # The failure is recorded in the sanitized trace, not swallowed.
+    assert "component_reestimate_failed" in _trace_outcomes(_latest_run(session, event_id))
+
+
 def _seed_pg_user(pg_engine: Engine) -> uuid.UUID:
     """Create one user with a UTC profile on the Postgres engine."""
 

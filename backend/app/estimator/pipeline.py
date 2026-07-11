@@ -203,7 +203,7 @@ def component_scoped_question(
 
 
 def collect_component_clarification(
-    context: EstimationContext, candidate: CandidateDraft, reason: str
+    context: EstimationContext, candidate: CandidateDraft, reason: str, *, step: str
 ) -> None:
     """Record ``candidate``'s item-scoped clarification instead of aborting the run.
 
@@ -213,6 +213,10 @@ def collect_component_clarification(
     event-level slot (so a later fully-costed candidate does not inherit it), builds the
     item-scoped question naming the component, and appends the pair to
     ``context.item_scoped_clarifications`` for the worker to finalize.
+
+    ``step`` names the resolution step that could not cost the component; it labels the
+    sanitized ``component_clarified`` per-component trace outcome (FTY-329) so the partial
+    route is explainable without the trace ever carrying the component name or raw text.
     """
 
     event_level = (
@@ -228,6 +232,7 @@ def collect_component_clarification(
             event_level_question=event_level,
         )
     )
+    context.record_decision(step, "outcome", outcome="component_clarified")
 
 
 @dataclass(frozen=True)
@@ -584,6 +589,24 @@ def _terminal_outcome(context: EstimationContext) -> PipelineResult:
     if not context.item_scoped_clarifications:
         return PipelineResult(PipelineOutcome.COMPLETED, None)
     if _has_costable_component(context):
+        # Emit the sanitized per-component partial-finalization vocabulary (FTY-329):
+        # one ``component_resolved`` per committed sibling (by its non-secret source ref,
+        # never its name) plus a single ``partial_finalized`` marker carrying how many
+        # siblings were counted. These label the partial route so it is explainable
+        # without the trace ever carrying the diary phrase or a component name.
+        for item in context.resolved_food_items:
+            context.record_decision(
+                "partial_resolution",
+                "outcome",
+                outcome="component_resolved",
+                source_ref=item.source_ref,
+            )
+        context.record_decision(
+            "partial_resolution",
+            "outcome",
+            outcome="partial_finalized",
+            result_count=len(context.resolved_food_items),
+        )
         return PipelineResult(PipelineOutcome.PARTIALLY_RESOLVED, None)
     # Nothing costable → whole-event clarification. Promote the collected drafts to the
     # event-level questions the ``needs_clarification`` finalize persists (no carrier),
