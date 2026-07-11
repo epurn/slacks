@@ -22,8 +22,8 @@ from typing import Any
 
 import pytest
 
+from app.estimator.evidence_view import EvidenceRecord
 from app.estimator.interpretation import (
-    EvidenceRecord,
     InterpretationSession,
     hypothesis_samples_disagree,
 )

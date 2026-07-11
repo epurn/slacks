@@ -16,8 +16,9 @@ from typing import Final
 
 from app.enums import CandidateType
 from app.estimator.decision_trace import MAX_TRACE_DESC_LEN, sanitize_trace_label
+from app.estimator.evidence_view import EvidenceRecord
 from app.estimator.fdc import ProductFacts
-from app.estimator.interpretation import EvidenceRecord, InterpretationSession
+from app.estimator.interpretation import InterpretationSession
 from app.estimator.pipeline import CandidateDraft, EstimationContext, StepError, StepFailed
 from app.estimator.searched_reference import StageEvidenceText
 from app.schemas.parse import ParsedCandidate
