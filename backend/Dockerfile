@@ -20,7 +20,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.21 /uv /uvx /usr/local/bin/
 # compose provider config volumes; nothing auth/session-related is baked in.
 #
 # CLAUDE_CODE_VERSION pin rationale (FTY-150): the pin MUST track a CLI release
-# new enough to recognise the model id set in FATTY_LLM_MODEL. Older releases
+# new enough to recognise the model id set in SLACKS_LLM_MODEL. Older releases
 # (e.g. 1.0.18) default to a retired model id and return 404 on every provider
 # call, making the claude_code subscription path dead on arrival. Verified
 # working on 2.1.195 during v1 RC dogfooding; pinned to the latest stable at
@@ -54,8 +54,8 @@ RUN apt-get update \
 
 # Non-root runtime user (FTY-116): fixed UID/GID keeps ownership stable across
 # rebuilds; a real home dir gives the claude CLI a writable scratch location.
-RUN groupadd --gid 10001 fatty \
-    && useradd --uid 10001 --gid fatty --shell /bin/bash --create-home fatty
+RUN groupadd --gid 10001 slacks \
+    && useradd --uid 10001 --gid slacks --shell /bin/bash --create-home slacks
 
 WORKDIR /app
 
@@ -65,9 +65,9 @@ ENV UV_LINK_MODE=copy \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     # Bind all interfaces inside the container so the host can reach the API.
-    FATTY_HOST=0.0.0.0 \
-    FATTY_PORT=8000 \
-    HOME=/home/fatty
+    SLACKS_HOST=0.0.0.0 \
+    SLACKS_PORT=8000 \
+    HOME=/home/slacks
 
 # Install locked production dependencies first for a cached layer.
 COPY pyproject.toml uv.lock ./
@@ -85,14 +85,14 @@ COPY alembic.ini ./
 # are readable/executable by it. Create the provider config mountpoints owned by
 # the same user so named-volume population inherits the correct owner on first
 # use (FTY-116, FTY-088, FTY-296).
-RUN chown -R fatty:fatty /app \
+RUN chown -R slacks:slacks /app \
     && mkdir -p /claude-config \
     && mkdir -p /codex-config \
-    && chown fatty:fatty /claude-config /codex-config
+    && chown slacks:slacks /claude-config /codex-config
 
 EXPOSE 8000
 
-USER fatty
+USER slacks
 
 # Default to the API; the worker service overrides this command in compose.
 CMD [".venv/bin/python", "-m", "app"]
