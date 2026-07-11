@@ -1,0 +1,139 @@
+# FTY-322: Swipe-left-to-delete a Today timeline row — running-app proof.
+#
+# The delete capability lets a user remove a mislogged entry from Today with the
+# standard iOS swipe-left gesture revealing a destructive Delete action. This
+# flow drives that end-to-end on the real screen against synthetic E2E fixtures:
+#
+#   Today (empty) → log "yogurt to delete" → pull-to-refresh so the entry
+#   resolves to a counted "Greek yogurt, 140 kcal" row and the hero counts it →
+#   swipe the row left to reveal Delete → tap Delete → the row leaves the
+#   timeline and the hero drops back to 0 → a final pull-to-refresh proves the
+#   soft-void keeps it gone (FTY-321 excludes a voided event from every read).
+#   Then log the forever-pending "mystery smoothie" and delete its skeleton row
+#   mid-estimate — every server-backed row is deletable, not just resolved ones.
+#
+# If the swipe affordance were missing, or the delete didn't wire through to the
+# FTY-321 endpoint / optimistic removal, the post-delete assertions below would
+# go red — exactly the regression this flow guards.
+#
+# Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
+# directory-level Maestro runs launch the installed app under test reliably.
+appId: com.fatty
+---
+# Step 1: Launch in E2E mode (the mock starts with an empty day).
+- launchApp:
+    clearState: false
+
+# Step 2: Reach Today in its ready, empty-day state.
+- extendedWaitUntil:
+    visible:
+      id: today-screen
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-ready
+    timeout: 15000
+
+# Step 3: Log the entry. The mock returns it pending first (skeleton visible).
+- tapOn:
+    text: "Log food or exercise.*"
+- inputText: "yogurt to delete"
+- tapOn:
+    text: "Add entry"
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-with-entries
+    timeout: 10000
+
+# Step 4: Pull-to-refresh to load the completed event + item-forward feed, so the
+#         resolved value row and the counted hero appear (FTY-185 RefreshControl).
+- swipe:
+    start: 50%, 35%
+    end: 50%, 90%
+    duration: 800
+
+# Step 5: The resolved row and the counted hero are on screen (ItemTimelineRow
+#         exposes the anchored a11y label; the hero counts the 140 kcal).
+- extendedWaitUntil:
+    visible:
+      id: "item-timeline-row-e2e-delete-event-00000000-0000-0000-0000-000000000000"
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      text: ".*Greek yogurt, 140 kcal.*"
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      text: ".*140 of 2,000 kcal.*"
+    timeout: 10000
+
+# Step 6: Swipe the row left to reveal the destructive Delete action, then tap it.
+#         The swipe reveal is the confirmation (native convention) — no alert.
+- swipe:
+    from:
+      id: "item-timeline-row-e2e-delete-event-00000000-0000-0000-0000-000000000000"
+    direction: LEFT
+- tapOn:
+    id: "swipe-delete-action"
+
+# Step 7: The row leaves the timeline immediately (optimistic) and the hero drops
+#         back to zero once the void's totals refetch lands — the day's counted
+#         intake reflects the removal, not just the row.
+- extendedWaitUntil:
+    notVisible:
+      text: ".*Greek yogurt, 140 kcal.*"
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      text: ".*0 of 2,000 kcal.*"
+    timeout: 10000
+
+# Step 8: A final pull-to-refresh proves the entry stays gone across reads — the
+#         soft-void (FTY-321) excludes it from the list and by-date feed, so it
+#         never resurfaces.
+- swipe:
+    start: 50%, 35%
+    end: 50%, 90%
+    duration: 800
+- assertNotVisible:
+    text: ".*Greek yogurt, 140 kcal.*"
+
+# Step 9: A still-estimating row is deletable too — FTY-322 covers every
+#         server-backed Today row, not just resolved ones (only offline-queued
+#         and optimistic local rows are excluded). Log the forever-pending
+#         fixture: the mock never resolves "mystery smoothie", so the skeleton
+#         row is deterministically mid-estimate when it is swiped.
+- tapOn:
+    text: "Log food or exercise.*"
+- inputText: "mystery smoothie"
+- tapOn:
+    text: "Add entry"
+- extendedWaitUntil:
+    visible:
+      id: "item-timeline-row-e2e-pending-delete-event-00000000-0000-0000-0000-000000000000"
+    timeout: 10000
+
+# Step 10: Swipe the pending skeleton row left — the destructive Delete reveals
+#          on a row that is still estimating.
+- swipe:
+    from:
+      id: "item-timeline-row-e2e-pending-delete-event-00000000-0000-0000-0000-000000000000"
+    direction: LEFT
+- assertVisible:
+    id: "swipe-delete-action"
+
+# Step 11: Tap Delete: the pending row leaves the timeline immediately, and a
+#          refresh proves the void keeps it gone (FTY-321 excludes it from
+#          every read).
+- tapOn:
+    id: "swipe-delete-action"
+- extendedWaitUntil:
+    notVisible:
+      id: "item-timeline-row-e2e-pending-delete-event-00000000-0000-0000-0000-000000000000"
+    timeout: 10000
+- swipe:
+    start: 50%, 35%
+    end: 50%, 90%
+    duration: 800
+- assertNotVisible:
+    id: "item-timeline-row-e2e-pending-delete-event-00000000-0000-0000-0000-000000000000"

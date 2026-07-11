@@ -865,6 +865,113 @@ export const E2E_TARGET_ENTRY: LogEventEntryDTO = {
   items: [E2E_TARGET_ITEM],
 };
 
+// ─── FTY-322 swipe-to-delete fixtures ─────────────────────────────────────────
+//
+// Back the delete.yaml Maestro flow, which drives swipe-left-to-delete on a
+// resolved Today row end-to-end: log a phrase → it resolves to a counted item
+// row → swipe the row and tap Delete → the row leaves the timeline, the hero
+// drops back to zero, and a refresh proves it stays gone (the FTY-321 soft-void
+// excludes it from every read). Keyed on its own raw_text so it never collides
+// with the resolve/clarify/failed/correction/target phase machines.
+
+/** The input delete.yaml submits. Distinct from every other flow's text. */
+export const E2E_DELETE_RAW_TEXT = 'yogurt to delete';
+
+/** Stable id for the delete flow's event (same id pending→completed→voided). */
+export const E2E_DELETE_EVENT_ID =
+  'e2e-delete-event-00000000-0000-0000-0000-000000000000';
+
+/** The pending event the delete flow's POST returns, keeping the skeleton visible. */
+export const E2E_DELETE_PENDING_EVENT: LogEventDTO = {
+  id: E2E_DELETE_EVENT_ID,
+  user_id: E2E_SESSION.userId,
+  raw_text: E2E_DELETE_RAW_TEXT,
+  status: 'pending',
+  created_at: '2026-01-01T10:00:00Z',
+  updated_at: '2026-01-01T10:00:00Z',
+};
+
+/** The completed event the delete flow's GET returns after refresh. */
+export const E2E_DELETE_EVENT: LogEventDTO = {
+  ...E2E_DELETE_PENDING_EVENT,
+  status: 'completed',
+};
+
+/**
+ * The resolved derived item the by-date feed carries for the delete event.
+ * ItemTimelineRow renders its accessibility label as "Greek yogurt, 140 kcal" —
+ * the row delete.yaml swipes to reveal Delete.
+ */
+export const E2E_DELETE_ITEM: DerivedFoodItemDTO = {
+  item_type: 'food',
+  id: 'e2e-delete-item-00000000-0000-0000-0000-000000000000',
+  user_id: E2E_SESSION.userId,
+  log_event_id: E2E_DELETE_EVENT_ID,
+  name: 'Greek yogurt',
+  quantity_text: '1 cup',
+  unit: 'cup',
+  amount: 1,
+  status: 'resolved',
+  grams: 245,
+  calories: 140,
+  protein_g: 20,
+  carbs_g: 9,
+  fat_g: 4,
+  calories_estimated: 140,
+  protein_g_estimated: 20,
+  carbs_g_estimated: 9,
+  fat_g_estimated: 4,
+  created_at: '2026-01-01T10:00:00Z',
+  updated_at: '2026-01-01T10:00:00Z',
+  source: {
+    source_type: 'trusted_nutrition_database',
+    label: 'USDA',
+    ref: 'usda_fdc:171284',
+  },
+  is_edited: false,
+};
+
+/** The item-forward day row the by-date feed returns for the delete entry. */
+export const E2E_DELETE_ENTRY: LogEventEntryDTO = {
+  event: E2E_DELETE_EVENT,
+  items: [E2E_DELETE_ITEM],
+};
+
+/** Daily summary reflecting the delete flow's pre-delete 140-kcal entry. */
+export const E2E_DELETE_SUMMARY: DailySummaryDTO = {
+  date: '2026-01-01',
+  intake: { calories: 140, protein_g: 20, carbs_g: 9, fat_g: 4 },
+  has_intake: true,
+  uncounted_entries: 0,
+  target: E2E_TARGET,
+  exercise: { active_calories: 0 },
+};
+
+/**
+ * FTY-322 pending-row deletion: a second entry the flow deletes while it is
+ * still estimating. Every server-backed Today row is deletable — including a
+ * pending/processing skeleton — so the mock keeps this event `pending` on
+ * every read (its estimate never lands within the flow) and only its DELETE
+ * removes it; that determinism is what lets delete.yaml swipe a genuinely
+ * pending row instead of racing the poll that resolves the main delete entry.
+ * Keyed on its own raw_text/id so it never disturbs the other phase machines.
+ */
+export const E2E_PENDING_DELETE_RAW_TEXT = 'mystery smoothie';
+
+/** Stable id for the pending-deletion event (pending → voided, never resolved). */
+export const E2E_PENDING_DELETE_EVENT_ID =
+  'e2e-pending-delete-event-00000000-0000-0000-0000-000000000000';
+
+/** The forever-pending event the pending-deletion POST returns and GETs keep. */
+export const E2E_PENDING_DELETE_EVENT: LogEventDTO = {
+  id: E2E_PENDING_DELETE_EVENT_ID,
+  user_id: E2E_SESSION.userId,
+  raw_text: E2E_PENDING_DELETE_RAW_TEXT,
+  status: 'pending',
+  created_at: '2026-01-01T10:30:00Z',
+  updated_at: '2026-01-01T10:30:00Z',
+};
+
 /**
  * Daily summary after the large entry resolves: 2,100 kcal against the 2,000
  * target, so the hero crosses into its over-budget state ("2,100 of 2,000 kcal,

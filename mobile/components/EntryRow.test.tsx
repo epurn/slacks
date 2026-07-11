@@ -139,3 +139,98 @@ describe("EntryRow read-only past day (FTY-199)", () => {
     expect(row.props.accessibilityLabel).toBe("asdkfj, couldn't read that, uncounted");
   });
 });
+
+describe("EntryRow — delete custom action (FTY-322)", () => {
+  const deleteA11y = (onDelete: () => void) => ({
+    accessibilityActions: [{ name: "delete", label: "Delete" }],
+    onAccessibilityAction: (e: { nativeEvent: { actionName: string } }) => {
+      if (e.nativeEvent.actionName === "delete") onDelete();
+    },
+  });
+
+  function renderWith(event: LogEventDTO, props: Record<string, unknown>) {
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <ThemeProvider override="light">
+          <EntryRow event={event} {...props} />
+        </ThemeProvider>,
+      );
+    });
+    return tree!;
+  }
+
+  it("exposes Delete on the tappable needs-a-detail row", () => {
+    const onDelete = jest.fn();
+    const tree = renderWith(baseEvent({ status: "needs_clarification" }), {
+      onPress: jest.fn(),
+      ...deleteA11y(onDelete),
+    });
+
+    const node = tree.root.find(
+      (n) =>
+        Array.isArray(n.props.accessibilityActions) &&
+        n.props.accessibilityActions.some(
+          (a: { name: string }) => a.name === "delete",
+        ) &&
+        typeof n.props.onAccessibilityAction === "function",
+    );
+    act(() =>
+      node.props.onAccessibilityAction({ nativeEvent: { actionName: "delete" } }),
+    );
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes Delete on the failed row's Retry control", () => {
+    const onDelete = jest.fn();
+    const tree = renderWith(baseEvent({ status: "failed" }), {
+      onRetry: jest.fn(),
+      onEditAsText: jest.fn(),
+      ...deleteA11y(onDelete),
+    });
+
+    const retry = tree.root.find(
+      (n) =>
+        n.props.accessibilityLabel === "Retry" &&
+        Array.isArray(n.props.accessibilityActions),
+    );
+    expect(
+      retry.props.accessibilityActions.some(
+        (a: { name: string }) => a.name === "delete",
+      ),
+    ).toBe(true);
+    act(() =>
+      retry.props.onAccessibilityAction({ nativeEvent: { actionName: "delete" } }),
+    );
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes Delete on the plain completed-with-no-items row as one accessible element", () => {
+    // A completed entry that produced nothing to show still renders a
+    // server-backed row the user may want gone; with the delete props supplied
+    // the row groups into a single accessible element carrying the action.
+    const onDelete = jest.fn();
+    const tree = renderWith(baseEvent({ status: "completed" }), {
+      ...deleteA11y(onDelete),
+    });
+
+    const node = tree.root.find(
+      (n) =>
+        n.props.accessible === true &&
+        Array.isArray(n.props.accessibilityActions) &&
+        typeof n.props.onAccessibilityAction === "function",
+    );
+    expect(node.props.accessibilityLabel).toContain("milk");
+    act(() =>
+      node.props.onAccessibilityAction({ nativeEvent: { actionName: "delete" } }),
+    );
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the plain completed row unchanged when no delete props are supplied", () => {
+    const tree = renderWith(baseEvent({ status: "completed" }), {});
+    expect(
+      tree.root.findAll((n) => Array.isArray(n.props.accessibilityActions)),
+    ).toHaveLength(0);
+  });
+});

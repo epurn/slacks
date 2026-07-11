@@ -79,6 +79,7 @@ import {
   listTodayLogEvents,
   listTodayLogEventEntries,
   createLogEvent,
+  deleteLogEvent,
   getLogEventClarification,
   answerClarification,
 } from '@/api/logEvents';
@@ -463,6 +464,64 @@ describe('E2E mock serves the URLs the real API clients request', () => {
     const summary = await getDailySummary(apiSession, '2026-01-01', mockFetch);
     expect(summary.has_intake).toBe(false);
     expect(summary.target?.calories.effective).toBe(2000);
+  });
+
+  // FTY-322 swipe-to-delete: the delete.yaml flow soft-voids a row via the real
+  // deleteLogEvent client's DELETE. The mock must answer that exact DELETE with
+  // a 204 (a 404 here would make the row appear undeletable on-device), and the
+  // isolated mock instance below proves the void then empties the day read.
+  it('deleteLogEvent resolves (204) and the void empties the delete flow read', async () => {
+    const isolated = createE2EMockFetch();
+    // Create the delete-flow entry, then soft-void it by id.
+    await createLogEvent(apiSession, 'yogurt to delete', undefined, isolated);
+    await expect(
+      deleteLogEvent(
+        apiSession,
+        'e2e-delete-event-00000000-0000-0000-0000-000000000000',
+        isolated,
+      ),
+    ).resolves.toBeUndefined();
+    // After the void the entry and its item drop out of every read.
+    const events = await listTodayLogEvents(apiSession, '2026-01-01', isolated);
+    expect(events).toHaveLength(0);
+    const entries = await listTodayLogEventEntries(
+      apiSession,
+      '2026-01-01',
+      isolated,
+    );
+    expect(entries).toHaveLength(0);
+    const summary = await getDailySummary(apiSession, '2026-01-01', isolated);
+    expect(summary.has_intake).toBe(false);
+  });
+
+  // FTY-322 pending-row deletion: delete.yaml also deletes a row that is still
+  // estimating. The mock must keep that entry `pending` on every read until its
+  // OWN void lands — and voiding it must not empty the main delete entry's
+  // reads (the DELETE handler is id-aware).
+  it('keeps the pending-deletion entry pending until its own void, without disturbing the main delete read', async () => {
+    const isolated = createE2EMockFetch();
+    await createLogEvent(apiSession, 'yogurt to delete', undefined, isolated);
+    await createLogEvent(apiSession, 'mystery smoothie', undefined, isolated);
+    // Both listed; the smoothie never resolves (pending on every read).
+    let events = await listTodayLogEvents(apiSession, '2026-01-01', isolated);
+    expect(events.map((e) => e.status).sort()).toEqual([
+      'completed',
+      'pending',
+    ]);
+    await expect(
+      deleteLogEvent(
+        apiSession,
+        'e2e-pending-delete-event-00000000-0000-0000-0000-000000000000',
+        isolated,
+      ),
+    ).resolves.toBeUndefined();
+    // Only the pending entry is voided; the main delete entry still reads back.
+    events = await listTodayLogEvents(apiSession, '2026-01-01', isolated);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.id).toBe(
+      'e2e-delete-event-00000000-0000-0000-0000-000000000000',
+    );
+    expect(events[0]?.status).toBe('completed');
   });
 
   // FTY-187 Trends reads: the weight series and the adherence range back the

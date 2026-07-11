@@ -34,8 +34,10 @@ export function Timeline({
   onOpenClarify,
   onRetryFailed,
   onEditFailedAsText,
+  onDeleteEvent,
   phase,
   loadError,
+  deleteError,
   onRetry,
   readOnly = false,
   emptyLabel = "Log your first thing",
@@ -54,8 +56,15 @@ export function Timeline({
   onRetryFailed?: (event: LogEventDTO) => void;
   /** Prefill the composer with a failed entry's text to fix + resubmit (FTY-176). */
   onEditFailedAsText?: (event: LogEventDTO) => void;
+  /** Soft-void a server-backed row via swipe-left-to-delete (FTY-322). */
+  onDeleteEvent?: (event: LogEventDTO) => void;
   phase: Phase;
   loadError: string | null;
+  /**
+   * Calm inline error shown when a delete fails and the row is restored
+   * (FTY-322) — never a crash or a silent loss. Cleared on the next delete.
+   */
+  deleteError?: string | null;
   onRetry: () => void;
   /**
    * Read-only past-day timeline (FTY-199): render the same clustered rows
@@ -124,6 +133,18 @@ export function Timeline({
         </Text>
       ) : null}
 
+      {/* Calm inline delete error (FTY-322): a failed delete restores the row
+          and surfaces this in place — never a crash, never a silent loss. */}
+      {deleteError ? (
+        <Text
+          testID="today-delete-error"
+          style={[styles.error, { color: colors.textSecondary }]}
+          accessibilityRole="alert"
+        >
+          {deleteError}
+        </Text>
+      ) : null}
+
       {clusters.map((cluster) => (
         <ClusterView
           key={cluster.anchorTime}
@@ -136,6 +157,7 @@ export function Timeline({
           onOpenClarify={onOpenClarify}
           onRetryFailed={onRetryFailed}
           onEditFailedAsText={onEditFailedAsText}
+          onDeleteEvent={onDeleteEvent}
           readOnly={readOnly}
           colors={colors}
         />

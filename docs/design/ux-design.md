@@ -70,6 +70,15 @@ tracker**. The wedge is two things competitors don't do well together:
   session" feed — the optimistic insert *is* the acknowledgement.
 - **Correction is a universal slide-up sheet** from any item (see §4a) — never a
   page change.
+- **Deletion is the standard iOS swipe-left-to-delete** on any server-backed
+  timeline row (a resolved item or a raw needs-a-detail / failed entry): a left
+  swipe reveals a single destructive **Delete** action, and tapping it soft-voids
+  the entry (the swipe reveal is the confirmation — no extra alert, per native
+  convention; there is no undo in v1). The row leaves the timeline immediately
+  (optimistic) and the day totals update in place; a failed delete restores the
+  row with a calm inline error, never a silent loss. VoiceOver users reach the
+  same action as a "Delete" custom action on the row. Tap still opens the
+  correction sheet — deletion never fights the tap.
 - **Missing details are asked inline, non-blocking.** When Slacks needs a detail to
   be accurate, the entry shows a gentle "needs a detail" affordance and is *not
   counted* in totals until answered. Slacks never fabricates a number.

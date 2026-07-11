@@ -12,6 +12,7 @@ import { getLabelProposal as getLabelProposalApi } from "@/api/labelProposal";
 import {
   answerClarification as answerClarificationApi,
   createLogEvent as createLogEventApi,
+  deleteLogEvent as deleteLogEventApi,
   getLogEventClarification as getLogEventClarificationApi,
   listTodayLogEvents as listTodayLogEventsApi,
   listTodayLogEventEntries as listTodayLogEventEntriesApi,
@@ -49,6 +50,7 @@ import {
   type Phase,
 } from "./helpers";
 import { useCorrectionSheet } from "./useCorrectionSheet";
+import { useDeleteEvent } from "./useDeleteEvent";
 import { useEntryResolveBeats } from "./useEntryResolveBeats";
 import { useLabelProposal } from "./useLabelProposal";
 import "./visualReviewEntryRows";
@@ -59,6 +61,7 @@ export type UseTodayDataParams = {
   load: typeof listTodayLogEventsApi;
   loadEntries: typeof listTodayLogEventEntriesApi;
   create: typeof createLogEventApi;
+  deleteEvent: typeof deleteLogEventApi;
   getClarification: typeof getLogEventClarificationApi;
   answerClarification: typeof answerClarificationApi;
   itemsOverride?: Readonly<Record<string, readonly DerivedItem[]>>;
@@ -86,6 +89,7 @@ export function useTodayData({
   load,
   loadEntries,
   create,
+  deleteEvent,
   getClarification,
   answerClarification,
   itemsOverride,
@@ -147,6 +151,30 @@ export function useTodayData({
   const [supersededFailedIds, setSupersededFailedIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
+
+  // The delete (soft-void) flow (FTY-322) lives in a focused sub-hook: hiding
+  // the row, recomputing the hero/day totals in the same beat, the
+  // poll-resurrect guards for both, and the failure restore. `beginSummaryRead`
+  // wraps every daily-summary read below so a response that raced a delete can
+  // never land stale totals that still count the deleted row.
+  const {
+    deletedEventIds,
+    deleteError,
+    displaySummary,
+    beginSummaryRead,
+    handleDeleteEvent,
+  } = useDeleteEvent({
+    apiSession,
+    deleteEvent,
+    loadEntries,
+    getDailySummary,
+    itemsByEvent,
+    summary,
+    setEvents,
+    setItemsByEvent,
+    setSummary,
+    setSummaryError,
+  });
 
   // The submit machine reads the latest selected saved food at submit time, and
   // each in-flight submit stashes its saved food by optimistic id so the right
@@ -303,10 +331,11 @@ export function useTodayData({
       return;
     }
     let active = true;
+    const landSummary = beginSummaryRead();
     getDailySummary(apiSession).then(
       (loaded) => {
         if (!active) return;
-        setSummary(loaded);
+        landSummary(loaded);
         setSummaryError(null);
       },
       () => {
@@ -319,7 +348,7 @@ export function useTodayData({
     return () => {
       active = false;
     };
-  }, [apiSession, getDailySummary, reloadKey]);
+  }, [apiSession, getDailySummary, reloadKey, beginSummaryRead]);
 
   // Beat 1 — entry resolve (FTY-181): detect pending→completed transitions,
   // fire the soft-tap haptic once per resolved event, and ease the value row in.
@@ -506,9 +535,10 @@ export function useTodayData({
         // Keep the current items; retry on the next interval.
       },
     );
+    const landSummary = beginSummaryRead();
     getDailySummary(apiSession).then(
       (loaded) => {
-        setSummary(loaded);
+        landSummary(loaded);
         // Clear any stale error so a recovered poll drops the inline summary
         // error once good data arrives.
         setSummaryError(null);
@@ -517,7 +547,7 @@ export function useTodayData({
         // Keep the current summary and any existing error; retry next interval.
       },
     );
-  }, [apiSession, load, loadEntries, getDailySummary]);
+  }, [apiSession, load, loadEntries, getDailySummary, beginSummaryRead]);
 
   // Retry a failed parse as a fresh attempt (FTY-176). There is no server-side
   // resubmit endpoint (a non-goal), so this reuses the existing create path: the
@@ -609,10 +639,14 @@ export function useTodayData({
     // status. Answered needs_clarification entries need no such filter: the
     // FTY-170 resolve transitions the same event in place (→ processing), so the
     // real server row already drops its needs-a-detail treatment (FTY-175).
-    const visible =
-      supersededFailedIds.size === 0
-        ? events
-        : events.filter((event) => !supersededFailedIds.has(event.id));
+    const hidden = supersededFailedIds.size === 0 && deletedEventIds.size === 0;
+    const visible = hidden
+      ? events
+      : events.filter(
+          (event) =>
+            !supersededFailedIds.has(event.id) &&
+            !deletedEventIds.has(event.id),
+        );
     if (offlineEntries.length === 0) return visible;
     const offlineEvents = offlineEntries
       .filter((entry) => entry.syncState !== "accepted")
@@ -625,18 +659,19 @@ export function useTodayData({
         }),
       );
     return sortByNewest([...visible, ...offlineEvents]);
-  }, [events, offlineEntries, supersededFailedIds]);
+  }, [events, offlineEntries, supersededFailedIds, deletedEventIds]);
 
   return {
     session,
     apiSession,
     phase,
     loadError,
+    deleteError,
     itemsByEvent,
     displayEvents,
     offlineStateById,
     resolveAnimIds,
-    summary,
+    summary: displaySummary,
     summaryError,
     scannerOpen,
     setScannerOpen,
@@ -670,6 +705,7 @@ export function useTodayData({
     handleClarificationResolved,
     handleRetryFailed,
     handleEditFailedAsText,
+    handleDeleteEvent,
     handleItemChange,
   };
 }

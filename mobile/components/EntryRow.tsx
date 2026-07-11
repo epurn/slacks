@@ -1,5 +1,11 @@
 import { useMemo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type AccessibilityActionEvent,
+} from "react-native";
 
 import type { LogEventDTO } from "@/api/logEvents";
 import { StatusIcon } from "@/components/StatusIcon";
@@ -49,6 +55,8 @@ export function EntryRow({
   onRetry,
   onEditAsText,
   readOnly = false,
+  accessibilityActions,
+  onAccessibilityAction,
 }: {
   event: LogEventDTO;
   /**
@@ -81,10 +89,27 @@ export function EntryRow({
    * interactive rows are unchanged.
    */
   readOnly?: boolean;
+  /**
+   * Delete custom action (FTY-322), supplied by the swipe wrapper so the
+   * destructive Delete stays reachable by VoiceOver on this row's own accessible
+   * controls — the swipe gesture is pointer-only. Spread onto the tappable
+   * "Add a detail" row (needs_clarification) and onto the Retry / Edit-as-text
+   * controls (failed), so a screen-reader user always has Delete on the focused
+   * control. Absent for the non-deletable read-only past-day rows.
+   */
+  accessibilityActions?: readonly { name: string; label: string }[];
+  onAccessibilityAction?: (event: AccessibilityActionEvent) => void;
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { label } = statusPresentation(event.status);
+  // Delete custom action props, spread onto each variant's accessible controls
+  // when the swipe wrapper supplies them (FTY-322). Grouped so a variant that
+  // renders several controls attaches the same reachable action to each.
+  const deleteA11y =
+    accessibilityActions && onAccessibilityAction
+      ? { accessibilityActions, onAccessibilityAction }
+      : null;
 
   // Calm, actionable "couldn't read that" row for a failed parse (FTY-176). The
   // status is terminal and uncounted, but the row is never a dead end: Retry
@@ -139,6 +164,7 @@ export function EntryRow({
               accessibilityRole="button"
               accessibilityLabel="Retry"
               accessibilityHint="Re-runs the estimate as a fresh attempt"
+              {...deleteA11y}
             >
               <Text style={[styles.failedActionText, { color: colors.accentText }]}>
                 Retry
@@ -155,6 +181,7 @@ export function EntryRow({
               accessibilityRole="button"
               accessibilityLabel="Edit as text"
               accessibilityHint="Puts this entry's wording in the composer to fix and resubmit"
+              {...deleteA11y}
             >
               <Text style={[styles.failedActionText, { color: colors.accentText }]}>
                 Edit as text
@@ -209,6 +236,7 @@ export function EntryRow({
         accessibilityRole="button"
         accessibilityLabel={`${event.raw_text}, needs a detail, uncounted`}
         accessibilityHint="Tap to see the full phrase and add the missing detail"
+        {...deleteA11y}
       >
         <StatusIcon status={event.status} />
         <View style={styles.body}>
@@ -254,9 +282,23 @@ export function EntryRow({
     );
   }
 
+  // Plain terminal-status row (e.g. completed with no items to show). When the
+  // swipe wrapper supplies the Delete custom action (FTY-322), the row becomes a
+  // single accessible element carrying its text + status so VoiceOver has a
+  // focusable target to expose the action on; without it (past-day/read-only or
+  // no delete handler) the row renders exactly as before.
   return (
     <View style={styles.container}>
-      <View style={styles.row}>
+      <View
+        style={styles.row}
+        {...(deleteA11y
+          ? {
+              accessible: true,
+              accessibilityLabel: `${event.raw_text}, ${label}`,
+              ...deleteA11y,
+            }
+          : null)}
+      >
         <StatusIcon status={event.status} />
         <View style={styles.body}>
           <Text style={styles.text} numberOfLines={3}>

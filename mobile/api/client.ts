@@ -125,3 +125,35 @@ export async function request<T>(
   }
   return (await response.json()) as T;
 }
+
+/**
+ * Fetch wrapper for authenticated endpoints that return **no body** on success
+ * (a `204 No Content`, e.g. the FTY-321 soft-void `DELETE`). Same error mapping
+ * and `401` handling as {@link request}, but the 2xx path never reads/parses the
+ * body — a `204` carries none, so `response.json()` would throw. Resolves `void`.
+ */
+export async function requestNoContent(
+  url: string,
+  opts: {
+    method: string;
+    headers: Record<string, string>;
+    body?: string;
+    action: string;
+    onError: (status: number, action: string) => ApiError;
+    fetchImpl?: typeof fetch;
+  },
+): Promise<void> {
+  const fetchFn = opts.fetchImpl ?? fetch;
+  const init: RequestInit = { method: opts.method, headers: opts.headers };
+  if (opts.body !== undefined) {
+    init.body = opts.body;
+  }
+  const response = await fetchFn(url, init);
+  if (!response.ok) {
+    if (response.status === 401) {
+      notifyUnauthorized();
+    }
+    throw opts.onError(response.status, opts.action);
+  }
+  // 2xx with no content to parse (the delete contract returns 204).
+}
