@@ -1,4 +1,4 @@
-import { Animated } from "react-native";
+import { Animated, Dimensions } from "react-native";
 import { act, create as render, type ReactTestRenderer } from "react-test-renderer";
 
 import { ItemTimelineRow } from "./ItemTimelineRow";
@@ -476,6 +476,173 @@ describe("ItemTimelineRow — beat 1: resolve fade (FTY-180/181)", () => {
     });
     expect(Animated.spring).not.toHaveBeenCalled();
     expect(Animated.timing).toHaveBeenCalled();
+  });
+});
+
+describe("ItemTimelineRow — Larger Accessibility reflow (FTY-360)", () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  // Drive the system content-size category through the same signal the component
+  // reads (`useWindowDimensions().fontScale`, sourced from Dimensions), not an RN
+  // internal. fontScale 1 ≈ standard (default…xxxLarge tops out ~1.35); 2.5 sits
+  // in the accessibility-extra-large-and-up range (> the 1.5 reflow cutoff).
+  function mockFontScale(fontScale: number) {
+    jest
+      .spyOn(Dimensions, "get")
+      .mockReturnValue({ width: 390, height: 844, scale: 3, fontScale });
+  }
+
+  function interactiveRow(tree: ReactTestRenderer) {
+    return tree.root.find((n) => n.props.accessibilityRole === "button");
+  }
+
+  function styleOf(node: { props: { style?: unknown } }): Record<string, unknown> {
+    return Object.assign(
+      {},
+      ...([] as unknown[]).concat(node.props.style).filter(Boolean) as Record<
+        string,
+        unknown
+      >[],
+    );
+  }
+
+  it("standard Dynamic Type keeps the single horizontal row — name, tag, and kcal share one line", () => {
+    mockFontScale(1);
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(
+        <ItemTimelineRow
+          item={foodItem({ name: "How much hummus?" })}
+          needsClarification
+          onPress={jest.fn()}
+        />,
+      );
+    });
+
+    expect(rowGeometry(interactiveRow(tree!)).flexDirection).toBe("row");
+
+    // At standard size the wrapping question text and the kcal em-dash live on
+    // the same horizontal line (identical to today's layout).
+    const nameNode = tree!.root.find((n) => n.props.children === "How much hummus?");
+    const kcalNode = tree!.root.find((n) => n.props.children === "—");
+    expect(nameNode.parent).toBe(kcalNode.parent);
+  });
+
+  it("standard-size resolved row keeps the reserved 64pt kcal column beside the flexed name", () => {
+    mockFontScale(1);
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(<ItemTimelineRow item={foodItem({ name: "Oatmeal", calories: 205 })} />);
+    });
+
+    expect(rowGeometry(interactiveRow(tree!)).flexDirection).toBe("row");
+    const kcalNode = tree!.root.find((n) => n.props.children === "205 kcal");
+    expect(styleOf(kcalNode).minWidth).toBe(64);
+    const nameNode = tree!.root.find((n) => n.props.children === "Oatmeal");
+    expect(styleOf(nameNode).flex).toBe(1);
+  });
+
+  it("at a Larger Accessibility size the tag/kcal reflow to a second line so the wrapping question keeps full width", () => {
+    mockFontScale(2.5);
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(
+        <ItemTimelineRow
+          item={foodItem({ name: "How much hummus?" })}
+          needsClarification
+          onPress={jest.fn()}
+        />,
+      );
+    });
+
+    // The row stacks vertically at AX sizes so the text column owns the width.
+    expect(rowGeometry(interactiveRow(tree!)).flexDirection).toBe("column");
+
+    const nameNode = tree!.root.find((n) => n.props.children === "How much hummus?");
+    // The question still wraps by word — never clamped to a single line, and no
+    // longer sharing its horizontal line with the value column that starved it.
+    expect(nameNode.props.numberOfLines).toBeUndefined();
+    expect(styleOf(nameNode).flex).toBe(1);
+
+    const kcalNode = tree!.root.find((n) => n.props.children === "—");
+    expect(nameNode.parent).not.toBe(kcalNode.parent);
+
+    // The "needs a detail" tag is preserved (reflowed, not dropped) and the row
+    // a11y label is unchanged.
+    expect(allText(tree!)).toContain("needs a detail");
+    expect(firstA11yLabel(tree!)).toContain("needs a detail");
+  });
+
+  it("at a Larger Accessibility size a resolved row also reflows its kcal below the name", () => {
+    mockFontScale(2.5);
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(<ItemTimelineRow item={foodItem({ name: "Oatmeal", calories: 205 })} />);
+    });
+
+    expect(rowGeometry(interactiveRow(tree!)).flexDirection).toBe("column");
+    const nameNode = tree!.root.find((n) => n.props.children === "Oatmeal");
+    const kcalNode = tree!.root.find((n) => n.props.children === "205 kcal");
+    expect(nameNode.parent).not.toBe(kcalNode.parent);
+    // Value + provenance still reach the row's a11y label unchanged.
+    expect(firstA11yLabel(tree!)).toContain("205 kcal");
+  });
+
+  it("at a Larger Accessibility size the loading skeleton keeps the resolved stacked footprint — kcal placeholder right-aligned, no jump on resolve", () => {
+    mockFontScale(2.5);
+    // The Skeleton shimmer drives Animated.loop; stub it so no rAF-driven loop
+    // outlives the test (its animation is Skeleton's own concern, covered
+    // elsewhere).
+    jest
+      .spyOn(Animated, "loop")
+      .mockReturnValue({ start: jest.fn(), stop: jest.fn() } as never);
+
+    let loadingTree: ReactTestRenderer;
+    let resolvedTree: ReactTestRenderer;
+    act(() => {
+      loadingTree = render(<ItemTimelineRow loading accessibilityLabel="Estimating" />);
+    });
+    act(() => {
+      resolvedTree = render(<ItemTimelineRow item={foodItem({ name: "Oatmeal", calories: 205 })} />);
+    });
+
+    // The loading row stacks vertically at AX sizes, matching the resolved row —
+    // same two-line footprint.
+    const loadingRow = loadingTree!.root.find(
+      (n) => n.props.accessibilityRole === "progressbar",
+    );
+    expect(rowGeometry(loadingRow).flexDirection).toBe("column");
+    expect(rowGeometry(interactiveRow(resolvedTree!)).flexDirection).toBe("column");
+
+    // The kcal placeholder (width 64) is wrapped in a flex:1 + flex-end container
+    // so it lands at the far-right of the second line — exactly where the resolved
+    // `kcalStacked` value (flex:1 + textAlign:"right") sits. Without this the
+    // placeholder would sit at the left and the value would slide left→right on
+    // resolve.
+    const kcalSkeleton = loadingTree!.root.find((n) => n.props.width === 64);
+    const wrapperStyle = styleOf(kcalSkeleton.parent!);
+    expect(wrapperStyle.flex).toBe(1);
+    expect(wrapperStyle.alignItems).toBe("flex-end");
+
+    // The resolved counterpart is the flexed, right-aligned kcal value.
+    const resolvedKcal = resolvedTree!.root.find((n) => n.props.children === "205 kcal");
+    expect(styleOf(resolvedKcal).flex).toBe(1);
+    expect(styleOf(resolvedKcal).textAlign).toBe("right");
+  });
+
+  it("read-only past-day row reflows at AX sizes while preserving its value+provenance label", () => {
+    mockFontScale(2.5);
+    let tree: ReactTestRenderer;
+    act(() => {
+      tree = render(<ItemTimelineRow item={foodItem({ name: "Oatmeal", calories: 205 })} readOnly />);
+    });
+
+    const row = tree!.root.find(
+      (n) => typeof n.props.accessibilityLabel === "string" && n.props.accessibilityRole === undefined && n.props.accessible === true,
+    );
+    expect(styleOf(row).flexDirection).toBe("column");
+    expect(row.props.accessibilityLabel).toContain("205 kcal");
+    expect(row.props.accessibilityLabel).toContain("USDA");
   });
 });
 

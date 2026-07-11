@@ -3,6 +3,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
   type AccessibilityActionEvent,
 } from "react-native";
@@ -11,6 +12,24 @@ import type { DerivedItem } from "@/api/derivedItems";
 import { ProvenanceIcon, provenancePresentation, Skeleton } from "@/components/ui";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
 import { useResolveFade } from "@/theme/motion";
+
+/**
+ * Content-size threshold at/above which the row reflows the inline tag and the
+ * kcal column onto a second line beneath the name/question (FTY-360). RN's
+ * `fontScale` mirrors the active iOS content-size category: standard Dynamic
+ * Type tops out at xxxLarge (~1.35), and the first "Larger Accessibility" size
+ * (accessibilityMedium) jumps to ~1.65. A 1.5 cutoff therefore cleanly divides
+ * standard sizes — which keep the single horizontal line, unchanged — from the
+ * accessibility sizes, where a lone horizontal line starves the flexed
+ * name/question column below a legible word width and wrapping text collapses to
+ * one glyph per line. Driven off the system content-size signal, never a
+ * hardcoded device width.
+ */
+const AX_REFLOW_FONT_SCALE = 1.5;
+
+// Left indent for the reflowed second line so the tag/kcal align under the
+// name column rather than under the provenance icon (icon slot width + row gap).
+const STACKED_SECONDARY_INDENT = 22 + spacing.sm;
 
 function formatKcal(n: number | null): string {
   if (n === null) return "—";
@@ -117,6 +136,11 @@ type ItemTimelineRowProps =
  */
 export function ItemTimelineRow(props: ItemTimelineRowProps) {
   const { colors } = useTheme();
+  // Reflow to a stacked (two-line) layout at the Larger Accessibility content
+  // sizes so the tag/kcal never squeeze the name/question column below a legible
+  // word width (FTY-360). Read from the live system content-size signal.
+  const { fontScale } = useWindowDimensions();
+  const stacked = fontScale >= AX_REFLOW_FONT_SCALE;
   // Called unconditionally (rules-of-hooks): the loading branch returns early
   // below, but a reused instance transitions loading→resolved in place, so this
   // arms the entry-resolve fade (beat 1) for that transition (FTY-180/181).
@@ -126,40 +150,70 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
   );
 
   if (props.loading) {
+    const iconSkeleton = (
+      <View style={styles.iconSlot}>
+        <Skeleton
+          width={16}
+          height={16}
+          borderRadius={8}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        />
+      </View>
+    );
+    const nameSkeleton = (
+      <Skeleton
+        width="55%"
+        height={16}
+        borderRadius={radius.sm}
+        style={styles.nameSkeleton}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      />
+    );
+    const kcalSkeleton = (
+      <Skeleton
+        width={64}
+        height={16}
+        borderRadius={radius.sm}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      />
+    );
     return (
       <View
         testID={props.testID}
-        style={[styles.row, { borderBottomColor: colors.separator }]}
+        style={[styles.row, stacked && styles.rowStacked, { borderBottomColor: colors.separator }]}
         accessible
         accessibilityRole="progressbar"
         accessibilityLabel={props.accessibilityLabel}
         accessibilityActions={props.accessibilityActions}
         onAccessibilityAction={props.onAccessibilityAction}
       >
-        <View style={styles.iconSlot}>
-          <Skeleton
-            width={16}
-            height={16}
-            borderRadius={8}
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-          />
-        </View>
-        <Skeleton
-          width="55%"
-          height={16}
-          borderRadius={radius.sm}
-          style={styles.nameSkeleton}
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-        />
-        <Skeleton
-          width={64}
-          height={16}
-          borderRadius={radius.sm}
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-        />
+        {stacked ? (
+          <>
+            {/* Same skeleton footprint as the resolved stacked row, so the
+                pending row still resolves in place without a jump at AX sizes. */}
+            <View style={styles.stackedPrimary}>
+              {iconSkeleton}
+              {nameSkeleton}
+            </View>
+            <View style={styles.stackedSecondary}>
+              {/* Right-align the kcal placeholder to the far edge of the second
+                  line so it lands exactly where the resolved `kcalStacked`
+                  value (flex:1 + textAlign:"right") does — otherwise a pending
+                  row's value would jump left→right when it resolves at AX
+                  sizes. */}
+              <View style={styles.kcalSkeletonStacked}>{kcalSkeleton}</View>
+            </View>
+          </>
+        ) : (
+          <>
+            {iconSkeleton}
+            {nameSkeleton}
+            {kcalSkeleton}
+          </>
+        )}
       </View>
     );
   }
@@ -213,48 +267,74 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
       ? "Tap to confirm before it counts"
       : "Tap to view details";
 
+  // Provenance icon — always on.
+  const iconNode = <ProvenanceIcon source={source} is_edited={is_edited} />;
+
+  // Name. A resolved/proposal row is a single value line and stays clamped to
+  // one line (name · kcal · source). A needs-a-detail row's name is the open
+  // component's *question* text (FTY-330) — the row's primary content, not a
+  // label beside a value — so it wraps to as many lines as it needs instead of
+  // clipping to "How much hum…", which stays legible as the question grows and
+  // under Dynamic Type.
+  const nameNode = (
+    <Text
+      style={[styles.name, { color: textColor }]}
+      numberOfLines={needsClarification ? undefined : 1}
+      accessibilityElementsHidden
+    >
+      {displayName}
+    </Text>
+  );
+
+  // Uncounted tag: "needs a detail" (clarify) or "not counted" (proposal).
+  const tagNode = uncounted ? (
+    <View
+      style={[styles.needsDetailTag, { backgroundColor: colors.controlBackground }]}
+      accessibilityElementsHidden
+    >
+      <Text style={[styles.needsDetailText, { color: colors.textMuted }]}>
+        {needsClarification ? "needs a detail" : "not counted"}
+      </Text>
+    </View>
+  ) : null;
+
+  // Kcal — right-aligned. A proposal shows its parsed kcal (muted); a
+  // needs-a-detail row has no value yet, so it shows an em dash.
+  const kcalNode = (
+    <Text
+      style={[styles.kcal, stacked && styles.kcalStacked, { color: kcalColor }]}
+      accessibilityElementsHidden
+    >
+      {needsClarification ? "—" : formatKcal(kcal)}
+    </Text>
+  );
+
   // The row's inner content is identical whether the row is interactive (Today)
   // or read-only (a past day) — only the wrapping element and its accessibility
   // treatment differ, so the two paths never drift visually.
-  const rowContent = (
+  //
+  // At standard Dynamic Type the four slots sit on one horizontal line exactly
+  // as before. At the Larger Accessibility sizes (`stacked`), the tag and kcal
+  // reflow to a second line so the flexed name/question column can use the full
+  // row width and wrap by word instead of collapsing to one glyph per line
+  // (FTY-360).
+  const rowContent = stacked ? (
     <>
-      {/* Provenance icon — always on */}
-      <ProvenanceIcon source={source} is_edited={is_edited} />
-
-      {/* Name. A resolved/proposal row is a single value line and stays clamped
-          to one line (name · kcal · source). A needs-a-detail row's name is the
-          open component's *question* text (FTY-330) — the row's primary content,
-          not a label beside a value — so it wraps to as many lines as it needs
-          instead of clipping to "How much hum…", which stays legible as the
-          question grows and under Dynamic Type. */}
-      <Text
-        style={[styles.name, { color: textColor }]}
-        numberOfLines={needsClarification ? undefined : 1}
-        accessibilityElementsHidden
-      >
-        {displayName}
-      </Text>
-
-      {/* Uncounted tag: "needs a detail" (clarify) or "not counted" (proposal) */}
-      {uncounted ? (
-        <View
-          style={[styles.needsDetailTag, { backgroundColor: colors.controlBackground }]}
-          accessibilityElementsHidden
-        >
-          <Text style={[styles.needsDetailText, { color: colors.textMuted }]}>
-            {needsClarification ? "needs a detail" : "not counted"}
-          </Text>
-        </View>
-      ) : null}
-
-      {/* Kcal — right-aligned. A proposal shows its parsed kcal (muted); a
-          needs-a-detail row has no value yet, so it shows an em dash. */}
-      <Text
-        style={[styles.kcal, { color: kcalColor }]}
-        accessibilityElementsHidden
-      >
-        {needsClarification ? "—" : formatKcal(kcal)}
-      </Text>
+      <View style={styles.stackedPrimary}>
+        {iconNode}
+        {nameNode}
+      </View>
+      <View style={styles.stackedSecondary}>
+        {tagNode}
+        {kcalNode}
+      </View>
+    </>
+  ) : (
+    <>
+      {iconNode}
+      {nameNode}
+      {tagNode}
+      {kcalNode}
     </>
   );
 
@@ -267,7 +347,7 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
     return (
       <View
         testID={testID}
-        style={[styles.row, { borderBottomColor: colors.separator }]}
+        style={[styles.row, stacked && styles.rowStacked, { borderBottomColor: colors.separator }]}
         accessible
         accessibilityLabel={`${a11yLabel}, ${provenanceLabel}`}
       >
@@ -282,6 +362,7 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
         testID={testID}
         style={({ pressed }) => [
           styles.row,
+          stacked && styles.rowStacked,
           { borderBottomColor: colors.separator },
           pressed && { opacity: 0.7 },
         ]}
@@ -307,6 +388,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.base,
     borderBottomWidth: StyleSheet.hairlineWidth,
     minHeight: 44,
+  },
+  // FTY-360: at the Larger Accessibility sizes the row becomes a vertical stack
+  // (name/question line, then tag + kcal line) so the flexed text column can use
+  // the full row width. Standard sizes never apply this — `styles.row` stays the
+  // single horizontal line.
+  rowStacked: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: spacing.xs,
+  },
+  stackedPrimary: {
+    flexDirection: "row",
+    // Top-align the icon with the first line of the wrapping name/question.
+    alignItems: "flex-start",
+    gap: spacing.sm,
+  },
+  stackedSecondary: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    // Align the reflowed tag/kcal under the name column, not under the icon.
+    paddingLeft: STACKED_SECONDARY_INDENT,
   },
   name: {
     flex: 1,
@@ -336,5 +439,17 @@ const styles = StyleSheet.create({
     fontVariant: ["tabular-nums"],
     minWidth: 64,
     textAlign: "right",
+  },
+  // On the reflowed second line the kcal owns the row width and stays right
+  // aligned; it no longer needs to reserve a fixed 64pt column beside the text.
+  kcalStacked: {
+    flex: 1,
+  },
+  // Loading counterpart of `kcalStacked`: the fixed-width kcal skeleton owns the
+  // second line and is pushed to its right edge, so it occupies the same spot
+  // the resolved right-aligned value lands in (zero horizontal jump on resolve).
+  kcalSkeletonStacked: {
+    flex: 1,
+    alignItems: "flex-end",
   },
 });
