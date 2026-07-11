@@ -216,8 +216,13 @@ in the one transaction that persists the `clarification_answers` row:
   **in place** from `unresolved` to `resolved`; each component is therefore
   represented exactly once, so a sibling is never re-costed into a duplicate row
   or counted twice. During the
-  `processing` window a `processing` event is excluded from every finalized read
-  (`daily-summary.md`), so intake never flickers; when the round commits, the
+  `processing` window the event's already-committed `resolved` siblings **stay
+  counted** in every finalized read — the scoped re-estimate is admitted by the
+  two-clause discriminator (a committed `resolved` sibling **and** an open
+  item-scoped question on a still-`unresolved` component; FTY-349,
+  `daily-summary.md`), not
+  excluded — so the day total never dips and reappears; only the still-open
+  component stays uncounted until it resolves. When the round commits, the
   siblings are still their original `resolved` rows and the answered component is
   now `resolved` (or, if still indeterminate, the event stays `partially_resolved`
   with a fresh item-scoped question while the siblings stay resolved). When

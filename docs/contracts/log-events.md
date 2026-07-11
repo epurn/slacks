@@ -120,7 +120,10 @@ settles four contract points and cross-links the affected contracts:
    leaves the already-resolved siblings **untouched** (never re-costing,
    re-creating, or replacing them), and completes the entry when the last
    component resolves, with no double-counting or duplicate item rows (the
-   job/run mechanics are `estimation-jobs.md` v3).
+   job/run mechanics are `estimation-jobs.md` v3). This `partially_resolved →
+   processing` flip is **invisible in the day total**: the daily-summary
+   finalized gate keys on committed resolved items, so the committed siblings stay
+   counted for the whole re-estimate window (FTY-349, `daily-summary.md`).
 
 **This version is a contract decision only; it edits no product code.** The
 downstream estimator/backend implementation is a required follow-up split (called
@@ -312,16 +315,25 @@ clarification answer):
 
 `items` uses the shared `DerivedFoodItemDTO | DerivedExerciseItemDTO` shape from
 `corrections.md` / `daily-summary.md`, but only for finalized item detail: the
-owning event must be `completed` **or** `partially_resolved` (the FTY-278 partial
-state), the item must be `resolved`, and its costed value must be present
-(`calories` for food, `active_calories` for exercise). This mirrors the
+owning event must be `completed`, `partially_resolved` (the FTY-278 partial
+state), **or** `processing` as an answer-triggered scoped re-estimate of a
+previously-partial event (FTY-349) — discriminated by **two** facts on the event: a
+committed `resolved` item **and** an open item-scoped clarification question on a
+still-`unresolved` component; the item must be `resolved`, and its costed value must
+be present (`calories` for food, `active_calories` for exercise). This mirrors the
 `daily-summary.md` finalized-state filter exactly — a `resolved`, costed item is
 surfaced whether it is the whole of a `completed` entry or a **costable sibling of
 a `partially_resolved` entry**, so a mixed log's resolved components appear in
-place while its unresolved component's question stays open. A pending, processing,
-failed, `needs_clarification`, or completed/partial-with-no-finalized-item event is
-still returned with `items: []`, matching the Today timeline's status-row
-fallback. Non-finalized item rows — including the **unresolved component** that
+place while its unresolved component's question stays open. The same committed
+siblings stay surfaced while the event momentarily flips `partially_resolved →
+processing` to re-cost the still-open component, so the by-date read never drops a
+committed sibling during the re-estimate window (no dip, matching the
+`daily-summary.md` no-dip guarantee). A pending, **first-pass** processing (owns no
+open item-scoped question, so it surfaces nothing early — excluded even inside the
+worker's two-commit completion window, where committed `resolved` rows briefly
+coexist with the `processing` status), failed, `needs_clarification`, or
+completed/partial-with-no-finalized-item event is still returned with `items: []`,
+matching the Today timeline's status-row fallback. Non-finalized item rows — including the **unresolved component** that
 owns an item-scoped question — remain persisted with their own `status`
 (`unresolved` / `proposed`) and nullable values but are **not** included in this
 read; that component is instead discoverable through the status-gated

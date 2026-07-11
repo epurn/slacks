@@ -86,6 +86,29 @@ persistence and no migration — the same computed read over existing (already-n
 macro columns; the `user_text` source system is `evidence-retrieval.md`'s, and it is
 **numerically inert until the FTY-280 estimator follow-up** first writes such an item.
 
+8 (FTY-349) re-expresses the finalized-state filter's event gate in terms of
+**committed resolved items** rather than the parent event's transient status, so a
+partial event's already-counted `resolved` siblings **stay counted for the whole
+window** while an item-scoped answer flips the event `partially_resolved →
+processing` to re-cost the still-open component (`log-events.md` v6 shape #1). A
+`resolved` item counts when its event is `completed` or `partially_resolved` **or**
+is momentarily `processing` **as a scoped re-estimate of a previously-partial
+event** — discriminated by **two** facts on that event: ≥1 already-committed
+`resolved` sibling **and** ≥1 open item-scoped clarification question on a
+still-`unresolved` component. A **first-pass** `processing` event is still excluded,
+so nothing counts early: even though the worker's two-commit completion window
+momentarily leaves a first-pass event `processing` with committed `resolved` rows
+(they commit just before the `processing → completed` transition), that event owns
+no open item-scoped question, so it fails the second discriminator clause. The same gate
+applies to every intake surface (single-day `intake`, the by-date / range read, and
+`has_intake`) and to the open-item-scoped-question `uncounted_entries` unit, so no
+surface dips and reappears while the answer re-estimates (calm-by-default; the
+contract's own "counted immediately, never double-counted" framing). This
+**refines — does not reopen — FTY-278**: shape #1's `partially_resolved →
+processing` answer transition is unchanged; only the counting rule is clarified so
+that transition is invisible in the day total. A pure computed read over existing
+rows — no new status, no DTO shape change, no migration.
+
 7 (FTY-306, contract only) aligns the `source` descriptor's rough-estimate nudge
 wording with the **exact evidence upgrade** eligibility
 (`evidence-retrieval.md` → **Exact Evidence Upgrade — FTY-306**): the
@@ -200,12 +223,22 @@ read path.)
     label parse, excluded from every finalized read by construction).
 
   **Excluded** (never counted): finalized items (already in `intake`), including a
-  partial event's `resolved` siblings; `pending` and `processing` events (the
-  estimator is still working — the client's loading path, not "awaiting details");
-  and `failed` events (a distinct retry state). A single partially-resolved entry
-  can therefore contribute to **both** `intake` (its resolved siblings) and
-  `uncounted_entries` (its unresolved component) at once — the two sets are disjoint
-  by item status, so nothing is double-counted. Day attribution is the owning
+  partial event's `resolved` siblings; `pending` and **first-pass** `processing`
+  events (the estimator is still working — the client's loading path, not "awaiting
+  details"); and `failed` events (a distinct retry state). **A scoped re-estimate
+  does not drop an open question (FTY-349):** "open" keys on the **component's
+  resolution, never on the answer row** — the answer flow commits the
+  `clarification_answers` row in the same transaction that flips the event
+  `partially_resolved → processing` (`clarification.md`), so the answered
+  question's still-`unresolved` component keeps its uncounted entry for the whole
+  in-flight window, as do any *other* still-open item-scoped questions (the
+  `processing` event is admitted here by the same two-clause scoped-re-estimate
+  discriminator the finalized gate uses — a committed `resolved` sibling **and** an
+  open item-scoped question on a still-`unresolved` component). A question drops only when its own
+  component resolves — so the count does not dip and reappear. A single partially-resolved entry can therefore contribute to **both**
+  `intake` (its resolved siblings) and `uncounted_entries` (its unresolved
+  component) at once — the two sets are disjoint by item status, so nothing is
+  double-counted. Day attribution is the owning
   `LogEvent.created_at` in the profile timezone over `[start, end)`, exactly
   matching how `intake` / `has_intake` attribute a day. A day with no such units
   reports `0`. This is what lets a range consumer (FTY-188 Trends adherence)
@@ -237,9 +270,18 @@ The exact predicate (documented for auditability — never relaxed without updat
 this contract):
 
 > `log_events.voided_at IS NULL`
-> AND `log_events.status IN ('completed', 'partially_resolved')`
+> AND **finalized-event gate** (see below)
 > AND `derived_{food,exercise}_items.status == 'resolved'`
 > AND `current_value IS NOT NULL`
+
+The **finalized-event gate** (FTY-349) keys on committed resolved items, not on the
+event's transient status alone:
+
+> `log_events.status IN ('completed', 'partially_resolved')`
+> OR (`log_events.status == 'processing'`
+>     AND the event carries ≥1 already-committed `resolved` derived item
+>     AND the event owns ≥1 open item-scoped clarification question on a
+>         still-`unresolved` component)
 
 - **Voided events are excluded (FTY-321).** A user who deletes a mislogged entry
   soft-voids its `log_events` row (`voided_at` set; `log-events.md`); the
@@ -249,9 +291,30 @@ this contract):
   `uncounted_entries` predicates below, so a voided `needs_clarification` event
   or `proposed` item stops inflating that count too.
 
-- Items on `pending` / `processing` / `failed` events are excluded: a `pending` or
-  `processing` event has no committed terminal items (the estimator is still
-  working — the client's loading path), and a `failed` event never produced any.
+- Items on `pending` / `failed` events and on a **first-pass** `processing` event
+  are excluded: a `pending` event has no committed terminal items, a `failed` event
+  never produced any, and a first-pass `processing` event owns no open item-scoped
+  question (the client's loading path) so it fails the second discriminator clause
+  even inside the worker's two-commit completion window.
+- **A scoped re-estimate keeps committed siblings counted (FTY-349).** When a user
+  answers an item-scoped question the event flips `partially_resolved → processing`
+  to re-cost only the still-open component (`log-events.md` v6 shape #1); its
+  already-committed `resolved` siblings are left untouched. The finalized-event gate
+  admits a `processing` event **iff** it carries ≥1 already-committed `resolved`
+  derived item **and** ≥1 open item-scoped question on a still-`unresolved`
+  component, so those siblings keep counting for the whole re-estimate window and
+  the day total never dips and reappears (calm-by-default). The two-clause
+  discriminator is safe against the worker's two-commit completion window: a
+  first-pass `processing` event can momentarily carry committed `resolved` rows
+  (they commit just before the `processing → completed` transition), but it owns no
+  open item-scoped question, so it fails the second clause and nothing counts early.
+  This **refines — does not reopen — FTY-278**: the `partially_resolved → processing`
+  transition itself is unchanged; only the counting rule is clarified so that
+  transition is invisible in the day total. The same gate governs every intake
+  surface (single-day `intake`, the by-date / range read, `has_intake`) and the
+  open-item-scoped-question `uncounted_entries` unit — a still-open question stays
+  counted across the window and drops only when its own component resolves — so no
+  surface dips.
 - **`partially_resolved` events are included (FTY-278).** Under the item-scoped
   partial contract (`log-events.md` v6, `food-resolution.md` v9) a
   `partially_resolved` event carries committed `resolved` siblings — a mixed
@@ -279,11 +342,14 @@ this contract):
   and never inflates intake until the user confirms it (`proposed → resolved`). This
   filter is **not relaxed** for the gate — the exclusion is a property of the
   existing predicate, not new logic.
-- A test proves this exclusion: items on `pending` / `processing` / `failed` /
-  `needs_clarification` events, `unresolved` items (including a partial event's
-  amountless component), and `proposed` (unconfirmed label) items never inflate a
-  total (single-day and range); a `partially_resolved` event's `resolved` siblings
-  do count.
+- A test proves this exclusion: items on `pending` / **first-pass** `processing`
+  (no open item-scoped question — excluded even inside the worker's two-commit
+  completion window, where committed `resolved` rows briefly coexist with the
+  `processing` status) / `failed` / `needs_clarification` events, `unresolved` items
+  (including a partial event's amountless component), and `proposed` (unconfirmed
+  label) items never inflate a total (single-day and range); a `partially_resolved`
+  event's `resolved` siblings — **and the same siblings while the event is
+  momentarily `processing` for a scoped re-estimate (FTY-349)** — do count.
 
 ## Day / timezone resolution
 
@@ -516,3 +582,31 @@ curl -s ':8000/api/users/<uid>/daily-summary/range?from=2025-01-01&to=2026-06-01
   derived read of the item's `evidence_sources` row. Backend proposal/apply
   implementation is FTY-307–FTY-309; mobile nudge consumption is
   FTY-310–FTY-313.
+- **FTY-349 (read-model predicate; no migration).** Re-expresses the
+  finalized-event gate in terms of **committed resolved items**: a `resolved` item
+  counts when its event is `completed` / `partially_resolved` **or** is momentarily
+  `processing` as an answer-triggered scoped re-estimate of a previously-partial
+  event (`log-events.md` v6 shape #1) — discriminated by **two** facts that must
+  both hold on that event: ≥1 already-committed `resolved` sibling **and** ≥1 open
+  item-scoped clarification question on a still-`unresolved` component. Committed
+  resolved rows **alone** do not admit a `processing` event: a first-pass
+  `processing` event owns no open item-scoped question, and neither does the
+  worker's two-commit completion window (where committed `resolved` rows land just
+  before the `processing → completed` transition, per FTY-358), so both fail the
+  second clause and nothing counts early. The bare committed-resolved-item test is
+  unsafe — `processing` + committed rows is not on its own the signature of an
+  answer-triggered scoped re-estimate. The same gate is applied to every intake surface (single-day `intake`, the
+  by-date / range read, `has_intake`) and to the open-item-scoped-question
+  `uncounted_entries` unit, so a partial event's already-counted siblings — and its
+  still-open questions — do not dip and reappear while the answer re-estimates
+  (calm-by-default). Still a **pure computed read** over existing rows — no new
+  status, no new column, no DTO shape change, no migration; the `uncounted_entries`
+  counting **unit is unchanged** (one per still-open item-scoped question — "open"
+  meaning its component is not yet `resolved`, since the answer row commits before
+  the re-estimate window opens — one per `needs_clarification` event, plus
+  `proposed` items). This **refines — does not
+  reopen — FTY-278**: the `partially_resolved → processing` transition is unchanged.
+  Numerically inert until the FTY-329 estimator follow-up first drives a live
+  answer→re-estimate; FTY-349 lands before FTY-329 so the correctness is in place
+  when partial states become user-visible. The consumer contract (FTY-188 Trends,
+  FTY-330 calorie hero) is unchanged.

@@ -233,7 +233,12 @@ item-scoped question while the siblings stay resolved untouched). Because `intak
 sums the event's `resolved` items and the siblings are never re-created, a
 component resolved in an earlier round can never be **double-counted** or spawn a
 **duplicate** row (the job/run mechanics are `estimation-jobs.md` v3; the counting
-rule is `daily-summary.md`).
+rule is `daily-summary.md`). While the re-estimate is in flight the event is
+momentarily `processing` (`partially_resolved → processing`), but the day total
+**does not dip**: the daily-summary finalized gate keys on committed resolved items,
+so the already-committed siblings — and any still-open item-scoped questions — keep
+counting for the whole window and change only when a component actually resolves
+(FTY-349, `daily-summary.md`).
 When the final unresolved component resolves, the event reaches `completed` with
 the full costed set. **Baseline:** until the FTY-278 implementation lands, a mixed
 log routes to an event-level `needs_clarification` carrying no committed siblings,

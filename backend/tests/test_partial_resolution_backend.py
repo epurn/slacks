@@ -225,6 +225,37 @@ def _resolve_open_component(
         session.commit()
 
 
+def _add_followup_question(
+    db_engine: Engine,
+    event_id: uuid.UUID,
+    user_id: uuid.UUID,
+    component_id: uuid.UUID,
+) -> None:
+    """Simulate a fresh clarification round on the same still-unresolved component.
+
+    The answer flow retains answered question rows
+    (``_persist_clarification_questions`` deletes only *unanswered* rows), so a new
+    round adds a second open question on the SAME component while the prior answered
+    row survives — two question rows linked to one unresolved component (FTY-349).
+    The question text names only the sanitized component ``name`` (never the raw
+    diary phrase), matching the FTY-278 redaction gate.
+    """
+
+    factory = create_session_factory(db_engine)
+    with factory() as session:
+        session.add(
+            ClarificationQuestion(
+                log_event_id=event_id,
+                user_id=user_id,
+                question_text="Was the milk whole or skim?",
+                options=["whole", "skim", "2%"],
+                derived_food_item_id=component_id,
+                position=1,
+            )
+        )
+        session.commit()
+
+
 def _assert_completed_counts_and_items(
     client: TestClient,
     user_id: str,
@@ -362,10 +393,9 @@ def test_item_scoped_question_rejects_full_raw_diary_text(
         )
 
 
-def test_partial_resolution_state_machine_and_counts_on_postgres(pg_engine: Engine) -> None:
-    """Postgres parity for the seeded partial state, count, and answer idempotency."""
+def _seed_pg_user(pg_engine: Engine) -> uuid.UUID:
+    """Create one user with a UTC profile on the Postgres engine."""
 
-    upgrade(pg_engine, "head")
     factory = create_session_factory(pg_engine)
     with factory() as session:
         created_user = User()
@@ -373,8 +403,257 @@ def test_partial_resolution_state_machine_and_counts_on_postgres(pg_engine: Engi
         session.flush()
         session.add(UserProfile(user_id=created_user.id, timezone="UTC"))
         session.commit()
-        user_id = created_user.id
+        return created_user.id
 
+
+def test_daily_summary_no_dip_predicate_on_postgres(pg_engine: Engine) -> None:
+    """FTY-349 Postgres parity for the scoped-re-estimate read-model predicate.
+
+    On the production engine: (a) the committed sibling stays in ``intake`` /
+    range / ``has_intake`` **and in the ``/log-events/by-date`` item read** and the
+    answered-but-unresolved question stays in ``uncounted_entries`` while the **real
+    answer flow** holds the event at ``processing``; (b) a first-pass ``processing``
+    event with no committed resolved item contributes nothing; (c) resolving the
+    open component raises the total by exactly the new item with the sibling
+    unchanged.
+    """
+
+    upgrade(pg_engine, "head")
+    user_id = _seed_pg_user(pg_engine)
+    event_id, resolved_id, unresolved_id = _seed_partial_event(pg_engine, str(user_id))
+    day = date(2026, 7, 10)
+    factory = create_session_factory(pg_engine)
+
+    def _read_summaries() -> tuple[float, bool, int]:
+        """Read the single-day and range models, assert parity, return the day."""
+
+        with factory() as session:
+            loaded_user = session.get(User, user_id)
+            assert loaded_user is not None
+            single = daily_summary_service.get_daily_summary(session, user_id, loaded_user, day)
+            ranged = daily_summary_service.get_daily_summaries(
+                session, user_id, loaded_user, day, day
+            )
+            assert ranged == [single]
+            return single.intake.calories, single.has_intake, single.uncounted_entries
+
+    def _by_date_item_ids() -> set[uuid.UUID]:
+        """Item ids the ``/log-events/by-date`` day-listing read surfaces for the event."""
+
+        with factory() as session:
+            loaded_user = session.get(User, user_id)
+            assert loaded_user is not None
+            entries = log_event_service.list_entries_for_day(session, user_id, loaded_user, day)
+            event_entries = [entry for entry in entries if entry.event.id == event_id]
+            assert len(event_entries) == 1
+            return {item.id for item in event_entries[0].items}
+
+    # BEFORE: the pinned partial state — sibling counted, one open question, and the
+    # committed sibling on the timeline.
+    assert _read_summaries() == (180.0, True, 1)
+    assert _by_date_item_ids() == {resolved_id}
+
+    # DURING: the real answer flow commits the ClarificationAnswer row in the same
+    # transaction that flips the event to ``processing``. The question is answered
+    # but its component is still unresolved — nothing may dip, and the by-date read
+    # must keep the committed sibling on the timeline.
+    with factory() as session:
+        loaded_user = session.get(User, user_id)
+        assert loaded_user is not None
+        questions = log_event_service.list_clarification_questions(
+            session, user_id, loaded_user, event_id
+        )
+        event, resolved = clarification_service.answer_clarification_question(
+            session, user_id, loaded_user, event_id, questions[0].id, "1 cup"
+        )
+        assert resolved is True
+        assert LogEventStatus(event.status) is LogEventStatus.PROCESSING
+    assert _read_summaries() == (180.0, True, 1)
+    assert _by_date_item_ids() == {resolved_id}
+
+    # A first-pass ``processing`` event (no committed resolved item) on the same
+    # day still contributes nothing to any surface — the totals stay unchanged.
+    with factory() as session:
+        first_pass = LogEvent(
+            user_id=user_id,
+            raw_text="mystery smoothie",
+            status=LogEventStatus.PROCESSING,
+            created_at=datetime(2026, 7, 10, 13, 0, tzinfo=UTC),
+        )
+        session.add(first_pass)
+        session.flush()
+        session.add(
+            DerivedFoodItem(
+                log_event_id=first_pass.id,
+                user_id=user_id,
+                name="smoothie",
+                quantity_text="",
+                status=DerivedItemStatus.UNRESOLVED,
+            )
+        )
+        session.commit()
+    assert _read_summaries() == (180.0, True, 1)
+
+    # AFTER: the open component resolves and the event completes (FTY-329's
+    # terminal write). The total rises by exactly the newly-resolved 120 kcal —
+    # the sibling is never re-added — and the uncounted entry drops. Both items now
+    # surface on the by-date timeline, the sibling never duplicated.
+    _resolve_open_component(pg_engine, event_id, unresolved_id)
+    assert _read_summaries() == (300.0, True, 0)
+    assert _by_date_item_ids() == {resolved_id, unresolved_id}
+
+
+def test_first_pass_processing_commit_window_is_excluded_on_postgres(pg_engine: Engine) -> None:
+    """FTY-349 Postgres parity: the worker's real two-commit completion window.
+
+    The estimation worker commits a first-pass event's ``resolved`` derived rows in
+    the same transaction as the run/job status and then transitions the event
+    ``processing → completed`` in a *second* commit
+    (``app.estimator.processing._finalize``). Between those commits the event is
+    externally visible as ``processing`` **with a committed ``resolved`` item** — the
+    exact state the earlier seeded first-pass test (an ``unresolved`` row) never
+    exercised. The scoped-re-estimate gate must **not** match it: a first-pass event
+    owns no item-scoped clarification question on an unresolved component, so it
+    contributes nothing to ``intake`` / ``has_intake`` / ``uncounted_entries`` and
+    surfaces no item on ``/log-events/by-date`` — nothing counts early. A realistic
+    leftover ``unresolved`` component (no question) must not fake a re-estimate either.
+    """
+
+    upgrade(pg_engine, "head")
+    user_id = _seed_pg_user(pg_engine)
+    day = date(2026, 7, 10)
+    factory = create_session_factory(pg_engine)
+
+    with factory() as session:
+        first_pass = LogEvent(
+            user_id=user_id,
+            raw_text="oatmeal and a mystery topping",
+            status=LogEventStatus.PROCESSING,
+            created_at=datetime(2026, 7, 10, 8, 0, tzinfo=UTC),
+        )
+        session.add(first_pass)
+        session.flush()
+        session.add_all(
+            [
+                DerivedFoodItem(
+                    log_event_id=first_pass.id,
+                    user_id=user_id,
+                    name="oatmeal",
+                    quantity_text="1 cup",
+                    amount=1.0,
+                    status=DerivedItemStatus.RESOLVED,
+                    grams=234.0,
+                    calories=150.0,
+                    protein_g=5.0,
+                    carbs_g=27.0,
+                    fat_g=3.0,
+                    calories_estimated=150.0,
+                    protein_g_estimated=5.0,
+                    carbs_g_estimated=27.0,
+                    fat_g_estimated=3.0,
+                ),
+                DerivedFoodItem(
+                    log_event_id=first_pass.id,
+                    user_id=user_id,
+                    name="mystery topping",
+                    quantity_text="",
+                    status=DerivedItemStatus.UNRESOLVED,
+                ),
+            ]
+        )
+        session.commit()
+        first_pass_id = first_pass.id
+
+    with factory() as session:
+        loaded_user = session.get(User, user_id)
+        assert loaded_user is not None
+        single = daily_summary_service.get_daily_summary(session, user_id, loaded_user, day)
+        ranged = daily_summary_service.get_daily_summaries(session, user_id, loaded_user, day, day)
+        entries = log_event_service.list_entries_for_day(session, user_id, loaded_user, day)
+
+    # Nothing counts early: the committed 150 kcal resolved row stays out of every
+    # surface while the event is still ``processing`` mid-completion.
+    assert ranged == [single]
+    assert single.intake.calories == 0.0
+    assert single.has_intake is False
+    assert single.uncounted_entries == 0
+    # The by-date read surfaces the event envelope but no item detail.
+    first_pass_entries = [entry for entry in entries if entry.event.id == first_pass_id]
+    assert len(first_pass_entries) == 1
+    assert first_pass_entries[0].items == []
+
+
+def test_uncounted_entries_holds_at_one_component_across_fresh_round_on_postgres(
+    pg_engine: Engine,
+) -> None:
+    """FTY-349 Postgres parity: a fresh clarification round does not bump the count.
+
+    ``uncounted_entries`` is one per still-``unresolved`` **component**, not per
+    question row. When an answer-triggered re-estimate returns a fresh question on
+    the same still-open component, the answered prior row is retained alongside the
+    new open row, so two question rows link to one unresolved component. The count
+    is taken over **distinct** components, so it stays ``1`` across the round and
+    drops to ``0`` only when the component actually resolves — never the ``1 → 2``
+    bump the per-row count produced.
+    """
+
+    upgrade(pg_engine, "head")
+    user_id = _seed_pg_user(pg_engine)
+    event_id, _resolved_id, unresolved_id = _seed_partial_event(pg_engine, str(user_id))
+    day = date(2026, 7, 10)
+    factory = create_session_factory(pg_engine)
+
+    def _uncounted() -> int:
+        with factory() as session:
+            loaded_user = session.get(User, user_id)
+            assert loaded_user is not None
+            single = daily_summary_service.get_daily_summary(session, user_id, loaded_user, day)
+            ranged = daily_summary_service.get_daily_summaries(
+                session, user_id, loaded_user, day, day
+            )
+            assert ranged == [single]
+            return single.uncounted_entries
+
+    # One open question on the unresolved component → one uncounted entry.
+    assert _uncounted() == 1
+
+    # Answer it (retains the answered row, flips the event to ``processing``) and
+    # land a fresh round: a second open question on the SAME still-unresolved
+    # component.
+    with factory() as session:
+        loaded_user = session.get(User, user_id)
+        assert loaded_user is not None
+        questions = log_event_service.list_clarification_questions(
+            session, user_id, loaded_user, event_id
+        )
+        clarification_service.answer_clarification_question(
+            session, user_id, loaded_user, event_id, questions[0].id, "1 cup"
+        )
+    _add_followup_question(pg_engine, event_id, user_id, unresolved_id)
+
+    # Two question rows now link to the one still-unresolved component…
+    with factory() as session:
+        rows = list(
+            session.scalars(
+                select(ClarificationQuestion).where(ClarificationQuestion.log_event_id == event_id)
+            )
+        )
+        assert len(rows) == 2
+        assert {row.derived_food_item_id for row in rows} == {unresolved_id}
+    # …but the component is one uncounted entry — no ``1 → 2`` bump.
+    assert _uncounted() == 1
+
+    # It drops only when the component itself resolves.
+    _resolve_open_component(pg_engine, event_id, unresolved_id)
+    assert _uncounted() == 0
+
+
+def test_partial_resolution_state_machine_and_counts_on_postgres(pg_engine: Engine) -> None:
+    """Postgres parity for the seeded partial state, count, and answer idempotency."""
+
+    upgrade(pg_engine, "head")
+    factory = create_session_factory(pg_engine)
+    user_id = _seed_pg_user(pg_engine)
     event_id, resolved_id, unresolved_id = _seed_partial_event(pg_engine, str(user_id))
 
     with factory() as session:
