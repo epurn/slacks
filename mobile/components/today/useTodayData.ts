@@ -51,6 +51,7 @@ import {
 import { useCorrectionSheet } from "./useCorrectionSheet";
 import { useEntryResolveBeats } from "./useEntryResolveBeats";
 import { useLabelProposal } from "./useLabelProposal";
+import "./visualReviewEntryRows";
 
 /** The (already-resolved) inputs the Today data hook needs from the screen. */
 export type UseTodayDataParams = {
