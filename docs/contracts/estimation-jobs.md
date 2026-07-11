@@ -400,3 +400,9 @@ POST /api/users/{uid}/log-events  →  201 pending event
   additive column). The estimator implementation is the downstream FTY-278
   follow-up; until then, FTY-301 rough-estimates recognizable amountless items by
   default and any remaining allowed clarification stays event-level.
+- **FTY-334 (brand cutover, mechanical rename).** The LLM model reference for
+  `estimation_runs.model` documented here now uses the `SLACKS_LLM_MODEL`
+  environment key, renamed from the legacy prefix as part of the repo-wide brand
+  cutover to Slacks. This is not a contract version bump — the field meaning,
+  its operator-configuration (non-secret) nature, and worker/retention semantics
+  are unchanged.
