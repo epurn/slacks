@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -40,10 +41,12 @@ from sqlalchemy.orm import Session
 
 from app.enums import (
     TERMINAL_JOB_STATUSES,
+    DerivedItemStatus,
     EstimationJobStatus,
     EstimationRunStatus,
     LogEventStatus,
 )
+from app.estimator.decision_trace import MAX_TRACE_ENTRIES
 from app.estimator.fdc import build_fdc_client
 from app.estimator.food_resolvers import BarcodeResolver, FoodResolver
 from app.estimator.label_step import LabelInput
@@ -54,10 +57,14 @@ from app.estimator.parse_policy import ParsePolicySettings
 from app.estimator.persist import (
     _persist_candidates,
     _persist_clarification_questions,
+    _persist_item_scoped_clarifications,
     _retain_label_image,
+    apply_scoped_resolution,
+    replace_component_question,
 )
 from app.estimator.pipeline import (
     AnsweredClarification,
+    ClarificationDraft,
     EstimationContext,
     Pipeline,
     PipelineOutcome,
@@ -73,6 +80,7 @@ from app.llm import build_provider, load_llm_settings
 from app.models.derived import (
     ClarificationAnswer,
     ClarificationQuestion,
+    DerivedFoodItem,
 )
 from app.models.estimation import EstimationJob, EstimationRun
 from app.models.identity import UserProfile
@@ -198,6 +206,261 @@ def _load_answered_clarifications(
         AnsweredClarification(question_text=question, answer_text=answer)
         for question, answer in rows
     ]
+
+
+def _record_run_metadata(run: EstimationRun, context: EstimationContext) -> None:
+    """Copy the sanitized run metadata the pipeline accumulated onto the run row."""
+
+    run.provider = context.provider
+    run.model = context.model
+    run.schema_version = context.schema_version
+    run.tool_names = list(context.tool_names)
+    run.source_refs = list(context.source_refs)
+    run.assumptions = list(context.assumptions)
+    run.validation_errors = list(context.validation_errors)
+    run.trace = list(context.trace)
+
+
+def _load_event_food_items(session: Session, log_event_id: uuid.UUID) -> list[DerivedFoodItem]:
+    """Return every ``derived_food_items`` row already committed for the event.
+
+    Non-empty only on an answer-triggered re-estimate of a previously-committed
+    (``partially_resolved``) event — a first pass and an event-level
+    ``needs_clarification`` re-estimate persist no food rows — so its presence is the
+    scoped-re-estimate discriminator.
+    """
+
+    return list(
+        session.scalars(
+            select(DerivedFoodItem)
+            .where(DerivedFoodItem.log_event_id == log_event_id)
+            .order_by(DerivedFoodItem.created_at.asc(), DerivedFoodItem.id.asc())
+        )
+    )
+
+
+def _load_answered_open_components(
+    session: Session, log_event_id: uuid.UUID, prior_food: list[DerivedFoodItem]
+) -> list[tuple[DerivedFoodItem, list[AnsweredClarification]]]:
+    """Return each still-``unresolved`` component that has ≥1 answered question.
+
+    Groups the event's answered (question, answer) pairs by the item-scoped
+    ``derived_food_item_id`` carrier and pairs each with its still-``unresolved``
+    component row, oldest answer first. A component whose question is not yet answered —
+    or that already resolved — is excluded, so a scoped re-estimate re-costs exactly the
+    open, newly-answered components and leaves every sibling untouched. The pairs are
+    untrusted user text, never copied into the run ``trace``/``error``.
+    """
+
+    unresolved_by_id = {
+        item.id: item for item in prior_food if item.status == DerivedItemStatus.UNRESOLVED
+    }
+    if not unresolved_by_id:
+        return []
+    rows = session.execute(
+        select(
+            ClarificationQuestion.derived_food_item_id,
+            ClarificationQuestion.question_text,
+            ClarificationAnswer.answer_text,
+        )
+        .join(ClarificationAnswer, ClarificationAnswer.question_id == ClarificationQuestion.id)
+        .where(
+            ClarificationQuestion.log_event_id == log_event_id,
+            ClarificationQuestion.derived_food_item_id.in_(unresolved_by_id.keys()),
+        )
+        .order_by(ClarificationAnswer.created_at.asc(), ClarificationQuestion.position.asc())
+    ).all()
+    answers_by_component: dict[uuid.UUID, list[AnsweredClarification]] = {}
+    for component_id, question_text, answer_text in rows:
+        answers_by_component.setdefault(component_id, []).append(
+            AnsweredClarification(question_text=question_text, answer_text=answer_text)
+        )
+    return [
+        (unresolved_by_id[component_id], answers)
+        for component_id, answers in answers_by_component.items()
+    ]
+
+
+def _has_open_item_scoped_question(session: Session, log_event_id: uuid.UUID) -> bool:
+    """Whether any still-``unresolved`` component still owns an item-scoped question.
+
+    Mirrors the daily-summary / read-model finalized gate
+    (:func:`app.services.daily_summary._has_open_item_scoped_question`): while one holds,
+    the event stays ``partially_resolved``; once every component with a question has
+    resolved, the event reaches ``completed``.
+    """
+
+    return (
+        session.scalars(
+            select(ClarificationQuestion.id)
+            .join(DerivedFoodItem, DerivedFoodItem.id == ClarificationQuestion.derived_food_item_id)
+            .where(
+                ClarificationQuestion.log_event_id == log_event_id,
+                DerivedFoodItem.status == DerivedItemStatus.UNRESOLVED,
+            )
+            .limit(1)
+        ).first()
+        is not None
+    )
+
+
+def _scoped_failure_question(component: DerivedFoodItem) -> ClarificationDraft:
+    """A fresh, answerable item-scoped ask for a scoped re-estimate that failed closed.
+
+    A deterministic (or retry-exhausted) scoped failure must not leave the component's
+    only question already answered — that is an inert ``partially_resolved`` state the
+    user cannot act on. This re-opens an answerable ask naming the component by its
+    bounded, schema-validated parse ``name`` (already the ``derived_food_items.name`` the
+    user sees, never raw diary text — the carrier's ``before_insert`` guard fails closed
+    otherwise), so a new answer can drive a fresh scoped re-estimate.
+    """
+
+    name = component.name.strip() or "that item"
+    return ClarificationDraft(
+        text=f'We couldn\'t work out "{name}" from that answer. Which food was it, and how much?'
+    )
+
+
+def _apply_scoped_component_outcome(
+    session: Session,
+    run: EstimationRun,
+    component: DerivedFoodItem,
+    context: EstimationContext,
+    result: PipelineResult,
+) -> None:
+    """Fold one open component's scoped pipeline outcome back onto its own row.
+
+    Resolved → advance the row in place to ``resolved`` with the newly-costed values +
+    evidence (:func:`apply_scoped_resolution`). Still un-costable → keep the row
+    ``unresolved`` and replace its open ask with the fresh component-named question
+    (:func:`replace_component_question`). A deterministic (or retry-exhausted) failure is
+    *not* left inert: the answered question is replaced with a fresh answerable ask and
+    the failure is recorded in the sanitized trace, so the event never becomes a
+    ``partially_resolved`` dead end with no answerable question. Each branch emits the
+    ``scoped_reestimate`` per-component trace vocabulary (FTY-329).
+    """
+
+    if context.resolved_food_items:
+        apply_scoped_resolution(session, run, component, context.resolved_food_items[0])
+        context.record_decision(
+            "scoped_reestimate",
+            "outcome",
+            outcome="component_resolved",
+            source_ref=context.resolved_food_items[0].source_ref,
+        )
+    elif context.item_scoped_clarifications:
+        replace_component_question(
+            session, run, component, context.item_scoped_clarifications[0].question
+        )
+        context.record_decision("scoped_reestimate", "outcome", outcome="component_clarified")
+    elif result.outcome is PipelineOutcome.NEEDS_CLARIFICATION and context.clarification_questions:
+        # A parse-level safety gate (e.g. implausible re-read) asked whole-event; keep
+        # the component open with that question re-scoped to its carrier.
+        fresh = ClarificationDraft(text=context.clarification_questions[0].text)
+        replace_component_question(session, run, component, fresh)
+        context.record_decision("scoped_reestimate", "outcome", outcome="component_clarified")
+    else:
+        # Any terminal scoped outcome that did **not** resolve the component and did not
+        # re-open a scoped question above — a deterministic :class:`StepFailed` (or a
+        # retryable failure whose retries are exhausted; the retry-with-attempts-left case
+        # is handled by the caller), or a rare re-estimate that costed nothing — must not
+        # be left untouched: the component's only question is now answered, and the
+        # clarification read filters answered questions, so the event would be a
+        # ``partially_resolved`` dead end with nothing the user can answer. Record the
+        # failure and re-open an answerable ask (a new answer is fresh input; the failure
+        # was about the prior one).
+        outcome = (
+            "component_reestimate_failed"
+            if result.outcome is PipelineOutcome.FAILED
+            else "component_reestimate_unresolved"
+        )
+        replace_component_question(session, run, component, _scoped_failure_question(component))
+        context.record_decision("scoped_reestimate", "outcome", outcome=outcome)
+
+
+def _finalize_scoped_reestimate(
+    session: Session,
+    pipeline: Pipeline,
+    job: EstimationJob,
+    event: LogEvent,
+    run: EstimationRun,
+    prior_food: list[DerivedFoodItem],
+    *,
+    user_id: uuid.UUID,
+) -> ProcessResult:
+    """Re-cost only the answered open component(s), preserving every resolved sibling.
+
+    Each open component is re-interpreted from its own sanitized identity plus its
+    answered clarifications — never the whole raw entry — so the model makes **no**
+    provider call about a sibling. The costable siblings stay their original committed
+    ``resolved`` rows; the answered component's row is advanced in place. The event lands
+    ``completed`` once no ``unresolved`` component still owns an item-scoped question, and
+    otherwise stays ``partially_resolved`` (a still-open component keeps a fresh
+    item-scoped question). Persistence + the terminal status transition commit atomically
+    in the single :func:`transition_event` commit, exactly like :func:`_finalize`.
+    """
+
+    open_components = _load_answered_open_components(session, event.id, prior_food)
+    weight_kg = _load_user_weight_kg(session, user_id)
+    contexts: list[EstimationContext] = []
+    for component, answered in open_components:
+        context = EstimationContext(
+            log_event_id=event.id,
+            user_id=user_id,
+            # The scoped identity only — the committed sibling names never re-enter
+            # interpretation, so no provider call is made about them.
+            raw_text=component.name,
+            weight_kg=weight_kg,
+            answered_clarifications=answered,
+        )
+        result = _run_pipeline(pipeline, context)
+        if (
+            result.outcome is PipelineOutcome.FAILED
+            and result.retryable
+            and job.attempts < job.max_attempts
+        ):
+            # A transient failure with retries left: discard any in-place applications
+            # from this round and ask the caller to retry the whole scoped re-estimate,
+            # exactly as the full path retries a :class:`StepError`. Re-answering the
+            # (already-recorded) question is a no-op, so without this the event would be
+            # stuck ``partially_resolved`` with no way to re-cost.
+            session.rollback()
+            job.status = EstimationJobStatus.RUNNING
+            run.status = EstimationRunStatus.FAILED
+            run.error = result.error
+            session.add_all([run, job])
+            session.commit()
+            return _result(job, event, run, should_retry=True)
+        _apply_scoped_component_outcome(session, run, component, context, result)
+        contexts.append(context)
+
+    if contexts:
+        _record_run_metadata(run, contexts[-1])
+        # ``_record_run_metadata`` copies only the last context's trace; concatenate every
+        # scoped component's sanitized trace so a ``component_clarified`` /
+        # ``component_reestimate_failed`` outcome on a non-last component is still recorded
+        # (bounded like any run trace, defence in depth over the per-context bound).
+        merged: list[dict[str, Any]] = []
+        for scoped in contexts:
+            merged.extend(scoped.trace)
+        run.trace = merged[:MAX_TRACE_ENTRIES]
+
+    # The session runs ``autoflush=False``, so flush the in-place component status
+    # updates before the completion query reads them — otherwise it sees the stale
+    # ``unresolved`` rows and never completes.
+    session.flush()
+    if _has_open_item_scoped_question(session, event.id):
+        run.status = EstimationRunStatus.NEEDS_CLARIFICATION
+        job.status = EstimationJobStatus.NEEDS_CLARIFICATION
+        session.add_all([run, job])
+        transition_event(session, event, LogEventStatus.PARTIALLY_RESOLVED)
+        return _result(job, event, run, should_retry=False)
+
+    run.status = EstimationRunStatus.COMPLETED
+    job.status = EstimationJobStatus.SUCCEEDED
+    session.add_all([run, job])
+    transition_event(session, event, LogEventStatus.COMPLETED)
+    return _result(job, event, run, should_retry=False)
 
 
 def _load_user_weight_kg(session: Session, user_id: uuid.UUID) -> float | None:
@@ -332,6 +595,19 @@ def process_estimation(
     session.commit()
     session.refresh(run)
 
+    # FTY-329 scoped re-estimate: a previously-``partially_resolved`` event carries
+    # committed food items from an earlier round, so this re-estimate re-costs **only**
+    # the open, newly-answered component(s) and leaves the already-``resolved`` siblings
+    # untouched — never re-parsing the whole entry, so no sibling is re-costed,
+    # duplicated, or double-counted. A first pass and an event-level
+    # ``needs_clarification`` re-estimate carry no prior food items and run the full
+    # pipeline unchanged; a label re-estimate is out of scope.
+    prior_food = _load_event_food_items(session, log_event_id)
+    if label_upload is None and prior_food:
+        return _finalize_scoped_reestimate(
+            session, pipeline, job, event, run, prior_food, user_id=user_id
+        )
+
     context = EstimationContext(
         log_event_id=log_event_id,
         user_id=user_id,
@@ -343,14 +619,7 @@ def process_estimation(
     result = _run_pipeline(pipeline, context)
 
     # Persist the sanitized run metadata regardless of outcome.
-    run.provider = context.provider
-    run.model = context.model
-    run.schema_version = context.schema_version
-    run.tool_names = list(context.tool_names)
-    run.source_refs = list(context.source_refs)
-    run.assumptions = list(context.assumptions)
-    run.validation_errors = list(context.validation_errors)
-    run.trace = list(context.trace)
+    _record_run_metadata(run, context)
 
     process_result = _finalize(session, job, event, run, result, context)
 
@@ -418,6 +687,22 @@ def _finalize(
         job.status = EstimationJobStatus.NEEDS_CLARIFICATION
         session.add_all([run, job])
         transition_event(session, event, LogEventStatus.NEEDS_CLARIFICATION)
+        return _result(job, event, run, should_retry=False)
+
+    if outcome is PipelineOutcome.PARTIALLY_RESOLVED:
+        # Item-scoped partial resolution (FTY-278/FTY-329): commit the costable
+        # siblings (``resolved`` rows + evidence/products) and persist each un-costable
+        # component as an ``unresolved`` row owning its item-scoped question, then land
+        # the event ``partially_resolved`` — all in the single terminal transaction. The
+        # run/job stay ``needs_clarification`` (the worker-terminal awaiting-answer
+        # status, re-opened only by the clarification resolve — ``estimation-jobs.md``
+        # v3); only the *event* transition differs from the whole-event case.
+        _persist_candidates(session, run, context)
+        _persist_item_scoped_clarifications(session, run, context)
+        run.status = EstimationRunStatus.NEEDS_CLARIFICATION
+        job.status = EstimationJobStatus.NEEDS_CLARIFICATION
+        session.add_all([run, job])
+        transition_event(session, event, LogEventStatus.PARTIALLY_RESOLVED)
         return _result(job, event, run, should_retry=False)
 
     # Failed. A deterministic (non-retryable) failure or an exhausted retry bound

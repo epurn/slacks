@@ -97,6 +97,11 @@ class PipelineOutcome(StrEnum):
 
     COMPLETED = "completed"
     NEEDS_CLARIFICATION = "needs_clarification"
+    #: Item-scoped partial resolution (FTY-278/FTY-329): at least one component was
+    #: costed and committed while at least one other component owns an item-scoped
+    #: clarification. The event lands ``partially_resolved`` (``log-events.md`` v6);
+    #: the run/job status stays ``needs_clarification`` (``estimation-jobs.md`` v3).
+    PARTIALLY_RESOLVED = "partially_resolved"
     FAILED = "failed"
 
 
@@ -151,6 +156,83 @@ class ClarificationDraft:
 
     text: str
     options: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ComponentClarification:
+    """One food component the resolver could not cost, with its two question shapes.
+
+    The item-scoped partial-resolution carrier (FTY-329): a resolution step collects
+    this instead of raising a whole-event :class:`NeedsClarification` when a single
+    component is un-costable. ``candidate`` is the parsed component the worker persists
+    as an ``unresolved`` ``derived_food_items`` row; ``question`` is the **item-scoped**
+    draft naming that component by its sanitized parse name (linked to the row via the
+    ``derived_food_item_id`` carrier when the event lands ``partially_resolved``);
+    ``event_level_question`` is the original generic draft the step built, used verbatim
+    only in the whole-event ``needs_clarification`` fallback (no component costable), so
+    that path's wording is unchanged. Neither draft ever carries raw diary text — the
+    component name is bounded, schema-validated parse data.
+    """
+
+    candidate: CandidateDraft
+    question: ClarificationDraft
+    event_level_question: ClarificationDraft
+
+
+def component_scoped_question(
+    candidate: CandidateDraft, event_level: ClarificationDraft, reason: str
+) -> ClarificationDraft:
+    """Build the item-scoped question naming ``candidate`` by its sanitized parse name.
+
+    The component's ``name`` is bounded, schema-validated parse data (already the
+    ``derived_food_items.name`` the user sees), never raw diary text, so embedding it
+    keeps the question specific without leaking the entry phrase. ``reason`` is the
+    resolver's sanitized :class:`NeedsClarification` reason and selects the question
+    intent (a quantity ask vs. an unknown-food ask); the display ``options`` are carried
+    over from the step's original generic draft unchanged.
+    """
+
+    name = candidate.name.strip() or "that item"
+    if reason == "unresolvable_quantity":
+        text = f"How much {name} did you have (for example, in grams, millilitres, or servings)?"
+    elif reason == "barcode_unknown":
+        text = f"We couldn't find that barcode's product. Which food was \"{name}\", and how much?"
+    else:
+        text = f'Which food was "{name}"? We couldn\'t find a nutrition match.'
+    return ClarificationDraft(text=text, options=list(event_level.options))
+
+
+def collect_component_clarification(
+    context: EstimationContext, candidate: CandidateDraft, reason: str, *, step: str
+) -> None:
+    """Record ``candidate``'s item-scoped clarification instead of aborting the run.
+
+    A food resolution step (``food_step`` / ``official_step``) set a generic draft on
+    ``context.clarification_questions`` just before raising :class:`NeedsClarification`
+    for one component. This captures that draft as the event-level fallback, clears the
+    event-level slot (so a later fully-costed candidate does not inherit it), builds the
+    item-scoped question naming the component, and appends the pair to
+    ``context.item_scoped_clarifications`` for the worker to finalize.
+
+    ``step`` names the resolution step that could not cost the component; it labels the
+    sanitized ``component_clarified`` per-component trace outcome (FTY-329) so the partial
+    route is explainable without the trace ever carrying the component name or raw text.
+    """
+
+    event_level = (
+        context.clarification_questions[-1]
+        if context.clarification_questions
+        else ClarificationDraft(text=f'Which food was "{candidate.name}"?')
+    )
+    context.clarification_questions = []
+    context.item_scoped_clarifications.append(
+        ComponentClarification(
+            candidate=candidate,
+            question=component_scoped_question(candidate, event_level, reason),
+            event_level_question=event_level,
+        )
+    )
+    context.record_decision(step, "outcome", outcome="component_clarified")
 
 
 @dataclass(frozen=True)
@@ -345,6 +427,14 @@ class EstimationContext:
     resolved_food_items: list[ResolvedFoodItem] = field(default_factory=list)
     resolved_label_items: list[ResolvedLabelItem] = field(default_factory=list)
     clarification_questions: list[ClarificationDraft] = field(default_factory=list)
+    #: Item-scoped partial outcomes (FTY-329): one per food component the resolver
+    #: could not cost. Collected by the food/official steps instead of raising a
+    #: whole-event :class:`NeedsClarification`, so costable siblings still resolve. On
+    #: a mixed run (≥1 costable) the worker commits the siblings, persists each of these
+    #: as an ``unresolved`` row owning its item-scoped question, and lands the event
+    #: ``partially_resolved``; when nothing else is costable these fall back to
+    #: whole-event ``needs_clarification`` questions.
+    item_scoped_clarifications: list[ComponentClarification] = field(default_factory=list)
 
     def record_step(self, name: str, status: str) -> None:
         """Append a sanitized trace entry for a completed step.
@@ -434,11 +524,16 @@ class PipelineResult:
 class Pipeline:
     """An ordered list of estimation steps run to a single terminal outcome.
 
-    The steps run in order. The first :class:`NeedsClarification` ends the run as
-    ``needs_clarification``; the first :class:`StepFailed` ends it as ``failed``
-    (terminal, non-retryable); the first :class:`StepError` ends it as ``failed``
-    (retryable). If every step completes, the outcome is ``completed``. The
-    runner never inspects or copies ``context.raw_text`` into the result.
+    The steps run in order. A **whole-event** :class:`NeedsClarification` (raised by
+    the parse/user-text safety gates) ends the run as ``needs_clarification``; the
+    first :class:`StepFailed` ends it as ``failed`` (terminal, non-retryable); the
+    first :class:`StepError` ends it as ``failed`` (retryable). If every step
+    completes, the outcome depends on the item-scoped partial outcomes the food
+    resolution steps collected (FTY-329): none → ``completed``; some, with ≥1 costable
+    component → ``partially_resolved`` (the costable siblings are committed and each
+    un-costable component owns its item-scoped question); some, with nothing costable →
+    ``needs_clarification`` (the collected drafts fall back to whole-event questions).
+    The runner never inspects or copies ``context.raw_text`` into the result.
     """
 
     def __init__(self, steps: list[EstimationStep]) -> None:
@@ -461,7 +556,73 @@ class Pipeline:
             except StepError as exc:
                 context.record_step(step.name, "failed")
                 return PipelineResult(PipelineOutcome.FAILED, exc.message, retryable=True)
+        return _terminal_outcome(context)
+
+
+def _has_costable_component(context: EstimationContext) -> bool:
+    """Whether the run committed at least one costed item (food, exercise, or label).
+
+    The mixed-vs-none discriminator for item-scoped partial resolution: a costable
+    component is a committed ``resolved``/``proposed`` item that surfaces and counts, so
+    a run with one costable sibling and one un-costable component is a *partial* outcome
+    rather than a whole-event clarification.
+    """
+
+    return bool(
+        context.resolved_food_items
+        or context.resolved_exercise_items
+        or context.resolved_label_items
+    )
+
+
+def _terminal_outcome(context: EstimationContext) -> PipelineResult:
+    """Decide the terminal outcome once every step ran without a whole-event abort.
+
+    With no collected item-scoped clarification the run is ``completed``. Otherwise the
+    outcome splits on whether any component was costable (FTY-278): a mixed run commits
+    the costable siblings and lands ``partially_resolved`` (each un-costable component
+    keeps its item-scoped question); a run with nothing costable falls back to a
+    whole-event ``needs_clarification``, promoting the collected drafts to the
+    event-level questions the worker persists (no ``derived_food_item_id`` carrier).
+    """
+
+    if not context.item_scoped_clarifications:
         return PipelineResult(PipelineOutcome.COMPLETED, None)
+    if _has_costable_component(context):
+        # Emit the sanitized per-component partial-finalization vocabulary (FTY-329):
+        # one ``component_resolved`` per committed sibling (by its non-secret source ref,
+        # never its name) plus a single ``partial_finalized`` marker carrying how many
+        # siblings were counted. These label the partial route so it is explainable
+        # without the trace ever carrying the diary phrase or a component name.
+        for item in context.resolved_food_items:
+            context.record_decision(
+                "partial_resolution",
+                "outcome",
+                outcome="component_resolved",
+                source_ref=item.source_ref,
+            )
+        context.record_decision(
+            "partial_resolution",
+            "outcome",
+            outcome="partial_finalized",
+            result_count=len(context.resolved_food_items),
+        )
+        return PipelineResult(PipelineOutcome.PARTIALLY_RESOLVED, None)
+    # Nothing costable → whole-event clarification, exactly as today (FTY-329 criterion).
+    # Before FTY-329 the first un-costable component raised a whole-event
+    # ``NeedsClarification`` that aborted the pipeline, so the event carried a **single**
+    # first-clarification question with the un-named generic wording. The steps now
+    # collect each component instead of aborting, but the no-costable fallback must
+    # preserve that boundary: promote only the *first* collected draft's event-level
+    # question (components are collected in step-execution order, so ``[0]`` is the same
+    # component the old first-raise boundary stopped on). Promoting every collected draft
+    # would surface multiple duplicate, carrier-less event-level questions the old path
+    # never produced. The remaining ``item_scoped_clarifications`` are left in place
+    # (unused by the ``needs_clarification`` finalize) so a scoped re-estimate — where a
+    # single component's un-costable outcome is not "whole-event" — can still read back
+    # its component-named question.
+    context.clarification_questions = [context.item_scoped_clarifications[0].event_level_question]
+    return PipelineResult(PipelineOutcome.NEEDS_CLARIFICATION, None)
 
 
 def default_pipeline(

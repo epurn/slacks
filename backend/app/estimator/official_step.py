@@ -66,7 +66,9 @@ from app.estimator.official_fetch import OfficialFetchSettings, fetch_official_s
 from app.estimator.pipeline import (
     CandidateDraft,
     EstimationContext,
+    NeedsClarification,
     ResolvedFoodItem,
+    collect_component_clarification,
 )
 from app.estimator.reference_fetch import ReferenceFetchSettings, fetch_searched_result
 from app.estimator.resolved_item import _build_item
@@ -151,10 +153,19 @@ class OfficialSourceResolveStep:
         context.schema_version = OFFICIAL_SOURCE_SCHEMA_VERSION
 
         for candidate in pending:
-            context.resolved_food_items.append(self._resolve(context, candidate))
+            try:
+                item = self._resolve(context, candidate)
+            except NeedsClarification as exc:
+                # FTY-329: a component the web-evidence/model-prior tiers cannot cost is
+                # collected as its own item-scoped outcome rather than aborting the
+                # whole pipeline, so the entry's costable siblings still resolve.
+                collect_component_clarification(context, candidate, exc.reason, step=self.name)
+                continue
+            context.resolved_food_items.append(item)
 
-        # These candidates are now resolved; clear so the worker does not also persist
-        # them as unresolved leftovers.
+        # Every pending candidate is now resolved or collected as an item-scoped
+        # clarification; clear so the worker does not also persist them as unresolved
+        # leftovers (which would double-represent a component).
         context.pending_official_candidates.clear()
         context.record_step(self.name, "ok")
 
