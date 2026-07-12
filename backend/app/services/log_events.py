@@ -28,7 +28,7 @@ from datetime import UTC, date, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session
 
 from app.enums import DerivedItemStatus, LogEventStatus
 from app.models.derived import (
@@ -41,6 +41,10 @@ from app.models.identity import User
 from app.models.log_events import LogEvent
 from app.schemas.corrections import DerivedExerciseItemDTO, DerivedFoodItemDTO
 from app.services import item_read_model
+from app.services.daily_summary_predicates import (
+    _FINALIZED_EVENT_STATUSES,
+    _scoped_reestimate_processing_ids,
+)
 from app.timeutils import current_day, day_bounds_utc, user_timezone
 
 #: The log-event status state machine: each status maps to the set of statuses
@@ -73,18 +77,14 @@ LEGAL_TRANSITIONS: dict[LogEventStatus, frozenset[LogEventStatus]] = {
     LogEventStatus.FAILED: frozenset(),
 }
 
-#: Terminal-finalized event statuses whose committed ``resolved`` items always
-#: surface in the by-date item read (:func:`list_entries_for_day`). A ``processing``
-#: event surfaces items only when it is a genuine answer-triggered scoped re-estimate
-#: (FTY-349), discriminated at query time by
-#: :func:`_scoped_reestimate_processing_ids` — never by status membership here, so a
-#: first-pass ``processing`` event in the worker's two-commit completion window (which
-#: momentarily carries committed resolved rows) is excluded. See
+#: The finalized-event status set and the scoped-``processing`` discriminator are
+#: single-sourced in :mod:`app.services.daily_summary_predicates` (FTY-357): the
+#: by-date item read (:func:`list_entries_for_day`) imports
+#: :data:`~app.services.daily_summary_predicates._FINALIZED_EVENT_STATUSES` and
+#: :func:`~app.services.daily_summary_predicates._scoped_reestimate_processing_ids`
+#: and composes them rather than defining its own copy, so this read and the
+#: daily-summary aggregate reads cannot drift. See
 #: ``docs/contracts/daily-summary.md`` (finalized-event gate) and ``log-events.md``.
-_FINALIZED_ITEM_READ_STATUSES = (
-    LogEventStatus.COMPLETED,
-    LogEventStatus.PARTIALLY_RESOLVED,
-)
 _CLARIFICATION_EVENT_STATUSES = (
     LogEventStatus.NEEDS_CLARIFICATION,
     LogEventStatus.PARTIALLY_RESOLVED,
@@ -236,38 +236,6 @@ def list_events_for_day(
     )
 
 
-def _scoped_reestimate_processing_ids(
-    session: Session, owner_id: uuid.UUID, candidate_ids: list[uuid.UUID]
-) -> set[uuid.UUID]:
-    """Of ``candidate_ids`` (``processing`` events), those that are genuine scoped re-estimates.
-
-    Mirrors the daily-summary finalized gate's scoped-``processing`` discriminator
-    (FTY-349, :func:`app.services.daily_summary._has_open_item_scoped_question`): a
-    ``processing`` event surfaces its committed resolved siblings only when it owns
-    ≥1 item-scoped clarification question on a still-``unresolved`` component — the
-    signature of a previously-``partially_resolved`` event being re-costed. A
-    **first-pass** ``processing`` event that momentarily carries committed resolved
-    rows during the worker's two-commit completion window owns no such question, so it
-    is excluded and surfaces nothing. The per-item ``RESOLVED`` + costed-value filter
-    is *not* a sufficient discriminator on its own, precisely because that window
-    exposes committed resolved rows before the terminal transition commits.
-    """
-
-    if not candidate_ids:
-        return set()
-    component = aliased(DerivedFoodItem)
-    rows = session.scalars(
-        select(ClarificationQuestion.log_event_id)
-        .join(component, ClarificationQuestion.derived_food_item_id == component.id)
-        .where(
-            ClarificationQuestion.user_id == owner_id,
-            ClarificationQuestion.log_event_id.in_(candidate_ids),
-            component.status == DerivedItemStatus.UNRESOLVED,
-        )
-    )
-    return set(rows)
-
-
 def list_entries_for_day(
     session: Session,
     owner_id: uuid.UUID,
@@ -291,7 +259,9 @@ def list_entries_for_day(
     question on a still-unresolved component), so a first-pass ``processing`` event —
     which momentarily carries committed resolved rows during the worker's two-commit
     completion window but owns no such question — surfaces nothing (nothing counts
-    early). See :data:`_FINALIZED_ITEM_READ_STATUSES`.
+    early). The status set and the discriminator are the single-sourced
+    :data:`~app.services.daily_summary_predicates._FINALIZED_EVENT_STATUSES` and
+    :func:`~app.services.daily_summary_predicates._scoped_reestimate_processing_ids`.
     """
 
     events = list_events_for_day(session, owner_id, current_user, day)
@@ -299,9 +269,7 @@ def list_entries_for_day(
         return []
 
     item_bearing_event_ids = [
-        event.id
-        for event in events
-        if LogEventStatus(event.status) in _FINALIZED_ITEM_READ_STATUSES
+        event.id for event in events if LogEventStatus(event.status) in _FINALIZED_EVENT_STATUSES
     ]
     processing_ids = [
         event.id for event in events if LogEventStatus(event.status) is LogEventStatus.PROCESSING
