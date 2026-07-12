@@ -39,7 +39,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
@@ -54,6 +54,7 @@ from app.estimator.exact_evidence import (
     ProposalNotResolvable,
     build_exact_evidence_apply_capability,
 )
+from app.estimator.label_proposal import LabelProposalGenerator, LabelProviderError
 from app.estimator.off import OffResponseError, OffTransientError
 from app.estimator.re_match import ItemForbidden, ItemNotFound
 from app.schemas.corrections import DerivedFoodItemDTO
@@ -64,6 +65,12 @@ from app.schemas.exact_evidence import (
 )
 from app.services import barcode_proposal as barcode_proposal_service
 from app.services import item_read_model
+from app.services import label_exact_proposal as label_proposal_service
+from app.services.attachments import (
+    AttachmentInvalidContentType,
+    AttachmentTooLarge,
+    validate_upload,
+)
 from app.services.corrections import DerivedItemNotFound, ensure_parent_event_not_voided
 from app.services.exact_evidence import NotUpgradeable
 from app.settings import Settings
@@ -72,12 +79,19 @@ router = APIRouter(prefix="/api/users", tags=["exact-evidence"])
 
 _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="derived item not found")
 
-#: Path suffixes whose request bodies carry untrusted, potentially sensitive input
+#: Path suffixes whose request bodies/params carry untrusted, potentially sensitive input
 #: (a signed ``proposal_ref``, a barcode, or client-injected nutrition facts caught by
-#: ``extra="forbid"``). A validation failure on either must return a content-free code
-#: rather than echo the rejected value. Matching the suffix uniquely selects these two
-#: POST endpoints without coupling the sanitizer to the full parameterised paths.
-_SANITIZED_PATH_SUFFIXES = ("/exact-upgrade/apply", "/exact-upgrade/barcode")
+#: ``extra="forbid"``). A validation failure on any must return a content-free code rather
+#: than echo the rejected value. The label route carries no sensitive Pydantic body (its
+#: image bytes are a raw body validated as data, not schema-echoed), but it is included so
+#: *every* exact-upgrade endpoint has one uniform content-free validation-error contract.
+#: Matching the suffix uniquely selects these POST endpoints without coupling the
+#: sanitizer to the full parameterised paths.
+_SANITIZED_PATH_SUFFIXES = (
+    "/exact-upgrade/apply",
+    "/exact-upgrade/barcode",
+    "/exact-upgrade/label",
+)
 
 
 def _is_sanitized_request(request: Request) -> bool:
@@ -121,6 +135,28 @@ def get_barcode_proposal_generator(
     """
 
     return barcode_proposal_service.build_barcode_proposal_generator(session)
+
+
+def get_label_proposal_generator() -> LabelProposalGenerator:
+    """Build the per-request label proposal generator (FTY-309).
+
+    A FastAPI dependency so tests can override it with a network-free generator; the
+    default wires the real vision-provider label extraction and the identity fallback over
+    the configured LLM/search/fetch clients. Construction opens no socket.
+    """
+
+    return label_proposal_service.build_label_proposal_generator()
+
+
+async def _read_image_body(request: Request) -> bytes:
+    """Read the raw uploaded label-image bytes off the request body.
+
+    Reading the body is async; the label propose path operation is a sync function (so its
+    blocking extraction runs in the threadpool), so the read is isolated in this dependency
+    — mirroring the FTY-064 label-capture upload route.
+    """
+
+    return await request.body()
 
 
 def _refuse_voided_parent(session: Session, item_id: uuid.UUID, owner_id: uuid.UUID) -> None:
@@ -241,6 +277,93 @@ def propose_barcode_evidence(
     except (OffTransientError, OffResponseError) as exc:
         # A source outage during propose is surfaced honestly as retryable, never
         # disguised as a `none`/`fallback` miss (mirrors the re-match listing posture).
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "source_unavailable"},
+        ) from exc
+
+
+@router.post(
+    "/{user_id}/derived-items/food/{item_id}/exact-upgrade/label",
+    response_model=ExactEvidenceProposalDTO,
+)
+def propose_label_evidence(
+    user_id: uuid.UUID,
+    item_id: uuid.UUID,
+    current_user: CurrentUser,
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    data: Annotated[bytes, Depends(_read_image_body)],
+    generator: Annotated[LabelProposalGenerator, Depends(get_label_proposal_generator)],
+    content_type: Annotated[str | None, Header()] = None,
+    save: Annotated[
+        bool,
+        Query(description="Retain the raw label image as a log_attachment (FTY-077)."),
+    ] = False,
+) -> ExactEvidenceProposalDTO:
+    """Build an exact-or-fallback label proposal for the caller's own food item.
+
+    The label image is the raw request body; its declared type is the ``Content-Type``
+    header. It is validated as **data** (size / content-type allowlist / magic-number
+    signature) at the trust boundary **before any model call** — an invalid upload fails
+    closed with ``413`` / ``415`` and produces no proposal, no attachment, and no
+    mutation. A valid image runs the schema-validated label extraction and returns a
+    server-signed **proposal** the user previews and applies via FTY-307 — a read-only
+    operation that never mutates the item and creates no log event or extra timeline item.
+    A legible panel yields an ``exact`` ``user_label`` proposal costed at the item's
+    current amount (or one requiring an amount when the current amount is uncostable); an
+    unreadable / not-a-label / schema-invalid reading yields a clearly-labelled
+    ``fallback`` from the item's identity when the estimator can produce one, else a
+    ``none`` response with a content-free reason. On ``save=true`` (and only when a
+    proposal was produced) the raw image is retained as exactly one attachment on the
+    item's owning log event; on ``save=false`` it is discarded after extraction.
+
+    Cross-user / unknown / non-food items — and items whose parent log event is voided —
+    fail closed as ``404``; an already-source-backed (ineligible) item returns ``422
+    {"error": "not_upgradeable"}``; a transient / non-conforming vision-provider failure
+    surfaces a retryable ``503`` rather than a disguised miss.
+    """
+
+    # Validate the untrusted image as data before anything else — before ownership is
+    # even resolved — so an oversized/mistyped upload fails closed (413/415) uniformly for
+    # any caller and never becomes an item-existence oracle, and no model is ever called.
+    try:
+        canonical_type = validate_upload(data, content_type or "")
+    except AttachmentTooLarge as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail="image exceeds the maximum upload size",
+        ) from exc
+    except AttachmentInvalidContentType as exc:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="upload is not an allowed image type",
+        ) from exc
+
+    _refuse_voided_parent(session, item_id, user_id)
+    settings: Settings = request.app.state.settings
+    try:
+        return label_proposal_service.propose_label_evidence(
+            session,
+            owner_id=user_id,
+            current_user=current_user,
+            item_id=item_id,
+            data=data,
+            content_type=canonical_type,
+            save=save,
+            secret=settings.auth_secret.get_secret_value(),
+            generator=generator,
+        )
+    except (ItemForbidden, ItemNotFound) as exc:
+        raise _NOT_FOUND from exc
+    except NotUpgradeable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "not_upgradeable"},
+        ) from exc
+    except LabelProviderError as exc:
+        # A vision-provider outage during propose is surfaced honestly as retryable, never
+        # disguised as a `none`/`fallback` miss (mirrors the barcode OFF-error posture).
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"error": "source_unavailable"},

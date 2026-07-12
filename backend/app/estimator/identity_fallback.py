@@ -1,9 +1,15 @@
-"""Estimator fallback for a barcode proposal from an item's identity (FTY-308).
+"""Estimator fallback for an exact-evidence proposal from an item's identity (FTY-308).
 
-The production :class:`~app.estimator.barcode_proposal.IdentityFallbackSource`: when a
-barcode has no usable exact Open Food Facts match, the item's sanitized identity is
-estimated through the *existing* evidence fallback tiers, in the contract order
-(``docs/contracts/evidence-retrieval.md`` — Fallback Rule):
+The production :class:`~app.estimator.barcode_proposal.IdentityFallbackSource`, shared by
+both source-specific proposal generators (barcode FTY-308, label FTY-309): when the exact
+source has no usable match — no Open Food Facts product for a barcode, or an unreadable /
+not-a-label image — the item's sanitized identity is estimated through the *existing*
+evidence fallback tiers, in the contract order (``docs/contracts/evidence-retrieval.md`` —
+Fallback Rule). The two content-free provenance labels the fallback records are injected by
+the caller (:attr:`IdentityFallbackResolver.reference_assumption` /
+:attr:`~IdentityFallbackResolver.model_prior_assumption`) so a label fallback records
+``label exact match unavailable …`` rather than the barcode wording; the tiers themselves
+are identical:
 
 1. **Reference source** (FTY-166) — search the sanitized identity + the fixed
    nutrition intent through the pluggable search adapter, fetch each result page
@@ -62,10 +68,11 @@ from app.llm.errors import (
 from app.schemas.official_source import EstimateDisposition, NamedFoodEstimate
 from app.settings import DEFAULT_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR
 
-#: Content-free provenance labels the fallback records so the applied item stays
+#: Default content-free provenance labels the fallback records so the applied item stays
 #: honestly rough: they name the fallback tier and the barcode miss in closed
 #: vocabulary — never raw text, provider output, or a URL. The reference tier's own
-#: URL lives in ``source_ref`` (``reference_source:<url>``), per contract.
+#: URL lives in ``source_ref`` (``reference_source:<url>``), per contract. A caller may
+#: override them (e.g. the label proposal generator passes label-worded labels).
 _REFERENCE_ASSUMPTION = "barcode exact match unavailable; estimated from reference source"
 _MODEL_PRIOR_ASSUMPTION = "barcode exact match unavailable; estimated from model prior"
 
@@ -94,6 +101,11 @@ class IdentityFallbackResolver:
     reference_fetch_settings: ReferenceFetchSettings
     model_prior_confidence_floor: float = DEFAULT_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR
     reference_fetch_fn: FetchReference = fetch_searched_result
+    #: Content-free provenance labels the produced fallback records — the exact-source
+    #: miss that led here. Default to the barcode wording; the label proposal generator
+    #: (FTY-309) overrides them so a label fallback reads honestly as a label miss.
+    reference_assumption: str = _REFERENCE_ASSUMPTION
+    model_prior_assumption: str = _MODEL_PRIOR_ASSUMPTION
 
     def resolve(self, identity: str) -> FallbackFacts | None:
         """Estimate ``identity`` (reference source first, then model prior), or ``None``.
@@ -133,7 +145,7 @@ class IdentityFallbackResolver:
         )
         if found is None or found.basis != PER_100G_BASIS:
             return None
-        return _fallback_facts(found, REFERENCE_SOURCE_TYPE, _REFERENCE_ASSUMPTION)
+        return _fallback_facts(found, REFERENCE_SOURCE_TYPE, self.reference_assumption)
 
     def _model_prior(self, identity: str) -> FallbackFacts | None:
         """Estimate typical published per-100g facts from identity alone, gated on floor.
@@ -158,7 +170,7 @@ class IdentityFallbackResolver:
         )
         if found is None or found.basis != PER_100G_BASIS:
             return None
-        return _fallback_facts(found, SourceType.MODEL_PRIOR.value, _MODEL_PRIOR_ASSUMPTION)
+        return _fallback_facts(found, SourceType.MODEL_PRIOR.value, self.model_prior_assumption)
 
     def _fetch_reference(self, url: str) -> str | None:
         """Fetch ``url`` through the searched-result fetcher; ``None`` on any failure."""

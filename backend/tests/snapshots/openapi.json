@@ -2845,6 +2845,104 @@
         ]
       }
     },
+    "/api/users/{user_id}/derived-items/food/{item_id}/exact-upgrade/label": {
+      "post": {
+        "description": "Build an exact-or-fallback label proposal for the caller's own food item.\n\nThe label image is the raw request body; its declared type is the ``Content-Type``\nheader. It is validated as **data** (size / content-type allowlist / magic-number\nsignature) at the trust boundary **before any model call** \u2014 an invalid upload fails\nclosed with ``413`` / ``415`` and produces no proposal, no attachment, and no\nmutation. A valid image runs the schema-validated label extraction and returns a\nserver-signed **proposal** the user previews and applies via FTY-307 \u2014 a read-only\noperation that never mutates the item and creates no log event or extra timeline item.\nA legible panel yields an ``exact`` ``user_label`` proposal costed at the item's\ncurrent amount (or one requiring an amount when the current amount is uncostable); an\nunreadable / not-a-label / schema-invalid reading yields a clearly-labelled\n``fallback`` from the item's identity when the estimator can produce one, else a\n``none`` response with a content-free reason. On ``save=true`` (and only when a\nproposal was produced) the raw image is retained as exactly one attachment on the\nitem's owning log event; on ``save=false`` it is discarded after extraction.\n\nCross-user / unknown / non-food items \u2014 and items whose parent log event is voided \u2014\nfail closed as ``404``; an already-source-backed (ineligible) item returns ``422\n{\"error\": \"not_upgradeable\"}``; a transient / non-conforming vision-provider failure\nsurfaces a retryable ``503`` rather than a disguised miss.",
+        "operationId": "propose_label_evidence_api_users__user_id__derived_items_food__item_id__exact_upgrade_label_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Retain the raw label image as a log_attachment (FTY-077).",
+            "in": "query",
+            "name": "save",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Retain the raw label image as a log_attachment (FTY-077).",
+              "title": "Save",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "content-type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Content-Type"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExactEvidenceProposalDTO"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Propose Label Evidence",
+        "tags": [
+          "exact-evidence"
+        ]
+      }
+    },
     "/api/users/{user_id}/derived-items/food/{item_id}/re-resolve": {
       "post": {
         "description": "Re-resolve the caller's own food item to a chosen candidate reference.\n\nRecomputes calories/macros from the chosen source at the item's current portion,\nrewrites its provenance to the new source, and re-snapshots the estimated\noriginals \u2014 the item is **not** marked edited. The response carries the new\nper-item ``source`` descriptor (FTY-092). Cross-user or unknown items \u2014 and items\nwhose parent log event is voided (FTY-321) \u2014 fail closed as ``404``; a reference\nthe server cannot re-derive, or a re-match the new source cannot cost, returns\n``422`` with a clear error shape.",

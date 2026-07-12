@@ -18,14 +18,18 @@ applied item will read.
 
 from __future__ import annotations
 
+import uuid
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.enums import SourceType
+from app.enums import ExactEvidenceKind, ExactEvidenceQuality, SourceType
 from app.estimator.exact_evidence import ExactEvidenceProposal, cost_grams
 from app.estimator.food_serving import scale_facts
-from app.models.derived import DerivedFoodItem
+from app.estimator.re_match import ItemNotFound
+from app.models.derived import DerivedExerciseItem, DerivedFoodItem
 from app.models.food_sources import EvidenceSource
+from app.models.log_events import LogEvent
 from app.schemas.exact_evidence import (
     ExactEvidenceProposalDTO,
     ExactEvidenceProposalPreviewDTO,
@@ -82,6 +86,78 @@ def is_exact_upgrade_eligible(session: Session, item: DerivedFoodItem) -> bool:
     descriptor = source_descriptor(evidence.source_type, evidence.source_ref, evidence.assumptions)
     has_rough_macro_fill = descriptor is not None and descriptor.estimate_basis is not None
     return macros_incomplete or has_rough_macro_fill
+
+
+def load_owned_food_item(
+    session: Session, item_id: uuid.UUID, owner_id: uuid.UUID
+) -> DerivedFoodItem:
+    """Load a food item by id scoped to ``owner_id``, classifying an owned exercise id.
+
+    The shared owner-scoped loader for the source-specific propose services (barcode
+    FTY-308, label FTY-309). The query is constrained to the owner, so another user's
+    item — or an unknown id — is indistinguishable from a missing one
+    (:class:`~app.estimator.re_match.ItemNotFound` → ``404``, no existence oracle). An
+    **owned** exercise item, however, is a real but ineligible target (an exercise burn
+    has no evidence to upgrade), so it is refused with :class:`NotUpgradeable` → ``422
+    not_upgradeable`` rather than masqueraded as unknown — matching the exact-upgrade
+    eligibility contract. A cross-user exercise id stays a ``404`` (owner-scoped), and an
+    owned exercise item whose parent log event is soft-voided stays a ``404`` (no void
+    oracle), consistent with the router's voided-parent precheck.
+    """
+
+    item = session.scalars(
+        select(DerivedFoodItem).where(
+            DerivedFoodItem.id == item_id,
+            DerivedFoodItem.user_id == owner_id,
+        )
+    ).one_or_none()
+    if item is not None:
+        return item
+    if _owns_active_exercise_item(session, item_id, owner_id):
+        raise NotUpgradeable("exercise items are not exact-upgradeable")
+    raise ItemNotFound("derived food item not found")
+
+
+def _owns_active_exercise_item(session: Session, item_id: uuid.UUID, owner_id: uuid.UUID) -> bool:
+    """Whether ``item_id`` is an owner's exercise item with a non-voided parent event.
+
+    Owner-scoped and voided-parent-excluded so this stays fail-closed: a cross-user id
+    or a soft-voided-parent item does not report ``True`` (both remain ``404`` with no
+    existence/void disclosure). A ``True`` result marks a genuinely ineligible target
+    the propose route renders ``422 not_upgradeable``.
+    """
+
+    exercise_id = session.execute(
+        select(DerivedExerciseItem.id)
+        .join(LogEvent, LogEvent.id == DerivedExerciseItem.log_event_id)
+        .where(
+            DerivedExerciseItem.id == item_id,
+            DerivedExerciseItem.user_id == owner_id,
+            LogEvent.voided_at.is_(None),
+        )
+    ).scalar_one_or_none()
+    return exercise_id is not None
+
+
+def no_proposal_dto(
+    kind: ExactEvidenceKind, failure_reason: str | None
+) -> ExactEvidenceProposalDTO:
+    """The read shape for a propose attempt that produced nothing applyable.
+
+    A calm, content-free outcome shared by the source-specific propose services:
+    ``quality = none``, no preview, no signed reference, and the source-specific
+    ``failure_reason`` so the client can say what happened without any invented number.
+    ``kind`` distinguishes the barcode and label variants.
+    """
+
+    return ExactEvidenceProposalDTO(
+        proposal_ref="",
+        kind=kind,
+        quality=ExactEvidenceQuality.NONE,
+        failure_reason=failure_reason,
+        preview=None,
+        can_cost_current_amount=False,
+    )
 
 
 def serialize_proposal(

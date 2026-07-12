@@ -21,26 +21,25 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.enums import ExactEvidenceKind, ExactEvidenceQuality
+from app.enums import ExactEvidenceKind
 from app.estimator.barcode_proposal import BarcodeProposalGenerator
 from app.estimator.exact_evidence import encode_proposal_ref
 from app.estimator.food_resolvers import BarcodeResolver
 from app.estimator.identity_fallback import IdentityFallbackResolver
 from app.estimator.off import build_off_client
-from app.estimator.re_match import ItemForbidden, ItemNotFound
+from app.estimator.re_match import ItemForbidden
 from app.estimator.reference_fetch import load_reference_fetch_settings
 from app.estimator.search import build_search_provider
 from app.llm import build_provider, load_llm_settings
-from app.models.derived import DerivedExerciseItem, DerivedFoodItem
 from app.models.identity import User
-from app.models.log_events import LogEvent
 from app.schemas.exact_evidence import ExactEvidenceProposalDTO
 from app.services.exact_evidence import (
     NotUpgradeable,
     is_exact_upgrade_eligible,
+    load_owned_food_item,
+    no_proposal_dto,
     serialize_proposal,
 )
 from app.settings import load_settings
@@ -70,7 +69,7 @@ def propose_barcode_evidence(
 
     if owner_id != current_user.id:
         raise ItemForbidden("cross-user barcode proposal denied")
-    item = _load_owned_food_item(session, item_id, owner_id)
+    item = load_owned_food_item(session, item_id, owner_id)
     if not is_exact_upgrade_eligible(session, item):
         raise NotUpgradeable("item is already source-backed")
 
@@ -82,79 +81,11 @@ def propose_barcode_evidence(
     # would call OFF again instead of serving from cache. The item itself is untouched.
     session.commit()
     if outcome.proposal is None:
-        return _no_proposal_dto(outcome.failure_reason)
+        return no_proposal_dto(ExactEvidenceKind.BARCODE, outcome.failure_reason)
 
     proposal_ref = encode_proposal_ref(outcome.proposal, secret)
     return serialize_proposal(
         item, outcome.proposal, proposal_ref, failure_reason=outcome.failure_reason
-    )
-
-
-def _load_owned_food_item(
-    session: Session, item_id: uuid.UUID, owner_id: uuid.UUID
-) -> DerivedFoodItem:
-    """Load a food item by id scoped to ``owner_id``, classifying an owned exercise id.
-
-    The query is constrained to the owner, so another user's item — or an unknown id —
-    is indistinguishable from a missing one (:class:`ItemNotFound` → ``404``, no
-    existence oracle). An **owned** exercise item, however, is a real but ineligible
-    target (an exercise burn has no evidence to upgrade), so it is refused with
-    :class:`NotUpgradeable` → ``422 not_upgradeable`` rather than masqueraded as unknown
-    — matching the FTY-308 eligibility contract. A cross-user exercise id stays a
-    ``404`` (owner-scoped), and an owned exercise item whose parent log event is
-    soft-voided stays a ``404`` (no void oracle), consistent with the food path's
-    router precheck.
-    """
-
-    item = session.scalars(
-        select(DerivedFoodItem).where(
-            DerivedFoodItem.id == item_id,
-            DerivedFoodItem.user_id == owner_id,
-        )
-    ).one_or_none()
-    if item is not None:
-        return item
-    if _owns_active_exercise_item(session, item_id, owner_id):
-        raise NotUpgradeable("exercise items are not exact-upgradeable")
-    raise ItemNotFound("derived food item not found")
-
-
-def _owns_active_exercise_item(session: Session, item_id: uuid.UUID, owner_id: uuid.UUID) -> bool:
-    """Whether ``item_id`` is an owner's exercise item with a non-voided parent event.
-
-    Owner-scoped and voided-parent-excluded so this stays fail-closed: a cross-user id
-    or a soft-voided-parent item does not report ``True`` (both remain ``404`` with no
-    existence/void disclosure). A ``True`` result marks a genuinely ineligible target
-    the route renders ``422 not_upgradeable``.
-    """
-
-    exercise_id = session.execute(
-        select(DerivedExerciseItem.id)
-        .join(LogEvent, LogEvent.id == DerivedExerciseItem.log_event_id)
-        .where(
-            DerivedExerciseItem.id == item_id,
-            DerivedExerciseItem.user_id == owner_id,
-            LogEvent.voided_at.is_(None),
-        )
-    ).scalar_one_or_none()
-    return exercise_id is not None
-
-
-def _no_proposal_dto(failure_reason: str | None) -> ExactEvidenceProposalDTO:
-    """The read shape for a barcode attempt that produced nothing applyable.
-
-    A calm, content-free outcome: ``quality = none``, no preview, no signed reference,
-    and the barcode ``failure_reason`` so the client can say what happened without any
-    invented number.
-    """
-
-    return ExactEvidenceProposalDTO(
-        proposal_ref="",
-        kind=ExactEvidenceKind.BARCODE,
-        quality=ExactEvidenceQuality.NONE,
-        failure_reason=failure_reason,
-        preview=None,
-        can_cost_current_amount=False,
     )
 
 
