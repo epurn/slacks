@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -87,6 +89,30 @@ def test_login_unknown_email_is_unauthorized(client: TestClient) -> None:
 
     # Same generic 401 as a wrong password: no account-existence oracle.
     assert resp.status_code == 401
+
+
+def test_protected_route_non_ascii_token_is_unauthorized(client: TestClient) -> None:
+    """A non-ASCII bearer token fails closed as 401, never an unhandled 500.
+
+    HTTP header values reach Starlette latin-1-decoded, so a client can place a
+    non-ASCII byte in the ``Authorization`` value. That value used to crash the
+    token verifier (UnicodeEncodeError / TypeError) and surface as a 500 with a
+    stack trace; deps.py catches only InvalidToken. The verifier now fails
+    closed, so the request maps to the generic 401.
+    """
+
+    # Latin-1-encodable so it survives the HTTP header transport, as a real
+    # client's header would.
+    resp = client.get(
+        f"/api/users/{uuid.uuid4()}/profile",
+        headers={"Authorization": "Bearer é.x".encode("latin-1")},
+    )
+
+    assert resp.status_code == 401
+    # Generic credential message only: no stack trace or internal detail leaks.
+    assert resp.json() == {"detail": "missing or invalid credentials"}
+    assert "Traceback" not in resp.text
+    assert "UnicodeEncodeError" not in resp.text
 
 
 def test_concurrent_register_race_returns_409(
