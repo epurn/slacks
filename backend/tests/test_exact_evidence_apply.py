@@ -15,12 +15,15 @@ barcode/label generation is FTY-308/FTY-309), proving the acceptance criteria:
   are rejected with no mutation;
 - cross-user / unknown item / voided parent fail closed as ``404``;
 - the read model reports the new source and ``is_edited = false``.
+
+The API-level endpoint tests (the ``test_apply_api_*`` group) live in the sibling
+``test_exact_evidence_apply_api.py``; the shared proposal builders and the ``session``
+fixture live in ``tests.exact_evidence_helpers``.
 """
 
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -29,7 +32,6 @@ from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from app.db import create_session_factory
 from app.enums import (
     CandidateType,
     CorrectionSource,
@@ -41,9 +43,7 @@ from app.enums import (
 from app.estimator.exact_evidence import (
     AmountNotCostable,
     ExactEvidenceApplyCapability,
-    ExactEvidenceProposal,
     InvalidProposalRef,
-    ProposalFacts,
     ProposalNotResolvable,
     build_proposal,
     decode_proposal_ref,
@@ -53,13 +53,12 @@ from app.models.corrections import Correction
 from app.models.derived import DerivedFoodItem
 from app.models.food_sources import EvidenceSource
 from app.models.identity import User
-from app.models.log_events import LogEvent
-from app.schemas.exact_evidence import MAX_PROPOSAL_REF_LENGTH
 from app.security.tokens import mint_token
 from app.services import item_read_model
 from app.services.exact_evidence import serialize_proposal
-from app.settings import DEV_AUTH_SECRET
 from tests.corrections_helpers import register, seed_evidence, seed_food_item
+from tests.exact_evidence_helpers import _exact_proposal, _facts, _fallback_proposal
+from tests.exact_evidence_helpers import session as session  # noqa: PLC0414 — re-exported fixture
 
 SECRET = "test-proposal-secret"  # noqa: S105 (test signing key, not a real credential)
 
@@ -69,89 +68,14 @@ SECRET = "test-proposal-secret"  # noqa: S105 (test signing key, not a real cred
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def session(db_engine: Engine) -> Iterator[Session]:
-    factory = create_session_factory(db_engine)
-    with factory() as db_session:
-        yield db_session
-
-
 def _user(session: Session, user_id: str) -> User:
     user = session.get(User, uuid.UUID(user_id))
     assert user is not None
     return user
 
 
-def _facts(
-    *,
-    calories: float = 120.0,
-    default_serving_g: float | None = 150.0,
-    serving_label: str | None = "1 serving",
-) -> ProposalFacts:
-    return ProposalFacts(
-        basis="per_100g",
-        calories=calories,
-        protein_g=6.0,
-        carbs_g=12.0,
-        fat_g=3.0,
-        default_serving_g=default_serving_g,
-        serving_label=serving_label,
-    )
-
-
-def _exact_proposal(
-    owner_id: uuid.UUID,
-    item_id: uuid.UUID,
-    *,
-    calories: float = 120.0,
-    default_serving_g: float | None = 150.0,
-    source_type: str = SourceType.PRODUCT_DATABASE.value,
-    source_ref: str = "open_food_facts:0123456789012",
-    kind: ExactEvidenceKind = ExactEvidenceKind.BARCODE,
-    now: datetime | None = None,
-) -> ExactEvidenceProposal:
-    return build_proposal(
-        owner_id=owner_id,
-        item_id=item_id,
-        kind=kind,
-        quality=ExactEvidenceQuality.EXACT,
-        source_type=source_type,
-        source_ref=source_ref,
-        content_hash="hash-exact",
-        facts=_facts(calories=calories, default_serving_g=default_serving_g),
-        now=now,
-    )
-
-
-def _fallback_proposal(
-    owner_id: uuid.UUID,
-    item_id: uuid.UUID,
-    *,
-    source_type: str = SourceType.REFERENCE_SOURCE.value,
-    source_ref: str = "reference_source:https://ex.example/nutrition",
-    assumptions: list[str] | None = None,
-    field_provenance: dict[str, str] | None = None,
-) -> ExactEvidenceProposal:
-    return build_proposal(
-        owner_id=owner_id,
-        item_id=item_id,
-        kind=ExactEvidenceKind.BARCODE,
-        quality=ExactEvidenceQuality.FALLBACK,
-        source_type=source_type,
-        source_ref=source_ref,
-        content_hash="hash-fallback",
-        facts=_facts(),
-        assumptions=assumptions if assumptions is not None else ["barcode_no_match"],
-        field_provenance=field_provenance,
-    )
-
-
 def _capability(session: Session) -> ExactEvidenceApplyCapability:
     return ExactEvidenceApplyCapability(session=session, secret=SECRET)
-
-
-def _apply_url(user_id: str, item_id: uuid.UUID) -> str:
-    return f"/api/users/{user_id}/derived-items/food/{item_id}/exact-upgrade/apply"
 
 
 # ---------------------------------------------------------------------------
@@ -621,32 +545,6 @@ def test_quality_none_proposal_is_not_applyable_no_mutation(
     )
 
 
-def test_apply_api_fallback_claiming_high_trust_source_is_422_no_mutation(
-    client: TestClient, db_engine: Engine, session: Session
-) -> None:
-    # End-to-end: a fallback signed with product_database renders the contracted
-    # 422 proposal_not_resolvable with no mutation (never a masquerading exact apply).
-    user_id, auth = register(client, "ee-api-fb-hitrust@example.com")
-    item_id = seed_food_item(db_engine, user_id, amount=2.0, calories=300.0)
-    ref = encode_proposal_ref(
-        _fallback_proposal(
-            uuid.UUID(user_id), item_id, source_type=SourceType.PRODUCT_DATABASE.value
-        ),
-        DEV_AUTH_SECRET,
-    )
-
-    resp = client.post(
-        _apply_url(user_id, item_id),
-        headers={"Authorization": auth},
-        json={"proposal_ref": ref},
-    )
-
-    assert resp.status_code == 422
-    assert resp.json()["detail"]["error"] == "proposal_not_resolvable"
-    session.expire_all()
-    assert session.get(DerivedFoodItem, item_id).calories == pytest.approx(300.0)  # type: ignore[union-attr]
-
-
 # ---------------------------------------------------------------------------
 # (f) Edit interaction
 # ---------------------------------------------------------------------------
@@ -753,248 +651,3 @@ def test_serialize_fallback_proposal_previews_rough_source(
         SourceType.PRODUCT_DATABASE,
         SourceType.USER_LABEL,
     }
-
-
-# ---------------------------------------------------------------------------
-# (h) Backend route — authz, validation, fail-closed
-# ---------------------------------------------------------------------------
-
-
-def _ref_for_app(owner_id: str, item_id: uuid.UUID, **kwargs: object) -> str:
-    """Sign a proposal with the app's dev secret so the route can verify it."""
-
-    proposal = _exact_proposal(uuid.UUID(owner_id), item_id, **kwargs)  # type: ignore[arg-type]
-    return encode_proposal_ref(proposal, DEV_AUTH_SECRET)
-
-
-def test_apply_api_happy_path(client: TestClient, db_engine: Engine) -> None:
-    user_id, auth = register(client, "ee-api@example.com")
-    item_id = seed_food_item(db_engine, user_id, amount=2.0, calories=300.0)
-
-    resp = client.post(
-        _apply_url(user_id, item_id),
-        headers={"Authorization": auth},
-        json={"proposal_ref": _ref_for_app(user_id, item_id)},
-    )
-
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["calories"] == pytest.approx(360.0)
-    assert body["is_edited"] is False
-    assert body["source"]["source_type"] == "product_database"
-    assert body["source"]["ref"] == "open_food_facts:0123456789012"
-
-
-def test_apply_api_rejects_client_supplied_facts(client: TestClient, db_engine: Engine) -> None:
-    user_id, auth = register(client, "ee-api-inject@example.com")
-    item_id = seed_food_item(db_engine, user_id, calories=300.0)
-
-    resp = client.post(
-        _apply_url(user_id, item_id),
-        headers={"Authorization": auth},
-        json={"proposal_ref": _ref_for_app(user_id, item_id), "calories": 50.0},
-    )
-
-    assert resp.status_code == 422  # extra=forbid: no fact injection
-    assert resp.json() == {"detail": {"error": "invalid_request"}}  # sanitized: fact not echoed
-
-
-def test_apply_api_unknown_reference_is_422(client: TestClient, db_engine: Engine) -> None:
-    user_id, auth = register(client, "ee-api-badref@example.com")
-    item_id = seed_food_item(db_engine, user_id, calories=300.0)
-
-    resp = client.post(
-        _apply_url(user_id, item_id),
-        headers={"Authorization": auth},
-        json={"proposal_ref": "not-a-real-ref"},
-    )
-
-    assert resp.status_code == 422
-    assert resp.json()["detail"]["error"] == "proposal_not_resolvable"
-
-
-def test_apply_api_oversized_reference_is_422_no_mutation(
-    client: TestClient, db_engine: Engine, session: Session
-) -> None:
-    # Oversized proposal_ref rejected at the request boundary (before HMAC/base64/JSON
-    # decode) — 422, no mutation, sanitized stable-code body that never echoes the ref.
-    user_id, auth = register(client, "ee-api-oversized@example.com")
-    item_id = seed_food_item(db_engine, user_id, calories=300.0)
-    resp = client.post(
-        _apply_url(user_id, item_id),
-        headers={"Authorization": auth},
-        json={"proposal_ref": "a" * (MAX_PROPOSAL_REF_LENGTH + 1)},
-    )
-
-    assert resp.status_code == 422
-    assert resp.json() == {"detail": {"error": "invalid_request"}}
-    session.expire_all()
-    assert session.get(DerivedFoodItem, item_id).calories == pytest.approx(300.0)  # type: ignore[union-attr]
-
-
-@pytest.mark.parametrize(
-    ("case", "malformed_ref"),
-    [("payload", "é.c2ln"), ("signature", "cGF5.é"), ("both", "é.é")],
-)
-def test_apply_api_non_ascii_reference_is_422_no_mutation(
-    client: TestClient, db_engine: Engine, session: Session, case: str, malformed_ref: str
-) -> None:
-    # A malformed non-ASCII proposal_ref must render the contracted 422
-    # proposal_not_resolvable with no mutation — never a 500 from an unmapped
-    # UnicodeError/TypeError in signature verification.
-    user_id, auth = register(client, f"ee-api-nonascii-{case}@example.com")
-    item_id = seed_food_item(db_engine, user_id, calories=300.0)
-
-    resp = client.post(
-        _apply_url(user_id, item_id),
-        headers={"Authorization": auth},
-        json={"proposal_ref": malformed_ref},
-    )
-
-    assert resp.status_code == 422
-    assert resp.json()["detail"]["error"] == "proposal_not_resolvable"
-    session.expire_all()
-    assert session.get(DerivedFoodItem, item_id).calories == pytest.approx(300.0)  # type: ignore[union-attr]
-
-
-def test_apply_api_expired_reference_is_422(client: TestClient, db_engine: Engine) -> None:
-    user_id, auth = register(client, "ee-api-expired@example.com")
-    item_id = seed_food_item(db_engine, user_id, calories=300.0)
-    expired = encode_proposal_ref(
-        _exact_proposal(uuid.UUID(user_id), item_id, now=datetime.now(UTC) - timedelta(days=1)),
-        DEV_AUTH_SECRET,
-    )
-
-    resp = client.post(
-        _apply_url(user_id, item_id),
-        headers={"Authorization": auth},
-        json={"proposal_ref": expired},
-    )
-
-    assert resp.status_code == 422
-    assert resp.json()["detail"]["error"] == "proposal_not_resolvable"
-
-
-def test_apply_api_uncostable_amount_is_422(client: TestClient, db_engine: Engine) -> None:
-    user_id, auth = register(client, "ee-api-amount@example.com")
-    item_id = seed_food_item(db_engine, user_id, amount=2.0, calories=300.0)
-
-    resp = client.post(
-        _apply_url(user_id, item_id),
-        headers={"Authorization": auth},
-        json={"proposal_ref": _ref_for_app(user_id, item_id, default_serving_g=None)},
-    )
-
-    assert resp.status_code == 422
-    assert resp.json()["detail"]["error"] == "amount_required"
-
-
-def test_apply_api_negative_amount_is_422(client: TestClient, db_engine: Engine) -> None:
-    user_id, auth = register(client, "ee-api-negamount@example.com")
-    item_id = seed_food_item(db_engine, user_id, amount=2.0, calories=300.0)
-
-    resp = client.post(
-        _apply_url(user_id, item_id),
-        headers={"Authorization": auth},
-        json={"proposal_ref": _ref_for_app(user_id, item_id), "amount": -1.0},
-    )
-
-    assert resp.status_code == 422  # request-boundary validation
-
-
-def test_apply_api_unknown_item_is_404(client: TestClient, db_engine: Engine) -> None:
-    user_id, auth = register(client, "ee-api-missing@example.com")
-    missing = uuid.uuid4()
-
-    resp = client.post(
-        _apply_url(user_id, missing),
-        headers={"Authorization": auth},
-        json={"proposal_ref": _ref_for_app(user_id, missing)},
-    )
-
-    assert resp.status_code == 404
-
-
-def test_apply_api_cross_user_fails_closed(client: TestClient, db_engine: Engine) -> None:
-    alice_id, alice_auth = register(client, "ee-alice@example.com")
-    bob_id, _bob_auth = register(client, "ee-bob@example.com")
-    bob_item = seed_food_item(db_engine, bob_id, amount=2.0, calories=200.0)
-
-    via_bob = client.post(
-        _apply_url(bob_id, bob_item),
-        headers={"Authorization": alice_auth},
-        json={"proposal_ref": _ref_for_app(bob_id, bob_item)},
-    )
-    via_alice = client.post(
-        _apply_url(alice_id, bob_item),
-        headers={"Authorization": alice_auth},
-        json={"proposal_ref": _ref_for_app(alice_id, bob_item)},
-    )
-
-    assert via_bob.status_code == 404
-    assert via_alice.status_code == 404
-    factory = create_session_factory(db_engine)
-    with factory() as s:
-        item = s.get(DerivedFoodItem, bob_item)
-        assert item is not None
-        assert item.calories == pytest.approx(200.0)  # no mutation
-
-
-def test_apply_api_voided_parent_is_404(client: TestClient, db_engine: Engine) -> None:
-    user_id, auth = register(client, "ee-api-voided@example.com")
-    item_id = seed_food_item(db_engine, user_id, amount=2.0, calories=300.0)
-    ref = _ref_for_app(user_id, item_id)
-    # Void the item's parent log event (FTY-321 soft void).
-    factory = create_session_factory(db_engine)
-    with factory() as s:
-        item = s.get(DerivedFoodItem, item_id)
-        assert item is not None
-        event = s.get(LogEvent, item.log_event_id)
-        assert event is not None
-        event.voided_at = datetime.now(UTC)
-        s.commit()
-
-    resp = client.post(
-        _apply_url(user_id, item_id),
-        headers={"Authorization": auth},
-        json={"proposal_ref": ref},
-    )
-
-    assert resp.status_code == 404
-    with factory() as s:
-        item = s.get(DerivedFoodItem, item_id)
-        assert item is not None
-        assert item.calories == pytest.approx(300.0)  # no mutation
-
-
-def test_apply_api_requires_authentication(client: TestClient, db_engine: Engine) -> None:
-    user_id, _auth = register(client, "ee-api-noauth@example.com")
-    item_id = seed_food_item(db_engine, user_id)
-
-    resp = client.post(
-        _apply_url(user_id, item_id),
-        json={"proposal_ref": _ref_for_app(user_id, item_id)},
-    )
-
-    assert resp.status_code == 401
-
-
-def test_apply_api_then_edit_marks_item_edited_again(client: TestClient, db_engine: Engine) -> None:
-    user_id, auth = register(client, "ee-api-then-edit@example.com")
-    item_id = seed_food_item(db_engine, user_id, amount=2.0, calories=300.0)
-
-    applied = client.post(
-        _apply_url(user_id, item_id),
-        headers={"Authorization": auth},
-        json={"proposal_ref": _ref_for_app(user_id, item_id)},
-    )
-    assert applied.status_code == 200
-    assert applied.json()["is_edited"] is False
-
-    edit = client.patch(
-        f"/api/users/{user_id}/derived-items/food/{item_id}",
-        headers={"Authorization": auth},
-        json={"field": "calories", "value": 250.0},
-    )
-    assert edit.status_code == 200
-    assert edit.json()["is_edited"] is True
