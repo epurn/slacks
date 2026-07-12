@@ -2,9 +2,12 @@
  * FTY-204: Provenance / evidence block for the correction sheet.
  *
  * Shows the item's source line (or "≈ Rough estimate"), a "Make it exact" nudge
- * for rough estimates, and the user's original quoted phrase. Extracted from the
- * former monolithic `CorrectionSheet.tsx` — behaviour, copy, and accessibility
- * labels are unchanged.
+ * for low-trust / incomplete items, and the user's original quoted phrase.
+ *
+ * FTY-312: the nudge is now gated on `showMakeExact` (any exact-upgrade-eligible
+ * item — `docs/contracts/evidence-retrieval.md` → **Eligibility**), not just the
+ * `model_prior` "≈ Rough estimate" case, and opens the dedicated exact-evidence
+ * choice surface rather than Change match.
  */
 
 import { Pressable, StyleSheet, Text, View } from "react-native";
@@ -19,6 +22,7 @@ export function ProvenanceBlock({
   isEdited,
   provenancePres,
   isRoughEstimate,
+  showMakeExact,
   logPhrase,
   onMakeExact,
   colors,
@@ -27,6 +31,8 @@ export function ProvenanceBlock({
   isEdited: boolean;
   provenancePres: ProvenancePresentation;
   isRoughEstimate: boolean;
+  /** Whether to offer the `Make it exact` entry point (exact-upgrade-eligible). */
+  showMakeExact: boolean;
   logPhrase?: string;
   onMakeExact: () => void;
   colors: ColorPalette;
@@ -52,13 +58,15 @@ export function ProvenanceBlock({
         </Text>
       </View>
 
-      {/* Rough estimate nudge */}
-      {isRoughEstimate ? (
+      {/* Exact-evidence nudge — lifts the lowest-trust items rather than hiding
+          them. Opens the dedicated barcode/label choice surface (FTY-312). */}
+      {showMakeExact ? (
         <Pressable
           onPress={onMakeExact}
           style={styles.makeExactRow}
           accessibilityRole="button"
-          accessibilityLabel="Make it exact — find the real source"
+          accessibilityLabel="Make it exact"
+          accessibilityHint="Add a barcode or nutrition label to replace this rough estimate"
         >
           <Text style={[styles.makeExactLabel, { color: colors.accentText }]}>
             › Make it exact

@@ -40,11 +40,21 @@ import {
   type DerivedFoodItemDTO,
   type DerivedItem,
 } from "@/api/derivedItems";
+import {
+  applyExactEvidenceProposal as applyExactEvidenceProposalApi,
+  requestBarcodeExactEvidenceProposal as requestBarcodeExactEvidenceProposalApi,
+  uploadLabelExactEvidenceProposal as uploadLabelExactEvidenceProposalApi,
+} from "@/api/exactEvidence";
 import { saveFood as saveFoodApi } from "@/api/savedFoods";
 import { ClarifyMode, type ClarificationData } from "@/components/ClarifyMode";
 import { AdvancedLeverRow } from "@/components/correction/AdvancedLeverRow";
 import { AmountStepper } from "@/components/correction/AmountStepper";
 import { ChangeMatchPanel } from "@/components/correction/ChangeMatchPanel";
+import {
+  ExactEvidencePanel,
+  type ExactEvidenceCaptureInjectables,
+} from "@/components/correction/ExactEvidencePanel";
+import { isExactUpgradeEligible } from "@/components/correction/helpers";
 import { OverridePanel } from "@/components/correction/OverridePanel";
 import { ProvenanceBlock } from "@/components/correction/ProvenanceBlock";
 import { SaveFoodRow } from "@/components/correction/SaveFoodRow";
@@ -52,6 +62,7 @@ import {
   useCorrectionSheet,
   type SheetMode,
 } from "@/components/correction/useCorrectionSheet";
+import { useExactEvidence } from "@/components/correction/useExactEvidence";
 import { DisplayText } from "@/components/ui/DisplayText";
 import { NativeSheet } from "@/components/ui/NativeSheet";
 import { provenancePresentation } from "@/components/ui/ProvenanceIcon";
@@ -77,6 +88,12 @@ export interface CorrectionSheetBaseProps {
   reResolve?: typeof reResolveItemApi;
   /** Injectable for tests (FTY-052/053 save-as-food). */
   saveFood?: typeof saveFoodApi;
+  /** Injectable for tests (FTY-312 / FTY-310 exact-evidence clients). */
+  requestBarcodeProposal?: typeof requestBarcodeExactEvidenceProposalApi;
+  uploadLabelProposal?: typeof uploadLabelExactEvidenceProposalApi;
+  applyProposal?: typeof applyExactEvidenceProposalApi;
+  /** Injectable capture seams for the FTY-311 barcode/label modals (tests). */
+  exactCapture?: ExactEvidenceCaptureInjectables;
   /**
    * E2E-only: opens the sheet directly into this mode (FTY-263 visual-review
    * seam). Never set by a real caller — Today's sheet host only supplies it
@@ -149,6 +166,10 @@ export function CorrectionSheet({
   listCandidates = listSourceCandidatesApi,
   reResolve = reResolveItemApi,
   saveFood = saveFoodApi,
+  requestBarcodeProposal = requestBarcodeExactEvidenceProposalApi,
+  uploadLabelProposal = uploadLabelExactEvidenceProposalApi,
+  applyProposal = applyExactEvidenceProposalApi,
+  exactCapture,
   e2eInitialMode,
   settledMarkerTestID,
 }: CorrectionSheetProps) {
@@ -180,6 +201,26 @@ export function CorrectionSheet({
   const unit = food?.unit ?? null;
   const kcal = food?.calories ?? null;
   const canSaveFood = food !== null && food.calories !== null && !!logPhrase;
+
+  // FTY-312: exact-evidence eligibility (low-trust/incomplete food only). Drives
+  // both the `Make it exact` nudge and — when the user enters the flow — the
+  // exact-evidence panel below.
+  const showMakeExact = isExactUpgradeEligible(item);
+  // The exact-evidence hook needs a food item; it is only ever *used* while
+  // `mode === "make-exact"`, which is reachable only from `showMakeExact` (food).
+  // For an exercise item `food` is null and the panel never renders, so the cast
+  // is inert — the hook reads only the item's id/amount, both present on either
+  // item type.
+  const exactItem = (food ?? item) as DerivedFoodItemDTO;
+  const exact = useExactEvidence({
+    session,
+    item: exactItem,
+    active: mode === "make-exact",
+    onCommitted: sheet.commitExactUpgrade,
+    requestBarcodeProposal,
+    uploadLabelProposal,
+    applyProposal,
+  });
 
   // FTY-263 in-modal settled marker. It appears only once the requested mode's
   // async state has settled — the exact per-mode gate the visual-review contract
@@ -260,16 +301,38 @@ export function CorrectionSheet({
                 isEdited={isEdited}
                 provenancePres={provenancePres}
                 isRoughEstimate={isRoughEstimate}
+                showMakeExact={showMakeExact}
                 logPhrase={logPhrase}
-                onMakeExact={sheet.openChangeMatch}
+                onMakeExact={sheet.openMakeExact}
                 colors={colors}
               />
 
+              {/* Exact-evidence flow (FTY-312): the dedicated barcode/label
+                  choice → preview → apply-in-place surface, plus its capture
+                  modals. Replaces the rest of the levers while active. */}
+              {food !== null && mode === "make-exact" ? (
+                <>
+                  <View style={[styles.separator, { backgroundColor: colors.separator }]} />
+                  <ExactEvidencePanel
+                    item={food}
+                    exact={exact}
+                    onCancel={sheet.cancelMakeExact}
+                    onChangeMatch={sheet.openChangeMatch}
+                    onManualEdit={() => sheet.openOverride("calories", food.calories)}
+                    colors={colors}
+                    cameraPermissionsHook={exactCapture?.cameraPermissionsHook}
+                    labelTakePhoto={exactCapture?.labelTakePhoto}
+                  />
+                </>
+              ) : null}
+
               {/* Separator */}
-              <View style={[styles.separator, { backgroundColor: colors.separator }]} />
+              {mode !== "make-exact" ? (
+                <View style={[styles.separator, { backgroundColor: colors.separator }]} />
+              ) : null}
 
               {/* Amount stepper (food only) */}
-              {food !== null ? (
+              {food !== null && mode !== "make-exact" ? (
                 <AmountStepper
                   amount={currentAmount}
                   unit={unit}
@@ -287,7 +350,7 @@ export function CorrectionSheet({
               ) : null}
 
               {/* Change match lever */}
-              {food !== null && mode !== "change-match" ? (
+              {food !== null && mode !== "change-match" && mode !== "make-exact" ? (
                 <>
                   <View style={[styles.separator, { backgroundColor: colors.separator }]} />
                   <Pressable
@@ -322,7 +385,10 @@ export function CorrectionSheet({
               ) : null}
 
               {/* Advanced override lever */}
-              {food !== null && mode !== "override" && mode !== "change-match" ? (
+              {food !== null &&
+              mode !== "override" &&
+              mode !== "change-match" &&
+              mode !== "make-exact" ? (
                 <>
                   <View style={[styles.separator, { backgroundColor: colors.separator }]} />
                   <AdvancedLeverRow

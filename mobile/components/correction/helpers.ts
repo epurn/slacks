@@ -6,7 +6,7 @@
  */
 
 import { CorrectionsApiError } from "@/api/corrections";
-import { DerivedItemApiError } from "@/api/derivedItems";
+import { DerivedItemApiError, type DerivedItem } from "@/api/derivedItems";
 import { formatValue } from "@/state/derivedItems";
 
 /**
@@ -28,4 +28,42 @@ export function messageForError(error: unknown, action: string): string {
 export function formatAmount(amount: number | null): string {
   if (amount === null) return "—";
   return formatValue(amount);
+}
+
+/**
+ * FTY-312: which items offer the correction sheet's `Make it exact` entry point.
+ *
+ * Only **low-trust or incomplete food** items are eligible, derived purely from
+ * the fields the public read model already contracts
+ * (`docs/contracts/evidence-retrieval.md` → **Eligibility**;
+ * `docs/contracts/daily-summary.md` → **`source` descriptor**): the descriptor's
+ * `source_type` and `estimate_basis` plus the item's nullable macro facts — no
+ * new persisted flag. Exercise items and already source-backed food sources
+ * (`user_label`, `product_database`, `trusted_nutrition_database`,
+ * `official_source`) are never eligible, so the rendered nudge and the server's
+ * propose-time validation (`food-resolution.md`, rejecting an ineligible target
+ * with `not_upgradeable`) can never disagree.
+ */
+export function isExactUpgradeEligible(item: DerivedItem): boolean {
+  if (item.item_type !== "food") return false;
+  const source = item.source;
+  if (!source) return false;
+  switch (source.source_type) {
+    // Rough/default-prior estimates and searched public-reference estimates.
+    case "model_prior":
+    case "reference_source":
+      return true;
+    // A user-stated calorie total is eligible only while its macros are still
+    // incomplete — a macro fact unknown/null, or a non-null `estimate_basis`
+    // marking a roughly gap-filled macro (FTY-281/FTY-350).
+    case "user_text":
+      return (
+        item.protein_g === null ||
+        item.carbs_g === null ||
+        item.fat_g === null ||
+        (source.estimate_basis ?? null) !== null
+      );
+    default:
+      return false;
+  }
 }

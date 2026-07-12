@@ -5,9 +5,19 @@
  */
 
 import { CorrectionsApiError } from "@/api/corrections";
-import { DerivedItemApiError } from "@/api/derivedItems";
+import {
+  DerivedItemApiError,
+  type DerivedExerciseItemDTO,
+  type DerivedFoodItemDTO,
+  type ItemSourceDTO,
+} from "@/api/derivedItems";
 
-import { formatAmount, messageForError, SEARCH_DEBOUNCE_MS } from "./helpers";
+import {
+  formatAmount,
+  isExactUpgradeEligible,
+  messageForError,
+  SEARCH_DEBOUNCE_MS,
+} from "./helpers";
 
 describe("messageForError", () => {
   it("passes through a CorrectionsApiError message verbatim", () => {
@@ -54,5 +64,97 @@ describe("formatAmount", () => {
 describe("SEARCH_DEBOUNCE_MS", () => {
   it("is the 300ms typing-pause window that bounds search fan-out", () => {
     expect(SEARCH_DEBOUNCE_MS).toBe(300);
+  });
+});
+
+describe("isExactUpgradeEligible", () => {
+  function src(source_type: ItemSourceDTO["source_type"], extra: Partial<ItemSourceDTO> = {}): ItemSourceDTO {
+    return { source_type, label: "src", ref: `${source_type}:1`, ...extra };
+  }
+  function food(overrides: Partial<DerivedFoodItemDTO> = {}): DerivedFoodItemDTO {
+    return {
+      item_type: "food",
+      id: "food-1",
+      user_id: "user-1",
+      log_event_id: "event-1",
+      name: "Item",
+      quantity_text: "1",
+      unit: "serving",
+      amount: 1,
+      status: "resolved",
+      grams: 10,
+      calories: 100,
+      protein_g: 5,
+      carbs_g: 10,
+      fat_g: 3,
+      calories_estimated: 100,
+      protein_g_estimated: 5,
+      carbs_g_estimated: 10,
+      fat_g_estimated: 3,
+      source: src("model_prior"),
+      is_edited: false,
+      created_at: "2026-07-01T00:00:00Z",
+      updated_at: "2026-07-01T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  it("is true for model_prior and reference_source food", () => {
+    expect(isExactUpgradeEligible(food({ source: src("model_prior") }))).toBe(true);
+    expect(isExactUpgradeEligible(food({ source: src("reference_source") }))).toBe(true);
+  });
+
+  it("is true for a user_text item with a missing macro", () => {
+    expect(
+      isExactUpgradeEligible(food({ source: src("user_text"), carbs_g: null })),
+    ).toBe(true);
+  });
+
+  it("is true for a user_text item with a non-null estimate_basis", () => {
+    expect(
+      isExactUpgradeEligible(
+        food({ source: src("user_text", { estimate_basis: "comparable_reference" }) }),
+      ),
+    ).toBe(true);
+  });
+
+  it("is false for a fully-specified user_text item", () => {
+    expect(isExactUpgradeEligible(food({ source: src("user_text") }))).toBe(false);
+  });
+
+  it("is false for already source-backed food sources", () => {
+    for (const t of [
+      "user_label",
+      "product_database",
+      "trusted_nutrition_database",
+      "official_source",
+    ] as const) {
+      expect(isExactUpgradeEligible(food({ source: src(t) }))).toBe(false);
+    }
+  });
+
+  it("is false for a food item with no source descriptor", () => {
+    expect(isExactUpgradeEligible(food({ source: null }))).toBe(false);
+  });
+
+  it("is false for an exercise item", () => {
+    const ex: DerivedExerciseItemDTO = {
+      item_type: "exercise",
+      id: "ex-1",
+      user_id: "user-1",
+      log_event_id: "event-2",
+      name: "Run",
+      quantity_text: "30 min",
+      unit: "min",
+      amount: 30,
+      status: "resolved",
+      active_calories: 300,
+      active_calories_estimated: 300,
+      source: null,
+      is_edited: false,
+      created_at: "2026-07-01T00:00:00Z",
+      updated_at: "2026-07-01T00:00:00Z",
+    };
+    expect(isExactUpgradeEligible(ex)).toBe(false);
   });
 });
