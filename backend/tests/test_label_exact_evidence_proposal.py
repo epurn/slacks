@@ -465,6 +465,23 @@ def test_vision_source_schema_invalid_reply_is_no_usable_facts() -> None:
     assert reason == FAILURE_NO_USABLE_FACTS == "no_usable_facts"
 
 
+def test_vision_source_implausible_panel_is_no_usable_facts() -> None:
+    # A panel that passes NutritionPanel schema validation but whose canonical per-100g
+    # facts are physically impossible (10,000 kcal in a 1 g serving → 1,000,000 kcal/100g)
+    # must NOT be signed as exact user_label evidence: it is unusable content, so it falls
+    # to the identity fallback carrying the content-free no_usable_facts reason, matching
+    # the barcode sibling's plausibility gate (FTY-308).
+    provider = FakeProvider(
+        supports_vision=True,
+        responses=[_panel(serving_amount=1.0, serving_unit="g", kcal=10_000.0)],
+    )
+    facts, reason = VisionLabelExactSource(provider=provider).extract(
+        data=PNG_BYTES, content_type="image/png"
+    )
+    assert facts is None  # never becomes an exact reading
+    assert reason == FAILURE_NO_USABLE_FACTS == "no_usable_facts"
+
+
 def test_vision_source_config_error_is_source_unavailable() -> None:
     provider = FakeProvider(
         supports_vision=True, responses=[LLMConfigurationError("no vision provider")]

@@ -60,6 +60,7 @@ from app.estimator.exact_evidence import (
 )
 from app.estimator.food_serving import (
     NutritionFacts,
+    nutrition_facts_plausible,
     per_serving_to_per_100g,
     serving_size_grams,
 )
@@ -169,11 +170,12 @@ class VisionLabelExactSource:
     ) -> tuple[LabelExactFacts | None, str | None]:
         """Transcribe + cost the label, mapping provider failures to the right posture.
 
-        A validated legible panel returns ``(LabelExactFacts, None)``; an unusable
-        disposition, low confidence, missing facts, an unresolvable serving size, or a
-        schema-invalid reply returns ``(None, reason)`` (the caller falls to the identity
-        fallback); a transient / non-conforming provider transport failure raises
-        :class:`LabelProviderError` (→ ``503``).
+        A validated, plausible legible panel returns ``(LabelExactFacts, None)``; an
+        unusable disposition, low confidence, missing facts, an unresolvable serving size,
+        a schema-invalid reply, or a schema-valid but physically implausible panel returns
+        ``(None, reason)`` (the caller falls to the identity fallback); a transient /
+        non-conforming provider transport failure raises :class:`LabelProviderError`
+        (→ ``503``).
         """
 
         try:
@@ -205,8 +207,11 @@ class VisionLabelExactSource:
         The panel is untrusted until it validates; a ``not_a_label`` / unreadable /
         low-confidence / factless / unresolvable-serving-size panel produces no exact
         reading. A legible panel's per-serving facts are canonicalised to per-100g by the
-        FTY-044 serving math (the model never supplies the stored math), and the label's
-        serving size in grams is kept so a count amount can be costed at apply/preview.
+        FTY-044 serving math (the model never supplies the stored math), then the canonical
+        facts must pass :func:`nutrition_facts_plausible` — a physically impossible panel
+        (e.g. millions of kcal/100g) is a ``no_usable_facts`` content miss, not an exact
+        reading. The label's serving size in grams is kept so a count amount can be costed
+        at apply/preview.
         """
 
         if panel.disposition is PanelDisposition.NOT_A_LABEL:
@@ -232,6 +237,15 @@ class VisionLabelExactSource:
             fat_g=facts.fat_g_per_serving,
         )
         per_100g = per_serving_to_per_100g(per_serving, serving_g)
+        if not nutrition_facts_plausible(per_100g):
+            # A schema-valid panel whose canonical per-100g facts are physically
+            # impossible (e.g. a 1 g serving claiming 10,000 kcal → 1,000,000 kcal/100g,
+            # or a negative/NaN nutrient) is unusable content, not an exact reading:
+            # reject it as a content miss so it falls to the identity fallback carrying
+            # no_usable_facts, never signed as exact label evidence (mirrors the barcode
+            # sibling's plausibility gate, FTY-308). The gate runs in canonical per-100g
+            # space so the same threshold governs every source uniformly.
+            return None, FAILURE_NO_USABLE_FACTS
         rounded = NutritionFacts(
             calories=round(per_100g.calories, 4),
             protein_g=round(per_100g.protein_g, 4),
