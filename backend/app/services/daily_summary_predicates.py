@@ -1,11 +1,27 @@
-"""Daily-summary window-condition predicate builders (FTY-355, extracted from ``daily_summary.py``).
+"""Finalized-event / uncounted-entry predicate builders (FTY-355, FTY-357).
 
 The reusable WHERE-clause / correlated-EXISTS helpers that decide **which rows
 count** toward a day's read-model. The service module
 (:mod:`app.services.daily_summary`) owns the read-model assembly — the public
 surface, the DTO builders, the aggregators, and target resolution — and imports
-these predicate builders, calling them exactly as before. The two contracts the
-service documents are enforced here:
+these predicate builders, calling them exactly as before.
+
+This module is also the **single canonical home** (FTY-357) for the
+finalized-event definition shared with the log-events item read: the finalized
+event **status set** (:data:`_FINALIZED_EVENT_STATUSES`) and the
+**committed-resolved-item discriminator** (an event's resolved items count while
+it is momentarily ``processing`` for an answer-triggered scoped re-estimate iff
+it owns an open item-scoped question on a still-``unresolved`` component). That
+rule has two renderings that genuinely cannot be one callable — a SQL
+correlated-EXISTS (:func:`_scoped_reestimate_processing`, used by the
+daily-summary aggregate reads) and an in-memory id-set query
+(:func:`_scoped_reestimate_processing_ids`, used by
+:func:`app.services.log_events.list_entries_for_day`) — so both live **here**,
+derived from the one shared status set, rather than each module hand-rolling its
+own copy. ``log_events.py`` imports the status set and the id-set rendering from
+this module; a parity test pins that the two renderings select the same events.
+
+The two contracts the service documents are enforced here:
 
 - **Finalized-state filtering.** The exact filter predicate, kept explicit so the
   rule is auditable: ``log_events.voided_at IS NULL AND <finalized-event
@@ -26,8 +42,9 @@ service documents are enforced here:
   open-item-scoped-question / ``proposed`` predicates that select the
   logged-but-not-yet-counted entries.
 
-These helpers emit SQL only — they read no raw diary/page text and persist
-nothing.
+These helpers read no raw diary/page text and persist nothing (the SQL builders
+emit SQL only; :func:`_scoped_reestimate_processing_ids` runs a single read-only
+id query).
 """
 
 from __future__ import annotations
@@ -36,7 +53,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import ColumnElement, and_, or_, select
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import Session, aliased
 
 from app.enums import DerivedItemStatus, LogEventStatus
 from app.models.derived import (
@@ -139,6 +156,70 @@ def _scoped_reestimate_processing() -> ColumnElement[bool]:
         _has_committed_resolved_item(),
         _has_open_item_scoped_question(),
     )
+
+
+def _scoped_reestimate_processing_ids(
+    session: Session, owner_id: uuid.UUID, candidate_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """In-memory rendering of the scoped-``processing`` discriminator (FTY-349/357).
+
+    The Python-side twin of the SQL :func:`_scoped_reestimate_processing`, sharing
+    this module's one discriminator rule so the log-events item read
+    (:func:`app.services.log_events.list_entries_for_day`) never hand-rolls its own
+    copy. Given ``candidate_ids`` already narrowed to ``processing`` events, returns
+    those that satisfy **both** discriminator clauses the SQL rendering encodes as
+    correlated ``EXISTS`` sub-queries, so the two renderings cannot drift:
+
+    1. ≥1 **committed resolved item** (a ``resolved`` food row with a non-null
+       ``calories`` **or** a ``resolved`` exercise row with a non-null
+       ``active_calories`` — the :func:`_has_committed_resolved_item` clause); and
+    2. ≥1 **open item-scoped question** on a still-``unresolved`` component (the
+       :func:`_has_open_item_scoped_question` clause).
+
+    Both together are the signature of a previously-``partially_resolved`` event being
+    re-costed. A **first-pass** ``processing`` event that momentarily carries committed
+    resolved rows during the worker's two-commit completion window owns no such
+    question, so it fails clause 2 and is excluded; symmetrically, a ``processing``
+    event with an open item-scoped question but no committed resolved sibling fails
+    clause 1 and is excluded — exactly as the SQL predicate rejects it. Requiring
+    **both** clauses here (not the question clause alone) is what single-sources the
+    committed-resolved-item discriminator across the two surfaces.
+    """
+
+    if not candidate_ids:
+        return set()
+    component = aliased(DerivedFoodItem)
+    with_open_question = set(
+        session.scalars(
+            select(ClarificationQuestion.log_event_id)
+            .join(component, ClarificationQuestion.derived_food_item_id == component.id)
+            .where(
+                ClarificationQuestion.user_id == owner_id,
+                ClarificationQuestion.log_event_id.in_(candidate_ids),
+                component.status == DerivedItemStatus.UNRESOLVED,
+            )
+        )
+    )
+    if not with_open_question:
+        return set()
+    with_committed_food = session.scalars(
+        select(DerivedFoodItem.log_event_id).where(
+            DerivedFoodItem.user_id == owner_id,
+            DerivedFoodItem.log_event_id.in_(candidate_ids),
+            DerivedFoodItem.status == DerivedItemStatus.RESOLVED,
+            DerivedFoodItem.calories.isnot(None),
+        )
+    )
+    with_committed_exercise = session.scalars(
+        select(DerivedExerciseItem.log_event_id).where(
+            DerivedExerciseItem.user_id == owner_id,
+            DerivedExerciseItem.log_event_id.in_(candidate_ids),
+            DerivedExerciseItem.status == DerivedItemStatus.RESOLVED,
+            DerivedExerciseItem.active_calories.isnot(None),
+        )
+    )
+    with_committed_resolved = set(with_committed_food) | set(with_committed_exercise)
+    return with_open_question & with_committed_resolved
 
 
 def _finalized_event_condition() -> ColumnElement[bool]:
