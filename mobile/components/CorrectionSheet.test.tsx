@@ -299,7 +299,7 @@ describe("provenance block", () => {
         {...defaultProps({ item: food({ source: modelPriorSource() }) })}
       />,
     );
-    expect(hasA11yLabel(tree, "Make it exact — find the real source")).toBe(true);
+    expect(hasA11yLabel(tree, "Make it exact")).toBe(true);
   });
 });
 
@@ -517,17 +517,8 @@ describe("change-match flow", () => {
     expect(hasA11yLabel(tree, "Cancel change match")).toBe(true);
   });
 
-  it("'Make it exact' nudge on a rough-estimate item opens Change match", async () => {
-    const listCandidates = jest.fn().mockResolvedValue([]);
-    const tree = mount(
-      <CorrectionSheet
-        {...defaultProps({ listCandidates, item: food({ source: modelPriorSource() }) })}
-      />,
-    );
-    await pressAsync(tree, "Make it exact — find the real source");
-    expect(listCandidates).toHaveBeenCalled();
-    expect(hasA11yLabel(tree, "Cancel change match")).toBe(true);
-  });
+  // The `Make it exact` nudge now opens the dedicated exact-evidence choice
+  // surface (barcode/label), not Change match — see CorrectionSheet.exact.test.tsx.
 });
 
 // ─── Direct value override (FTY-051) ──────────────────────────────────────────
@@ -776,7 +767,7 @@ describe("rough estimate", () => {
         {...defaultProps({ item: food({ source: modelPriorSource() }) })}
       />,
     );
-    expect(hasA11yLabel(tree, "Make it exact — find the real source")).toBe(true);
+    expect(hasA11yLabel(tree, "Make it exact")).toBe(true);
   });
 });
 
