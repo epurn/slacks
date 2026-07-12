@@ -34,7 +34,14 @@ import { usePulse } from "@/theme/motion";
 import { SEARCH_DEBOUNCE_MS, messageForError } from "./helpers";
 import type { SaveFoodStatus } from "./SaveFoodRow";
 
-export type SheetMode = "normal" | "change-match" | "override" | "clarify";
+export type SheetMode =
+  | "normal"
+  | "change-match"
+  | "override"
+  | "clarify"
+  // FTY-312: the `Make it exact` exact-evidence sub-flow (barcode/label →
+  // preview → apply-in-place). Its own step state lives in `useExactEvidence`.
+  | "make-exact";
 
 /** The override draft the "confirm_apply" seam pre-fills: the item's current calories. */
 function seamOverrideDraft(item: DerivedItem): string {
@@ -109,7 +116,8 @@ export function useCorrectionSheet({
   // the allowed detents to large-only makes UIKit animate the sheet up to it; the
   // quick-fix path (amount / save / clarify) stays at the medium detent with the
   // timeline visible behind.
-  const expanded = mode === "change-match" || mode === "override";
+  const expanded =
+    mode === "change-match" || mode === "override" || mode === "make-exact";
 
   // ─── Amount stepper state ───────────────────────────────────────────────────
   const [amountPending, setAmountPending] = useState(false);
@@ -294,6 +302,29 @@ export function useCorrectionSheet({
     setCandidatesError(null);
   }, [cancelPendingSearch]);
 
+  // ─── Make it exact (FTY-312) ─────────────────────────────────────────────────
+
+  // Open / leave the exact-evidence sub-flow. The barcode/label capture, proposal
+  // preview, and per-step async live in `useExactEvidence` (keyed on this mode);
+  // the sheet only owns the mode transition and the shared in-place commit.
+  const openMakeExact = useCallback(() => setMode("make-exact"), []);
+  const cancelMakeExact = useCallback(() => setMode("normal"), []);
+
+  // Commit an applied exact-evidence proposal to the same item in place: adopt the
+  // server-returned item, notify the parent, return to the normal sheet with the
+  // new provenance visible, and fire the same correction-saved beat as an
+  // amount/change-match edit. Never runs client nutrition math — the item comes
+  // straight from `apply`.
+  const commitExactUpgrade = useCallback(
+    (updated: DerivedFoodItemDTO) => {
+      setItem(updated);
+      onItemChange?.(updated);
+      setMode("normal");
+      fireCorrectionSaved();
+    },
+    [onItemChange, fireCorrectionSaved],
+  );
+
   // ─── Advanced override ───────────────────────────────────────────────────────
 
   const openOverride = useCallback((field: string, currentValue: number | null) => {
@@ -399,6 +430,10 @@ export function useCorrectionSheet({
     handleCandidateSearch,
     handlePickCandidate,
     cancelChangeMatch,
+    // Make it exact (FTY-312)
+    openMakeExact,
+    cancelMakeExact,
+    commitExactUpgrade,
     // Advanced override
     overrideField,
     overrideDraft,
