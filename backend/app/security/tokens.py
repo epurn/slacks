@@ -51,6 +51,16 @@ def parse_token(token: str, secret: str, *, now: datetime | None = None) -> uuid
     except ValueError as exc:
         raise InvalidToken("malformed token") from exc
 
+    # A valid mint is entirely base64url, i.e. ASCII, in both segments. Reject a
+    # non-ASCII segment as malformed *before* signing: `_sign` would otherwise
+    # raise UnicodeEncodeError on the payload, and `hmac.compare_digest` a
+    # TypeError on a non-ASCII signature — both would escape uncaught as a 500.
+    # This only removes tokens that can never be a valid mint, so it adds no
+    # timing distinguisher among plausibly-valid (all-ASCII) forgeries, which
+    # still reach the constant-time comparison below.
+    if not payload_b64.isascii() or not signature.isascii():
+        raise InvalidToken("malformed token")
+
     expected_sig = _sign(payload_b64, secret)
     # Constant-time comparison: a forged token cannot be distinguished by timing.
     if not hmac.compare_digest(signature, expected_sig):
