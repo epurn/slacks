@@ -13,7 +13,9 @@ import {
   type LogEventDTO,
 } from "@/api/logEvents";
 import { type ClarificationData } from "@/components/CorrectionSheet";
+import { type ExactEvidenceCaptureInjectables } from "@/components/correction/ExactEvidencePanel";
 import { type SheetMode } from "@/components/correction/useCorrectionSheet";
+import { type ExactEvidenceSeed } from "@/components/correction/useExactEvidence";
 import { type ApiSession } from "@/state/session";
 import { sortByNewest } from "@/state/today";
 
@@ -60,6 +62,14 @@ export type SheetTarget = {
    * real tap.
    */
   settledMarkerTestID?: string;
+  /**
+   * E2E-only (FTY-313): seeds the `Make it exact` sub-flow's settled sub-step
+   * (preview / error / label-open) and, when the label modal is seeded open, the
+   * `takePhoto` capture seam. Set only by the visual-review seam alongside
+   * `initialMode: "make-exact"`; `undefined` for every real tap.
+   */
+  exactSeed?: ExactEvidenceSeed;
+  exactCapture?: ExactEvidenceCaptureInjectables;
 };
 
 /**
@@ -97,10 +107,16 @@ export function useCorrectionSheet({
     (
       item: DerivedItem,
       logPhrase: string,
-      initialMode?: SheetMode,
-      settledMarkerTestID?: string,
+      // E2E-only extras, supplied together by the visual-review seam (FTY-263/313);
+      // a real timeline tap passes item + phrase only, leaving these undefined.
+      seam?: {
+        initialMode?: SheetMode;
+        settledMarkerTestID?: string;
+        exactSeed?: ExactEvidenceSeed;
+        exactCapture?: ExactEvidenceCaptureInjectables;
+      },
     ) => {
-      setSheetTarget({ item, logPhrase, initialMode, settledMarkerTestID });
+      setSheetTarget({ item, logPhrase, ...seam });
       setSheetVisible(true);
     },
     [],

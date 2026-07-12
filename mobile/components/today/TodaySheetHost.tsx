@@ -115,6 +115,8 @@ export function TodaySheetHost({
             saveFood={saveFood}
             e2eInitialMode={sheetTarget.initialMode}
             settledMarkerTestID={sheetTarget.settledMarkerTestID}
+            e2eExactSeed={sheetTarget.exactSeed}
+            exactCapture={sheetTarget.exactCapture}
           />
         )
       ) : null}

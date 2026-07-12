@@ -388,12 +388,12 @@ export function useTodayData({
   const correctionSeam = useCorrectionVisualReviewSeam();
   useEffect(() => {
     if (!correctionSeam) return;
-    openItemSheet(
-      correctionSeam.item,
-      correctionSeam.logPhrase,
-      correctionSeam.mode,
-      correctionSeam.settledMarkerTestID,
-    );
+    openItemSheet(correctionSeam.item, correctionSeam.logPhrase, {
+      initialMode: correctionSeam.mode,
+      settledMarkerTestID: correctionSeam.settledMarkerTestID,
+      exactSeed: correctionSeam.exactSeed,
+      exactCapture: correctionSeam.exactCapture,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [correctionSeam?.presetName]);
 
