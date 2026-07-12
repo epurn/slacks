@@ -85,8 +85,9 @@ from app.schemas.nutrition_panel import NutritionPanel, PanelDisposition
 #: - ``label_unreadable`` — a nutrition label the model could not transcribe confidently
 #:   (blur/glare/crop, a confidence below the clarify operating point, missing facts, or
 #:   a serving size that does not resolve to grams);
-#: - ``label_provider_failed`` — the provider answered, but its reply failed the
-#:   ``NutritionPanel`` schema validation (a usable response carrying unusable content);
+#: - ``no_usable_facts`` — the provider answered, but its reply failed the
+#:   ``NutritionPanel`` schema/plausibility validation (a usable response carrying
+#:   unusable content), matching the barcode sibling's content-miss reason (FTY-308);
 #: - ``source_unavailable`` — the vision provider is not configured/available.
 #:
 #: A *transient* provider failure (timeout/5xx) or a *non-conforming* provider response
@@ -96,7 +97,7 @@ from app.schemas.nutrition_panel import NutritionPanel, PanelDisposition
 #: Routing, Errors), mirroring the barcode generator's OFF-error posture (FTY-308).
 FAILURE_NOT_A_LABEL: Final = "not_a_label"
 FAILURE_UNREADABLE: Final = "label_unreadable"
-FAILURE_PROVIDER_FAILED: Final = "label_provider_failed"
+FAILURE_NO_USABLE_FACTS: Final = "no_usable_facts"
 FAILURE_SOURCE_UNAVAILABLE: Final = "source_unavailable"
 
 
@@ -142,7 +143,7 @@ class LabelExactSource(Protocol):
         """Return ``(facts, None)`` for a legible panel, or ``(None, reason)`` for a miss.
 
         The miss ``reason`` is one of the closed :data:`FAILURE_NOT_A_LABEL` /
-        :data:`FAILURE_UNREADABLE` / :data:`FAILURE_PROVIDER_FAILED` /
+        :data:`FAILURE_UNREADABLE` / :data:`FAILURE_NO_USABLE_FACTS` /
         :data:`FAILURE_SOURCE_UNAVAILABLE` labels. Raises :class:`LabelProviderError` on a
         transient / non-conforming provider transport failure so the route renders ``503``.
         """
@@ -185,8 +186,9 @@ class VisionLabelExactSource:
             )
         except StructuredOutputValidationError:
             # The provider answered but its reply failed schema validation — an unusable
-            # response, not an outage: fall to the identity fallback, never persisted.
-            return None, FAILURE_PROVIDER_FAILED
+            # response, not an outage: a content miss that falls to the identity fallback,
+            # never persisted (mirrors the barcode sibling's no_usable_facts, FTY-308).
+            return None, FAILURE_NO_USABLE_FACTS
         except LLMConfigurationError:
             # No configured/available vision provider: honest miss, not a retry signal.
             return None, FAILURE_SOURCE_UNAVAILABLE

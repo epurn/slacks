@@ -39,8 +39,8 @@ from app.estimator.exact_evidence import decode_proposal_ref
 from app.estimator.food_serving import NutritionFacts
 from app.estimator.identity_sanitizer import sanitized_identity
 from app.estimator.label_proposal import (
+    FAILURE_NO_USABLE_FACTS,
     FAILURE_NOT_A_LABEL,
-    FAILURE_PROVIDER_FAILED,
     FAILURE_SOURCE_UNAVAILABLE,
     FAILURE_UNREADABLE,
     LabelExactFacts,
@@ -309,6 +309,24 @@ def test_not_a_label_falls_back_with_not_a_label_reason() -> None:
     assert outcome.failure_reason == FAILURE_NOT_A_LABEL
 
 
+def test_schema_invalid_panel_falls_back_with_no_usable_facts_reason() -> None:
+    # A schema-invalid / implausible extracted panel is a content miss, not a transport
+    # outage: it falls to the identity fallback carrying the content-free no_usable_facts
+    # reason (matching FTY-308), never a provider-failure label and never the 503 path.
+    owner_id = uuid.uuid4()
+    exact = FakeLabelExactSource(reason=FAILURE_NO_USABLE_FACTS)
+    fallback = FakeFallback(_reference_fallback())
+
+    outcome = _generator(exact, fallback).generate(
+        owner_id=owner_id, item=_transient_item(owner_id), data=PNG_BYTES, content_type="image/png"
+    )
+
+    assert outcome.proposal is not None
+    assert outcome.proposal.quality is ExactEvidenceQuality.FALLBACK
+    assert outcome.proposal.source_type == SourceType.REFERENCE_SOURCE.value  # honest low trust
+    assert outcome.failure_reason == FAILURE_NO_USABLE_FACTS == "no_usable_facts"
+
+
 def test_no_reading_and_no_fallback_yields_no_proposal() -> None:
     owner_id = uuid.uuid4()
     exact = FakeLabelExactSource(reason=FAILURE_UNREADABLE)
@@ -432,9 +450,11 @@ def test_vision_source_unresolvable_serving_size_is_unreadable() -> None:
     assert reason == FAILURE_UNREADABLE
 
 
-def test_vision_source_schema_invalid_reply_is_provider_failed() -> None:
+def test_vision_source_schema_invalid_reply_is_no_usable_facts() -> None:
     # A reply that fails NutritionPanel validation (confidence out of range) is an unusable
-    # response, not an outage: a content miss that falls to the identity fallback.
+    # response, not an outage: a content miss that falls to the identity fallback, carrying
+    # the content-free no_usable_facts reason (never a provider-failure label), matching the
+    # barcode sibling FTY-308.
     provider = FakeProvider(
         supports_vision=True, responses=[{"disposition": "extracted", "confidence": 5.0}]
     )
@@ -442,7 +462,7 @@ def test_vision_source_schema_invalid_reply_is_provider_failed() -> None:
         data=PNG_BYTES, content_type="image/png"
     )
     assert facts is None
-    assert reason == FAILURE_PROVIDER_FAILED
+    assert reason == FAILURE_NO_USABLE_FACTS == "no_usable_facts"
 
 
 def test_vision_source_config_error_is_source_unavailable() -> None:
