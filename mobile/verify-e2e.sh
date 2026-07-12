@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Local E2E runner for the Fatty mobile app (FTY-160).
+# Local E2E runner for the Slacks mobile app (FTY-160).
 #
-# Builds the E2E debug binary (with EXPO_PUBLIC_FATTY_E2E=true baked in),
+# Builds the E2E debug binary (with EXPO_PUBLIC_SLACKS_E2E=true baked in),
 # installs it on an active simulator/emulator, and runs the Maestro flow suite.
 #
 # This is SEPARATE from `make verify` (npm typecheck + lint + jest) — E2E is
@@ -21,7 +21,7 @@
 #
 # Environment variables:
 #   PLATFORM          ios (default) or android
-#   E2E_METRO_LOG     Metro log path (default: ${TMPDIR:-/tmp}/fatty-e2e-metro.log)
+#   E2E_METRO_LOG     Metro log path (default: ${TMPDIR:-/tmp}/slacks-e2e-metro.log)
 #   E2E_BUILD_CACHE   Unset (default) → build with --no-build-cache for a clean,
 #                     deterministic local binary. Set to any value (CI sets it)
 #                     to reuse the restored Gradle/Xcode build cache and keep the
@@ -51,13 +51,13 @@ PLATFORM="${PLATFORM:-ios}"
 # toggle the OS flag), exercising the signature beats' no-motion branch end to
 # end. Unset (the default) → the var resolves to "false" so behaviour is
 # unchanged. Exported once so every child process (prebuild/metro/build) inherits
-# it; it only takes effect inside E2E mode, which the FATTY_E2E gate already
+# it; it only takes effect inside E2E mode, which the SLACKS_E2E gate already
 # guards.
 if [ -n "${E2E_REDUCE_MOTION:-}" ]; then
-  export EXPO_PUBLIC_FATTY_E2E_REDUCE_MOTION="true"
+  export EXPO_PUBLIC_SLACKS_E2E_REDUCE_MOTION="true"
   echo "==> [verify-e2e] Reduce Motion: FORCED ON (reduce-motion pass)"
 else
-  export EXPO_PUBLIC_FATTY_E2E_REDUCE_MOTION="false"
+  export EXPO_PUBLIC_SLACKS_E2E_REDUCE_MOTION="false"
 fi
 # E2E_UDID/E2E_METRO_PORT are iOS-only. On Android, genuinely ignore them by
 # unsetting BEFORE resolution: METRO_PORT then resolves to its 8081 default
@@ -71,7 +71,7 @@ if [ "$PLATFORM" = "android" ] && { [ -n "${E2E_UDID:-}" ] || [ -n "${E2E_METRO_
 fi
 METRO_PORT="${E2E_METRO_PORT:-8081}"
 E2E_UDID="${E2E_UDID:-}"
-METRO_LOG="${E2E_METRO_LOG:-${TMPDIR:-/tmp}/fatty-e2e-metro.log}"
+METRO_LOG="${E2E_METRO_LOG:-${TMPDIR:-/tmp}/slacks-e2e-metro.log}"
 METRO_PID=""
 METRO_STATUS_ERROR=""
 MAESTRO_TIMEOUT_SECONDS="${E2E_MAESTRO_TIMEOUT_SECONDS:-720}"
@@ -137,7 +137,7 @@ start_metro() {
   : > "$METRO_LOG"
   # Expo 57 otherwise prepares the standalone React Native DevTools shell, whose
   # bundled Chromium sandbox is not usable on GitHub's headless Linux runner.
-  EXPO_PUBLIC_FATTY_E2E=true EXPO_UNSTABLE_HEADLESS=1 npx expo start --dev-client --host localhost --port "$METRO_PORT" > "$METRO_LOG" 2>&1 &
+  EXPO_PUBLIC_SLACKS_E2E=true EXPO_UNSTABLE_HEADLESS=1 npx expo start --dev-client --host localhost --port "$METRO_PORT" > "$METRO_LOG" 2>&1 &
   METRO_PID="$!"
 
   for _ in $(seq 1 60); do
@@ -205,7 +205,7 @@ fi
 # expo prebuild generates the ios/ and android/ native project dirs from the
 # managed config. Run with --clean to regenerate from scratch.
 echo "==> [verify-e2e] Running expo prebuild..."
-EXPO_PUBLIC_FATTY_E2E=true npx expo prebuild --no-install --clean
+EXPO_PUBLIC_SLACKS_E2E=true npx expo prebuild --no-install --clean
 
 # ── 3. Start Metro explicitly ─────────────────────────────────────────────────
 # expo run:* starts Metro in the foreground by default, which prevents this
@@ -216,7 +216,7 @@ start_metro
 # ── 4. Build and install the debug binary ─────────────────────────────────────
 if [ "$PLATFORM" = "android" ]; then
   echo "==> [verify-e2e] Building Android debug APK..."
-  EXPO_PUBLIC_FATTY_E2E=true npx expo run:android $BUILD_CACHE_FLAG --variant debug --no-bundler
+  EXPO_PUBLIC_SLACKS_E2E=true npx expo run:android $BUILD_CACHE_FLAG --variant debug --no-bundler
 
 elif [ "$PLATFORM" = "ios" ]; then
   # expo run:ios both installs AND launches the app, so any RCT_jsLocation
@@ -225,7 +225,7 @@ elif [ "$PLATFORM" = "ios" ]; then
   # run:ios (Expo 57 rejects --no-bundler with -p/--port).
   if [ -n "$E2E_UDID" ]; then
     echo "==> [verify-e2e] Repointing app at Metro (RCT_jsLocation=localhost:$METRO_PORT)..."
-    xcrun simctl spawn "$E2E_UDID" defaults write com.fatty RCT_jsLocation "localhost:$METRO_PORT"
+    xcrun simctl spawn "$E2E_UDID" defaults write com.slacks RCT_jsLocation "localhost:$METRO_PORT"
   fi
 
   echo "==> [verify-e2e] Building iOS simulator binary..."
@@ -235,7 +235,7 @@ elif [ "$PLATFORM" = "ios" ]; then
   if [ -n "$E2E_UDID" ]; then
     ios_run_args+=(-d "$E2E_UDID")
   fi
-  EXPO_PUBLIC_FATTY_E2E=true npx expo run:ios $BUILD_CACHE_FLAG "${ios_run_args[@]}"
+  EXPO_PUBLIC_SLACKS_E2E=true npx expo run:ios $BUILD_CACHE_FLAG "${ios_run_args[@]}"
 
 else
   echo "ERROR: Unknown PLATFORM='$PLATFORM'. Use 'ios' or 'android'."

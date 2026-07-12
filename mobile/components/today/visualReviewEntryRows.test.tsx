@@ -78,14 +78,14 @@ jest.mock("expo-linking", () => ({
 
 const gThis = globalThis as Record<string, unknown>;
 const ORIGINAL_DEV = gThis["__DEV__"] as boolean;
-const ORIGINAL_E2E_ENV = process.env.EXPO_PUBLIC_FATTY_E2E;
+const ORIGINAL_E2E_ENV = process.env.EXPO_PUBLIC_SLACKS_E2E;
 
 function setE2E(on: boolean): void {
   gThis["__DEV__"] = on;
   if (on) {
-    process.env["EXPO_PUBLIC_FATTY_E2E"] = "true";
+    process.env["EXPO_PUBLIC_SLACKS_E2E"] = "true";
   } else {
-    delete process.env["EXPO_PUBLIC_FATTY_E2E"];
+    delete process.env["EXPO_PUBLIC_SLACKS_E2E"];
   }
 }
 
@@ -122,9 +122,9 @@ afterEach(() => {
   __deactivateVisualReview();
   gThis["__DEV__"] = ORIGINAL_DEV;
   if (ORIGINAL_E2E_ENV === undefined) {
-    delete process.env["EXPO_PUBLIC_FATTY_E2E"];
+    delete process.env["EXPO_PUBLIC_SLACKS_E2E"];
   } else {
-    process.env["EXPO_PUBLIC_FATTY_E2E"] = ORIGINAL_E2E_ENV;
+    process.env["EXPO_PUBLIC_SLACKS_E2E"] = ORIGINAL_E2E_ENV;
   }
 });
 

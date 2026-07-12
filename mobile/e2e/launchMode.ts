@@ -13,7 +13,7 @@
  * SECURITY: This module is an auth bypass and a mock-API switch. It is
  * hard-gated by `__DEV__` (a React Native compile-time constant that Metro
  * sets to `false` in release/production builds, dead-code-eliminating this
- * entire branch). The `EXPO_PUBLIC_FATTY_E2E` env var provides a second gate
+ * entire branch). The `EXPO_PUBLIC_SLACKS_E2E` env var provides a second gate
  * so only an explicitly built E2E debug binary can enter this mode.
  *
  * The mode is off by default and cannot be entered in a release build:
@@ -104,14 +104,14 @@ import {
 } from './visualReview/session';
 
 /**
- * True only in a DEV build that was compiled with EXPO_PUBLIC_FATTY_E2E=true.
+ * True only in a DEV build that was compiled with EXPO_PUBLIC_SLACKS_E2E=true.
  *
  * In release builds `__DEV__` is `false` (compile-time constant) so this
  * function always returns `false` and Metro dead-code-eliminates the branch.
  */
 export function isE2EMode(): boolean {
   if (!__DEV__) return false;
-  return process.env.EXPO_PUBLIC_FATTY_E2E === 'true';
+  return process.env.EXPO_PUBLIC_SLACKS_E2E === 'true';
 }
 
 /**
@@ -126,7 +126,7 @@ export function isE2EMode(): boolean {
  */
 export function isE2EReduceMotionMode(): boolean {
   if (!isE2EMode()) return false;
-  return process.env.EXPO_PUBLIC_FATTY_E2E_REDUCE_MOTION === 'true';
+  return process.env.EXPO_PUBLIC_SLACKS_E2E_REDUCE_MOTION === 'true';
 }
 
 /**

@@ -29,7 +29,7 @@
 #
 # Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
 # directory-level Maestro runs launch the installed app under test reliably.
-appId: com.fatty
+appId: com.slacks
 ---
 # Each preset below relaunches the app first rather than switching straight
 # from the previous preset. A native sheet is a real presented UIViewController
@@ -46,8 +46,8 @@ appId: com.fatty
 # match lever, Advanced override rows, all populated from the synthetic entry.
 - launchApp:
     clearState: false
-- openLink: "fatty://__visual-review?preset=correction.detail&theme=light"
-- runFlow: common/accept-open-in-fatty.yaml
+- openLink: "slacks://__visual-review?preset=correction.detail&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:correction.detail"
@@ -78,8 +78,8 @@ appId: com.fatty
 # confirming the sheet itself is up.
 - launchApp:
     clearState: false
-- openLink: "fatty://__visual-review?preset=correction.typeahead&theme=light"
-- runFlow: common/accept-open-in-fatty.yaml
+- openLink: "slacks://__visual-review?preset=correction.typeahead&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
 - runFlow:
     when:
       platform: Android
@@ -113,8 +113,8 @@ appId: com.fatty
 # confirming the sheet itself is up.
 - launchApp:
     clearState: false
-- openLink: "fatty://__visual-review?preset=correction.confirm_apply&theme=light"
-- runFlow: common/accept-open-in-fatty.yaml
+- openLink: "slacks://__visual-review?preset=correction.confirm_apply&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
 - runFlow:
     when:
       platform: Android

@@ -1,5 +1,5 @@
 # FTY-269: shared subflow — deterministically clears the iOS system "Open in
-# Fatty?" confirmation that `openLink` can surface on a fresh simulator, without
+# Slacks?" confirmation that `openLink` can surface on a fresh simulator, without
 # masking a real failure and without ever tapping an app-owned control.
 #
 # On iOS, `openLink` can trigger a one-time OS confirmation the first time the
@@ -12,7 +12,7 @@
 # already-accepted iOS simulator where the alert never appears.
 #
 # Platform gate — the important part for Android. The whole body runs inside a
-# `runFlow` gated on `platform: iOS`. The "Open in Fatty?" confirmation is an
+# `runFlow` gated on `platform: iOS`. The "Open in Slacks?" confirmation is an
 # iOS-only system dialog; Android's `openLink` never surfaces it. Gating the
 # body means Android evaluates one instant, false platform check and skips the
 # entire subflow — it does NOT enter the 10s `optional` wait. That keeps the
@@ -23,11 +23,11 @@
 # every `openLink` — the regression this gate removes.)
 #
 # Selector — the important part for iOS. Maestro's `text:` is a FULL-MATCH
-# regex, and iOS renders the alert title with smart quotes: `Open in “Fatty”?`.
-# A literal `Open in "Fatty"` (straight quotes, no trailing `?`) therefore never
+# regex, and iOS renders the alert title with smart quotes: `Open in “Slacks”?`.
+# A literal `Open in "Slacks"` (straight quotes, no trailing `?`) therefore never
 # matches, so an earlier revision's wait always warned and its `when:` gate never
 # fired — leaving the dialog up on a cold simulator regardless of timing. `Open
-# in .Fatty.*` is quote-agnostic (`.` matches either the smart or straight quote)
+# in .Slacks.*` is quote-agnostic (`.` matches either the smart or straight quote)
 # and full-match-safe (`.*` absorbs the trailing `?`), so it matches the real
 # system alert and the wait now resolves the instant the alert appears.
 #
@@ -45,7 +45,7 @@
 # Every openLink call in this directory's visual-review flows runs this right
 # after, so on iOS the dialog can never block reaching the settled marker while
 # on Android it is a zero-cost skip.
-appId: com.fatty
+appId: com.slacks
 ---
 - runFlow:
     when:
@@ -53,13 +53,13 @@ appId: com.fatty
     commands:
       - extendedWaitUntil:
           visible:
-            text: "Open in .Fatty.*"
+            text: "Open in .Slacks.*"
           timeout: 10000
           optional: true
       - runFlow:
           when:
             visible:
-              text: "Open in .Fatty.*"
+              text: "Open in .Slacks.*"
           commands:
             - tapOn:
                 text: "Open"

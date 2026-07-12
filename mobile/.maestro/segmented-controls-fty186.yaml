@@ -25,7 +25,7 @@
 #
 # Bundle ID: keep this literal so directory-level Maestro runs launch the app
 # under test (see smoke.yaml).
-appId: com.fatty
+appId: com.slacks
 ---
 # Step 1: Launch in E2E mode. AuthGate routes straight to Today.
 - launchApp:

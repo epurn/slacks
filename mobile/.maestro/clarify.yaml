@@ -10,7 +10,7 @@
 #   tap Refresh → entry counts in Today totals → cluster time renders "11:14 AM"
 #   (FTY-174 Hermes meridiem regression guard).
 #
-# FTY-175 upgrade: the sheet now renders Fatty's real question + candidate
+# FTY-175 upgrade: the sheet now renders Slacks's real question + candidate
 # quick-pick chips (FTY-170 payload), and a chip tap resolves via the first-class
 # answer round-trip (POST /clarification/answers) — not a duplicate log create.
 # This drives the chip path to completion end-to-end. The post-answer refresh
@@ -30,7 +30,7 @@
 #
 # Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
 # directory-level Maestro runs launch the installed app under test reliably.
-appId: com.fatty
+appId: com.slacks
 ---
 # Step 1: Launch in E2E mode. The mock starts in phase 0 (empty day).
 - launchApp:

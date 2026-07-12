@@ -35,11 +35,11 @@ import {
 
 const gThis = globalThis as Record<string, unknown>;
 const ORIGINAL_DEV = gThis['__DEV__'] as boolean;
-const ORIGINAL_E2E_ENV = process.env.EXPO_PUBLIC_FATTY_E2E;
+const ORIGINAL_E2E_ENV = process.env.EXPO_PUBLIC_SLACKS_E2E;
 
 function enterE2EMode(): void {
   gThis['__DEV__'] = true;
-  process.env['EXPO_PUBLIC_FATTY_E2E'] = 'true';
+  process.env['EXPO_PUBLIC_SLACKS_E2E'] = 'true';
 }
 
 let mounted: ReactTestRenderer | null = null;
@@ -78,9 +78,9 @@ afterEach(() => {
   jest.useRealTimers();
   gThis['__DEV__'] = ORIGINAL_DEV;
   if (ORIGINAL_E2E_ENV === undefined) {
-    delete process.env['EXPO_PUBLIC_FATTY_E2E'];
+    delete process.env['EXPO_PUBLIC_SLACKS_E2E'];
   } else {
-    process.env['EXPO_PUBLIC_FATTY_E2E'] = ORIGINAL_E2E_ENV;
+    process.env['EXPO_PUBLIC_SLACKS_E2E'] = ORIGINAL_E2E_ENV;
   }
 });
 

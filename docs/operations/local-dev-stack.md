@@ -355,7 +355,7 @@ the Docker Compose stack this document describes, published on `.env`'s
 requests hit FastAPI, Postgres, the worker, and the configured providers.
 
 That is **not** the same simulator mode `mobile/verify-e2e.sh` runs. The E2E
-suite builds the app with `EXPO_PUBLIC_FATTY_E2E=true` baked in, which installs
+suite builds the app with `EXPO_PUBLIC_SLACKS_E2E=true` baked in, which installs
 an **in-process mock `fetch`** (see `mobile/e2e/launchMode.ts`) so no request
 ever leaves the app. In that mode the app's server URL is the synthetic
 `E2E_SERVER_URL = 'http://localhost:8000'` in `mobile/e2e/fixtures.ts` — it is a

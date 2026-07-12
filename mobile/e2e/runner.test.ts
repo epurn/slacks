@@ -32,8 +32,8 @@ describe('verify-e2e runner contract', () => {
   }
 
   it('keeps the generated native app IDs aligned with the Maestro default', () => {
-    expect(appConfig.expo.android?.package).toBe('com.fatty');
-    expect(appConfig.expo.ios?.bundleIdentifier).toBe('com.fatty');
+    expect(appConfig.expo.android?.package).toBe('com.slacks');
+    expect(appConfig.expo.ios?.bundleIdentifier).toBe('com.slacks');
   });
 
   it('starts Metro explicitly and builds without Expo owning the bundler', () => {
@@ -73,7 +73,7 @@ describe('verify-e2e runner contract', () => {
     expect(script).toContain('ios_run_args+=(-d "$E2E_UDID")');
     expect(script).toContain('maestro_args+=(--udid "$E2E_UDID")');
     expect(script).toContain(
-      'xcrun simctl spawn "$E2E_UDID" defaults write com.fatty RCT_jsLocation "localhost:$METRO_PORT"',
+      'xcrun simctl spawn "$E2E_UDID" defaults write com.slacks RCT_jsLocation "localhost:$METRO_PORT"',
     );
 
     // The corrected re-point mechanism (RCT_jsLocation), not the no-op dev-client deep link.
@@ -111,7 +111,7 @@ describe('verify-e2e runner contract', () => {
     const script = readText(scriptPath);
     const expectedAppId = appConfig.expo.android?.package;
 
-    expect(expectedAppId).toBe('com.fatty');
+    expect(expectedAppId).toBe('com.slacks');
     expect(script).toContain('maestro_args=(test)');
     expect(script).toContain('maestro_args+=(.maestro/)');
     expect(script).not.toContain('APP_BUNDLE_ID');

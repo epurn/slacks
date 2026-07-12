@@ -12,19 +12,19 @@
 # so each `extendedWaitUntil` on it is the load-bearing assertion.
 #
 # Dialog-free iOS launch (FTY-269): every `openLink` is followed by the tolerant
-# `common/accept-open-in-fatty.yaml` subflow.
+# `common/accept-open-in-slacks.yaml` subflow.
 #
 # Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
 # directory-level Maestro runs launch the installed app under test reliably.
-appId: com.fatty
+appId: com.slacks
 ---
 - launchApp:
     clearState: false
 
 # today.suggestions (light): the chip row renders above the composer in server
 # order — the saved food first, then history-only candidates.
-- openLink: "fatty://__visual-review?preset=today.suggestions&theme=light"
-- runFlow: common/accept-open-in-fatty.yaml
+- openLink: "slacks://__visual-review?preset=today.suggestions&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:today.suggestions"
@@ -52,8 +52,8 @@ appId: com.fatty
 - takeScreenshot: today-quick-add-prefilled-light
 
 # today.suggestions (dark): the same calm row in dark mode.
-- openLink: "fatty://__visual-review?preset=today.suggestions&theme=dark"
-- runFlow: common/accept-open-in-fatty.yaml
+- openLink: "slacks://__visual-review?preset=today.suggestions&theme=dark"
+- runFlow: common/accept-open-in-slacks.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:today.suggestions"

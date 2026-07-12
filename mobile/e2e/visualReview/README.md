@@ -7,15 +7,15 @@ backend, or hand-authoring temporary Maestro YAML.
 
 It is an extension of the existing E2E launch harness (`../launchMode.ts`) and is
 **only** active behind the same gate: a `__DEV__` build compiled with
-`EXPO_PUBLIC_FATTY_E2E=true` (`isE2EMode()`). In a release build the entry point
+`EXPO_PUBLIC_SLACKS_E2E=true` (`isE2EMode()`). In a release build the entry point
 is inert.
 
 ## Entry point
 
-Open a deep link with the app's `fatty://` scheme:
+Open a deep link with the app's `slacks://` scheme:
 
 ```
-fatty://__visual-review?preset=<name>&theme=light|dark
+slacks://__visual-review?preset=<name>&theme=light|dark
 ```
 
 - `preset` — the named state to open (see the manifest below). An unknown or
@@ -29,8 +29,8 @@ fatty://__visual-review?preset=<name>&theme=light|dark
 Example (Maestro):
 
 ```yaml
-- openLink: "fatty://__visual-review?preset=today.populated&theme=dark"
-- runFlow: common/accept-open-in-fatty.yaml
+- openLink: "slacks://__visual-review?preset=today.populated&theme=dark"
+- runFlow: common/accept-open-in-slacks.yaml
 - extendedWaitUntil:
     visible:
       id: "visual-review-settled:today.populated"
@@ -38,10 +38,10 @@ Example (Maestro):
 - takeScreenshot: today-populated-dark
 ```
 
-On iOS, `openLink` can surface a one-time system "Open in Fatty?" confirmation
+On iOS, `openLink` can surface a one-time system "Open in Slacks?" confirmation
 the first time the app opens via its custom scheme on a given simulator (see
-[`../../.maestro/README.md`](../../.maestro/README.md#ios-launch-no-manual-open-in-fatty-dismissal-fty-269)).
-`runFlow: common/accept-open-in-fatty.yaml` (defined in `mobile/.maestro/`)
+[`../../.maestro/README.md`](../../.maestro/README.md#ios-launch-no-manual-open-in-slacks-dismissal-fty-269)).
+`runFlow: common/accept-open-in-slacks.yaml` (defined in `mobile/.maestro/`)
 deterministically dismisses it if — and only if — it is on screen, so every
 `openLink` call should be followed by that step. It is a no-op on Android and on
 an iOS simulator that has already accepted the dialog, and it never masks a
@@ -216,7 +216,7 @@ See `../../.maestro/README.md` for how to build and install the E2E debug binary
 ## Security / privacy
 
 - The whole flow is gated on `isE2EMode()` (`__DEV__` **and**
-  `EXPO_PUBLIC_FATTY_E2E=true`). Release builds dead-code-eliminate the
+  `EXPO_PUBLIC_SLACKS_E2E=true`). Release builds dead-code-eliminate the
   activation paths; the deep-link route is inert.
 - No fixture session or mock API is installed outside the gate.
 - Fixtures are synthetic only — no secrets, tokens, backend URLs, real bodies, or
