@@ -46,3 +46,21 @@ def test_expired_token_is_rejected() -> None:
 def test_malformed_token_is_rejected() -> None:
     with pytest.raises(InvalidToken):
         parse_token("not-a-token", SECRET)
+
+
+def test_non_ascii_payload_segment_is_rejected() -> None:
+    # "é.x" splits into exactly two parts, so it clears the structural guard;
+    # signing the non-ASCII payload used to raise UnicodeEncodeError (a
+    # ValueError subclass) *after* the split guard exited, escaping as a 500.
+    with pytest.raises(InvalidToken):
+        parse_token("é.x", SECRET)
+
+
+def test_non_ascii_signature_segment_is_rejected() -> None:
+    # A non-ASCII signature used to reach hmac.compare_digest, which raises
+    # TypeError on non-ASCII strings — also uncaught, also a 500.
+    token = mint_token(uuid.uuid4(), SECRET, ttl_seconds=3600)
+    payload, _signature = token.split(".")
+
+    with pytest.raises(InvalidToken):
+        parse_token(f"{payload}.é", SECRET)
