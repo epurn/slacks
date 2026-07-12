@@ -104,6 +104,7 @@ export function ExactEvidencePanel({
           item={item}
           proposal={exact.proposal}
           amount={exact.amount}
+          needsAmount={exact.needsExplicitAmount}
           onStepAmount={exact.stepAmount}
           applying={exact.applying}
           error={exact.error}

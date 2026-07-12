@@ -103,10 +103,13 @@ export function useExactEvidence({
   const [step, setStep] = useState<ExactStep>("choose");
   const [barcodeText, setBarcodeText] = useState("");
   const [proposal, setProposal] = useState<ApplyableProposal | null>(null);
-  // Preview amount — always concrete in the preview (a proposal that can't cost
-  // the current amount still needs one to apply), so the stepper/apply never
-  // guess a silent portion.
+  // Preview amount — the stepper's concrete starting value. It is display-only
+  // until the user actually adjusts it: `apply` never sends it unless
+  // `amountAdjusted` is true, so an untouched preview can never manufacture a
+  // silent portion (FTY-312/food-resolution: preserve the current amount by
+  // default, ask for an explicit one only when it can't be costed).
   const [amount, setAmount] = useState<number>(1);
+  const [amountAdjusted, setAmountAdjusted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState<EvidenceAttempt | null>(null);
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -123,6 +126,7 @@ export function useExactEvidence({
       setStep("choose");
       setBarcodeText("");
       setProposal(null);
+      setAmountAdjusted(false);
       setError(null);
       setAttempt(null);
       setScannerOpen(false);
@@ -146,7 +150,10 @@ export function useExactEvidence({
           return;
         }
         setProposal(result);
+        // Seed the stepper's display value; it stays "unadjusted" until the user
+        // touches it, so apply preserves the current amount by default.
         setAmount(result.preview.amount ?? item.amount ?? 1);
+        setAmountAdjusted(false);
         setStep("preview");
       } catch (err) {
         setError(messageForExactError(err));
@@ -228,19 +235,26 @@ export function useExactEvidence({
 
   const stepAmount = useCallback((delta: number) => {
     setAmount((prev) => Math.max(0.25, Math.round((prev + delta) * 4) / 4));
+    // Any step is an explicit user choice — from now on apply carries it.
+    setAmountAdjusted(true);
   }, []);
 
+  // A proposal that can't cost the item's current amount can't be applied by
+  // preserving it — the user must supply an explicit amount first (contract:
+  // `can_cost_current_amount === false` ⇒ apply requires an amount). Until they
+  // do, apply is blocked rather than sending a client-guessed portion.
+  const needsExplicitAmount =
+    proposal !== null && !proposal.can_cost_current_amount && !amountAdjusted;
+
   // Apply the previewed proposal in place. Sends only the opaque ref and an
-  // optional amount — the client can never inject nutrition facts. The amount is
-  // sent when the user changed it, or when the source can't cost the current
-  // amount (apply then requires an explicit one); otherwise omitted to keep the
-  // current portion.
+  // optional amount — the client can never inject nutrition facts, and never a
+  // guessed portion: the amount is sent ONLY when the user explicitly adjusted
+  // it. An unadjusted preview omits the amount to preserve the current portion;
+  // an uncostable proposal can't be applied at all until the user sets one.
   const apply = useCallback(async () => {
     if (!proposal) return;
-    const sendAmount =
-      !proposal.can_cost_current_amount || amount !== item.amount
-        ? amount
-        : undefined;
+    if (!proposal.can_cost_current_amount && !amountAdjusted) return;
+    const sendAmount = amountAdjusted ? amount : undefined;
     setApplying(true);
     setError(null);
     try {
@@ -257,7 +271,7 @@ export function useExactEvidence({
     } finally {
       setApplying(false);
     }
-  }, [proposal, amount, item.amount, item.id, applyProposal, session, onCommitted]);
+  }, [proposal, amount, amountAdjusted, item.id, applyProposal, session, onCommitted]);
 
   // Re-attempt the same evidence kind that produced the current preview/error:
   // re-open the scanner / label capture, or return to the barcode field.
@@ -283,6 +297,7 @@ export function useExactEvidence({
     setBarcodeText,
     proposal,
     amount,
+    needsExplicitAmount,
     error,
     scannerOpen,
     labelOpen,

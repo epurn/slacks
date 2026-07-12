@@ -36,6 +36,7 @@ export function ExactProposalPreview({
   item,
   proposal,
   amount,
+  needsAmount,
   onStepAmount,
   applying,
   error,
@@ -49,6 +50,11 @@ export function ExactProposalPreview({
   item: DerivedFoodItemDTO;
   proposal: ApplyableProposal;
   amount: number;
+  /**
+   * This proposal can't cost the item's current amount, so Apply stays blocked
+   * until the user sets an explicit amount — the client never guesses a portion.
+   */
+  needsAmount: boolean;
   onStepAmount: (delta: number) => void;
   applying: boolean;
   error: string | null;
@@ -182,6 +188,14 @@ export function ExactProposalPreview({
             {preview.serving_label}
           </Text>
         ) : null}
+        {needsAmount ? (
+          <Text
+            style={[styles.amountHint, { color: colors.textSecondary }]}
+            accessibilityLabel="Set an amount to apply this source"
+          >
+            Set an amount to apply this — the current portion cannot be costed.
+          </Text>
+        ) : null}
       </View>
 
       {error ? (
@@ -193,12 +207,20 @@ export function ExactProposalPreview({
       {/* Primary action */}
       <Pressable
         onPress={onApply}
-        style={[styles.applyButton, { backgroundColor: colors.accent }]}
+        style={[
+          styles.applyButton,
+          { backgroundColor: colors.accent },
+          (applying || needsAmount) && styles.applyButtonDisabled,
+        ]}
         accessibilityLabel="Apply"
-        accessibilityHint="Applies this source to the item"
+        accessibilityHint={
+          needsAmount
+            ? "Set an amount first to apply this source"
+            : "Applies this source to the item"
+        }
         accessibilityRole="button"
-        disabled={applying}
-        accessibilityState={{ disabled: applying }}
+        disabled={applying || needsAmount}
+        accessibilityState={{ disabled: applying || needsAmount }}
       >
         <Text style={[styles.applyLabel, { color: colors.accentForeground }]}>
           {applying ? "Applying…" : "Apply"}
@@ -337,6 +359,9 @@ const styles = StyleSheet.create({
   servingLabel: {
     fontSize: typeScale.footnote,
   },
+  amountHint: {
+    fontSize: typeScale.footnote,
+  },
   errorText: {
     fontSize: typeScale.footnote,
   },
@@ -345,6 +370,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
+  },
+  applyButtonDisabled: {
+    opacity: 0.5,
   },
   applyLabel: {
     fontSize: typeScale.callout,

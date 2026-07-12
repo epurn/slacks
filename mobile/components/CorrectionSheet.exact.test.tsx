@@ -236,6 +236,14 @@ function hasA11yLabel(tree: ReactTestRenderer, label: string): boolean {
   return allA11yLabels(tree).includes(label);
 }
 
+/** Whether the pressable with this accessibility label reports itself disabled. */
+function a11yDisabled(tree: ReactTestRenderer, label: string): boolean {
+  const node = tree.root.find(
+    (n) => n.props.accessibilityLabel === label && typeof n.props.onPress === "function",
+  );
+  return node.props.accessibilityState?.disabled === true;
+}
+
 async function press(tree: ReactTestRenderer, label: string): Promise<void> {
   const node = tree.root.find(
     (n) => n.props.accessibilityLabel === label && typeof n.props.onPress === "function",
@@ -509,6 +517,43 @@ describe("apply", () => {
     );
     await toTypedPreview(tree);
     await press(tree, "Increase amount"); // 1 → 1.25
+    await press(tree, "Apply");
+    expect(applyProposal).toHaveBeenCalledWith(SESSION, "food-1", "ref-exact", 1.25);
+  });
+
+  it("never sends a guessed amount when the preview basis differs from the item", async () => {
+    // Costable proposal whose preview basis (2) differs from the item amount (1):
+    // an untouched Apply must preserve the current portion, not the preview's.
+    const requestBarcodeProposal = jest
+      .fn()
+      .mockResolvedValue(exactProposal({ preview: preview({ amount: 2 }) }));
+    const applyProposal = jest.fn().mockResolvedValue(food({ calories: 200 }));
+    const tree = mount(
+      <CorrectionSheet {...defaultProps({ requestBarcodeProposal, applyProposal })} />,
+    );
+    await toTypedPreview(tree);
+    await press(tree, "Apply");
+    expect(applyProposal).toHaveBeenCalledWith(SESSION, "food-1", "ref-exact", undefined);
+  });
+
+  it("blocks Apply on an uncostable proposal until the user sets an explicit amount", async () => {
+    // can_cost_current_amount=false: preserving the current portion is impossible,
+    // so the client must ask for an explicit amount rather than guessing one.
+    const requestBarcodeProposal = jest
+      .fn()
+      .mockResolvedValue(exactProposal({ can_cost_current_amount: false }));
+    const applyProposal = jest.fn().mockResolvedValue(food({ calories: 200 }));
+    const tree = mount(
+      <CorrectionSheet {...defaultProps({ requestBarcodeProposal, applyProposal })} />,
+    );
+    await toTypedPreview(tree);
+    // Apply is disabled and pressing it never manufactures an amount.
+    expect(a11yDisabled(tree, "Apply")).toBe(true);
+    await press(tree, "Apply");
+    expect(applyProposal).not.toHaveBeenCalled();
+    // Once the user sets an explicit amount, apply carries exactly that amount.
+    await press(tree, "Increase amount"); // 1 → 1.25
+    expect(a11yDisabled(tree, "Apply")).toBe(false);
     await press(tree, "Apply");
     expect(applyProposal).toHaveBeenCalledWith(SESSION, "food-1", "ref-exact", 1.25);
   });
