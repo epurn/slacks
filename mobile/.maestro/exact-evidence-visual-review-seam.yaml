@@ -1,0 +1,279 @@
+# FTY-313: `Make it exact` exact-evidence visual audit.
+#
+# Opens each state of the FTY-311/312 exact-evidence sub-flow directly over the
+# low-trust synthetic "Peanut butter toast" entry via the correction-owned
+# visual-review seam (components/correction/visualReviewSeam.ts) — never a
+# scripted tap on a rendered row — and screenshots it in light and dark:
+#   - correction.exact_eligible   — detail sheet, `Make it exact` VISIBLE (low-trust);
+#   - correction.exact_applied    — detail sheet, `Make it exact` HIDDEN (source-backed);
+#   - correction.exact_choose     — the scan / type / label / cancel choice surface;
+#   - correction.exact_barcode_exact    — a typed-barcode EXACT proposal preview;
+#   - correction.exact_barcode_fallback — a typed-barcode FALLBACK preview (not exact);
+#   - correction.exact_no_proposal      — the calm, actionable no-proposal error;
+#   - correction.exact_label      — the label capture presented from the flow +
+#                                   the save-photo (default OFF) preview.
+#
+# Detent / accessibility scope (FTY-272): the make-exact presets open at the
+# large, DIMMED detent, where iOS exposes no in-modal content to the
+# accessibility tree — so the in-modal `visual-review-settled:<preset>` marker
+# wait is Android-only, and iOS instead waits on the sheet's own outer label
+# ("Peanut butter toast details", reachable on both platforms) before capturing
+# the same screenshot. The two normal-detent presets (exact_eligible /
+# exact_applied) sit at the undimmed medium detent, reachable on both platforms.
+# The label-capture modal is a separate full-screen presentation on top of the
+# sheet, so its framing hint and shutter ARE reachable on iOS.
+#
+# Each preset relaunches the app first: a native sheet is a real presented
+# UIViewController, and activating a second sheet-opening preset while the first
+# is still on screen races its dismissal against the next presentation (UIKit can
+# drop the second `present`). Relaunching between captures sidesteps that
+# harness-only race — see correction-visual-review-seam.yaml for the full note.
+#
+# Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
+# directory-level Maestro runs launch the installed app under test reliably.
+appId: com.slacks
+---
+# ─── exact_eligible: Make it exact VISIBLE on a low-trust item (light + dark) ───
+- launchApp:
+    clearState: false
+- openLink: "slacks://__visual-review?preset=correction.exact_eligible&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:correction.exact_eligible"
+    timeout: 20000
+# The `Make it exact` nudge renders in the sheet (see the screenshot), but on iOS
+# its Pressable a11y label folds into the parent, so a text assertion is
+# unreliable (FTY-346); the settled marker above is the load-bearing gate.
+- takeScreenshot: exact-eligible-light
+
+- launchApp:
+    clearState: false
+- openLink: "slacks://__visual-review?preset=correction.exact_eligible&theme=dark"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:correction.exact_eligible"
+    timeout: 20000
+- takeScreenshot: exact-eligible-dark
+
+# ─── exact_applied: Make it exact HIDDEN, source now Open Food Facts (light + dark) ───
+- launchApp:
+    clearState: false
+- openLink: "slacks://__visual-review?preset=correction.exact_applied&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:correction.exact_applied"
+    timeout: 20000
+- takeScreenshot: exact-applied-light
+
+- launchApp:
+    clearState: false
+- openLink: "slacks://__visual-review?preset=correction.exact_applied&theme=dark"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:correction.exact_applied"
+    timeout: 20000
+- takeScreenshot: exact-applied-dark
+
+# ─── exact_choose: the choice surface (light + dark) ───
+- launchApp:
+    clearState: false
+- openLink: "slacks://__visual-review?preset=correction.exact_choose&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "visual-review-settled:correction.exact_choose"
+          timeout: 20000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - extendedWaitUntil:
+          visible:
+            text: ".*Peanut butter toast.*"
+          timeout: 20000
+- takeScreenshot: exact-choose-light
+
+- launchApp:
+    clearState: false
+- openLink: "slacks://__visual-review?preset=correction.exact_choose&theme=dark"
+- runFlow: common/accept-open-in-slacks.yaml
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "visual-review-settled:correction.exact_choose"
+          timeout: 20000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - extendedWaitUntil:
+          visible:
+            text: ".*Peanut butter toast.*"
+          timeout: 20000
+- takeScreenshot: exact-choose-dark
+
+# ─── exact_barcode_exact: the EXACT proposal preview (light + dark) ───
+- launchApp:
+    clearState: false
+- openLink: "slacks://__visual-review?preset=correction.exact_barcode_exact&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "visual-review-settled:correction.exact_barcode_exact"
+          timeout: 20000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - extendedWaitUntil:
+          visible:
+            text: ".*Peanut butter toast.*"
+          timeout: 20000
+- takeScreenshot: exact-barcode-exact-light
+
+- launchApp:
+    clearState: false
+- openLink: "slacks://__visual-review?preset=correction.exact_barcode_exact&theme=dark"
+- runFlow: common/accept-open-in-slacks.yaml
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "visual-review-settled:correction.exact_barcode_exact"
+          timeout: 20000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - extendedWaitUntil:
+          visible:
+            text: ".*Peanut butter toast.*"
+          timeout: 20000
+- takeScreenshot: exact-barcode-exact-dark
+
+# ─── exact_barcode_fallback: the FALLBACK proposal preview (light + dark) ───
+- launchApp:
+    clearState: false
+- openLink: "slacks://__visual-review?preset=correction.exact_barcode_fallback&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "visual-review-settled:correction.exact_barcode_fallback"
+          timeout: 20000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - extendedWaitUntil:
+          visible:
+            text: ".*Peanut butter toast.*"
+          timeout: 20000
+- takeScreenshot: exact-barcode-fallback-light
+
+- launchApp:
+    clearState: false
+- openLink: "slacks://__visual-review?preset=correction.exact_barcode_fallback&theme=dark"
+- runFlow: common/accept-open-in-slacks.yaml
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "visual-review-settled:correction.exact_barcode_fallback"
+          timeout: 20000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - extendedWaitUntil:
+          visible:
+            text: ".*Peanut butter toast.*"
+          timeout: 20000
+- takeScreenshot: exact-barcode-fallback-dark
+
+# ─── exact_no_proposal: the calm, actionable error state (light + dark) ───
+- launchApp:
+    clearState: false
+- openLink: "slacks://__visual-review?preset=correction.exact_no_proposal&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "visual-review-settled:correction.exact_no_proposal"
+          timeout: 20000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - extendedWaitUntil:
+          visible:
+            text: ".*Peanut butter toast.*"
+          timeout: 20000
+- takeScreenshot: exact-no-proposal-light
+
+- launchApp:
+    clearState: false
+- openLink: "slacks://__visual-review?preset=correction.exact_no_proposal&theme=dark"
+- runFlow: common/accept-open-in-slacks.yaml
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "visual-review-settled:correction.exact_no_proposal"
+          timeout: 20000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - extendedWaitUntil:
+          visible:
+            text: ".*Peanut butter toast.*"
+          timeout: 20000
+- takeScreenshot: exact-no-proposal-dark
+
+# ─── exact_label — label capture from the flow + save-photo (default OFF) preview ───
+# The label modal is a full-screen presentation on top of the sheet, so its
+# framing hint and shutter are reachable on both platforms. Shooting the
+# injected fixture photo (the seam's takePhoto) advances to the save-photo
+# preview, where "Save this photo" defaults OFF.
+- launchApp:
+    clearState: false
+- openLink: "slacks://__visual-review?preset=correction.exact_label&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible: "Fit the nutrition label inside the frame"
+    timeout: 20000
+- takeScreenshot: exact-label-framing-light
+- tapOn:
+    text: "Take photo"
+- extendedWaitUntil:
+    visible: "Save this photo"
+    timeout: 20000
+- takeScreenshot: exact-label-save-photo-off-light

@@ -53,6 +53,24 @@ type EvidenceAttempt = "barcode-typed" | "barcode-scanned" | "label";
  */
 export type ExactStep = "choose" | "type-barcode" | "loading" | "preview" | "error";
 
+/**
+ * E2E-only seed (FTY-313) opening the sub-flow directly in a settled sub-step
+ * instead of `choose`, so the visual-review seam can screenshot the preview /
+ * error / label-open states without the scripted taps iOS cannot deliver at the
+ * sheet's dimmed detent (FTY-272). `undefined` for every real caller, so default
+ * behaviour is unchanged outside the visual-review harness.
+ */
+export interface ExactEvidenceSeed {
+  /** The sub-step to open in — never `loading` (a settled state is always shown). */
+  readonly step: Exclude<ExactStep, "loading">;
+  /** The applyable proposal the `preview` step renders. */
+  readonly proposal?: ApplyableProposal | null;
+  /** The content-free copy the `error` step renders. */
+  readonly error?: string | null;
+  /** Whether the label-capture modal opens on top (the label-from-correction shot). */
+  readonly labelOpen?: boolean;
+}
+
 /** Map an exact-evidence failure to plain, content-free copy for the panel. */
 function messageForExactError(err: unknown): string {
   if (
@@ -89,6 +107,11 @@ export interface UseExactEvidenceArgs {
   requestBarcodeProposal?: typeof requestBarcodeExactEvidenceProposalApi;
   uploadLabelProposal?: typeof uploadLabelExactEvidenceProposalApi;
   applyProposal?: typeof applyExactEvidenceProposalApi;
+  /**
+   * E2E-only (FTY-313): open the sub-flow directly in a settled sub-step. Never
+   * set by a real caller — only the visual-review seam supplies it.
+   */
+  seed?: ExactEvidenceSeed;
 }
 
 export function useExactEvidence({
@@ -99,21 +122,24 @@ export function useExactEvidence({
   requestBarcodeProposal = requestBarcodeExactEvidenceProposalApi,
   uploadLabelProposal = uploadLabelExactEvidenceProposalApi,
   applyProposal = applyExactEvidenceProposalApi,
+  seed,
 }: UseExactEvidenceArgs) {
-  const [step, setStep] = useState<ExactStep>("choose");
+  const [step, setStep] = useState<ExactStep>(seed?.step ?? "choose");
   const [barcodeText, setBarcodeText] = useState("");
-  const [proposal, setProposal] = useState<ApplyableProposal | null>(null);
+  const [proposal, setProposal] = useState<ApplyableProposal | null>(seed?.proposal ?? null);
   // Preview amount — the stepper's concrete starting value. It is display-only
   // until the user actually adjusts it: `apply` never sends it unless
   // `amountAdjusted` is true, so an untouched preview can never manufacture a
   // silent portion (FTY-312/food-resolution: preserve the current amount by
   // default, ask for an explicit one only when it can't be costed).
-  const [amount, setAmount] = useState<number>(1);
+  const [amount, setAmount] = useState<number>(
+    seed?.proposal?.preview.amount ?? item.amount ?? 1,
+  );
   const [amountAdjusted, setAmountAdjusted] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(seed?.error ?? null);
   const [attempt, setAttempt] = useState<EvidenceAttempt | null>(null);
   const [scannerOpen, setScannerOpen] = useState(false);
-  const [labelOpen, setLabelOpen] = useState(false);
+  const [labelOpen, setLabelOpen] = useState(seed?.labelOpen ?? false);
   const [applying, setApplying] = useState(false);
 
   // Reset the whole sub-flow when the sheet enters make-exact mode (false→true),
@@ -123,14 +149,17 @@ export function useExactEvidence({
   if (active !== prevActive) {
     setPrevActive(active);
     if (active) {
-      setStep("choose");
+      // Real callers pass no seed, so this resets to the `choose` start; the
+      // visual-review seam (FTY-313) resets straight to its seeded sub-step.
+      setStep(seed?.step ?? "choose");
       setBarcodeText("");
-      setProposal(null);
+      setProposal(seed?.proposal ?? null);
+      setAmount(seed?.proposal?.preview.amount ?? item.amount ?? 1);
       setAmountAdjusted(false);
-      setError(null);
+      setError(seed?.error ?? null);
       setAttempt(null);
       setScannerOpen(false);
-      setLabelOpen(false);
+      setLabelOpen(seed?.labelOpen ?? false);
       setApplying(false);
     }
   }

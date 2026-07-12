@@ -62,7 +62,10 @@ import {
   useCorrectionSheet,
   type SheetMode,
 } from "@/components/correction/useCorrectionSheet";
-import { useExactEvidence } from "@/components/correction/useExactEvidence";
+import {
+  useExactEvidence,
+  type ExactEvidenceSeed,
+} from "@/components/correction/useExactEvidence";
 import { DisplayText } from "@/components/ui/DisplayText";
 import { NativeSheet } from "@/components/ui/NativeSheet";
 import { provenancePresentation } from "@/components/ui/ProvenanceIcon";
@@ -112,6 +115,14 @@ export interface CorrectionSheetBaseProps {
    * this never renders outside the visual-review harness.
    */
   settledMarkerTestID?: string;
+  /**
+   * E2E-only (FTY-313): opens the `Make it exact` sub-flow directly in a settled
+   * sub-step (preview / error / label-open) so the visual-review seam can
+   * screenshot those states, which iOS cannot reach with a scripted tap at the
+   * sheet's dimmed detent (FTY-272). Supplied only by the visual-review seam
+   * alongside `e2eInitialMode: "make-exact"`; `undefined` for every real open.
+   */
+  e2eExactSeed?: ExactEvidenceSeed;
 }
 
 /**
@@ -172,6 +183,7 @@ export function CorrectionSheet({
   exactCapture,
   e2eInitialMode,
   settledMarkerTestID,
+  e2eExactSeed,
 }: CorrectionSheetProps) {
   const { colors } = useTheme();
 
@@ -220,6 +232,7 @@ export function CorrectionSheet({
     requestBarcodeProposal,
     uploadLabelProposal,
     applyProposal,
+    seed: e2eExactSeed,
   });
 
   // FTY-263 in-modal settled marker. It appears only once the requested mode's
@@ -228,6 +241,8 @@ export function CorrectionSheet({
   // mid-load frame:
   //   - change-match (typeahead): the candidate read finished with a painted list;
   //   - override (confirm_apply): the override panel is up with its pre-seeded draft;
+  //   - make-exact (FTY-313): the exact panel has reached its seeded, settled
+  //     sub-step (never the in-flight `loading` frame);
   //   - normal (detail) / clarify: the sheet + synthetic item have rendered.
   // Gated by `settledMarkerTestID` being set, which only happens under
   // `isE2EMode()` for the active `correction.*` preset — so this is inert for
@@ -237,7 +252,9 @@ export function CorrectionSheet({
       ? !sheet.candidatesLoading && sheet.candidates.length > 0
       : mode === "override"
         ? sheet.overrideDraft.trim() !== ""
-        : true;
+        : mode === "make-exact"
+          ? exact.step !== "loading"
+          : true;
   const showSettledMarker = settledMarkerTestID != null && markerModeSettled;
 
   return (
