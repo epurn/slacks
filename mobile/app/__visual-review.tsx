@@ -3,7 +3,7 @@
  *
  * Opened by a deep link like:
  *
- *     fatty://__visual-review?preset=today.populated&theme=dark
+ *     slacks://__visual-review?preset=today.populated&theme=dark
  *
  * In the E2E debug build this activates the named preset — seeding its synthetic
  * fixtures, forcing the requested theme, and navigating to its screen — so a
@@ -19,7 +19,7 @@
  * from the route's own reliable in-navigator router context.
  *
  * SECURITY / fail-closed (docs/security/security-baseline.md): the whole flow is
- * gated on `isE2EMode()` — `__DEV__` AND `EXPO_PUBLIC_FATTY_E2E=true`. In a
+ * gated on `isE2EMode()` — `__DEV__` AND `EXPO_PUBLIC_SLACKS_E2E=true`. In a
  * release build `__DEV__` is false, so this route is inert: it neither seeds nor
  * navigates, even if the deep link is opened. An unknown preset name fails closed
  * with a deterministic error marker and never falls through to a real route with

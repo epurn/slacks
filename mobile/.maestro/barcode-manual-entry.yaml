@@ -36,7 +36,7 @@
 #
 # Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
 # directory-level Maestro runs launch the installed app under test reliably.
-appId: com.fatty
+appId: com.slacks
 ---
 # Step 1: Launch in E2E mode. The mock starts with an empty, zero-intake day.
 - launchApp:

@@ -110,9 +110,9 @@ const gThis = globalThis as Record<string, unknown>;
 
 // Capture originals so each test can restore them in afterEach.
 const ORIGINAL_DEV = gThis['__DEV__'] as boolean;
-const ORIGINAL_E2E_ENV = process.env.EXPO_PUBLIC_FATTY_E2E;
+const ORIGINAL_E2E_ENV = process.env.EXPO_PUBLIC_SLACKS_E2E;
 const ORIGINAL_E2E_REDUCE_MOTION_ENV =
-  process.env.EXPO_PUBLIC_FATTY_E2E_REDUCE_MOTION;
+  process.env.EXPO_PUBLIC_SLACKS_E2E_REDUCE_MOTION;
 const ORIGINAL_FETCH = gThis['fetch'] as typeof fetch;
 const ORIGINAL_IS_REDUCE_MOTION_ENABLED =
   AccessibilityInfo.isReduceMotionEnabled;
@@ -122,14 +122,14 @@ afterEach(() => {
   gThis['fetch'] = ORIGINAL_FETCH;
   // Restore the original env value (undefined means the var was absent).
   if (ORIGINAL_E2E_ENV === undefined) {
-    delete process.env['EXPO_PUBLIC_FATTY_E2E'];
+    delete process.env['EXPO_PUBLIC_SLACKS_E2E'];
   } else {
-    process.env['EXPO_PUBLIC_FATTY_E2E'] = ORIGINAL_E2E_ENV;
+    process.env['EXPO_PUBLIC_SLACKS_E2E'] = ORIGINAL_E2E_ENV;
   }
   if (ORIGINAL_E2E_REDUCE_MOTION_ENV === undefined) {
-    delete process.env['EXPO_PUBLIC_FATTY_E2E_REDUCE_MOTION'];
+    delete process.env['EXPO_PUBLIC_SLACKS_E2E_REDUCE_MOTION'];
   } else {
-    process.env['EXPO_PUBLIC_FATTY_E2E_REDUCE_MOTION'] =
+    process.env['EXPO_PUBLIC_SLACKS_E2E_REDUCE_MOTION'] =
       ORIGINAL_E2E_REDUCE_MOTION_ENV;
   }
   // Restore the accessibility read a reduce-motion test may have overridden.
@@ -143,18 +143,18 @@ afterEach(() => {
 // access (required for delete/assign) is in one place rather than every test.
 function setE2EEnv(value: string | undefined): void {
   if (value === undefined) {
-    delete process.env['EXPO_PUBLIC_FATTY_E2E'];
+    delete process.env['EXPO_PUBLIC_SLACKS_E2E'];
   } else {
-    process.env['EXPO_PUBLIC_FATTY_E2E'] = value;
+    process.env['EXPO_PUBLIC_SLACKS_E2E'] = value;
   }
 }
 
 // Set the reduce-motion E2E env var (FTY-181), centralised for the same reason.
 function setE2EReduceMotionEnv(value: string | undefined): void {
   if (value === undefined) {
-    delete process.env['EXPO_PUBLIC_FATTY_E2E_REDUCE_MOTION'];
+    delete process.env['EXPO_PUBLIC_SLACKS_E2E_REDUCE_MOTION'];
   } else {
-    process.env['EXPO_PUBLIC_FATTY_E2E_REDUCE_MOTION'] = value;
+    process.env['EXPO_PUBLIC_SLACKS_E2E_REDUCE_MOTION'] = value;
   }
 }
 

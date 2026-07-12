@@ -1,6 +1,6 @@
 # FTY-160 smoke flow: launch the E2E debug build and assert the app reaches Today.
 #
-# The app under test is a debug binary built with EXPO_PUBLIC_FATTY_E2E=true
+# The app under test is a debug binary built with EXPO_PUBLIC_SLACKS_E2E=true
 # (see verify-e2e.sh). On launch it:
 #   - seeds a synthetic authenticated session (no live auth dependency),
 #   - installs an in-process fetch mock returning hermetic fixtures,
@@ -21,7 +21,7 @@
 #
 # Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
 # directory-level Maestro runs launch the installed app under test reliably.
-appId: com.fatty
+appId: com.slacks
 ---
 - launchApp:
     clearState: false

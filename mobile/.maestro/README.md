@@ -1,7 +1,7 @@
 # Maestro E2E Flow Tests (FTY-160)
 
 This directory contains [Maestro](https://maestro.mobile.dev/) YAML flows for
-Fatty's end-to-end test harness. Maestro drives the app via the accessibility
+Slacks's end-to-end test harness. Maestro drives the app via the accessibility
 tree against a real running device or simulator — the fidelity that catches UI
 regressions that unit tests miss (e.g. a sheet that opens but is data-starved).
 
@@ -39,7 +39,7 @@ cd mobile
 ```
 
 This script:
-1. Builds the E2E debug binary with `EXPO_PUBLIC_FATTY_E2E=true` (iOS simulator
+1. Builds the E2E debug binary with `EXPO_PUBLIC_SLACKS_E2E=true` (iOS simulator
    by default; set `PLATFORM=android` to build an APK).
 2. Installs the binary on the active simulator/emulator.
 3. Runs `maestro test .maestro/` — every flow in this directory.
@@ -61,7 +61,7 @@ maestro test .maestro/smoke.yaml
 
 ## Bundle ID
 
-The flows use bundle ID `com.fatty`. Expo prebuild generates the native iOS
+The flows use bundle ID `com.slacks`. Expo prebuild generates the native iOS
 bundle identifier and Android package from `app.json`, and each Maestro flow
 declares the same literal `appId` so directory-level runs launch the installed
 app under test reliably. If the app ID changes, update `app.json` and every flow
@@ -81,7 +81,7 @@ app under test reliably. If the app ID changes, update `app.json` and every flow
 | `target.yaml` | Target-reached beat (beat 3) real data-path: hero mounts under target ("0 of 2,000 kcal", seeds not-reached) → submit a large log → pull-to-refresh → the day summary crosses the target and the hero flips to its over-budget end state ("2,100 of 2,000 kcal, 100 over budget"), the crossing the target-reached beat rides (FTY-181) |
 | `reduce-motion.yaml` | Reduce Motion (all beats): under the reduce-motion build the harness forces `isReduceMotionEnabled` true, so the beats take their no-motion branch; the resolve value row still eases in (a fade, not a spring) and counts, proving the no-motion path reaches the same successful end state. Run via `E2E_REDUCE_MOTION=1 ./verify-e2e.sh` (see below) (FTY-181) |
 | `barcode-manual-entry.yaml` | Barcode "Type it instead" fallback: open the scanner from Today → the granted chrome renders ("Point at a barcode"; permission granted via the E2E stub since the simulator has no camera) → tap "Type it instead" → the scanner dismisses and the composer is pre-filled with the "1 serving of " starter, the never-a-dead-end running start into NL logging (FTY-194) |
-| `visual-review-smoke.yaml` | Visual-review mode launcher: open named presets by deep link (`fatty://__visual-review?preset=…&theme=…`) and wait for each `visual-review-settled:<preset>` marker before screenshotting — `today.populated` (light), `trends.populated` (dark), `today.empty`, the Today-owned sub-state preset `today.confirm_parsed` (FTY-262), the Today failed/needs-clarification EntryRow presets `today.failed` / `today.needs_clarification` in light and dark (FTY-342), the weight-owned sub-state preset `weight.sheet` (light, the weight-log sheet's open sub-state, FTY-265), and the onboarding-owned sub-state presets `onboarding.goal` / `onboarding.measurements_formula` / `onboarding.target_reveal` (FTY-266). The reusable launcher the screen visual audits (FTY-235..241) consume instead of hand-writing temporary YAML (FTY-247) |
+| `visual-review-smoke.yaml` | Visual-review mode launcher: open named presets by deep link (`slacks://__visual-review?preset=…&theme=…`) and wait for each `visual-review-settled:<preset>` marker before screenshotting — `today.populated` (light), `trends.populated` (dark), `today.empty`, the Today-owned sub-state preset `today.confirm_parsed` (FTY-262), the Today failed/needs-clarification EntryRow presets `today.failed` / `today.needs_clarification` in light and dark (FTY-342), the weight-owned sub-state preset `weight.sheet` (light, the weight-log sheet's open sub-state, FTY-265), and the onboarding-owned sub-state presets `onboarding.goal` / `onboarding.measurements_formula` / `onboarding.target_reveal` (FTY-266). The reusable launcher the screen visual audits (FTY-235..241) consume instead of hand-writing temporary YAML (FTY-247) |
 
 ## Visual-review mode (named-state launcher)
 
@@ -92,27 +92,27 @@ Entry point, preset manifest, settled markers, and the registration API for
 per-screen sub-state presets are documented in
 [`../e2e/visualReview/README.md`](../e2e/visualReview/README.md).
 
-### iOS launch: no manual "Open in Fatty?" dismissal (FTY-269)
+### iOS launch: no manual "Open in Slacks?" dismissal (FTY-269)
 
-Opening the `fatty://` deep link on the iOS simulator can surface a one-time OS
-security confirmation ("Open in Fatty?") the first time the app is opened via
+Opening the `slacks://` deep link on the iOS simulator can surface a one-time OS
+security confirmation ("Open in Slacks?") the first time the app is opened via
 its custom scheme on a given simulator — accepting it is a permanent choice for
 that simulator, so a fresh/erased simulator can see it again. Every `openLink`
 step in `visual-review-smoke.yaml` and `correction-visual-review-seam.yaml` is
 immediately followed by:
 
 ```yaml
-- runFlow: common/accept-open-in-fatty.yaml
+- runFlow: common/accept-open-in-slacks.yaml
 ```
 
-`common/accept-open-in-fatty.yaml` runs its whole body inside a
+`common/accept-open-in-slacks.yaml` runs its whole body inside a
 `when: platform: iOS` gate, so **Android skips it instantly** — the confirmation
 is an iOS-only system dialog, and Android never enters the wait, so the retained
 Android `mobile-e2e` suite's `openLink` launch path is unchanged and adds no
 delay. On iOS the subflow waits (optionally) for the exact system alert title
 and, only while it is visible, taps the alert's `Open` button. The title matcher
-is `Open in .Fatty.*` — quote-agnostic (iOS renders the title with smart quotes,
-`Open in “Fatty”?`) and full-match-safe (Maestro's `text:` is a full-match
+is `Open in .Slacks.*` — quote-agnostic (iOS renders the title with smart quotes,
+`Open in “Slacks”?`) and full-match-safe (Maestro's `text:` is a full-match
 regex), so it matches the real alert; the wait then resolves the moment the alert
 appears and the `when:` gate taps it. It is also a no-op on an iOS simulator that
 has already accepted the dialog: the wait warns and the gate is skipped, so
@@ -120,10 +120,10 @@ nothing is tapped and no app-owned control is ever hit. It does not swallow real
 failures — the following
 `extendedWaitUntil` on the preset's settled marker still fails when the preset
 never actually loads. No universal-links / associated-domains entitlement is
-added; the `fatty://` scheme stays a debug-only custom scheme.
+added; the `slacks://` scheme stays a debug-only custom scheme.
 
 Any new flow that opens a visual-review preset via `openLink` on iOS should add
-the same `runFlow: common/accept-open-in-fatty.yaml` step right after — that is the
+the same `runFlow: common/accept-open-in-slacks.yaml` step right after — that is the
 dialog-free launch recipe FTY-235..241 and other iOS evidence tooling should
 reuse instead of a manual `tapOn: Open`.
 
@@ -160,7 +160,7 @@ When the app is launched from the E2E binary it enters a gated launch mode:
 
 The gate is hard-closed in release builds: `__DEV__` is `false` at compile time
 in a production bundle, making the E2E branch dead code that Metro eliminates.
-The `EXPO_PUBLIC_FATTY_E2E=true` env var is the second gate; it is set only by
+The `EXPO_PUBLIC_SLACKS_E2E=true` env var is the second gate; it is set only by
 `verify-e2e.sh` at build time, never by default. See `e2e/launchMode.ts`.
 
 ## Reduce Motion pass (FTY-181)

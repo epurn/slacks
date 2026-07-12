@@ -22,7 +22,7 @@
 #
 # Bundle ID: keep this literal so directory-level Maestro runs launch the app
 # under test (see smoke.yaml).
-appId: com.fatty
+appId: com.slacks
 ---
 - launchApp:
     clearState: false

@@ -23,6 +23,21 @@
   rename `.env` keys and recreate the Postgres volume with `docker compose down
   -v && cp .env.example .env && docker compose up`, or manually rename the
   database role/database before restarting.
+- **Mobile app identity renamed to Slacks (FTY-336).** The installed iOS/Android
+  app is now **Slacks**: display name `Slacks`, Expo slug `slacks`, deep-link
+  scheme `slacks://`, iOS bundle identifier and Android package `com.slacks`, and
+  camera-permission copy re-branded — all driven by the committed
+  `mobile/app.json`, from which `expo prebuild` regenerates the native project
+  locally. The E2E build gate renamed `EXPO_PUBLIC_FATTY_E2E` /
+  `EXPO_PUBLIC_FATTY_E2E_REDUCE_MOTION` → `EXPO_PUBLIC_SLACKS_E2E` /
+  `EXPO_PUBLIC_SLACKS_E2E_REDUCE_MOTION`, the mobile verify skip toggle
+  `FATTY_VERIFY_SKIP_INSTALL` → `SLACKS_VERIFY_SKIP_INSTALL` (hard cut, no
+  fallback — external callers stay degraded until renamed), and the mobile
+  package is now `slacks-mobile`. **Breaking — the bundle identifier changed:**
+  any dev build installed under the previous identity is orphaned and its old
+  deep-link scheme no longer resolves. Migration: delete the previously-installed
+  dev app from your simulators/devices and reinstall a fresh `com.slacks` dev
+  build, opening it with `slacks://…` deep links.
 
 ## v1.0.0 — 2026-06-28
 

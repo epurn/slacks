@@ -1,21 +1,21 @@
 {
   "expo": {
-    "name": "Fatty",
-    "slug": "fatty",
+    "name": "Slacks",
+    "slug": "slacks",
     "version": "1.0.0",
     "orientation": "portrait",
-    "scheme": "fatty",
+    "scheme": "slacks",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "bundleIdentifier": "com.fatty",
+      "bundleIdentifier": "com.slacks",
       "supportsTablet": false,
       "infoPlist": {
-        "NSCameraUsageDescription": "Fatty uses the camera to scan product barcodes so you can log packaged foods quickly."
+        "NSCameraUsageDescription": "Slacks uses the camera to scan product barcodes so you can log packaged foods quickly."
       }
     },
     "android": {
-      "package": "com.fatty"
+      "package": "com.slacks"
     },
     "plugins": [
       "expo-router",
