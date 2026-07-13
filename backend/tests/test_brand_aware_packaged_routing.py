@@ -326,6 +326,65 @@ def test_compliments_chicken_strips_repro_resolves_from_branded_reference(
     assert fetcher.fetched == [_STRIPS_URL]
 
 
+def _compliments_strips_item_stranded_count() -> dict[str, object]:
+    # The FTY-362 live-failure parse shape: the model left the structured amount
+    # EMPTY and stranded the count "4" in quantity_text ("i had 4"). Deterministic
+    # recovery (parse._effective_candidate) must lift it into amount so the count
+    # reaches the FTY-252 count-serving scaling instead of dead-ending in a
+    # needs_clarification amount question.
+    return {
+        "type": "food",
+        "name": "chicken strips",
+        "brand": "Compliments",
+        "quantity_text": "i had 4",
+        "unit": "strips",
+        "amount": None,
+    }
+
+
+def test_compliments_chicken_strips_stranded_count_still_scales(
+    client: TestClient, session: Session
+) -> None:
+    # FTY-362: "compliments brand chicken strips (i had 4)" reached
+    # needs_clarification live because the parse stranded the count in
+    # quantity_text (amount=None). With the count recovered into amount, the same
+    # branded reference resolution scales exactly as the amount=4 repro — the
+    # supplied count is preserved, and no amount question is raised.
+    user_id, event_id = _seed_event(
+        client, "fty362-stranded@example.com", "compliments brand chicken strips (i had 4)"
+    )
+    search = ScriptedSearchProvider(
+        {"chicken strips Compliments nutrition facts": _success(_STRIPS_URL)}
+    )
+    fetcher = RecordingFetcher()
+    pipeline = _pipeline(
+        session,
+        food_source=FakeFoodSource({"chicken strips": _dennys_fdc_row(default_serving_g=None)}),
+        parsed_item=_compliments_strips_item_stranded_count(),
+        search_provider=search,
+        fetcher=fetcher,
+        estimates=[
+            {"disposition": "resolved", "confidence": 0.9, "facts": _COMPLIMENTS_STRIP_FACTS}
+        ],
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.job_status is EstimationJobStatus.SUCCEEDED
+    assert result.event_status is LogEventStatus.COMPLETED
+    assert _questions(session, event_id) == []  # never the generic quantity question
+
+    foods = _foods(session, event_id)
+    assert len(foods) == 1
+    food = foods[0]
+    assert food.status == DerivedItemStatus.RESOLVED
+    # The recovered count of 4 is the structured amount and drives the FTY-252
+    # count-serving scaling: 240 kcal per 3 strips × 4/3 = 320 kcal.
+    assert food.amount == 4.0
+    assert food.calories == 320.0
+    assert food.protein_g == 16.0
+
+
 def test_costable_but_incompatible_fdc_row_defers_to_official_tier(
     client: TestClient, session: Session
 ) -> None:

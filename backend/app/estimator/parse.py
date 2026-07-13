@@ -54,6 +54,7 @@ from app.enums import CandidateType
 from app.estimator.detail_signals import (
     has_food_detail,
     has_stated_nutrition,
+    parse_leading_count,
     parse_range_midpoint,
 )
 from app.estimator.exercise import has_exercise_detail
@@ -272,6 +273,12 @@ class ParseStep:
             session.note_pending_questions(context, [question], outcome="deterministic_gate_failed")
             raise NeedsClarification("unstable_stated_nutrition")
 
+        # Write the deterministically-completed amounts (range midpoint / bare
+        # count) back into the session hypothesis so the resolver-facing draft
+        # (interpretation_tools.current_food_candidate reads session.result) carries
+        # the recovered count/portion instead of the frozen amountless hypothesis.
+        session.apply_effective_items([item for item, _ in effective])
+
         for item, assumption in effective:
             if assumption is not None and assumption not in context.assumptions:
                 context.assumptions.append(assumption)
@@ -322,15 +329,21 @@ def _policy_allowed_result(
 
 
 def _effective_candidate(item: ParsedCandidate) -> tuple[ParsedCandidate, str | None]:
-    """Fill a food candidate's effective amount from a range midpoint, if any.
+    """Fill a food candidate's effective amount from a range midpoint or bare count.
 
     When a food candidate has no structured amount but ``quantity_text`` states a
     numeric range ("5-10"), the range's midpoint is filled deterministically so the
-    serving math can estimate a single portion. The fill happens *before* the
-    plausibility gate so the midpoint is subject to the same count caps as an
-    explicit amount — a gross range ("500-1000") must not bypass FTY-156. Returns
-    the effective candidate plus the content-free assumption string (numbers only —
-    never raw diary text) to record if the event is accepted. FTY-167.
+    serving math can estimate a single portion (FTY-167). When it instead states a
+    bare count the model stranded in the phrase ("(i had 4)", "2 large"), that count
+    is lifted into ``amount`` (FTY-362) so a supplied count reaches the count /
+    common-portion / model-prior scaling rather than being silently dropped and
+    re-asked as a quantity question. Both fills happen *before* the plausibility
+    gate so the recovered amount is subject to the same count caps as an explicit
+    amount — a gross range ("500-1000") must not bypass FTY-156. A measured
+    quantity ("100 g", "1 tbsp") is owned by the serving math and is never
+    recovered as a count. Returns the effective candidate plus the content-free
+    assumption string (numbers only — never raw diary text) to record if the event
+    is accepted.
     """
 
     amount = item.amount
@@ -340,6 +353,10 @@ def _effective_candidate(item: ParsedCandidate) -> tuple[ParsedCandidate, str | 
             low, high, midpoint = parsed_range
             assumption = f"range_midpoint: {low:g}-{high:g} → {midpoint:g}"
             return item.model_copy(update={"amount": midpoint}), assumption
+        count = parse_leading_count(item.quantity_text)
+        if count is not None:
+            assumption = f"stated_count: {count:g}"
+            return item.model_copy(update={"amount": count}), assumption
     return item, None
 
 

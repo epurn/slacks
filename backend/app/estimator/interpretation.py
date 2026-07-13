@@ -317,6 +317,41 @@ class InterpretationSession:
 
         return self._revise_from_model(context)
 
+    def apply_effective_items(self, items: Sequence[ParsedCandidate]) -> None:
+        """Adopt deterministically-completed candidate amounts into the hypothesis.
+
+        The parse step fills a stranded numeric-range midpoint or bare count into a
+        food candidate's ``amount``
+        (:func:`app.estimator.parse._effective_candidate`) before the plausibility
+        gate. The resolver-facing draft is derived from this session's hypothesis
+        (``interpretation_tools.current_food_candidate``), so those fills must be
+        written back here too — otherwise resolution reads the frozen hypothesis as
+        amountless and a supplied count/portion is silently dropped and re-asked.
+
+        ``items`` is the effective view of the *current* result items, in order;
+        only structured amounts change (the deterministic completion never renames,
+        re-brands, splits, or merges), so the hypothesis item ids and links are
+        preserved and this records **no** model re-interpretation and spends **no**
+        revision budget. A length mismatch is a no-op (the caller's effective list
+        is always the current items, one-for-one).
+        """
+
+        if self._result is None or self.hypothesis is None:
+            msg = "interpret_initial has not run"
+            raise RuntimeError(msg)
+        completed = tuple(items)
+        if len(completed) != len(self._result.items):
+            return
+        self._result = self._result.model_copy(update={"items": completed})
+        self.hypothesis = InterpretationHypothesis(
+            revision=self.hypothesis.revision,
+            items=tuple(
+                HypothesisItem(hypothesis_item_id=old.hypothesis_item_id, candidate=item)
+                for old, item in zip(self.hypothesis.items, completed, strict=True)
+            ),
+            item_links=self.hypothesis.item_links,
+        )
+
     def adopt_result(self, context: EstimationContext, result: ParseResult) -> None:
         """Adopt a routing-selected schema-valid result as the hypothesis.
 

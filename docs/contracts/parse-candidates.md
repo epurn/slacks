@@ -478,55 +478,56 @@ estimate first, and any remaining question stays item-scoped under this target.
 
 ### Estimate-first routing override (FTY-167, FTY-298)
 
-A casual entry is often returned by the model with a conservative confidence (or
-even a `needs_clarification` disposition) even though it already carries enough
-real-world structure to estimate — "Had a handful (5-10) of deep fried onion rings",
-"Had 3 cracker sandwiches", "ran 5 km", "played 3 games of badminton". Before routing
-such a reply to clarification, the step checks each extracted item against the active
-shared clarification policy ([estimator-policy.md](estimator-policy.md)). The older **deterministic detail signal**
+A casual entry is often returned by the model with a conservative confidence (or even a
+`needs_clarification` disposition) even though it already carries enough real-world
+structure to estimate — "a handful (5-10) of onion rings", "3 cracker sandwiches", "ran 5
+km", "played 3 games of badminton". Before routing such a reply to clarification, the step
+checks each extracted item against the active shared clarification policy
+([estimator-policy.md](estimator-policy.md)). The older **deterministic detail signal**
 (`app/estimator/detail_signals.py`) remains a strengthening signal:
 
 - **food** — a positive structured `amount` (a count or a measured quantity), a
-  numeric **range** in `quantity_text` (`5-10`), a **stated worded portion**
-  (FTY-275) in `quantity_text`: a household / cooking measure (`cup`, `tsp`, `tbsp`,
+  numeric **range** in `quantity_text` (`5-10`), a **stranded bare count** (FTY-362; a
+  delimited whole number left in `quantity_text` — see **Deterministic amount fills**
+  below), a **stated worded portion** (FTY-275): a household / cooking measure (`cup`, `tsp`, `tbsp`,
   `fl oz`, `pint`, `quart`, `gallon` and their spellings), a colloquial / approximate
   measure word (`splash`, `drizzle`, `dash`, `pinch`, `handful`, `glug`), or an
   indefinite-article measure (`a`/`an` = one); **or a stated nutrition fact**
   (FTY-279 — a `stated_calories` total or a `stated_*` macro the user wrote). Each
-  means the user *stated* a usable detail, so a generic source-miss defers to
-  estimation (or, for a stated nutrition fact, resolves directly from that
-  `user_text` evidence) rather than re-asking — see `food-resolution.md`
-  (**User-Stated Resolution (FTY-279)** (its no-second-follow-up rule), and **Official-Source
-  Resolution**, v8). Under the default `estimate_first` policy, a bare recognizable
-  identity with **no** stated portion and no stated nutrition fact (`milk`, `some
-  crackers`, `crackers and hummus`) is still enough to attempt a rough estimate; under
-  `balanced`/`strict` it may still lack the stronger detail signal used by the
-  calibrated abstention path;
-- **exercise** — an explicit duration, a **distance**, a **step count**, or a **game
-  count**.
+  means the user *stated* a usable detail, so a generic source-miss defers to estimation
+  (or, for a stated nutrition fact, resolves directly from that `user_text` evidence)
+  rather than re-asking — see `food-resolution.md` (**User-Stated Resolution (FTY-279)**
+  no-second-follow-up rule, and **Official-Source Resolution**, v8). Under the default
+  `estimate_first` policy a bare recognizable identity with **no** stated portion and no
+  stated nutrition fact (`milk`, `some crackers`) still attempts a rough estimate; under
+  `balanced`/`strict` it may lack the stronger detail signal used by the abstention path;
+- **exercise** — an explicit duration, a **distance**, a **step count**, or a **game count**.
 
 When the sample set would otherwise clarify (a hybrid score below the calibrated
-operating point or a provider `needs_clarification` disposition), the parse step
-applies the shared mode semantics and allowed clarification reasons from
-[estimator-policy.md](estimator-policy.md). Successful bounded schema-shape repair
-is not an independent clarification branch: after pre-validation repair yields a
-trusted `ParseResult`, routing uses the same disposition, sample
-confidence/agreement, recognizable-identity, plausibility, stated-nutrition
-safety, and active-policy gates as any other validated sample. Missing amounts
-become downstream rough assumptions, not parse questions, under the default policy.
-A calibrated-confident sample set is unaffected (it never entered the clarify
-branch), and the deterministic plausibility gate above still runs on the accepted
-items.
+operating point or a provider `needs_clarification` disposition), the parse step applies
+the shared mode semantics and allowed clarification reasons from
+[estimator-policy.md](estimator-policy.md). Bounded schema-shape repair is not an
+independent clarification branch: a repaired trusted `ParseResult` routes through the same
+disposition, confidence/agreement, recognizable-identity, plausibility, stated-nutrition
+safety, and active-policy gates as any other sample. Under the default policy missing
+amounts become downstream rough assumptions, not parse questions; a calibrated-confident
+sample set never enters the clarify branch, and the plausibility gate above still runs on
+accepted items.
 
-**Range midpoint.** When a food item has no structured `amount` but its `quantity_text`
-states a numeric range, the step fills the arithmetic **midpoint** as the count
-(`5-10 → 7.5`) so the serving math can estimate a single portion, and records a
-content-free `range_midpoint: <low>-<high> → <mid>` assumption on the run. The midpoint
-is filled **before** the FTY-156 plausibility gate, so it is bounded by the same count
-caps as an explicit amount (`500-1000 → 750` clarifies rather than bypassing the gate),
-and the assumption is recorded only when the event is accepted. This changes routing
-and the count only — the parse step still carries **no** energy/macro value;
-calories/macros remain the calculator layers' responsibility (FTY-043/044/062).
+**Deterministic amount fills (range midpoint / stranded count).** When a food item has
+no structured `amount` the step recovers one from `quantity_text`: a numeric **range**
+fills its **midpoint** (`5-10 → 7.5`, assumption `range_midpoint`; FTY-167), and a
+stranded stated **count** the model left in the phrase (`(i had 4)`, `2 large`,
+`4 toppables brand crackers`) is lifted as the count (assumption `stated_count`; FTY-362)
+so it reaches the count / common-portion / model-prior scaling instead of being dropped
+and re-asked. Only a **count** is recovered, never a *detail* numeral: a measured
+mass/volume (owned by the serving math) and a range are excluded first — measured
+exclusion covers a multi-word unit (`1 fl oz`, `1 fluid ounce`), not just single-token
+`100 g` / `1 tbsp` — and the count recognizer matches only a delimited whole number, so a
+percentage (`2% milk`), a fraction (`1/3 cup`), a decimal (`1.5`), and a product-number
+hint glued to letters (`7up`, `v8`, `12ct`) are left in place. Both fills happen **before**
+the FTY-156 plausibility gate, bounded by the same count caps (`500-1000 → 750` and a
+40-count clarify rather than bypassing it); the assumption is recorded only on acceptance.
 
 ### User-stated nutrition facts (FTY-279)
 

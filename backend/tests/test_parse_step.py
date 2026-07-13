@@ -757,6 +757,65 @@ def test_range_fills_midpoint_and_records_assumption() -> None:
     assert "range_midpoint: 5-10 → 7.5" in context.assumptions
 
 
+def test_stranded_count_fills_amount_and_records_assumption() -> None:
+    # FTY-362: "compliments brand chicken strips (i had 4)": the model stranded the
+    # count "4" in quantity_text and left the structured amount empty. The step
+    # recovers the count into amount (so the count reaches the count/common-portion/
+    # model-prior scaling) and records a content-free assumption.
+    provider = FakeProvider(
+        responses=_sampled(
+            _parsed(
+                [
+                    {
+                        "type": "food",
+                        "name": "chicken strips",
+                        "brand": "Compliments",
+                        "quantity_text": "i had 4",
+                        "unit": "strips",
+                    }
+                ],
+                confidence=_low(),
+            )
+        )
+    )
+    context = _context(raw_text="compliments brand chicken strips (i had 4)")
+
+    _run(provider, context)
+
+    assert len(context.food_candidates) == 1
+    assert context.food_candidates[0].amount == 4.0
+    assert context.clarification_questions == []
+    assert "stated_count: 4" in context.assumptions
+
+
+def test_stranded_count_above_cap_routes_to_clarification() -> None:
+    # The recovered count is filled *before* the FTY-156 plausibility gate: a
+    # stranded "40" chicken strips is an effective count of 40, above the count
+    # cap for that item, so the event clarifies rather than costing an absurd count.
+    provider = FakeProvider(
+        responses=_sampled(
+            _parsed(
+                [
+                    {
+                        "type": "food",
+                        "name": "eggs",
+                        "quantity_text": "i had 40",
+                        "unit": "eggs",
+                    }
+                ]
+            )
+        )
+    )
+    context = _context(raw_text="i had 40 eggs")
+
+    with pytest.raises(NeedsClarification) as exc:
+        _run(provider, context)
+
+    assert exc.value.reason == "implausible_candidate"
+    assert context.food_candidates == []
+    assert context.assumptions == []
+
+
 def test_implausible_range_midpoint_routes_to_clarification() -> None:
     # The midpoint is filled *before* the FTY-156 plausibility gate: "500-1000"
     # onion rings is an effective count of 750, far above the count cap, so the

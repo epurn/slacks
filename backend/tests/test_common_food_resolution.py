@@ -357,6 +357,51 @@ def test_common_food_resolves_from_fdc_with_plausible_calories(
         assert evidence.assumptions == [case["assumption"]]
 
 
+def test_two_large_eggs_recover_a_stranded_count(client: TestClient, session: Session) -> None:
+    """FTY-362: '2 large eggs' with the count stranded in quantity_text still counts two.
+
+    The live failure costed '2 large eggs' as a single ~55 kcal item — the count
+    of 2 was lost because the parse left the structured ``amount`` empty and
+    stranded '2 large' in ``quantity_text``. Deterministic count recovery
+    (parse._effective_candidate) lifts the 2 into ``amount`` so the common-portion
+    table scales two large eggs (2 × 50 g), not one.
+    """
+
+    user_id, event_id = _seed_event(client, "fty362-eggs@example.com", "2 large eggs")
+    pipeline = _pipeline(
+        session,
+        parse_responses=_parsed(
+            [
+                {
+                    "type": "food",
+                    "name": "eggs",
+                    "quantity_text": "2 large",
+                    "unit": "eggs",
+                    "amount": None,
+                }
+            ]
+        ),
+        estimates=[],
+        transport=QueryKeyedTransport(),
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.job_status is EstimationJobStatus.SUCCEEDED
+    assert result.event_status is LogEventStatus.COMPLETED
+    assert _questions(session, event_id) == []
+
+    food = _foods(session, event_id)[0]
+    assert food.status == DerivedItemStatus.RESOLVED
+    # The recovered count of 2 drives the common-portion scaling: two large eggs
+    # (2 × 50 g) at 143 kcal/100g ≈ 143 kcal — never a single ~55 kcal egg.
+    assert food.amount == 2.0
+    assert food.calories is not None and 120.0 <= food.calories <= 200.0
+    evidence = _evidence_for(session, food)
+    assert evidence.source_type == FDC_SOURCE_TYPE
+    assert "estimated_common_portion:egg large 50 g" in (evidence.assumptions or [])
+
+
 def test_hundred_gram_banana_is_not_costed_as_dehydrated_banana(
     client: TestClient, session: Session
 ) -> None:

@@ -24,6 +24,12 @@ from __future__ import annotations
 import re
 from typing import Final
 
+from app.estimator.food_serving import (
+    _MASS_UNIT_GRAMS,
+    _VOLUME_UNIT_GRAMS,
+    _grams_from_text,
+)
+
 # ---------------------------------------------------------------------------
 # Numeric ranges — "a handful (5-10) of onion rings".
 # A range is resolved to its arithmetic midpoint, a deterministic documented
@@ -58,6 +64,114 @@ def parse_range_midpoint(quantity_text: str) -> tuple[float, float, float] | Non
         return None
     midpoint = round((low + high) / 2.0, 3)
     return low, high, midpoint
+
+
+# ---------------------------------------------------------------------------
+# Bare counts — "(i had 4)", "4", "2 large".
+# A stated count with no measured unit is usable evidence — a count of pieces or
+# servings — so it is lifted into the structured ``amount`` when the model
+# stranded it in ``quantity_text`` and left ``amount`` empty. A measured quantity
+# ("100 g", "1 tbsp") is owned by the serving math and is never re-read as a
+# count here; a numeric range is owned by :func:`parse_range_midpoint`.
+# ---------------------------------------------------------------------------
+
+#: A casual counted log is a small whole number; a larger value is not a piece
+#: count and falls closed to the existing routing (rough tiers / clarification).
+MAX_BARE_COUNT: Final[float] = 50.0
+
+#: A *standalone* whole number — a count of pieces/servings — delimited by
+#: whitespace/punctuation on both sides, never glued to another character that
+#: makes it a product or detail numeral rather than a count:
+#:   * a decimal ("1.5") or the digits inside a measured "150 g" — the dot / digit
+#:     look-arounds keep those from being read as a bare count;
+#:   * a fat/detail percentage ("2% milk", "2 % milk") — a digit immediately (or
+#:     across spaces) followed by ``%`` is excluded;
+#:   * a fraction ("1/3", "1/3 cup") — a digit adjacent to ``/`` on either side is
+#:     excluded (the measured-portion path owns worded fractions);
+#:   * a product-number hint glued to letters ("7up", "v8") — a digit touching a
+#:     word character is excluded.
+#: A genuine count token ("4", "(i had 4)", "2 large", "4 toppables") is still
+#: matched because it is bounded by spaces or parentheses, not glued to any of the
+#: above.
+_BARE_COUNT_RE: Final[re.Pattern[str]] = re.compile(r"(?<![\w./])(\d+)(?![\w./]|\s*%)")
+
+#: A fraction ("1/3", "1 / 2") is a measured/detail portion, never a piece count.
+#: The token look-arounds already reject a *glued* fraction, but a spaced fraction
+#: ("1 / 2 avocado") strands a lone denominator that would otherwise read as a
+#: count, so the whole phrase is rejected when any numeric fraction is present. A
+#: non-numeric slash ("w/ hummus") has no digits around it and does not match.
+_FRACTION_RE: Final[re.Pattern[str]] = re.compile(r"\d+\s*/\s*\d+")
+
+#: The supported measured mass/volume unit spellings whose form is more than one
+#: word ("fl oz", "fluid ounce"). Derived from the canonical serving-math vocabularies
+#: so this stays in sync as units are added. :func:`app.estimator.food_serving._grams_from_text`
+#: reads only ONE alphabetic token after the number, so it silently misses these
+#: multi-word measures — a stated "1 fl oz" would otherwise fall through to the bare-count
+#: recovery and be lifted into ``amount`` as a fabricated serving count of 1. Single-token
+#: measured units ("100 g", "1 tbsp") are already caught by ``_grams_from_text``.
+_MULTIWORD_MEASURED_UNITS: Final[tuple[str, ...]] = tuple(
+    sorted(
+        (unit for unit in (*_MASS_UNIT_GRAMS, *_VOLUME_UNIT_GRAMS) if " " in unit),
+        key=len,
+        reverse=True,
+    )
+)
+
+#: Match "<number> <multi-word measured unit>" ("1 fl oz", "2 fluid ounces"). Each
+#: unit's internal space is matched as flexible whitespace so "1 fl  oz" still counts;
+#: the trailing ``\b`` keeps "fluid ounce" from matching a longer glued word. The
+#: alternation is longest-first (``sorted`` above) so "fluid ounces" wins over
+#: "fluid ounce".
+_MULTIWORD_MEASURED_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?<![\w.])\d+(?:\.\d+)?\s*(?:"
+    + "|".join(unit.replace(" ", r"\s+") for unit in _MULTIWORD_MEASURED_UNITS)
+    + r")\b",
+    re.IGNORECASE,
+)
+
+
+def parse_leading_count(quantity_text: str) -> float | None:
+    """Return a stated bare count from ``quantity_text``, or ``None``.
+
+    A "bare count" is a small whole number the user stated with no measured unit
+    — "(i had 4)", "4", "2 large" — i.e. a count of pieces or servings. It is
+    returned so a caller can lift it into the structured ``amount`` the model
+    left empty (:func:`app.estimator.parse._effective_candidate`), so a supplied
+    count reaches the count/common-portion/model-prior scaling instead of being
+    silently dropped and re-asked. Returns ``None`` when the phrase already
+    carries a measured mass/volume quantity (owned by the serving math) — including
+    a multi-word measured unit such as ``1 fl oz`` / ``1 fluid ounce`` that the
+    single-token :func:`app.estimator.food_serving._grams_from_text` scan misses — states a
+    numeric range (owned by :func:`parse_range_midpoint`), carries only a *detail*
+    numeral rather than a count — a percentage ("2% milk"), a fraction ("1/3 cup"),
+    or a product-number hint glued to letters ("7up", "v8") — has no standalone
+    whole number, or the number is non-positive or beyond a casual count
+    (:data:`MAX_BARE_COUNT`). Only a whitespace/punctuation-delimited count token is
+    recovered (:data:`_BARE_COUNT_RE`), so a non-count detail numeral is never
+    lifted into ``amount``.
+    """
+
+    text = quantity_text or ""
+    # A measured quantity ("100 g", "1 tbsp") is the serving math's, not a count.
+    # `_grams_from_text` catches single-token measures; a multi-word measured unit
+    # ("1 fl oz", "1 fluid ounce") is invisible to it (it reads one token), so it is
+    # excluded explicitly to keep a stated measured portion from being recovered as
+    # a bare count (FTY-362 reviewer round 2).
+    if _grams_from_text(text) is not None or _MULTIWORD_MEASURED_RE.search(text) is not None:
+        return None
+    # A range resolves to a midpoint through its own deterministic path.
+    if parse_range_midpoint(text) is not None:
+        return None
+    # A fraction ("1/3", "1 / 2") is a stated portion, not a piece count.
+    if _FRACTION_RE.search(text) is not None:
+        return None
+    match = _BARE_COUNT_RE.search(text)
+    if match is None:
+        return None
+    value = float(match.group(1))
+    if value <= 0 or value > MAX_BARE_COUNT:
+        return None
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -282,16 +396,19 @@ def has_food_detail(amount: float | None, quantity_text: str) -> bool:
 
     ``True`` when the model supplied a positive structured ``amount`` (a count or a
     measured quantity), ``quantity_text`` states a numeric range (which resolves to a
-    midpoint), or ``quantity_text`` carries a stated worded portion — a household
-    measure, a colloquial measure word, or an indefinite-article measure (FTY-275). A
-    bare identity with no stated portion ("some crackers", "some milk", bare "milk")
-    returns ``False`` so it still routes to clarification.
+    midpoint), ``quantity_text`` states a bare count ("(i had 4)", "2 large") the
+    model stranded there, or ``quantity_text`` carries a stated worded portion — a
+    household measure, a colloquial measure word, or an indefinite-article measure
+    (FTY-275). A bare identity with no stated portion ("some crackers", "some milk",
+    bare "milk") returns ``False`` so it still routes to clarification.
     """
 
     if amount is not None and amount > 0:
         return True
     text = quantity_text or ""
     if parse_range_midpoint(text) is not None:
+        return True
+    if parse_leading_count(text) is not None:
         return True
     return _states_worded_portion(text)
 
