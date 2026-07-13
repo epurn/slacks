@@ -46,6 +46,15 @@ def test_parse_leading_count_hits(text: str, expected: float) -> None:
         "1 tbsp",  # a measured household volume, not a count
         "about 1 tbsp",
         "1tbsp",
+        # A multi-word measured unit is owned by the serving math, not a count. The
+        # single-token _grams_from_text scan misses these, so parse_leading_count
+        # excludes them explicitly (FTY-362 reviewer round 2) — a stated "1 fl oz"
+        # (30 ml) must never be recovered as a fabricated serving count of 1.
+        "1 fl oz",
+        "1 fluid ounce",
+        "2 fluid ounces of milk",
+        "1 fl  oz",  # tolerant of extra internal whitespace
+        "about 1 fl oz of cream",
         "5-10",  # a range resolves through parse_range_midpoint, not here
         "1.5",  # a decimal is not a whole count
         "0",  # non-positive

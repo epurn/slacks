@@ -521,13 +521,13 @@ stranded stated **count** the model left in the phrase (`(i had 4)`, `2 large`,
 `4 toppables brand crackers`) is lifted as the count (assumption `stated_count`; FTY-362)
 so it reaches the count / common-portion / model-prior scaling instead of being dropped
 and re-asked. Only a **count** is recovered, never a *detail* numeral: a measured
-mass/volume (owned by the serving math) and a range are excluded first, and the count
-recognizer matches only a delimited whole number, so a percentage (`2% milk`), a fraction
-(`1/3 cup`), a decimal (`1.5`), and a product-number hint glued to letters (`7up`, `v8`,
-`12ct`) are left in place. Both fills happen **before** the FTY-156 plausibility gate,
-bounded by the same count caps (`500-1000 → 750` and `i had 40` chicken strips clarify
-rather than bypassing it); the assumption is recorded only on an accepted event, and the
-parse step carries **no** energy/macro value (FTY-043/044/062).
+mass/volume (owned by the serving math) and a range are excluded first — measured
+exclusion covers a multi-word unit (`1 fl oz`, `1 fluid ounce`), not just single-token
+`100 g` / `1 tbsp` — and the count recognizer matches only a delimited whole number, so a
+percentage (`2% milk`), a fraction (`1/3 cup`), a decimal (`1.5`), and a product-number
+hint glued to letters (`7up`, `v8`, `12ct`) are left in place. Both fills happen **before**
+the FTY-156 plausibility gate, bounded by the same count caps (`500-1000 → 750` and a
+40-count clarify rather than bypassing it); the assumption is recorded only on acceptance.
 
 ### User-stated nutrition facts (FTY-279)
 

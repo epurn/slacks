@@ -24,7 +24,11 @@ from __future__ import annotations
 import re
 from typing import Final
 
-from app.estimator.food_serving import _grams_from_text
+from app.estimator.food_serving import (
+    _MASS_UNIT_GRAMS,
+    _VOLUME_UNIT_GRAMS,
+    _grams_from_text,
+)
 
 # ---------------------------------------------------------------------------
 # Numeric ranges — "a handful (5-10) of onion rings".
@@ -98,6 +102,33 @@ _BARE_COUNT_RE: Final[re.Pattern[str]] = re.compile(r"(?<![\w./])(\d+)(?![\w./]|
 #: non-numeric slash ("w/ hummus") has no digits around it and does not match.
 _FRACTION_RE: Final[re.Pattern[str]] = re.compile(r"\d+\s*/\s*\d+")
 
+#: The supported measured mass/volume unit spellings whose form is more than one
+#: word ("fl oz", "fluid ounce"). Derived from the canonical serving-math vocabularies
+#: so this stays in sync as units are added. :func:`app.estimator.food_serving._grams_from_text`
+#: reads only ONE alphabetic token after the number, so it silently misses these
+#: multi-word measures — a stated "1 fl oz" would otherwise fall through to the bare-count
+#: recovery and be lifted into ``amount`` as a fabricated serving count of 1. Single-token
+#: measured units ("100 g", "1 tbsp") are already caught by ``_grams_from_text``.
+_MULTIWORD_MEASURED_UNITS: Final[tuple[str, ...]] = tuple(
+    sorted(
+        (unit for unit in (*_MASS_UNIT_GRAMS, *_VOLUME_UNIT_GRAMS) if " " in unit),
+        key=len,
+        reverse=True,
+    )
+)
+
+#: Match "<number> <multi-word measured unit>" ("1 fl oz", "2 fluid ounces"). Each
+#: unit's internal space is matched as flexible whitespace so "1 fl  oz" still counts;
+#: the trailing ``\b`` keeps "fluid ounce" from matching a longer glued word. The
+#: alternation is longest-first (``sorted`` above) so "fluid ounces" wins over
+#: "fluid ounce".
+_MULTIWORD_MEASURED_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?<![\w.])\d+(?:\.\d+)?\s*(?:"
+    + "|".join(unit.replace(" ", r"\s+") for unit in _MULTIWORD_MEASURED_UNITS)
+    + r")\b",
+    re.IGNORECASE,
+)
+
 
 def parse_leading_count(quantity_text: str) -> float | None:
     """Return a stated bare count from ``quantity_text``, or ``None``.
@@ -108,7 +139,9 @@ def parse_leading_count(quantity_text: str) -> float | None:
     left empty (:func:`app.estimator.parse._effective_candidate`), so a supplied
     count reaches the count/common-portion/model-prior scaling instead of being
     silently dropped and re-asked. Returns ``None`` when the phrase already
-    carries a measured mass/volume quantity (owned by the serving math), states a
+    carries a measured mass/volume quantity (owned by the serving math) — including
+    a multi-word measured unit such as ``1 fl oz`` / ``1 fluid ounce`` that the
+    single-token :func:`app.estimator.food_serving._grams_from_text` scan misses — states a
     numeric range (owned by :func:`parse_range_midpoint`), carries only a *detail*
     numeral rather than a count — a percentage ("2% milk"), a fraction ("1/3 cup"),
     or a product-number hint glued to letters ("7up", "v8") — has no standalone
@@ -120,7 +153,11 @@ def parse_leading_count(quantity_text: str) -> float | None:
 
     text = quantity_text or ""
     # A measured quantity ("100 g", "1 tbsp") is the serving math's, not a count.
-    if _grams_from_text(text) is not None:
+    # `_grams_from_text` catches single-token measures; a multi-word measured unit
+    # ("1 fl oz", "1 fluid ounce") is invisible to it (it reads one token), so it is
+    # excluded explicitly to keep a stated measured portion from being recovered as
+    # a bare count (FTY-362 reviewer round 2).
+    if _grams_from_text(text) is not None or _MULTIWORD_MEASURED_RE.search(text) is not None:
         return None
     # A range resolves to a midpoint through its own deterministic path.
     if parse_range_midpoint(text) is not None:

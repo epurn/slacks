@@ -327,6 +327,94 @@ def test_branded_counted_crackers_and_measured_hummus_variant_resolves(
     assert all(food.calories is not None for food in foods)
 
 
+#: The exact FTY-362 simulator retry phrasing that stayed `processing` live: the
+#: model stranded the cracker count in quantity_text (amount empty) and left the
+#: hummus portion as an approximate household measure ("about 1 tbsp") with no
+#: structured amount, which previously drove repeated provider calls / a structured
+#: output rejection instead of a terminal estimate.
+_RETRY_PHRASE = "4 toppables brand crackers with about 1 tbsp of pc (loblaws store brand) hummus"
+
+
+def _stranded_retry_items() -> list[dict[str, object]]:
+    return [
+        {
+            "type": "food",
+            "name": "crackers",
+            "brand": "toppables",
+            "quantity_text": "4",  # count stranded here; the model left amount empty
+            "unit": "crackers",
+            "amount": None,
+        },
+        {
+            "type": "food",
+            "name": "dill pickle hummus",
+            "brand": "pc",
+            "quantity_text": "about 1 tbsp of pc dill pickle hummus",
+            "unit": None,
+            "amount": None,
+        },
+    ]
+
+
+def test_retry_phrase_stranded_count_and_approx_portion_reach_completed(
+    client: TestClient, session: Session
+) -> None:
+    # FTY-362 acceptance criterion: the simulator retry phrasing must reach a
+    # terminal `completed` state within the smoke-scale budget and not remain
+    # indefinitely `processing`. This drives the whole parse -> split -> resolve
+    # flow for the EXACT phrase with the live stranded/approximate parse shape.
+    # The FakeProvider script is bounded (one parse window + one estimate per
+    # item), so an unbounded provider loop would exhaust it and raise instead of
+    # completing — reaching COMPLETED here is the no-loop proof.
+    user_id, event_id = _seed_event(client, "fty362-retry@example.com", _RETRY_PHRASE)
+    search = FakeSearchProvider(_no_result())
+    fetcher = RecordingFetcher()
+    pipeline = _pipeline(
+        session,
+        parsed_items=_stranded_retry_items(),
+        search=search,
+        fetcher=fetcher,
+        estimates=[
+            {"disposition": "resolved", "confidence": 0.8, "facts": _CRACKER_MODEL_PRIOR_FACTS},
+            {"disposition": "resolved", "confidence": 0.8, "facts": _HUMMUS_MODEL_PRIOR_FACTS},
+        ],
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.job_status is EstimationJobStatus.SUCCEEDED
+    assert result.event_status is LogEventStatus.COMPLETED
+    assert _questions(session, event_id) == []  # never re-asks the stranded/approx amounts
+
+    foods = sorted(_foods(session, event_id), key=lambda row: row.name)
+    assert [food.name for food in foods] == ["crackers", "dill pickle hummus"]
+    crackers, hummus = foods
+    assert all(food.status == DerivedItemStatus.RESOLVED for food in foods)
+    # The stranded count "4" was recovered into the structured amount and drives the
+    # count-serving scaling (4 crackers x 3 g = 12 g of the per-100g prior).
+    assert crackers.amount == 4.0
+    assert crackers.grams == 12.0
+    assert crackers.calories == 51.6
+    # The approximate "about 1 tbsp" hummus is stated detail, so it estimates from
+    # its model prior instead of clarifying or looping; it resolves with a portion.
+    assert hummus.grams is not None
+    assert hummus.calories is not None and hummus.calories > 0
+
+    # Honest provenance: both items carry the model-prior source, no fabricated
+    # product row, and the raw retry phrase never leaks into persisted metadata.
+    evidence = _evidence(session, event_id)
+    assert len(evidence) == 2
+    assert {row.source_type for row in evidence} == {MODEL_PRIOR_SOURCE_TYPE}
+    assert session.scalars(select(Product)).all() == []
+    run = _run(session, event_id)
+    persisted = (
+        f"{run.trace!r} {run.assumptions!r} {run.source_refs!r} "
+        f"{run.validation_errors!r} {run.error!r}"
+    )
+    assert _RETRY_PHRASE not in persisted
+    assert "How much" not in persisted
+
+
 def test_amountless_crackers_and_hummus_rough_estimates(
     client: TestClient, session: Session
 ) -> None:
