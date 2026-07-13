@@ -50,6 +50,7 @@ Use contracts for:
 | [clarification.md](clarification.md) | Clarify-loop read/answer sub-API for a `needs_clarification` or `partially_resolved` log event |
 | [corrections.md](corrections.md) | User-initiated corrections and edits to derived food and exercise items |
 | [daily-summary.md](daily-summary.md) | Read-only daily-summary endpoint for fetching a user's daily totals and entries |
+| [estimate-first-routing.md](estimate-first-routing.md) | Parse step's estimate-first routing override, deterministic detail signal, amount fills, and user-stated-nutrition extraction |
 | [estimation-jobs.md](estimation-jobs.md) | Async estimation engine that turns pending log events into resolved food and exercise items |
 | [estimator-policy.md](estimator-policy.md) | Shared estimator clarification modes, last-resort ask policy, and rough-provenance requirements |
 | [evidence-retrieval.md](evidence-retrieval.md) | Source-backed estimation contracts defining the evidence hierarchy and lookup rules |

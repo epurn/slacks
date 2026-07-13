@@ -37,6 +37,14 @@ estimator / contracts / backend-core lane:
 
 ## Version
 
+11 (FTY-364, contract only): relocates the `### Estimate-first routing override`
+and `### User-stated nutrition facts` sections to
+[estimate-first-routing.md](estimate-first-routing.md) with no normative change;
+this page keeps the parse schema, sampling, routing table, question-quality, and
+persistence rules and links to the new page for the routing/detail-signal and
+user-stated-nutrition semantics. The two headings remain as compatibility
+anchors that link onward.
+
 10 (FTY-348, contract only): relocates the FTY-324 (v9) interpretation-session and
 hypothesis-revision semantics to [interpretation-session.md](interpretation-session.md)
 with no normative change; this page keeps the parse schema, sampling, routing, and
@@ -478,89 +486,30 @@ estimate first, and any remaining question stays item-scoped under this target.
 
 ### Estimate-first routing override (FTY-167, FTY-298)
 
-A casual entry is often returned by the model with a conservative confidence (or even a
-`needs_clarification` disposition) even though it already carries enough real-world
-structure to estimate — "a handful (5-10) of onion rings", "3 cracker sandwiches", "ran 5
-km", "played 3 games of badminton". Before routing such a reply to clarification, the step
-checks each extracted item against the active shared clarification policy
-([estimator-policy.md](estimator-policy.md)). The older **deterministic detail signal**
-(`app/estimator/detail_signals.py`) remains a strengthening signal:
-
-- **food** — a positive structured `amount` (a count or a measured quantity), a
-  numeric **range** in `quantity_text` (`5-10`), a **stranded bare count** (FTY-362; a
-  delimited whole number left in `quantity_text` — see **Deterministic amount fills**
-  below), a **stated worded portion** (FTY-275): a household / cooking measure (`cup`, `tsp`, `tbsp`,
-  `fl oz`, `pint`, `quart`, `gallon` and their spellings), a colloquial / approximate
-  measure word (`splash`, `drizzle`, `dash`, `pinch`, `handful`, `glug`), or an
-  indefinite-article measure (`a`/`an` = one); **or a stated nutrition fact**
-  (FTY-279 — a `stated_calories` total or a `stated_*` macro the user wrote). Each
-  means the user *stated* a usable detail, so a generic source-miss defers to estimation
-  (or, for a stated nutrition fact, resolves directly from that `user_text` evidence)
-  rather than re-asking — see `food-resolution.md` (**User-Stated Resolution (FTY-279)**
-  no-second-follow-up rule, and **Official-Source Resolution**, v8). Under the default
-  `estimate_first` policy a bare recognizable identity with **no** stated portion and no
-  stated nutrition fact (`milk`, `some crackers`) still attempts a rough estimate; under
-  `balanced`/`strict` it may lack the stronger detail signal used by the abstention path;
-- **exercise** — an explicit duration, a **distance**, a **step count**, or a **game count**.
-
-When the sample set would otherwise clarify (a hybrid score below the calibrated
-operating point or a provider `needs_clarification` disposition), the parse step applies
-the shared mode semantics and allowed clarification reasons from
-[estimator-policy.md](estimator-policy.md). Bounded schema-shape repair is not an
-independent clarification branch: a repaired trusted `ParseResult` routes through the same
-disposition, confidence/agreement, recognizable-identity, plausibility, stated-nutrition
-safety, and active-policy gates as any other sample. Under the default policy missing
-amounts become downstream rough assumptions, not parse questions; a calibrated-confident
-sample set never enters the clarify branch, and the plausibility gate above still runs on
-accepted items.
-
-**Deterministic amount fills (range midpoint / stranded count).** When a food item has
-no structured `amount` the step recovers one from `quantity_text`: a numeric **range**
-fills its **midpoint** (`5-10 → 7.5`, assumption `range_midpoint`; FTY-167), and a
-stranded stated **count** the model left in the phrase (`(i had 4)`, `2 large`,
-`4 toppables brand crackers`) is lifted as the count (assumption `stated_count`; FTY-362)
-so it reaches the count / common-portion / model-prior scaling instead of being dropped
-and re-asked. Only a **count** is recovered, never a *detail* numeral: a measured
-mass/volume (owned by the serving math) and a range are excluded first — measured
-exclusion covers a multi-word unit (`1 fl oz`, `1 fluid ounce`), not just single-token
-`100 g` / `1 tbsp` — and the count recognizer matches only a delimited whole number, so a
-percentage (`2% milk`), a fraction (`1/3 cup`), a decimal (`1.5`), and a product-number
-hint glued to letters (`7up`, `v8`, `12ct`) are left in place. Both fills happen **before**
-the FTY-156 plausibility gate, bounded by the same count caps (`500-1000 → 750` and a
-40-count clarify rather than bypassing it); the assumption is recorded only on acceptance.
+The estimate-first routing override — the deterministic **detail signal**
+(`app/estimator/detail_signals.py`) as a strengthening signal, the per-item
+food/exercise detail-signal enumeration (structured amount, numeric range,
+stranded bare count, stated worded portions, stated nutrition facts; exercise
+duration/distance/step/game count), the `estimate_first` vs `balanced`/`strict`
+policy interaction, the "bounded schema-shape repair is not an independent
+clarify branch" rule, and the **deterministic amount fills** (range midpoint /
+stranded count) that recover a missing count before the FTY-156 plausibility gate
+— is specified in
+[estimate-first-routing.md](estimate-first-routing.md#estimate-first-routing-override-fty-167-fty-298).
+That page owns how a recognizable-but-underspecified entry is estimated rather
+than re-asked; this step applies it after the calibrated clarify decision and
+before the deterministic plausibility gate above, interpreting the shared mode
+semantics from [estimator-policy.md](estimator-policy.md).
 
 ### User-stated nutrition facts (FTY-279)
 
-When the user writes an explicit nutrition fact — a calorie total (`580 cals`,
-`580 calories`, e.g. "Sobeys buffalo chicken lime wrap (580 cals idk the
-breakdown)"), a macro (`30g protein`), or both — the parser extracts it into the
-`stated_*` fields on that item's candidate rather than dropping it. Common calorie
-and macro phrasings (`cal`/`cals`/`calories`/`kcal`; `30g protein`, `30 g protein`)
-all resolve to the same `stated_*` field. The rule refines "No energy": the parser still **invents no
-number**, but it is allowed to **read what the user stated** and carry it as
-untrusted evidence.
-
-- **Extract, don't invent.** A `stated_*` field is filled **only** from a value the
-  user actually wrote for that item; an unstated field is `null`. The model must not
-  synthesize a calorie/macro number the user did not give (that is the resolution
-  layers' job, with their own provenance), and it never copies a value from one item
-  onto another.
-- **As-logged.** `stated_*` values are the totals for the exact item as logged, not
-  per-100g/per-serving. The honest basis and per-field provenance are fixed in
-  `evidence-retrieval.md` (`as_logged`, `field_provenance`); the parser only carries
-  the raw stated numbers.
-- **Bounded & untrusted.** Each field is finite, `≥ 0`, and schema-capped; an
-  out-of-range/negative/non-finite value makes the reply schema-invalid and fails
-  closed. Extracted facts back a persisted number only after the food step's
-  plausibility validation (as-logged abuse cap + Atwater internal-consistency);
-  a self-contradictory claim clarifies rather than committing (`food-resolution.md`).
-- **Prompt-injection safe.** The stated numbers are stored as data through
-  parameterized inserts and never interpreted; an instruction embedded in the entry
-  text is never executed (as for every `ParsedCandidate` field).
-
-A stated nutrition fact is a **detail signal** (above): a recognizable item that
-carries one is estimated/resolved, **not** re-asked for an amount — see the
-no-second-follow-up rule in `food-resolution.md`.
+When the user writes an explicit nutrition fact, the parser extracts it into the
+optional `stated_*` fields on that item's candidate (see the `ParsedCandidate`
+schema under **Inputs** and the `stated_*` bullet under `## Validation`) rather
+than dropping it. The extract-don't-invent / as-logged / bounded-untrusted /
+prompt-injection-safe rules, and the "a stated nutrition fact is a detail
+signal" cross-reference, are specified in
+[estimate-first-routing.md](estimate-first-routing.md#user-stated-nutrition-facts-fty-279).
 
 ## Validation
 
