@@ -73,7 +73,7 @@ from app.estimator.pipeline import (
     label_pipeline,
 )
 from app.estimator.reference_fetch import load_reference_fetch_settings
-from app.estimator.run_budget import BudgetedProvider
+from app.estimator.run_budget import BudgetedProvider, is_run_budget_breach
 from app.estimator.search import build_search_provider
 from app.estimator.user_text_macro_estimator import UserTextMacroEstimator
 from app.estimator.user_text_step import UserTextResolveStep
@@ -367,13 +367,10 @@ def _apply_scoped_component_outcome(
     else:
         # Any terminal scoped outcome that did **not** resolve the component and did not
         # re-open a scoped question above — a deterministic :class:`StepFailed` (or a
-        # retryable failure whose retries are exhausted; the retry-with-attempts-left case
-        # is handled by the caller), or a rare re-estimate that costed nothing — must not
-        # be left untouched: the component's only question is now answered, and the
-        # clarification read filters answered questions, so the event would be a
-        # ``partially_resolved`` dead end with nothing the user can answer. Record the
-        # failure and re-open an answerable ask (a new answer is fresh input; the failure
-        # was about the prior one).
+        # retry-exhausted failure; the retry-with-attempts-left and run-budget-breach cases
+        # are handled by the caller), or a rare re-estimate that costed nothing — must not
+        # be left untouched: the component's only question is now answered and the read
+        # filters it out, so re-open an answerable ask instead of an inert partial.
         outcome = (
             "component_reestimate_failed"
             if result.outcome is PipelineOutcome.FAILED
@@ -419,16 +416,26 @@ def _finalize_scoped_reestimate(
             answered_clarifications=answered,
         )
         result = _run_pipeline(pipeline, context)
+        if result.outcome is PipelineOutcome.FAILED and is_run_budget_breach(result.error):
+            # A per-run ceiling breach (FTY-363) is a run-level, non-retryable failure, not a
+            # per-component one: terminate the whole run immediately (``processing → failed``,
+            # no extra attempt) not reopen a component question below. Roll back this round.
+            session.rollback()
+            run.status = EstimationRunStatus.FAILED
+            run.error = result.error
+            job.status = EstimationJobStatus.FAILED
+            session.add_all([run, job])
+            transition_event(session, event, LogEventStatus.FAILED)
+            return _result(job, event, run, should_retry=False)
         if (
             result.outcome is PipelineOutcome.FAILED
             and result.retryable
             and job.attempts < job.max_attempts
         ):
-            # A transient failure with retries left: discard any in-place applications
-            # from this round and ask the caller to retry the whole scoped re-estimate,
-            # exactly as the full path retries a :class:`StepError`. Re-answering the
-            # (already-recorded) question is a no-op, so without this the event would be
-            # stuck ``partially_resolved`` with no way to re-cost.
+            # A transient failure with retries left: discard any in-place applications from
+            # this round and ask the caller to retry the whole scoped re-estimate, exactly as
+            # the full path retries a :class:`StepError`. Re-answering the (already-recorded)
+            # question is a no-op, so without this the event would stick ``partially_resolved``.
             session.rollback()
             job.status = EstimationJobStatus.RUNNING
             run.status = EstimationRunStatus.FAILED
@@ -443,8 +450,7 @@ def _finalize_scoped_reestimate(
         _record_run_metadata(run, contexts[-1])
         # ``_record_run_metadata`` copies only the last context's trace; concatenate every
         # scoped component's sanitized trace so a ``component_clarified`` /
-        # ``component_reestimate_failed`` outcome on a non-last component is still recorded
-        # (bounded like any run trace, defence in depth over the per-context bound).
+        # ``component_reestimate_failed`` outcome on a non-last component is still recorded.
         merged: list[dict[str, Any]] = []
         for scoped in contexts:
             merged.extend(scoped.trace)

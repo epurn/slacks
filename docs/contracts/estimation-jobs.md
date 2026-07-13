@@ -329,7 +329,10 @@ surface (`docs/security/data-retention.md`, "Estimation runs").
   (`run_provider_call_budget_exceeded` / `run_wall_clock_deadline_exceeded`) — no
   raw prompt, provider output, user text, or credential. This is a runaway-cost /
   denial-of-service guard on the untrusted-input path, so failing closed on breach
-  is the security-preferred behaviour. Defaults live next to the retry constants
+  is the security-preferred behaviour. The ceiling terminates the run identically on
+  **both** run shapes: the first-pass worker path and the answer-triggered **scoped
+  re-estimate** — a breach there fails the run closed (`processing → failed`) rather
+  than reopening a component question. Defaults live next to the retry constants
   (`backend/app/estimator/run_budget.py`) and may be tuned like them. The
   attempt-level retry bound, backoff schedule, and per-call rate-limit retry above
   are unchanged.

@@ -63,6 +63,24 @@ DEFAULT_RUN_DEADLINE_SECONDS = 75.0
 PROVIDER_CALL_BUDGET_EXCEEDED = "run_provider_call_budget_exceeded"
 WALL_CLOCK_DEADLINE_EXCEEDED = "run_wall_clock_deadline_exceeded"
 
+#: The full set of run-budget breach reasons. A :class:`RunBudgetExceeded` flattens to
+#: a ``StepFailed`` :class:`PipelineResult` carrying one of these as its ``error``; the
+#: reason string is the only signal that survives to a finalizer, so paths that must
+#: fail the *whole run* closed on a ceiling breach (the scoped re-estimate finalizer,
+#: FTY-363) match ``result.error`` against this set via :func:`is_run_budget_breach`.
+RUN_BUDGET_REASONS = frozenset({PROVIDER_CALL_BUDGET_EXCEEDED, WALL_CLOCK_DEADLINE_EXCEEDED})
+
+
+def is_run_budget_breach(reason: str | None) -> bool:
+    """True iff ``reason`` is a per-run ceiling breach label (FTY-363).
+
+    A run-budget breach is a *run-level*, non-retryable failure — distinct from a
+    per-component scoped step failure — so a finalizer uses this to route it to a
+    terminal ``processing → failed`` transition instead of reopening a question.
+    """
+
+    return reason in RUN_BUDGET_REASONS
+
 
 class RunBudgetExceeded(StepFailed):
     """Terminal, non-retryable: one run hit its per-run provider-call/wall-clock ceiling.

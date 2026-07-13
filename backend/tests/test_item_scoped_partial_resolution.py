@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
@@ -30,9 +31,13 @@ from app.estimator.food_step import FoodResolveStep
 from app.estimator.official_fetch import OfficialFetchSettings
 from app.estimator.official_step import OfficialSourceResolveStep
 from app.estimator.parse import ParseStep
-from app.estimator.pipeline import Pipeline
+from app.estimator.pipeline import EstimationContext, Pipeline
 from app.estimator.processing import process_estimation
 from app.estimator.reference_fetch import ReferenceFetchSettings
+from app.estimator.run_budget import (
+    PROVIDER_CALL_BUDGET_EXCEEDED,
+    BudgetedProvider,
+)
 from app.estimator.search import (
     OFFICIAL_SOURCE_TYPE,
     SearchCapability,
@@ -40,6 +45,7 @@ from app.estimator.search import (
     SearchStatus,
 )
 from app.estimator.self_consistency import SELF_CONSISTENCY_FIRST_WINDOW
+from app.llm.base import Provider
 from app.llm.errors import LLMTransientError
 from app.llm.providers.fake import FakeProvider
 from app.models.derived import (
@@ -720,6 +726,94 @@ def test_scoped_deterministic_failure_reopens_answerable_question(
     assert open_questions[0].id not in answered_ids
     # The failure is recorded in the sanitized trace, not swallowed.
     assert "component_reestimate_failed" in _trace_outcomes(_latest_run(session, event_id))
+
+
+class _Echo(BaseModel):
+    """Minimal schema so the budget-breach step can drive a real ``structured_completion``."""
+
+    value: int
+
+
+class _BudgetBreachStep:
+    """A scoped step whose second provider call trips the per-run ceiling (FTY-363).
+
+    Stands in for the answer-triggered cascade that would exceed the run's budget, driving
+    a real :class:`BudgetedProvider` (budget 1) so the second call raises the non-retryable
+    ``RunBudgetExceeded`` exactly as a runaway multi-item resolution would.
+    """
+
+    name = "budget_breach"
+
+    def __init__(self, provider: Provider) -> None:
+        self._provider = provider
+
+    def run(self, context: EstimationContext) -> None:
+        for _ in range(2):
+            self._provider.structured_completion("scoped-reestimate", _Echo)
+
+
+def test_scoped_reestimate_run_budget_breach_fails_closed(
+    client: TestClient, session: Session
+) -> None:
+    """A per-run ceiling breach on the scoped path fails the whole run closed (FTY-363).
+
+    The reviewer's blocker: unlike a deterministic per-component failure (which reopens an
+    answerable question and keeps the event ``partially_resolved``), a ``RunBudgetExceeded``
+    during an answer-triggered re-estimate must terminate the run immediately —
+    ``processing → failed``, non-retryable, no extra attempt — not become a reopened
+    question.
+    """
+
+    user_id, event_id, _resolved, _unresolved = _run_mixed_first_pass(
+        client, session, "fty363-scoped-budget@example.com"
+    )
+    question = _questions(session, event_id)[0]
+    current_user = session.get(User, user_id)
+    assert current_user is not None
+    clarification_service.answer_clarification_question(
+        session, user_id, current_user, event_id, question.id, "1 cup"
+    )
+
+    # A one-call budget over a step that would make two calls: the scoped re-estimate trips
+    # the per-run ceiling deterministically (no real sleep, no network).
+    budgeted = BudgetedProvider(
+        FakeProvider(responses=[{"value": 1}] * 5, model="fake-model"),
+        max_provider_calls=1,
+        deadline_seconds=10_000.0,
+    )
+    scoped_pipeline = Pipeline([_BudgetBreachStep(budgeted)])
+
+    result = process_estimation(
+        session, log_event_id=event_id, user_id=user_id, pipeline=scoped_pipeline
+    )
+
+    # Terminal, non-retryable, and bounded — the run stopped at the budget, not looped.
+    # This is the re-estimate attempt (the first pass was attempt 1); no further attempt is
+    # burned re-running an input that would hit the same bound.
+    assert result.event_status is LogEventStatus.FAILED
+    assert result.job_status is EstimationJobStatus.FAILED
+    assert result.should_retry is False
+    assert result.attempts == 2
+    assert budgeted.calls_made == 1
+
+    # The recorded reason is the fixed content-free budget label, never the diary phrase.
+    run = _latest_run(session, event_id)
+    assert run.error == PROVIDER_CALL_BUDGET_EXCEEDED
+    assert "grilled chicken 150g and a glass of milk" not in repr((run.trace, run.error))
+
+    # No question was reopened: the run failed rather than becoming a fresh answerable ask.
+    open_questions = log_event_service.list_clarification_questions(
+        session, user_id, current_user, event_id
+    )
+    assert open_questions == []
+
+    # A redelivery is an idempotent no-op — the terminal job burns no second attempt.
+    again = process_estimation(
+        session, log_event_id=event_id, user_id=user_id, pipeline=scoped_pipeline
+    )
+    assert again.job_status is EstimationJobStatus.FAILED
+    assert again.run_id is None
+    assert again.attempts == 2
 
 
 def _seed_pg_user(pg_engine: Engine) -> uuid.UUID:
