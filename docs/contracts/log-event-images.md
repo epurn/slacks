@@ -82,16 +82,25 @@ create **one** `pending` event and enqueue **exactly one** estimation job.
 
 A mixed submission runs the **normal async estimation pipeline** (create →
 enqueue → worker), **not** the synchronous label path. The synchronous
-`POST .../log-events/label` boundary resolves a transient provider error to
-terminal `failed` (`label-upload.md` — its in-request seam has no scheduler to
-honor a retry), which directly violates the design-philosophy *estimate first /
-never reject* clause for a typed food entry. The async worker has bounded
-retries, the per-run provider-call / wall-clock ceiling (`estimation-jobs.md`
-v5), and honest still-working / degraded-estimate states, so an entry the user
-typed in good faith never surfaces `failed` because of infrastructure trouble.
-**That rationale is why the mixed path is asynchronous.** The standalone
-synchronous label endpoint and its FTY-196 confirmation gate are unchanged and
-remain for the "photograph a label, nothing typed" flow.
+`POST .../log-events/label` boundary resolves a **single** transient provider
+error to terminal `failed` (`label-upload.md` — its in-request seam has no
+scheduler to honor a retry), which directly violates the design-philosophy
+*estimate first / never reject* clause for a typed food entry. The async
+worker, by contrast, retries a transient failure with backoff while the event
+honestly reports `processing` (still working), routes ambiguity to a
+clarifying question rather than failure, and degrades rather than fails on a
+configuration limit (the non-vision gating, `estimation-jobs.md` v6) — so a
+good-faith entry never becomes terminal `failed` on a *first* transient error.
+That guarantee is bounded, not absolute: the attempt-level retry policy and
+the per-run provider-call / wall-clock ceiling apply to image-bearing events
+**unchanged**, and retry exhaustion, a ceiling breach, or a deterministic step
+failure still drives the event to `failed` exactly as the `estimation-jobs.md`
+v6 state and error tables specify — FTY-375/FTY-376 implement those tables
+as written, with no image-specific exception. **That
+retries-before-terminal difference — not an unconditional never-`failed`
+promise — is why the mixed path is asynchronous.** The standalone synchronous
+label endpoint and its FTY-196 confirmation gate are unchanged and remain for
+the "photograph a label, nothing typed" flow.
 
 To let the ids-only worker read the images, they are **transiently persisted**
 at create time as `log_attachments` rows tied to the created `pending` event,
