@@ -32,7 +32,7 @@ dev = [
     "httpx>=0.27",
     "mypy>=2.2.0",
     "pytest>=8.3",
-    "ruff>=0.6",
+    "ruff>=0.15.21",
 ]
 
 # This is an application, not a distributable library, so uv manages the
