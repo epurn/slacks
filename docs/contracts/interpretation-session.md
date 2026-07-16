@@ -33,6 +33,18 @@ working objects — not public HTTP DTOs and not persisted wholesale.
 
 ## Version
 
+2 (FTY-374, contract only): the session gains **image evidence surfaces**. An
+event created by the unified text+image submission (`log-events.md` v9) enters
+the session with its validated images available alongside the raw text at every
+model-consultable interpretation call: text supplies identity/count/context, an
+image supplies label facts as `user_label`-tier evidence (`parse-candidates.md`
+v12, `estimation-jobs.md` v6). The images live inside the **same boundary as
+the raw text** — the configured LLM/vision provider only, never
+search/fetch/tool egress, never traces/logs — and image-derived output crosses
+the same schema-validation trust boundary before deterministic code uses it.
+No hypothesis-shape, trace-label, or decision-point vocabulary change; FTY-376
+implements.
+
 1 (FTY-348, contract only): extracts the FTY-324 interpretation-session and
 hypothesis-revision semantics verbatim from `parse-candidates.md`,
 `food-resolution.md`, `evidence-retrieval.md`, and `estimator-policy.md` into this
@@ -61,6 +73,15 @@ The raw log text and answered clarification text remain available **only inside
 the configured LLM boundary** for every model interpretation call in the session.
 They are not copied into search queries, fetch requests, run traces,
 `assumptions`, `source_refs`, provider error strings, logs, or evidence rows.
+The event's **image attachments** (FTY-374, `log-events.md` v9) are an evidence
+surface with the same boundary: available to every model interpretation call in
+the session (as `ImageInput`s via the vision-capable provider —
+`estimation-jobs.md` v6), and never sent to search/fetch/tools, never logged,
+never copied — as bytes, paths, or hashes — into traces, `assumptions`,
+`source_refs`, or error strings. Facts a model reads off an image are trusted
+only after schema validation, and persist as `user_label` evidence rows whose
+`content_hash` provenance lives in `evidence_sources` (`parse-candidates.md`
+v12).
 Downstream search/fetch/model-prior tools receive the least-sensitive structured
 inputs their contracts allow: sanitized item identity, bounded amount/unit fields,
 source refs, fetched inert text, snippets, and content-free source-status labels.
@@ -267,6 +288,14 @@ The privacy boundary is exact and must not be weakened by the interpretation loo
 
 ## Migration / Compatibility
 
+- **FTY-374 (contract only; no code or migration in this story).** Adds the
+  image evidence surface: a unified text+image submission's validated images
+  are available to the session's model interpretation calls under the same
+  boundary as the raw text (provider-only, never tool egress or
+  traces/logs). No `InterpretationHypothesis` field, decision-point, or
+  trace-label vocabulary changes; the existing `evidence_view` sanitized
+  record shapes cover image-extraction statuses. Implemented by the downstream
+  FTY-376 estimator story.
 - **FTY-348 (contract only; no code or migration in this story).** This page is a
   **relocation and de-duplication** of the FTY-324 interpretation/session text that
   previously lived in `parse-candidates.md` (v9), `food-resolution.md` (v16),

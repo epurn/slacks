@@ -11,11 +11,15 @@ capture) is FTY-064") — that contract owns the backend pipeline; this one owns
 mobile↔backend HTTP boundary it consumes.
 
 This is deliberately **synchronous, not enqueued**: the raw image is discarded by
-default (FTY-077), so it must never be persisted or published to the broker just to
-reach an async worker. The estimation job payload carries only ids
-(`estimation-jobs.md`), so the image could not travel that path anyway. The image
-therefore only ever lives in the request that uploads it and is resolved there,
-through the same idempotent `process_estimation` core the worker uses.
+default (FTY-077) and is never published to the broker (the estimation job
+payload carries only ids — `estimation-jobs.md`). On this label-only path the
+image lives only in the request that uploads it and is resolved there, through
+the same idempotent `process_estimation` core the worker uses. (The **unified
+text+image submission** — FTY-374, `log-event-images.md` — takes the other
+sanctioned route to the async worker: images transiently persisted as `log_attachments`
+rows and purged at estimation-terminal, `log-attachments.md`. That path does
+not change this endpoint, which remains the synchronous "photograph a label,
+nothing typed" flow with its FTY-196 confirmation gate.)
 
 ## Owner
 

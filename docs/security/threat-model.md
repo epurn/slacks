@@ -105,7 +105,16 @@ The built v1 surface has answered the original open questions:
   nutrition-label image is **discarded by default** — retained only while needed for
   extraction and persisted (one user-owned `log_attachments` row) only on an
   explicit user save, with `ON DELETE CASCADE` from the user and the owning log
-  event. No raw image is stored in the default flow.
+  event. No raw image is stored in the default flow. The unified text+image log
+  submission (FTY-374) reaches the **same retained-only-while-needed rule via a
+  transient DB row instead of an in-request buffer** — required because the
+  async worker's ids-only job payload forbids putting image bytes on the queue:
+  images are persisted at create marked `transient`, fail-closed validated
+  (size/type/signature, at most 4 per submission) before any persistence or
+  model call, sent to the LLM/vision provider only (never search/fetch, logs,
+  queue, or run traces), and hard-deleted by the worker in the same transaction
+  as the event's terminal estimation status unless the user explicitly chose
+  `save=true`.
 - **Telemetry.** v1 ships **no** product telemetry/analytics. Logs are structured,
   redacted, and operational only. Any future telemetry must be opt-in or clearly
   documented before public launch (`security-baseline.md`).
