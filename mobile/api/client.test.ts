@@ -161,6 +161,77 @@ describe("request", () => {
     });
   });
 
+  it("passes the app-level error code from a { detail: { error } } body to onError", async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: async () => ({ detail: { error: "source_not_resolvable" } }),
+    } as unknown as Response);
+    const onErrorSpy = jest.fn(onError);
+
+    await expect(
+      request<unknown>("https://api.example.test/ep", {
+        method: "POST",
+        headers: {},
+        action: "apply",
+        onError: onErrorSpy,
+        fetchImpl: fetchMock,
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
+
+    expect(onErrorSpy).toHaveBeenCalledWith(422, "apply", "source_not_resolvable");
+  });
+
+  it.each([
+    ["request-validation array detail", { detail: [{ loc: ["body", "x"] }] }],
+    ["string detail", { detail: "error" }],
+    ["non-token code (content must not cross)", { detail: { error: "Ate 500 kcal!" } }],
+    ["non-string code", { detail: { error: 42 } }],
+    ["non-object body", "plain text"],
+  ])("passes no error code for a %s body", async (_label, body) => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: async () => body,
+    } as unknown as Response);
+    const onErrorSpy = jest.fn(onError);
+
+    await expect(
+      request<unknown>("https://api.example.test/ep", {
+        method: "POST",
+        headers: {},
+        action: "apply",
+        onError: onErrorSpy,
+        fetchImpl: fetchMock,
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
+
+    expect(onErrorSpy).toHaveBeenCalledWith(422, "apply", undefined);
+  });
+
+  it("passes no error code when the error body is not JSON", async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      json: async () => {
+        throw new SyntaxError("not json");
+      },
+    } as unknown as Response);
+    const onErrorSpy = jest.fn(onError);
+
+    await expect(
+      request<unknown>("https://api.example.test/ep", {
+        method: "POST",
+        headers: {},
+        action: "apply",
+        onError: onErrorSpy,
+        fetchImpl: fetchMock,
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
+
+    expect(onErrorSpy).toHaveBeenCalledWith(502, "apply", undefined);
+  });
+
   it("includes the body in the request when provided", async () => {
     const fetchMock = jest.fn().mockResolvedValue(okResponse({}));
     const body = JSON.stringify({ foo: "bar" });

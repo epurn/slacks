@@ -480,8 +480,12 @@ describe("change-match flow", () => {
   it("shows a retryable error when re-resolve fails", async () => {
     const c = candidate();
     const listCandidates = jest.fn().mockResolvedValue([c]);
+    // The FTY-366 per-flow copy the real client maps for a re-resolve 422.
     const reResolve = jest.fn().mockRejectedValue(
-      new CorrectionsApiError(422, "That correction couldn't be applied. Check the value and try again."),
+      new CorrectionsApiError(
+        422,
+        "That match couldn't be applied. Pick a different match or search again.",
+      ),
     );
 
     const tree = mount(<CorrectionSheet {...defaultProps({ listCandidates, reResolve })} />);
