@@ -28,9 +28,11 @@ See `docs/architecture/system-overview.md` for the working architecture.
 Slacks is designed for self-hosting. The Docker Compose stack brings up Postgres,
 Redis, the FastAPI API, and a Celery worker over plain HTTP from a clean checkout.
 
-**Scope:** HTTP-only local self-host. TLS/HTTPS termination, reverse proxy,
-production hardening, resource limits, backups, and cloud/Kubernetes deployment
-are intentionally out of scope.
+**Scope:** local self-host, plain HTTP by default. For encrypted transport on
+your private tailnet, the supported paved path is HTTPS on port 443 via
+`tailscale serve` — see [HTTPS over Tailscale](#https-over-tailscale-optional)
+below. Public-internet ingress, production hardening, resource limits, backups,
+and cloud/Kubernetes deployment are intentionally out of scope.
 
 ### Prerequisites
 
@@ -206,6 +208,19 @@ A 200 response from `/healthz` confirms the API is up. `/readyz` returns 200 whe
 stack is coherent (backend images from one checkout, Alembic at head, health
 green) and prints the exact connect-screen URL derived from your `.env`
 `API_PORT`. See [Local Development Stack → Simulator Readiness Smoke](docs/operations/local-dev-stack.md#simulator-readiness-smoke-fty-250).
+
+### HTTPS over Tailscale (Optional)
+
+To reach the backend from your other devices with **encrypted transport**, serve
+it over your tailnet: `tailscale serve` terminates TLS on the standard port 443
+with a valid certificate for the host's MagicDNS name and reverse-proxies to the
+loopback-bound API port. The app then connects to
+`https://<host>.<tailnet-name>.ts.net` — no high port in the URL, no cleartext
+reachable off-box, and the endpoint stays private to your own tailnet (serve,
+never funnel). Setup, prerequisites (MagicDNS + HTTPS certificates), the
+one-line `.env` switch (`API_BIND_HOST=127.0.0.1`), and verification steps are
+in [HTTPS over Tailscale](docs/operations/tailscale-https.md); or run
+`make tailscale-serve`.
 
 ### Provider Availability
 

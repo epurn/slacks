@@ -10,9 +10,12 @@
 # First-boot: the `migrate` service runs `alembic upgrade head` before the API
 # and worker start, so the schema is ready without manual intervention.
 #
-# Self-host scope: HTTP-only local deployment. TLS / reverse proxy / HTTPS
-# termination, production hardening, resource limits, and cloud deployment are
-# intentionally out of scope. See the README self-host section for details.
+# Self-host scope: plain-HTTP local deployment by default. For encrypted
+# transport on a private tailnet, the paved path is `tailscale serve` (TLS on
+# 443, valid tailnet cert) proxying to the loopback-bound API port — see
+# docs/operations/tailscale-https.md (FTY-367). Public-internet ingress,
+# production hardening, resource limits, and cloud deployment remain out of
+# scope. See the README self-host section for details.
 #
 # The real `.env` is gitignored; only `.env.example` is committed.
 #
@@ -111,8 +114,13 @@ services:
       # mounted volume contents are a host secret and must never be copied into
       # the image, committed, or included in support bundles.
       CODEX_HOME: "/codex-config"
+    # API_BIND_HOST is optional (FTY-367): unset (the default) publishes the
+    # port on all host interfaces exactly as before; set API_BIND_HOST=127.0.0.1
+    # in .env for the tailnet-served posture, where `tailscale serve` is the
+    # only network-facing ingress and the plain-HTTP listener stays on-box.
+    # See docs/operations/tailscale-https.md.
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "${API_BIND_HOST:+${API_BIND_HOST}:}${API_PORT:-8000}:8000"
     volumes:
       # Persistent Claude Code session volume (FTY-088). Populated once by
       # running 'claude login' interactively (see README Self-Hosting section).
