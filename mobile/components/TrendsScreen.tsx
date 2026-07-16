@@ -20,8 +20,13 @@
  * Privacy: no weight or nutrition values in logs, error messages, or
  * notification bodies.
  *
- * All injectable for tests: session, API functions, today date, cadence/
- * notification adapters.
+ * Data freshness (FTY-365): the tab stays mounted across tab switches, so the
+ * weight and adherence reads refresh once per focus gain (never a timer) and
+ * the date window derives from the clock at focus time, not first mount —
+ * deletes and new logs on Today, and day rollovers, appear on the next visit.
+ *
+ * All injectable for tests: session, API functions, the clock, the focus
+ * signal, cadence/notification adapters.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -59,6 +64,12 @@ import type { GoalDirection } from "@/api/goals";
 import { AdherenceStrip } from "@/components/AdherenceStrip";
 import { EWMATrendChart } from "@/components/EWMATrendChart";
 import { WeightLogSheet } from "@/components/WeightLogSheet";
+import {
+  AdherenceEmptyInvite,
+  AdherenceSummaryRow,
+  AdherenceUncountedRow,
+} from "@/components/trends/AdherenceCardContent";
+import { useFocusRefresh } from "@/components/trends/useFocusRefresh";
 import { isE2EMode } from "@/e2e/launchMode";
 import { registerVisualReviewPreset, useVisualReviewCore } from "@/e2e/visualReview";
 // Registers the `trends.adherence_retry` visual-review preset (FTY-264) as a
@@ -68,6 +79,7 @@ import "@/components/trends/visualReviewPresets";
 import { useGoalDirection } from "@/state/goalDirection";
 import type { UnitsPreference } from "@/state/profile";
 import { useSession, toApiSession, type Session, type ApiSession } from "@/state/session";
+import { useScreenActive } from "@/state/useScreenActive";
 import { formatDate } from "@/state/weightEntries";
 import {
   DEFAULT_DATE_RANGE,
@@ -135,7 +147,10 @@ interface TrendsScreenProps {
    * reads as a neutral delta (no toward/away claim).
    */
   goalDirection?: GoalDirection;
-  now?: Date;
+  /** Clock, re-read at each focus gain (FTY-365). Injectable for tests. */
+  now?: () => Date;
+  /** Foreground+focus signal (FTY-365). Injectable for tests. */
+  useActive?: () => boolean;
   /** Injectable for tests. */
   listWeightEntries?: typeof listWeightEntriesApi;
   /** Injectable for tests. */
@@ -160,7 +175,8 @@ export function TrendsScreen({
   session: sessionOverride,
   unitsPreference = "metric",
   goalDirection: goalDirectionOverride,
-  now = new Date(),
+  now = () => new Date(),
+  useActive = useScreenActive,
   listWeightEntries = listWeightEntriesApi,
   getDailySummaryRange = getDailySummaryRangeApi,
   createWeightEntry = createWeightEntryApi,
@@ -189,13 +205,20 @@ export function TrendsScreen({
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
-  const todayStr = useMemo(() => formatDate(now), [now]);
+  // Focus refresh (FTY-365): the tab stays mounted across switches, so the
+  // read effects below also key on `focusSeq` — one silent refetch per focus
+  // gain — and the date window derives from `focusNow`, the clock re-read at
+  // each focus, so it rolls across midnight while the app stays open.
+  const isActive = useActive();
+  const { focusNow, focusSeq } = useFocusRefresh(isActive, now);
+
+  const todayStr = useMemo(() => formatDate(focusNow), [focusNow]);
 
   // ── Range ────────────────────────────────────────────────────────────────
   const [range, setRange] = useState<DateRangeKey>(DEFAULT_DATE_RANGE);
   const { from, to } = useMemo(
-    () => rangeBounds(range, now),
-    [range, now],
+    () => rangeBounds(range, focusNow),
+    [range, focusNow],
   );
   const allDates = useMemo(() => buildDayRange(from, to), [from, to]);
 
@@ -230,7 +253,10 @@ export function TrendsScreen({
     return () => {
       active = false;
     };
-  }, [apiSession, listWeightEntries, from, to, weightReload]);
+    // `focusSeq` refetches on each focus gain (FTY-365) without touching
+    // `weightPhase`, so the chart keeps its data until fresh entries replace
+    // it in place — only `reloadWeight` (the user retry) shows loading.
+  }, [apiSession, listWeightEntries, from, to, weightReload, focusSeq]);
 
   // ── EWMA + headline ───────────────────────────────────────────────────────
   const ewmaKg = useMemo(() => computeEWMAFromEntries(entries), [entries]);
@@ -250,19 +276,26 @@ export function TrendsScreen({
     readonly (DailySummaryDTO | null)[]
   >([]);
   const [adherenceReload, setAdherenceReload] = useState(0);
-  // The settled phase is keyed to the read that produced it. Any new read —
-  // initial mount, a range change, or a retry — has a fresh key, so the card
-  // derives back to `loading` instead of leaving the previous ready/error
-  // content on screen while the new read is in flight (FTY-188).
-  const adherenceRequestKey = `${from}|${to}|${adherenceReload}`;
+  // The settled phase is keyed to the read that produced it. A new read for a
+  // *different* content selection — initial mount, a range change, or a retry
+  // from the error state — has a fresh key with no same-range ready content to
+  // stand in, so the card derives back to `loading` instead of leaving the
+  // previous content on screen while the new read is in flight (FTY-188). A
+  // same-range refresh (a focus gain, or the post-weight-save reload) instead
+  // keeps the settled ready content visible until fresh data replaces it in
+  // place — never an unmount-to-skeleton swap (FTY-365, calm-by-default).
+  const adherenceRequestKey = `${from}|${to}|${adherenceReload}|${focusSeq}`;
   const [adherenceSettled, setAdherenceSettled] = useState<{
     key: string;
+    range: DateRangeKey;
     phase: "ready" | "error";
   } | null>(null);
   const adherencePhase: LoadPhase =
     adherenceSettled?.key === adherenceRequestKey
       ? adherenceSettled.phase
-      : "loading";
+      : adherenceSettled?.phase === "ready" && adherenceSettled.range === range
+        ? "ready"
+        : "loading";
 
   const reloadAdherence = useCallback(() => {
     setAdherenceError(null);
@@ -285,7 +318,7 @@ export function TrendsScreen({
         if (!active) return;
         setRawSummaries(results);
         setAdherenceError(null);
-        setAdherenceSettled({ key: adherenceRequestKey, phase: "ready" });
+        setAdherenceSettled({ key: adherenceRequestKey, range, phase: "ready" });
       })
       .catch((err: unknown) => {
         if (!active) return;
@@ -295,7 +328,7 @@ export function TrendsScreen({
             ? err.message
             : "Could not load your intake history. Please try again.",
         );
-        setAdherenceSettled({ key: adherenceRequestKey, phase: "error" });
+        setAdherenceSettled({ key: adherenceRequestKey, range, phase: "error" });
       });
 
     return () => {
@@ -306,8 +339,10 @@ export function TrendsScreen({
     getDailySummaryRange,
     from,
     to,
+    range,
     adherenceReload,
     adherenceRequestKey,
+    focusSeq,
   ]);
 
   const adherence: AdherenceSummary = useMemo(
@@ -620,92 +655,6 @@ function RangeSelector({
   );
 }
 
-/**
- * The honest empty invite: genuinely nothing logged in the range. Distinct from
- * the uncounted state — here there are no entries at all, so we invite logging
- * rather than claim a false "no intake data" (FTY-188).
- */
-function AdherenceEmptyInvite({
-  colors,
-}: {
-  colors: { text: string; textSecondary: string; textMuted: string };
-}) {
-  return (
-    <View
-      style={styles.adherenceRow}
-      accessible
-      accessibilityLabel="No intake logged for this range"
-    >
-      <Text style={[styles.emptyTitle, { color: colors.text }]}>
-        No meals logged in this range yet.
-      </Text>
-      <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-        Your logged meals will show up here.
-      </Text>
-    </View>
-  );
-}
-
-/**
- * The logged-but-uncounted state: entries exist in the range but none are
- * counted yet (they await a detail on Today). Never the false "No intake data"
- * — this acknowledges the real action and points at what to do next without
- * duplicating the Today clarify flow (ux-design §Acknowledge-every-action;
- * FTY-188).
- */
-function AdherenceUncountedRow({
-  count,
-  colors,
-}: {
-  count: number;
-  colors: { text: string; textSecondary: string; textMuted: string };
-}) {
-  const noun = count === 1 ? "entry" : "entries";
-  return (
-    <View
-      style={styles.adherenceRow}
-      accessible
-      accessibilityLabel={`${count} ${noun} awaiting details`}
-    >
-      <Text style={[styles.emptyTitle, { color: colors.text }]}>
-        {`${count} ${noun} awaiting details`}
-      </Text>
-      <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-        Add their details on Today to count them toward your intake.
-      </Text>
-    </View>
-  );
-}
-
-function AdherenceSummaryRow({
-  adherence,
-  colors,
-}: {
-  adherence: AdherenceSummary;
-  colors: { text: string; textSecondary: string; textMuted: string };
-}) {
-  return (
-    <View style={styles.adherenceRow}>
-      {adherence.avgCalories !== null ? (
-        <Text
-          style={[styles.adherenceStat, { color: colors.text }]}
-          accessibilityLabel={`Average: ${adherence.avgCalories} kcal per day`}
-        >
-          {`Avg ${adherence.avgCalories} kcal/day`}
-        </Text>
-      ) : null}
-      {adherence.daysWithTarget > 0 ? (
-        <Text
-          style={[styles.adherenceStat, { color: colors.textSecondary }]}
-          accessibilityLabel={`On target: ${adherence.daysOnTarget} of ${adherence.daysWithTarget} days`}
-        >
-          {`${adherence.daysOnTarget}/${adherence.daysWithTarget} days on target`}
-        </Text>
-      ) : null}
-    </View>
-  );
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
 // ─────────────────────────────────────────────────────────────────────────────
@@ -778,11 +727,6 @@ const styles = StyleSheet.create({
   logWeightLabel: { fontSize: typeScale.subhead, fontWeight: "600" },
 
   adherenceLoading: { gap: spacing.xs },
-  emptyTitle: { fontSize: typeScale.body, fontWeight: "600" },
-  emptyText: { fontSize: typeScale.body },
-
-  adherenceRow: { gap: spacing.xs },
-  adherenceStat: { fontSize: typeScale.subhead },
 
   errorBox: { gap: spacing.sm },
   errorText: { fontSize: typeScale.body },
