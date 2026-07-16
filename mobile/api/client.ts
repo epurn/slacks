@@ -91,11 +91,50 @@ export function userScopedUrl(
 }
 
 /**
+ * Application error codes are short fixed-vocabulary tokens (`lower_snake_case`,
+ * e.g. `source_not_resolvable`). Anything else — user text, values, whole
+ * messages — is rejected so no response content travels through error handling.
+ */
+const APP_ERROR_CODE_RE = /^[a-z_]{1,64}$/;
+
+/**
+ * Extract the machine-readable application error code from a non-2xx response
+ * body of the backend's app-level shape `{ "detail": { "error": "<code>" } }`.
+ * Returns `undefined` for a FastAPI request-validation body (`detail` is an
+ * array), any other shape, or an unreadable/non-JSON body. Only a token
+ * matching {@link APP_ERROR_CODE_RE} is ever returned; it is never logged, and
+ * callers only compare it against fixed constants (`security-baseline.md`).
+ */
+async function appErrorCode(response: Response): Promise<string | undefined> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return undefined;
+  }
+  if (typeof body !== "object" || body === null) {
+    return undefined;
+  }
+  const detail = (body as { detail?: unknown }).detail;
+  if (typeof detail !== "object" || detail === null || Array.isArray(detail)) {
+    return undefined;
+  }
+  const code = (detail as { error?: unknown }).error;
+  return typeof code === "string" && APP_ERROR_CODE_RE.test(code)
+    ? code
+    : undefined;
+}
+
+/**
  * Fetch wrapper for authenticated JSON endpoints.
  *
  * On a 2xx response parses and returns the body as `T`. On non-2xx throws the
- * error returned by `onError(status, action)` — callers supply this function so
- * per-endpoint message text is preserved exactly without being logged here.
+ * error returned by `onError(status, action, errorCode)` — callers supply this
+ * function so per-endpoint message text is preserved exactly without being
+ * logged here. `errorCode` is the backend's app-level machine code (e.g. a
+ * re-resolve `source_not_resolvable`) when the body carries one, so a mapper
+ * can distinguish the documented application `422`s from request-validation
+ * `422`s; it is a fixed-vocabulary token, never content.
  */
 export async function request<T>(
   url: string,
@@ -104,7 +143,7 @@ export async function request<T>(
     headers: Record<string, string>;
     body?: string;
     action: string;
-    onError: (status: number, action: string) => ApiError;
+    onError: (status: number, action: string, errorCode?: string) => ApiError;
     fetchImpl?: typeof fetch;
   },
 ): Promise<T> {
@@ -121,7 +160,7 @@ export async function request<T>(
     if (response.status === 401) {
       notifyUnauthorized();
     }
-    throw opts.onError(response.status, opts.action);
+    throw opts.onError(response.status, opts.action, await appErrorCode(response));
   }
   return (await response.json()) as T;
 }

@@ -14,7 +14,8 @@
  *
  * Both operations are scoped to the authenticated caller: cross-user access fails
  * closed as 404. Nutrition values and phrases are never logged; errors carry only
- * HTTP status + action label.
+ * the HTTP status, a fixed action label, and — for the re-resolve `422`s — the
+ * backend's fixed-vocabulary machine code, mapped to per-flow copy (FTY-366).
  */
 
 import {
@@ -76,6 +77,41 @@ function correctionsError(
 }
 
 /**
+ * Fixed re-resolve messages for the route's documented application-level `422`
+ * codes (`evidence-retrieval.md` → Item Re-match → Errors). The user enters no
+ * value on a re-resolve, so — unlike the value-edit flows — none of these say
+ * "check the value"; each names the follow-up that can actually succeed
+ * (FTY-366). All copy is fixed: no candidate name, query, or nutrition value
+ * ever appears in an error.
+ */
+const RE_RESOLVE_422_MESSAGES: Readonly<Record<string, string>> = {
+  // The chosen reference isn't re-derivable server-side; picking another
+  // candidate (or searching again) is the follow-up that can work.
+  source_not_resolvable:
+    "That match couldn't be applied. Pick a different match or search again.",
+  // The new source can't cost the item's current quantity; the follow-up it
+  // needs is how much the user had.
+  needs_clarification:
+    "That match needs to know how much you had. Update the amount, then try the match again.",
+};
+
+/** Plain, non-blaming residual for a re-resolve `422` with no known code. */
+const RE_RESOLVE_422_FALLBACK = "That match couldn't be applied. Try again.";
+
+function reResolveError(
+  status: number,
+  action: string,
+  errorCode?: string,
+): CorrectionsApiError {
+  if (status === 422) {
+    const known =
+      errorCode !== undefined ? RE_RESOLVE_422_MESSAGES[errorCode] : undefined;
+    return new CorrectionsApiError(status, known ?? RE_RESOLVE_422_FALLBACK);
+  }
+  return correctionsError(status, action);
+}
+
+/**
  * List alternative source candidates for the given food item (FTY-093). An
  * optional `query` override re-aims the search to a different food name — it is
  * item-identity only and sanitized server-side before any provider egress.
@@ -133,7 +169,7 @@ export async function reResolveItem(
       headers: authHeaders(session),
       body: JSON.stringify({ source_ref: sourceRef }),
       action: "apply that match",
-      onError: correctionsError,
+      onError: reResolveError,
       fetchImpl,
     },
   );
