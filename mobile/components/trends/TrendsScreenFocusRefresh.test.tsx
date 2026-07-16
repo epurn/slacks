@@ -85,6 +85,12 @@ function skeletonCount(tree: ReactTestRenderer): number {
   return tree.root.findAll((n) => n.props.testID === "adherence-loading").length;
 }
 
+/** The strip cell for `date` (carries the human-readable adherence state). */
+function cellLabel(tree: ReactTestRenderer, date: string): string {
+  return tree.root.find((n) => n.props.testID === `adherence-cell-${date}`)
+    .props.accessibilityLabel as string;
+}
+
 /**
  * A focus/clock harness around one mounted TrendsScreen. The `useActive` and
  * `now` props read mutable harness state, and every render uses a freshly
@@ -177,6 +183,7 @@ describe("TrendsScreen focus refresh (FTY-365)", () => {
 
     expect(getSum).toHaveBeenCalledTimes(1);
     expect(textContent(harness.tree)).toContain("2/2 days on target");
+    expect(cellLabel(harness.tree, TODAY)).toBe("Today: on target");
 
     // Switch to Today (blur) — no fetch — then back to Trends (focus gain).
     harness.blur();
@@ -188,6 +195,8 @@ describe("TrendsScreen focus refresh (FTY-365)", () => {
     const content = textContent(harness.tree);
     expect(content).toContain("1/1 days on target");
     expect(content).not.toContain("2/2 days on target");
+    // The affected day's strip cell reflects the deletion too.
+    expect(cellLabel(harness.tree, TODAY)).toBe("Today: no data");
     // The weight read shares the same focus-refresh trigger.
     expect(listWeights).toHaveBeenCalledTimes(2);
   });
