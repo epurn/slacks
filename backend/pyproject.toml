@@ -5,7 +5,7 @@ description = "Slacks backend FastAPI application skeleton."
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.139.0",
-    "uvicorn>=0.50.2",
+    "uvicorn>=0.51.0",
     # Celery worker + Redis broker for the local Docker Compose stack (FTY-011).
     # The architecture (docs/architecture/system-overview.md) and README mandate
     # "Celery workers with Redis queue"; the ``[redis]`` extra pulls the broker
@@ -30,7 +30,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "httpx>=0.27",
-    "mypy>=2.2.0",
+    "mypy>=2.3.0",
     "pytest>=8.3",
     "ruff>=0.15.21",
 ]
