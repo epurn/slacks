@@ -63,6 +63,8 @@ const SESSION: Session = {
 };
 
 const NOW = new Date("2026-06-27T12:00:00Z");
+// FTY-365 focus seam: no navigator in these mounts, so inject always-focused.
+const ACTIVE = () => true;
 
 function makeEntry(
   id: string,
@@ -259,7 +261,7 @@ describe("TrendsScreen — no session", () => {
         session={null}
         listWeightEntries={list}
         getDailySummaryRange={jest.fn()}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     expect(textContent(tree)).toContain("Sign in to view your trends");
@@ -275,7 +277,7 @@ describe("TrendsScreen — weight entries", () => {
         session={SESSION}
         listWeightEntries={list}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     const loading = tree.root.find(
@@ -292,7 +294,7 @@ describe("TrendsScreen — weight entries", () => {
         session={SESSION}
         listWeightEntries={list}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -311,7 +313,7 @@ describe("TrendsScreen — weight entries", () => {
         session={SESSION}
         listWeightEntries={list}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -329,7 +331,7 @@ describe("TrendsScreen — weight entries", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -344,7 +346,7 @@ describe("TrendsScreen — range selector", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -366,7 +368,7 @@ describe("TrendsScreen — range selector", () => {
         session={SESSION}
         listWeightEntries={list}
         getDailySummaryRange={getSum}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -389,7 +391,7 @@ describe("TrendsScreen — range selector", () => {
         session={SESSION}
         listWeightEntries={list}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -418,7 +420,7 @@ describe("TrendsScreen — headline delta", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue(entries)}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
         unitsPreference="metric"
       />,
     );
@@ -438,7 +440,7 @@ describe("TrendsScreen — headline delta", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue(entries)}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
         unitsPreference="metric"
       />,
     );
@@ -473,7 +475,7 @@ describe("TrendsScreen — adherence summary", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={getSum}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -490,7 +492,7 @@ describe("TrendsScreen — adherence summary", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={getSum}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -515,7 +517,7 @@ describe("TrendsScreen — past-day drilldown", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={getSum}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
         onDayPress={onDayPress}
       />,
     );
@@ -546,7 +548,7 @@ describe("TrendsScreen — log weight sheet", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -578,7 +580,7 @@ describe("TrendsScreen — log weight sheet", () => {
         createWeightEntry={createEntry}
         store={store}
         notifications={notifications}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -622,7 +624,7 @@ describe("TrendsScreen — log weight sheet", () => {
         listWeightEntries={list}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
         createWeightEntry={createEntry}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
         unitsPreference="metric"
       />,
     );
@@ -711,7 +713,7 @@ describe("TrendsScreen — visual-review weight.sheet seam (FTY-265)", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
 
@@ -730,7 +732,7 @@ describe("TrendsScreen — visual-review weight.sheet seam (FTY-265)", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -747,7 +749,7 @@ describe("TrendsScreen — visual-review weight.sheet seam (FTY-265)", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -775,7 +777,7 @@ describe("TrendsScreen — cadence card removed", () => {
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
         store={store}
         notifications={notifications}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -798,7 +800,7 @@ describe("TrendsScreen — adherence fan-out removal", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={getSum}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -813,7 +815,7 @@ describe("TrendsScreen — adherence fan-out removal", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={getSum}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -833,7 +835,7 @@ describe("TrendsScreen — adherence fan-out removal", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={getSum}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -865,7 +867,7 @@ describe("TrendsScreen — adherence error and empty states", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={getSum}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -898,7 +900,7 @@ describe("TrendsScreen — adherence error and empty states", () => {
             getDailySummaryRange={jest.fn().mockRejectedValue(
               new DailySummaryApiError(500, "error"),
             )}
-            now={NOW}
+            now={() => NOW} useActive={ACTIVE}
           />
         </ThemeProvider>,
       );
@@ -925,7 +927,7 @@ describe("TrendsScreen — adherence error and empty states", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([makeEntry("1", 70, "2026-06-27")])}
         getDailySummaryRange={getSum}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -952,7 +954,7 @@ describe("TrendsScreen — adherence error and empty states", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={getSum}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -974,7 +976,7 @@ describe("TrendsScreen — adherence error and empty states", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={jest.fn().mockResolvedValue([])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -999,7 +1001,7 @@ describe("TrendsScreen — adherence error and empty states", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={getSum}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -1028,7 +1030,7 @@ describe("TrendsScreen — adherence honesty (FTY-188)", () => {
         getDailySummaryRange={jest
           .fn()
           .mockResolvedValue([makeSummary(TODAY, 0, null, false, 3)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -1054,7 +1056,7 @@ describe("TrendsScreen — adherence honesty (FTY-188)", () => {
         getDailySummaryRange={jest
           .fn()
           .mockResolvedValue([makeSummary(TODAY, 0, null, false, 1)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -1071,7 +1073,7 @@ describe("TrendsScreen — adherence honesty (FTY-188)", () => {
           .mockResolvedValue([
             makeSummary(TODAY, 2000, 2000, true, 2),
           ])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -1090,7 +1092,7 @@ describe("TrendsScreen — adherence honesty (FTY-188)", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={jest.fn().mockReturnValue(pending)}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     // Flush the weight list + Skeleton's async Reduce-Motion check; the range
@@ -1124,7 +1126,7 @@ describe("TrendsScreen — adherence honesty (FTY-188)", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={jest.fn().mockReturnValue(pending)}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -1157,7 +1159,7 @@ describe("TrendsScreen — adherence honesty (FTY-188)", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={getSum}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -1197,7 +1199,7 @@ describe("TrendsScreen — adherence honesty (FTY-188)", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={getSum}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -1231,7 +1233,7 @@ describe("TrendsScreen — adherence honesty (FTY-188)", () => {
         getDailySummaryRange={jest
           .fn()
           .mockResolvedValue([makeSummary(TODAY, 0, null, false, 4)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -1262,7 +1264,7 @@ describe("TrendsScreen — accessibility", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue(entries)}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
         unitsPreference="metric"
       />,
     );
@@ -1285,7 +1287,7 @@ describe("TrendsScreen — accessibility", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue(entries)}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
         unitsPreference="metric"
       />,
     );
@@ -1309,7 +1311,7 @@ describe("TrendsScreen — accessibility", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={getSum}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -1339,7 +1341,7 @@ describe("TrendsScreen — single-title regression (FTY-151)", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={jest.fn().mockResolvedValue([])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -1362,7 +1364,7 @@ describe("TrendsScreen — single-title regression (FTY-151)", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={jest.fn().mockResolvedValue([])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
         onPressProfile={onPressProfile}
       />,
     );
@@ -1383,7 +1385,7 @@ describe("TrendsScreen — single-title regression (FTY-151)", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={jest.fn().mockResolvedValue([])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -1416,7 +1418,7 @@ describe("TrendsScreen — goal-aware headline delta", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue(DECREASING)}
         getDailySummaryRange={jest.fn().mockResolvedValue([])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
         unitsPreference="metric"
         goalDirection="loss"
       />,
@@ -1439,7 +1441,7 @@ describe("TrendsScreen — goal-aware headline delta", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue(INCREASING)}
         getDailySummaryRange={jest.fn().mockResolvedValue([])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
         unitsPreference="metric"
         goalDirection="loss"
       />,
@@ -1462,7 +1464,7 @@ describe("TrendsScreen — goal-aware headline delta", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue(INCREASING)}
         getDailySummaryRange={jest.fn().mockResolvedValue([])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
         unitsPreference="metric"
         goalDirection="gain"
       />,
@@ -1485,7 +1487,7 @@ describe("TrendsScreen — goal-aware headline delta", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue(DECREASING)}
         getDailySummaryRange={jest.fn().mockResolvedValue([])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
         unitsPreference="metric"
         goalDirection="gain"
       />,
@@ -1508,7 +1510,7 @@ describe("TrendsScreen — goal-aware headline delta", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue(INCREASING)}
         getDailySummaryRange={jest.fn().mockResolvedValue([])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
         unitsPreference="metric"
         goalDirection="maintain"
       />,
@@ -1533,7 +1535,7 @@ describe("TrendsScreen — goal-aware headline delta", () => {
             session={SESSION}
             listWeightEntries={jest.fn().mockResolvedValue(INCREASING)}
             getDailySummaryRange={jest.fn().mockResolvedValue([])}
-            now={NOW}
+            now={() => NOW} useActive={ACTIVE}
             unitsPreference="metric"
           />
         </GoalDirectionProvider>
@@ -1565,7 +1567,7 @@ describe("TrendsScreen — goal-aware headline delta", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue(INCREASING)}
         getDailySummaryRange={jest.fn().mockResolvedValue([])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
         unitsPreference="metric"
       />,
     );
@@ -1602,7 +1604,7 @@ describe("TrendsScreen — range prose", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue(entries)}
         getDailySummaryRange={jest.fn().mockResolvedValue([])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
         unitsPreference="metric"
       />,
     );
@@ -1643,7 +1645,7 @@ describe("TrendsScreen — human dates", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={getSum}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -1672,7 +1674,7 @@ describe("TrendsScreen — human dates", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -1704,7 +1706,7 @@ describe("TrendsScreen — non-color adherence cue", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={getSum}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -1737,7 +1739,7 @@ describe("TrendsScreen — floating switcher bottom clearance (FTY-258)", () => 
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -1763,7 +1765,7 @@ describe("TrendsScreen — floating switcher bottom clearance (FTY-258)", () => 
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -1791,7 +1793,7 @@ describe("TrendsScreen — status-bar top containment (FTY-261)", () => {
         session={SESSION}
         listWeightEntries={jest.fn().mockResolvedValue([])}
         getDailySummaryRange={jest.fn().mockResolvedValue([makeSummary("2026-06-27", 0, null)])}
-        now={NOW}
+        now={() => NOW} useActive={ACTIVE}
       />,
     );
     await act(async () => {});
@@ -1834,7 +1836,7 @@ describe("TrendsScreen — status-bar top containment (FTY-261)", () => {
             getDailySummaryRange={jest.fn().mockResolvedValue([
               makeSummary("2026-06-27", 0, null),
             ])}
-            now={NOW}
+            now={() => NOW} useActive={ACTIVE}
           />
         </ThemeProvider>,
       );
