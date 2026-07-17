@@ -79,41 +79,50 @@ router = APIRouter(prefix="/api/users", tags=["exact-evidence"])
 
 _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="derived item not found")
 
-#: Path suffixes whose request bodies/params carry untrusted, potentially sensitive input
-#: (a signed ``proposal_ref``, a barcode, or client-injected nutrition facts caught by
-#: ``extra="forbid"``). A validation failure on any must return a content-free code rather
-#: than echo the rejected value. The label route carries no sensitive Pydantic body (its
-#: image bytes are a raw body validated as data, not schema-echoed), but it is included so
-#: *every* exact-upgrade endpoint has one uniform content-free validation-error contract.
-#: Matching the suffix uniquely selects these POST endpoints without coupling the
-#: sanitizer to the full parameterised paths.
-_SANITIZED_PATH_SUFFIXES = (
-    "/exact-upgrade/apply",
-    "/exact-upgrade/barcode",
-    "/exact-upgrade/label",
+#: ``(method, path suffix)`` pairs whose request bodies/params carry untrusted,
+#: potentially sensitive input (a signed ``proposal_ref``, a barcode, client-injected
+#: nutrition facts caught by ``extra="forbid"``, or a rename's item name). A validation
+#: failure on any must return a content-free code rather than echo the rejected value.
+#: The label route carries no sensitive Pydantic body (its image bytes are a raw body
+#: validated as data, not schema-echoed), but it is included so *every* exact-upgrade
+#: endpoint has one uniform content-free validation-error contract. The derived-item
+#: rename (FTY-377, ``routers/corrections.py``) joins the set because its body is the
+#: user-authored item name, which must never be reflected back. Matching method +
+#: suffix uniquely selects these endpoints without coupling the sanitizer to the full
+#: parameterised paths.
+_SANITIZED_ROUTES = (
+    ("POST", "/exact-upgrade/apply"),
+    ("POST", "/exact-upgrade/barcode"),
+    ("POST", "/exact-upgrade/label"),
+    ("PATCH", "/name"),
 )
 
 
 def _is_sanitized_request(request: Request) -> bool:
-    """True when ``request`` targets an exact-evidence endpoint with sanitized errors."""
+    """True when ``request`` targets an endpoint with sanitized validation errors."""
 
-    return request.method == "POST" and request.url.path.endswith(_SANITIZED_PATH_SUFFIXES)
+    return any(
+        request.method == method and request.url.path.endswith(suffix)
+        for method, suffix in _SANITIZED_ROUTES
+    )
 
 
 async def sanitized_exact_evidence_validation_handler(
     request: Request, exc: RequestValidationError
 ) -> Response:
-    """Content-free ``422`` for exact-evidence request-validation failures; default elsewhere.
+    """Content-free ``422`` for sensitive-input request-validation failures; default elsewhere.
 
     Registered app-wide for :class:`RequestValidationError` (see
-    ``app.main.create_app``), but only overrides the response for the exact-evidence
-    apply and barcode-propose routes. FastAPI's default validation body echoes the
+    ``app.main.create_app``), but only overrides the response for the routes in
+    ``_SANITIZED_ROUTES`` — the exact-evidence apply/propose routes and the
+    derived-item rename (FTY-377). FastAPI's default validation body echoes the
     rejected ``input`` — for these endpoints that would reflect the submitted signed
-    ``proposal_ref`` / barcode or a client-injected nutrition fact (``extra="forbid"``)
-    straight back to the caller, violating the stable-code-only error contract. For
-    those routes we return ``{"detail": {"error": "invalid_request"}}`` — a stable code
-    carrying no submitted value. Every other endpoint falls through to FastAPI's default
-    handler so their validation-error contracts are unchanged.
+    ``proposal_ref`` / barcode, a client-injected nutrition fact (``extra="forbid"``),
+    or the user-authored item name straight back to the caller, violating the
+    stable-code-only error contract. For those routes we return
+    ``{"detail": {"error": "invalid_request"}}`` — a stable code carrying no submitted
+    value. Every other endpoint falls through to FastAPI's default handler so their
+    validation-error contracts are unchanged.
     """
 
     if _is_sanitized_request(request):

@@ -262,7 +262,7 @@
         "type": "object"
       },
       "DerivedExerciseItemDTO": {
-        "description": "Read shape for an exercise item: current burn, original snapshot, provenance.\n\nMirrors :class:`DerivedFoodItemDTO`. Exercise burn is computed from MET tables\n(recorded on the estimation run), not an ``evidence_sources`` row, so ``source``\nis ``None``; ``is_edited`` follows the same ``user_edit`` rule (a corrected\n``active_calories`` marks it edited).",
+        "description": "Read shape for an exercise item: current burn, original snapshot, provenance.\n\nMirrors :class:`DerivedFoodItemDTO`. Exercise burn is computed from MET tables\n(recorded on the estimation run), not an ``evidence_sources`` row, so ``source``\nis ``None``; ``is_edited`` follows the same ``user_edit`` rule (a corrected\n``active_calories`` marks it edited) and ``is_renamed`` the same ``name_edit``\nrule (FTY-377).",
         "properties": {
           "active_calories": {
             "anyOf": [
@@ -310,6 +310,11 @@
           "is_edited": {
             "default": false,
             "title": "Is Edited",
+            "type": "boolean"
+          },
+          "is_renamed": {
+            "default": false,
+            "title": "Is Renamed",
             "type": "boolean"
           },
           "item_type": {
@@ -384,7 +389,7 @@
         "type": "object"
       },
       "DerivedFoodItemDTO": {
-        "description": "Read shape for a food item: current values, original snapshot, provenance.\n\nReturned by the edit ``PATCH`` and every Today read path. ``source`` and\n``is_edited`` are server-derived (FTY-092): ``source`` from the item's\n``evidence_sources`` row (``None`` when no provenance record exists), and\n``is_edited`` ``True`` iff the item carries a ``user_edit`` value-override\ncorrection \u2014 an amount-adjusted-only item stays ``False``.",
+        "description": "Read shape for a food item: current values, original snapshot, provenance.\n\nReturned by the edit ``PATCH`` and every Today read path. ``source`` and\n``is_edited`` are server-derived (FTY-092): ``source`` from the item's\n``evidence_sources`` row (``None`` when no provenance record exists), and\n``is_edited`` ``True`` iff the item carries a ``user_edit`` value-override\ncorrection \u2014 an amount-adjusted-only item stays ``False``. ``is_renamed``\n(FTY-377) is likewise derived: ``True`` iff the item carries a ``name_edit``\ncorrection \u2014 the user authored the display name. Independent of ``is_edited``\n(a rename is not a value override).",
         "properties": {
           "amount": {
             "anyOf": [
@@ -487,6 +492,11 @@
           "is_edited": {
             "default": false,
             "title": "Is Edited",
+            "type": "boolean"
+          },
+          "is_renamed": {
+            "default": false,
+            "title": "Is Renamed",
             "type": "boolean"
           },
           "item_type": {
@@ -609,6 +619,23 @@
           "value"
         ],
         "title": "DerivedItemEditRequest",
+        "type": "object"
+      },
+      "DerivedItemRenameRequest": {
+        "additionalProperties": false,
+        "description": "Request body for ``PATCH .../derived-items/{item_type}/{item_id}/name`` (FTY-377).\n\n``name`` is the user-authored replacement display name \u2014 untrusted user text\n(like ``raw_text``): bounded and non-blank-checked here, stored via\nparameterized ORM inserts, never interpreted as an instruction, and never\nlogged or echoed. A validation failure on this body renders the content-free\n``422 invalid_request`` shape (see\n:func:`app.routers.exact_evidence.sanitized_exact_evidence_validation_handler`)\nrather than FastAPI's default input-echoing body.",
+        "properties": {
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "DerivedItemRenameRequest",
         "type": "object"
       },
       "DerivedItemStatus": {
@@ -3194,6 +3221,102 @@
           }
         },
         "summary": "Edit Derived Item",
+        "tags": [
+          "corrections"
+        ]
+      }
+    },
+    "/api/users/{user_id}/derived-items/{item_type}/{item_id}/name": {
+      "patch": {
+        "description": "Rename the caller's own derived item \u2014 an audited display-name edit (FTY-377).\n\nOverwrites the item's ``name`` in place and appends one immutable text-valued\n``name_edit`` correction row. Not a value override: the item's numbers and\nprovenance are untouched and ``is_edited`` is unaffected; the response carries\nthe new ``name`` and the derived ``is_renamed`` flag. Renaming to the identical\ncurrent name is a safe no-op (no audit row). Cross-user, unknown, or\nvoided-parent targets fail closed as ``404`` with no mutation; an invalid name\nrenders ``422`` without echoing the value.",
+        "operationId": "rename_derived_item_api_users__user_id__derived_items__item_type___item_id__name_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CandidateType"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DerivedItemRenameRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DerivedFoodItemDTO"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DerivedExerciseItemDTO"
+                    }
+                  ],
+                  "title": "Response Rename Derived Item Api Users  User Id  Derived Items  Item Type   Item Id  Name Patch"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rename Derived Item",
         "tags": [
           "corrections"
         ]

@@ -28,6 +28,15 @@ const gentleSpring: Omit<Animated.SpringAnimationConfig, 'toValue'> = {
 export const reducedMotionDuration = 180;
 
 /**
+ * Upper bound (ms) a one-shot beat may wait for the Reduce Motion read before
+ * revealing its content anyway. The read normally settles within a frame or
+ * two; this only fires when `AccessibilityInfo.isReduceMotionEnabled()` never
+ * resolves (FTY-379) — in which case the setting is still unknown, so the
+ * reveal uses the no-motion fade, never a spring.
+ */
+const reduceMotionReadDeadlineMs = 400;
+
+/**
  * Live "is Reduce Motion enabled" for the signature beats. Mirrors the Skeleton
  * pattern: read `AccessibilityInfo.isReduceMotionEnabled()` once and subscribe to
  * `reduceMotionChanged` so a mid-session toggle is honoured.
@@ -126,6 +135,11 @@ export function usePulse(): {
  * value eases in with `gentleSpring`; under Reduce Motion it is a simple timing
  * fade. The fade plays once — a static (already-resolved) row stays fully opaque
  * and never re-animates on re-render.
+ *
+ * The wait for the Reduce Motion read is bounded: if the read has not settled
+ * within {@link reduceMotionReadDeadlineMs}, the row reveals with the no-motion
+ * fade anyway — an armed row is never left stuck invisible behind a hung
+ * accessibility read (FTY-379).
  */
 export function useResolveFade(
   active: boolean,
@@ -145,7 +159,23 @@ export function useResolveFade(
       opacity.setValue(startsHidden ? 0 : 1);
       return;
     }
-    if (played.current || reduceMotion === null) return;
+    if (played.current) return;
+    if (reduceMotion === null) {
+      // The accessibility read is still in flight. A resolved row must never
+      // stay hidden (FTY-379), so bound the wait: past the deadline, reveal
+      // with the no-motion fade — the setting is still unknown, so no spring.
+      // Settling in time clears the timer (effect re-runs on `reduceMotion`).
+      const deadline = setTimeout(() => {
+        if (played.current) return;
+        played.current = true;
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: reducedMotionDuration,
+          useNativeDriver: true,
+        }).start();
+      }, reduceMotionReadDeadlineMs);
+      return () => clearTimeout(deadline);
+    }
     played.current = true;
     opacity.setValue(0);
     if (reduceMotion) {

@@ -272,6 +272,11 @@ class CorrectionSource(StrEnum):
       instead it **supersedes** any prior ``user_edit`` — ``is_edited`` is true only for
       a ``user_edit`` made *after* the latest re-match (the new source carries the
       honesty, not the stale override). See ``docs/contracts/evidence-retrieval.md``.
+    - :attr:`NAME_EDIT` — a **display-name edit** (FTY-377): the user renamed the
+      item. A text-valued row (``old_value_text`` / ``new_value_text``; ``new_value``
+      ``NULL``). It is **not** a value override — the item's numbers still come from
+      their resolved source — so it never affects ``is_edited``; it drives the
+      separate derived ``is_renamed`` flag instead.
 
     Later learning/adaptation work (FTY-052+) may append other sources without
     redefining the append-only audit contract.
@@ -280,6 +285,7 @@ class CorrectionSource(StrEnum):
     USER_EDIT = "user_edit"
     AMOUNT_ADJUST = "amount_adjust"
     RE_MATCH = "re_match"
+    NAME_EDIT = "name_edit"
 
 
 class SourceType(StrEnum):

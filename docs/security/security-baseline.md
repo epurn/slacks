@@ -57,7 +57,12 @@ This project uses the following as design references:
 
 ## Encryption and Secrets
 
-- Require TLS in hosted and production-like deployments.
+- Require TLS in hosted and production-like deployments. *(Self-host paved
+  path: `tailscale serve` terminates TLS on 443 with a valid tailnet
+  certificate and proxies to the loopback-bound API port, so no cleartext is
+  reachable off-box — tailnet-only, never funnel; certificate lifecycle stays
+  with `tailscaled` on the host, no cert/key material in the repo. See
+  `docs/operations/tailscale-https.md`, FTY-367.)*
 - Use database and object-storage encryption where supported by the deployment.
 - Consider application-level encryption for highly sensitive fields once the data model is finalized.
 - Store provider keys and app secrets in environment variables or secret managers.
@@ -135,7 +140,8 @@ dedicated middleware in `app/main.py` (FTY-112):
 - `Referrer-Policy: no-referrer` — limits referrer leakage on redirects.
 
 `Strict-Transport-Security` (HSTS) is intentionally omitted: TLS termination
-is the self-hoster's reverse-proxy concern, not the application's.
+is the self-hoster's ingress concern (the paved path is `tailscale serve` —
+see `docs/operations/tailscale-https.md`), not the application's.
 `Content-Security-Policy` is omitted because this is a JSON API consumed by a
 native client, making a CSP low-value.
 

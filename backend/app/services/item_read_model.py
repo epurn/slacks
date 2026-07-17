@@ -19,6 +19,11 @@ is no new persisted provenance column and no de-normalized read table:
   it clears the edited marker honestly (the new source, not the old override, is the
   truth).
 
+- :func:`item_is_renamed` (FTY-377) is ``True`` iff the item carries a ``name_edit``
+  correction — the user authored the display name. Independent of ``is_edited``: a
+  rename is not a value override (the numbers keep their source), so it never flips
+  the edited marker, and vice-versa.
+
 :func:`serialize_food_item` / :func:`serialize_exercise_item` are the shared
 serializers every read path uses, so the descriptor and flag are computed once and
 inherited consistently rather than re-derived per endpoint.
@@ -71,22 +76,24 @@ _URL_SOURCE_FALLBACK_LABELS: dict[SourceType, str] = {
 
 
 def serialize_food_item(session: Session, item: DerivedFoodItem) -> DerivedFoodItemDTO:
-    """Build the food-item read DTO, enriched with ``source`` + ``is_edited``."""
+    """Build the food-item read DTO, enriched with ``source``/``is_edited``/``is_renamed``."""
 
     dto = DerivedFoodItemDTO.model_validate(item)
     return dto.model_copy(
         update={
             "source": build_item_source(session, item),
             "is_edited": item_is_edited(session, CandidateType.FOOD, item.id),
+            "is_renamed": item_is_renamed(session, CandidateType.FOOD, item.id),
         }
     )
 
 
 def serialize_exercise_item(session: Session, item: DerivedExerciseItem) -> DerivedExerciseItemDTO:
-    """Build the exercise-item read DTO, enriched with ``source`` + ``is_edited``.
+    """Build the exercise-item read DTO, enriched with ``source``/``is_edited``/``is_renamed``.
 
     Exercise burn has no ``evidence_sources`` row, so ``source`` is ``None``;
-    ``is_edited`` follows the same value-override rule as food.
+    ``is_edited`` follows the same value-override rule as food, ``is_renamed`` the
+    same ``name_edit`` rule.
     """
 
     dto = DerivedExerciseItemDTO.model_validate(item)
@@ -94,6 +101,7 @@ def serialize_exercise_item(session: Session, item: DerivedExerciseItem) -> Deri
         update={
             "source": None,
             "is_edited": item_is_edited(session, CandidateType.EXERCISE, item.id),
+            "is_renamed": item_is_renamed(session, CandidateType.EXERCISE, item.id),
         }
     )
 
@@ -218,6 +226,25 @@ def item_is_edited(session: Session, item_type: CandidateType, item_id: uuid.UUI
         *((Correction.created_at > last_re_match,) if last_re_match is not None else ()),
     )
     return bool(session.scalar(select(user_edit)))
+
+
+def item_is_renamed(session: Session, item_type: CandidateType, item_id: uuid.UUID) -> bool:
+    """Return ``True`` iff the item carries a ``name_edit`` correction (FTY-377).
+
+    Derived from the append-only audit trail, never stored — the same
+    derive-don't-store rule as :func:`item_is_edited`, without the supersession
+    clause: any rename in the item's history means the user authored the display
+    name. Deliberately independent of ``is_edited`` — a rename is not a value
+    override, so neither flag ever implies the other.
+    """
+
+    if item_type is CandidateType.FOOD:
+        item_match = Correction.derived_food_item_id == item_id
+    else:
+        item_match = Correction.derived_exercise_item_id == item_id
+
+    renamed = exists().where(item_match, Correction.source == CorrectionSource.NAME_EDIT)
+    return bool(session.scalar(select(renamed)))
 
 
 def _source_label(source_type: SourceType, source_ref: str) -> str:

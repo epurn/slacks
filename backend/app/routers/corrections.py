@@ -1,14 +1,23 @@
-"""Derived-item edit route (FTY-051).
+"""Derived-item edit + rename routes (FTY-051, FTY-377).
 
 ``PATCH /api/users/{user_id}/derived-items/{item_type}/{item_id}`` applies a
 single deterministic user override to a derived food/exercise item, preserving the
 estimator's original value and appending immutable correction rows.
 
+``PATCH /api/users/{user_id}/derived-items/{item_type}/{item_id}/name`` (FTY-377)
+is the dedicated display-name mutation: it overwrites the item's ``name`` in place
+and appends one immutable text-valued ``name_edit`` correction. A rename is not a
+value override — it never flips ``is_edited``; the response carries the separate
+derived ``is_renamed`` flag. The name is untrusted user text, so this route's
+request-validation failures render the content-free ``422 invalid_request`` shape
+(:func:`app.routers.exact_evidence.sanitized_exact_evidence_validation_handler`)
+— the submitted name is never echoed back.
+
 The ``{user_id}`` path is explicit so object-level ownership is checked on every
 edit. A cross-user or unknown target renders ``404`` — the API never confirms
 another user's item exists nor mutates it (fail closed). Semantic rejections
-(unknown field, out-of-range value, invalid quantity) render ``422`` with a
-machine-readable error shape that never echoes the item's values.
+(unknown field, out-of-range value, invalid quantity, invalid name) render ``422``
+with a machine-readable error shape that never echoes the item's values.
 """
 
 from __future__ import annotations
@@ -27,6 +36,7 @@ from app.schemas.corrections import (
     DerivedExerciseItemDTO,
     DerivedFoodItemDTO,
     DerivedItemEditRequest,
+    DerivedItemRenameRequest,
 )
 from app.services import corrections as corrections_service
 from app.services import item_read_model
@@ -73,6 +83,53 @@ def edit_derived_item(
             item_id,
             payload.field,
             payload.value,
+        )
+    except (DerivedItemForbidden, DerivedItemNotFound) as exc:
+        raise _NOT_FOUND from exc
+    except InvalidCorrection as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": exc.code, "field": exc.field},
+        ) from exc
+
+    if item_type is CandidateType.FOOD:
+        return item_read_model.serialize_food_item(session, cast("DerivedFoodItem", result.item))
+    return item_read_model.serialize_exercise_item(
+        session, cast("DerivedExerciseItem", result.item)
+    )
+
+
+@router.patch(
+    "/{user_id}/derived-items/{item_type}/{item_id}/name",
+    response_model=DerivedFoodItemDTO | DerivedExerciseItemDTO,
+)
+def rename_derived_item(
+    user_id: uuid.UUID,
+    item_type: CandidateType,
+    item_id: uuid.UUID,
+    payload: DerivedItemRenameRequest,
+    current_user: CurrentUser,
+    session: Annotated[Session, Depends(get_session)],
+) -> DerivedFoodItemDTO | DerivedExerciseItemDTO:
+    """Rename the caller's own derived item — an audited display-name edit (FTY-377).
+
+    Overwrites the item's ``name`` in place and appends one immutable text-valued
+    ``name_edit`` correction row. Not a value override: the item's numbers and
+    provenance are untouched and ``is_edited`` is unaffected; the response carries
+    the new ``name`` and the derived ``is_renamed`` flag. Renaming to the identical
+    current name is a safe no-op (no audit row). Cross-user, unknown, or
+    voided-parent targets fail closed as ``404`` with no mutation; an invalid name
+    renders ``422`` without echoing the value.
+    """
+
+    try:
+        result = corrections_service.rename_derived_item(
+            session,
+            user_id,
+            current_user,
+            item_type,
+            item_id,
+            payload.name,
         )
     except (DerivedItemForbidden, DerivedItemNotFound) as exc:
         raise _NOT_FOUND from exc

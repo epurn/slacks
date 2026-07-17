@@ -149,7 +149,7 @@ def test_alembic_status_handles_unreadable_db_version() -> None:
 def test_code_head_revision_matches_the_shipped_head() -> None:
     # Guards that the smoke reads the head from the migration scripts, and pins
     # the current head the story is calibrated against.
-    assert sr.code_head_revision() == "0020"
+    assert sr.code_head_revision() == "0021"
 
 
 # --------------------------------------------------------------------------- #

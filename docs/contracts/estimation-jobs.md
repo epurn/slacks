@@ -35,6 +35,20 @@ estimator / backend-core / contracts lane:
 
 ## Version
 
+6 (FTY-374, contract only; no schema change to these tables): the worker learns
+to feed a **unified text+image submission** (`log-events.md` v9) to the
+estimator. The `EstimationJobPayload` is **unchanged — ids only, reaffirmed**:
+no image bytes, paths, or hashes ever ride the queue or logs. Instead, the
+worker **loads the event's transient image attachments by `log_event_id` at
+claim time** (`log-attachments.md` v3) and passes them to the pipeline as
+`ImageInput`s (`llm-provider.md` v2 `images=`). An image-bearing NL event runs
+the **text-parse / interpretation pipeline augmented with the images as vision
+evidence surfaces** (`parse-candidates.md` v12) — *not* the label-only
+`label_pipeline` — and the worker **purges the event's transient rows in the
+same transaction as the terminal status write** (`completed`/`failed`) unless
+they were saved. Implementation is the downstream **FTY-375/FTY-376** split.
+See [Image-bearing events](#image-bearing-events-fty-374).
+
 5 (FTY-363, descriptive; no schema change): the retry/terminal state machine gains
 a **per-run provider-call / wall-clock ceiling** — a run-scoped bound on total
 sequential provider work *within one attempt*, distinct from the attempt-level
@@ -129,6 +143,12 @@ worker trust boundary (`extra="forbid"`).
 { "log_event_id": "UUID", "user_id": "UUID" }
 ```
 
+**FTY-374 reaffirms this shape unchanged for image-bearing events**: no image
+bytes, storage paths, content hashes, or any other image-derived value is ever
+placed on the queue, in task arguments, or in logs. The worker reaches the
+images through the database, by the event id it already carries (see
+[Image-bearing events](#image-bearing-events-fty-374)).
+
 ### Pipeline step interface
 
 A step carries a stable `name` and a `run(context)` that mutates an
@@ -156,11 +176,23 @@ FTY-043 `exercise_calculate` step. (FTY-040 shipped two stub steps; FTY-042 repl
 FTY-043 replaced `stub_calculate` with the deterministic MET exercise-burn step —
 see `exercise-burn.md`. Food resolution, FTY-044, is still to come.)
 
-A log event carrying a user-provided **nutrition-label image** (FTY-061) runs a
-separate `label_pipeline(provider)` instead — a single `label_resolve` step that
-reads the image through the v2 vision provider and costs it deterministically,
-because a label event has an image rather than NL text. It uses the same step-signal
-vocabulary and status transitions; see `label-extraction.md`.
+A log event created by the standalone synchronous **nutrition-label upload**
+(FTY-061/FTY-064, `label-upload.md`) runs a separate `label_pipeline(provider)`
+instead — a single `label_resolve` step that reads the image through the v2
+vision provider and costs it deterministically, because a label event has an
+image rather than NL text. It uses the same step-signal vocabulary and status
+transitions; see `label-extraction.md`.
+
+**Pipeline selection for image-bearing events (FTY-374):** an event created by
+the unified text+image submission (`log-events.md` v9) is an **NL event with
+image evidence**, not a label event — it runs `default_pipeline` (the
+parse/interpretation path) **augmented with the event's images as vision
+evidence surfaces**, never `label_pipeline`. Text supplies identity, count, and
+context; an image supplies label facts as `user_label`-tier evidence
+(`parse-candidates.md` v12, `label-extraction.md`, `evidence-retrieval.md`).
+The `label_pipeline` remains reserved for the synchronous label endpoint's
+"photograph a label, nothing typed" flow and is unchanged, as is its FTY-196
+confirmation gate.
 
 ## Outputs / State machine
 
@@ -246,6 +278,50 @@ in the one transaction that persists the `clarification_answers` row:
   that lands, only remaining allowed clarifications after FTY-301's rough-estimate
   fallback carry no committed siblings, so this reduces to the v2 event-level
   re-estimate.
+
+### Image-bearing events (FTY-374)
+
+An event created with images (`log-events.md` v9) runs the same claim → run →
+transition machinery with four additional rules, implemented by the downstream
+FTY-375/FTY-376 split:
+
+- **Worker-side image load, by event id.** At claim time the worker loads the
+  event's `log_attachments` rows by `log_event_id`, scoped to the job's
+  `user_id` like the event itself (a cross-user row is unreachable by
+  construction), and places them on the `EstimationContext` as `ImageInput`s
+  (`llm-provider.md` v2). The queue payload stays ids-only; the database is the
+  only channel image bytes travel from create to worker.
+- **Vision gating — an image never reaches a non-vision model.** Images are
+  supplied to the provider only when the configured model is vision-capable
+  (`SLACKS_LLM_SUPPORTS_VISION=true`; `llm-provider.md` fails fast otherwise).
+  On a non-vision deployment the worker does **not** pass the images: the run
+  proceeds on the text surface alone as a visibly rough estimate (the
+  *estimate-first / never-reject* clause — a configuration limit is
+  infrastructure trouble, never grounds for a terminal `failed`). An
+  image-only event (marker `raw_text`, no usable text surface) on a non-vision
+  deployment routes to a clarifying question rather than terminal failure.
+- **Same run bounds, same re-estimate.** The attempt-level retry policy and
+  the per-run provider-call / wall-clock ceiling (FTY-363) apply unchanged. An
+  answer-triggered re-estimate reloads the event's still-retained transient
+  images the same way (they are retained across the awaiting-answer window —
+  `log-attachments.md` v3), so a clarify round never loses the image evidence.
+- **Terminal purge.** When the run drives the event to a terminal status
+  (`completed` / `failed`), the worker **hard-deletes the event's
+  `transient = true` attachment rows in the same transaction as the terminal
+  status write** — atomic with the outcome, so no purge job, no orphaned
+  window. Saved rows (`transient = false`) are never touched. Worker-terminal
+  clarification outcomes (`needs_clarification` / `partially_resolved`) purge
+  nothing.
+
+**Image egress and privacy.** Images are untrusted input sent to the
+**LLM/vision provider only** (`llm-provider.md` — data, never instructions).
+They are never sent to search, fetch, OCR-web, or any other egress; never
+logged; never placed on the queue; and never copied — as bytes, paths, or
+hashes — into `estimation_runs` `trace` or `error` (the evidence row's
+`content_hash` provenance lives in `evidence_sources`, not the run). Errors
+stay content-free. Prompt-injection printed on an image is data, never
+instructions: image-derived output crosses the same schema-validation trust
+boundary as any text output before anything is persisted.
 
 ## Decision trace (FTY-255)
 
@@ -369,7 +445,10 @@ surface (`docs/security/data-retention.md`, "Estimation runs").
   validation errors) plus a sanitized trace and error — **no raw prompts, no
   secrets, no raw user text** (security baseline + `docs/security/data-retention.md`,
   "Estimation runs").
-- Jobs carry event/user ids; logs use ids, never raw text.
+- Jobs carry event/user ids; logs use ids, never raw text. Image-bearing events
+  (FTY-374) add nothing to this surface: image bytes/paths/hashes never appear
+  on the queue, in logs, or in `trace`/`error` — the worker reads images from
+  the database and sends them to the vision provider only.
 - Retention follows the owning log event: `ON DELETE CASCADE` on `log_event_id`
   (and `user_id`) removes a user's jobs and runs when the event or account is
   deleted.
@@ -431,6 +510,16 @@ POST /api/users/{uid}/log-events  →  201 pending event
   additive column). The estimator implementation is the downstream FTY-278
   follow-up; until then, FTY-301 rough-estimates recognizable amountless items by
   default and any remaining allowed clarification stays event-level.
+- **v6 (FTY-374, contract only; no code, no migration in this story).** Adds
+  the image-bearing-event rules: worker-side image load by `log_event_id` at
+  claim time onto the context as `ImageInput`s, pipeline selection
+  (`default_pipeline` augmented with images, never `label_pipeline`), vision
+  gating with the never-reject degrade path, the terminal-transaction purge of
+  transient attachment rows, and provider-only image egress. The
+  `EstimationJobPayload`, both tables, the claim/idempotency/ownership rules,
+  the retry policy, and the FTY-363 ceiling are all unchanged. Implementation:
+  **FTY-375** (ingestion/retention + the `log-attachments.md` v3 migration) and
+  **FTY-376** (worker/pipeline consumption).
 - **FTY-334 (brand cutover, mechanical rename).** The LLM model reference for
   `estimation_runs.model` documented here now uses the `SLACKS_LLM_MODEL`
   environment key, renamed from the legacy prefix as part of the repo-wide brand

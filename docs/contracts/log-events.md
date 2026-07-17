@@ -35,9 +35,11 @@ derived-item persistence. **Deleting** an event is now in scope as the
 soft-void operation (FTY-321, item 6 above): a void is a status marker, not a
 hard row deletion, so no derived-item, correction, or evidence row is ever
 removed by application code. The day-listing read composes the existing derived
-food/exercise item read-model without changing its storage contract. Saved image attachments are owned by their own contract
-(`log-attachments.md`, FTY-077): a `log_attachments` row references a log event but
-is written only when the user explicitly saves an uploaded image.
+food/exercise item read-model without changing its storage contract. Image attachments are owned by their own contract
+(`log-attachments.md`): a `log_attachments` row references a log event and is
+written either when the user explicitly saves an uploaded image (FTY-077) or
+transiently — purged at estimation-terminal — for a unified text+image
+submission (FTY-374, `log-event-images.md`).
 
 ## Owner
 
@@ -46,6 +48,15 @@ backend-core / contracts lane (`backend/app/models/log_events.py`,
 `backend/app/routers/log_events.py`, `backend/alembic/`).
 
 ## Version
+
+9 (FTY-374, contract only): create gains the **unified text+image submission**
+— the endpoint now also accepts `multipart/form-data` (one JSON `payload` part
+plus 0..N fail-closed validated `image` parts) while the `application/json`
+body stays **byte-for-byte unchanged**, preserving the FTY-104 offline outbox
+and every text-only client. The wire shape, validation/limits, async
+never-reject rationale, transient retention, and replay-re-ingests-nothing
+rules are owned by [log-event-images.md](log-event-images.md); this page's
+event DTO, status machine, idempotency, and counting semantics are unchanged.
 
 8 (FTY-321): adds the **soft-void (delete) operation** — `DELETE
 /api/users/{user_id}/log-events/{event_id}` — and a nullable `voided_at`
@@ -82,56 +93,23 @@ state machine (including `needs_clarification` and `partially_resolved`),
 validation, authorization, privacy/retention, and errors — since the clarify
 endpoints are still gated by the statuses defined here.
 
-6 (FTY-278): defines the **item-scoped partial clarification** contract for a
-mixed food log by adding a first-class **`partially_resolved`** event status — a
-**pre-v1 additive extension** of the status vocabulary and state machine, with no
-back-compat shim. Before FTY-278 a mixed log with any un-costable component routed
-the *whole* entry to a terminal-with-nothing-committed `needs_clarification` event:
-no item was persisted while a question waited. FTY-278 makes clarification
-**item-scoped**: the costable components of the entry are committed as `resolved`
-derived items (and counted — see `daily-summary.md`) on a new `partially_resolved`
-event while a **specific unresolved component** owns the open question.
-`needs_clarification` keeps its pre-FTY-278 meaning — event-level clarification
-with *nothing* committed (no component individually costed). Concretely this story
-settles four contract points and cross-links the affected contracts:
-
-1. **Event status and transitions** — a new **`partially_resolved`** status is the
-   item-scoped partial state: it carries committed `resolved` items alongside an
-   open item-scoped question. The state machine gains two transitions —
-   `processing → partially_resolved` (the estimator commits the costable siblings
-   and raises the item-scoped question in one terminal transaction) and
-   `partially_resolved → processing` (answering re-estimates the same event).
-   `needs_clarification` and its transitions are unchanged and still mean the
-   event-level, nothing-committed case.
-2. **Question → component reference** — each item-scoped clarification question
-   names the specific unresolved component by a stable `derived_food_item_id`
-   reference (see `parse-candidates.md`), never by echoing the raw diary phrase.
-   That reference is an **internal** producer→estimator link (which component the
-   answer-triggered re-estimate re-costs); it is **not** surfaced in the API. The
-   **FTY-170 clarification read/answer shape is unchanged** — the read still
-   serves `{ id, text, options }`, and the human context is the question `text`,
-   which names the component by its sanitized food `name`.
-3. **Partial read exposure** — the day-listing read returns a partial event's
-   committed `resolved` items (its event-status gate relaxes from `completed`-only
-   to `completed` **or** `partially_resolved`); the open question remains
-   discoverable through the status-gated clarification read.
-4. **Answer flow** — answering an item-scoped question re-estimates **only that
-   open component** on the **same** event (`partially_resolved → processing`),
-   leaves the already-resolved siblings **untouched** (never re-costing,
-   re-creating, or replacing them), and completes the entry when the last
-   component resolves, with no double-counting or duplicate item rows (the
-   job/run mechanics are `estimation-jobs.md` v3). This `partially_resolved →
-   processing` flip is **invisible in the day total**: the daily-summary
-   finalized gate keys on committed resolved items, so the committed siblings stay
-   counted for the whole re-estimate window (FTY-349, `daily-summary.md`).
-
-**This version is a contract decision only; it edits no product code.** The
-downstream estimator/backend implementation is a required follow-up split (called
-out under Migration / Compatibility). FTY-301 changes the default amountless case:
-recognizable components now rough-estimate under `estimate_first`. Until the
-item-scoped follow-up lands, any **remaining** allowed clarification (strict mode,
-unsafe input, or every rough path unavailable) is still event-level
-`needs_clarification` with no committed siblings.
+6 (FTY-278, contract only): defines the **item-scoped partial clarification**
+contract for a mixed food log by adding the first-class **`partially_resolved`**
+event status — a **pre-v1 additive extension** of the status vocabulary and
+state machine, with no back-compat shim. A mixed entry is no longer
+all-or-nothing: the costable components are committed as `resolved` items (and
+counted — `daily-summary.md`) on a `partially_resolved` event while a specific
+unresolved component owns the open question; `needs_clarification` keeps its
+event-level, nothing-committed meaning. The two new transitions and the
+sibling-preserving answer flow are specified under
+[State machine](#state-machine) and in `estimation-jobs.md` v3; the internal
+question→component reference (`derived_food_item_id`, never surfaced — the
+FTY-170 read/answer shape is unchanged) is `parse-candidates.md` v5; the
+day-listing read's event-status gate relaxes to `completed` **or**
+`partially_resolved`. The estimator/backend implementation is a required
+follow-up split (see Migration / Compatibility); until it lands, FTY-301's
+rough-estimate default applies and any remaining allowed clarification is still
+event-level `needs_clarification` with nothing committed.
 
 5 (FTY-198): adds the **day-listing read** —
 `GET /api/users/{user_id}/log-events/by-date?day=YYYY-MM-DD` — which returns an
@@ -211,13 +189,19 @@ The `0003` migration creates:
 All requests carry `Authorization: Bearer <token>` and target the
 authenticated user's own `{user_id}`.
 
-- `POST /api/users/{user_id}/log-events` —
-  `{ "raw_text": str, "idempotency_key"?: str }`. Creates a `pending` event.
-  `raw_text` is trimmed; it must be non-empty after trimming and at most 2000
-  characters. The optional `idempotency_key` is an **opaque** client token (a
-  UUID/ULID by convention — the server never parses or interprets it): trimmed,
-  non-empty after trimming when present, and at most 200 characters. Unknown body
-  keys are rejected. See [Idempotent create](#idempotent-create-201-vs-200).
+- `POST /api/users/{user_id}/log-events` — creates a `pending` event. Accepts
+  **either** of two content types (FTY-374):
+  - `application/json` — `{ "raw_text": str, "idempotency_key"?: str }`,
+    **byte-for-byte unchanged** from v1/v2. `raw_text` is trimmed; it must be
+    non-empty after trimming and at most 2000 characters. The optional
+    `idempotency_key` is an **opaque** client token (a UUID/ULID by convention —
+    the server never parses or interprets it): trimmed, non-empty after trimming
+    when present, and at most 200 characters. Unknown body keys are rejected.
+    See [Idempotent create](#idempotent-create-201-vs-200).
+  - `multipart/form-data` — one JSON `payload` part (same field rules as the
+    JSON body) plus 0..N binary `image` parts, with an optional `save` query
+    flag. Wire shape, validation, and limits:
+    [log-event-images.md](log-event-images.md).
 - `GET /api/users/{user_id}/log-events?day=YYYY-MM-DD` — lists the user's events
   whose `created_at` falls on `day`, resolved in the user's profile timezone.
   `day` is optional and defaults to the current day in that timezone.
@@ -407,6 +391,20 @@ in the day's totals) — and runs the unchanged `pending → processing → comp
 transitions the estimator drives (see `estimation-jobs.md`). A keyed create
 enqueues exactly as the no-key path does; the replay path enqueues nothing.
 
+### Images on create (FTY-374)
+
+Specified in [log-event-images.md](log-event-images.md): the multipart wire
+shape (`payload` part + 0..N `image` parts + `save` query flag), the
+at-least-one-surface rule and the `"Photo log"` marker for image-only
+submissions, the fail-closed per-image validation (`MAX_SUBMISSION_IMAGES = 4`,
+10 MiB, allowlist + signature), the async never-reject routing rationale, and
+the transient-then-purge retention (`log-attachments.md` v3). On this page's
+surfaces nothing changes: both content types create exactly one `pending`
+event and enqueue exactly one job; first-write-wins idempotency holds and a
+keyed replay **re-ingests nothing** (the "body mismatch is not an error" rule
+extends to image parts, which a replay ignores entirely); the status state
+machine, `daily-summary.md` counting, and soft-void (FTY-321) are unchanged.
+
 ### Clarification read and Clarification answer (resolve)
 
 The clarify-loop read (`GET .../log-events/{event_id}/clarification`) and
@@ -543,8 +541,14 @@ label event still reaches terminal `completed`; only its food item is held
 
 ## Validation
 
-- `raw_text`: required; trimmed; non-empty after trimming; 1–2000 characters.
-  Whitespace-only input is rejected.
+- `raw_text`: required on the `application/json` create; trimmed; non-empty
+  after trimming; 1–2000 characters. Whitespace-only input is rejected. On a
+  `multipart/form-data` create it is optional **only when at least one `image`
+  part is present**, and obeys the same rules when present (FTY-374).
+- Multipart `payload` / `image` parts and the `save` query flag: validated
+  fail-closed **before** any event, attachment, enqueue, or model call —
+  limits, ordering, and rejection statuses in
+  [log-event-images.md](log-event-images.md).
 - `idempotency_key`: optional; when present, a string, trimmed, non-empty after
   trimming, and at most 200 characters. An over-length, empty/whitespace, or
   wrong-type key is rejected (`422`). It is validated as opaque data only — the
@@ -613,7 +617,8 @@ label event still reaches terminal `completed`; only its food item is held
 | `401` | Missing/invalid/expired bearer token. |
 | `404` | Creating, listing, day-listing, or reading events for an account the caller does not own; a get-by-id, **delete (void)**, clarification read, or clarification answer whose event does not exist for the owner (a voided event is not-found for get-by-id and the clarify endpoints); an answer whose `question_id` is not one of the owned event's questions (all fail closed). |
 | `409` | A fresh (non-replay) answer for an event not in `needs_clarification` or `partially_resolved` — `{"error": "not_awaiting_clarification"}`; nothing persisted or mutated. |
-| `422` | Empty/whitespace/oversized `raw_text`, empty/whitespace/oversized/wrong-type `idempotency_key`, unknown body key, malformed `day`, missing/malformed `question_id`, or empty/whitespace/oversized/wrong-type `answer`. |
+| `413` / `415` | A multipart create `image` part failing size / content-type+signature validation; the whole submission is rejected — no event, no attachment, no enqueue, no model call (`log-event-images.md`). |
+| `422` | Empty/whitespace/oversized `raw_text`, empty/whitespace/oversized/wrong-type `idempotency_key`, unknown body key, malformed `day`, missing/malformed `question_id`, empty/whitespace/oversized/wrong-type `answer`, or a malformed/over-limit/empty multipart submission (`log-event-images.md`). |
 
 ## Examples
 
@@ -735,3 +740,11 @@ questions) live in `clarification.md`.
   handles recognizable amountless components; any remaining allowed clarification
   still routes the whole event to event-level `needs_clarification` with nothing
   committed.
+- **FTY-374 (contract only; no code, no migration in this story).** Adds the
+  unified text+image create ([log-event-images.md](log-event-images.md); the
+  retention/worker/parse halves are `log-attachments.md` v3,
+  `estimation-jobs.md` v6, `parse-candidates.md` v12 /
+  `interpretation-session.md` v2). Additive for the JSON path — nothing about
+  the JSON shape changes. Downstream: **FTY-375** (ingestion/retention),
+  **FTY-376** (estimator consumption), plus a required follow-up **mobile
+  composer** story.

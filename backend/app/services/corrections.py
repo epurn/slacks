@@ -24,8 +24,18 @@ contract:
    field is a **value override** — it overrides only that field, appends exactly one
    :attr:`~app.enums.CorrectionSource.USER_EDIT` row, and marks the item edited.
 
+4. **The display-name rename (FTY-377).** :func:`rename_derived_item` overwrites
+   an item's ``name`` in place and appends one **text-valued**
+   :attr:`~app.enums.CorrectionSource.NAME_EDIT` row (``old_value_text`` /
+   ``new_value_text``, ``new_value`` ``NULL``). A rename is **not** a value
+   override — the item's numbers still come from their resolved source — so it
+   never affects ``is_edited``; the read model derives the separate ``is_renamed``
+   flag from the ``name_edit`` row. Renaming never re-resolves or re-costs the
+   item, and a rename to the identical current name is a safe no-op (no churn row).
+
 Every change appends an immutable :class:`~app.models.corrections.Correction`.
-Old/new values are sensitive personal data and are never written to logs.
+Old/new values — numbers and names alike — are sensitive personal data and are
+never written to logs.
 """
 
 from __future__ import annotations
@@ -38,7 +48,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.enums import CandidateType, CorrectionSource
-from app.models.corrections import Correction
+from app.models.corrections import CORRECTION_TEXT_MAX_LENGTH, Correction
 from app.models.derived import DerivedExerciseItem, DerivedFoodItem
 from app.models.identity import User
 from app.models.log_events import LogEvent
@@ -133,6 +143,62 @@ def edit_derived_item(
     session.commit()
     session.refresh(item)
     return EditResult(item=item, corrections=corrections)
+
+
+def rename_derived_item(
+    session: Session,
+    owner_id: uuid.UUID,
+    current_user: User,
+    item_type: CandidateType,
+    item_id: uuid.UUID,
+    new_name: str,
+) -> EditResult:
+    """Rename one of ``owner_id``'s derived items, appending a ``name_edit`` audit row.
+
+    The dedicated display-name mutation (FTY-377). Enforces the same fail-closed
+    boundary as the value edit — ownership (:func:`_authorize` + owner-scoped load)
+    and the voided-parent precheck (FTY-321) — then overwrites ``item.name`` in
+    place and appends exactly one immutable text-valued
+    :attr:`~app.enums.CorrectionSource.NAME_EDIT` correction (``old_value_text`` =
+    prior name, ``new_value_text`` = new name, ``new_value`` ``NULL``), committing
+    both atomically. A rename to the identical current name is a safe no-op: the
+    item is returned unchanged and **no** churn row is appended. Never re-resolves,
+    re-costs, or touches ``is_edited`` — the numbers keep their provenance.
+
+    ``new_name`` is untrusted user text; the request boundary validates it
+    (non-blank, bounded), and :class:`InvalidCorrection` re-checks here so a
+    non-HTTP caller cannot bypass the bound. The name value is never logged.
+    """
+
+    _authorize(owner_id, current_user)
+    item = _load_owned(session, item_type, item_id, owner_id)
+    ensure_parent_event_not_voided(session, item_type, item_id, owner_id)
+
+    stripped = new_name.strip()
+    if not stripped or len(stripped) > CORRECTION_TEXT_MAX_LENGTH:
+        raise InvalidCorrection("invalid_name", "name")
+
+    if stripped == item.name:
+        return EditResult(item=item, corrections=[])
+
+    correction = Correction(
+        user_id=owner_id,
+        item_type=item_type,
+        derived_food_item_id=item.id if item_type is CandidateType.FOOD else None,
+        derived_exercise_item_id=item.id if item_type is CandidateType.EXERCISE else None,
+        field="name",
+        old_value=None,
+        new_value=None,
+        old_value_text=item.name,
+        new_value_text=stripped,
+        source=CorrectionSource.NAME_EDIT,
+    )
+    item.name = stripped
+
+    session.add(correction)
+    session.commit()
+    session.refresh(item)
+    return EditResult(item=item, corrections=[correction])
 
 
 def apply_item_edit(

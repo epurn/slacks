@@ -7,6 +7,10 @@ Contracts consumed by the mobile edit UI (FTY-050), the Today timeline + sheet
   new value). The new value is the single untrusted number crossing this boundary;
   it is bounds-checked here (finite, non-negative) before the service applies any
   field-specific range rule.
+- :class:`DerivedItemRenameRequest` — the ``PATCH .../name`` request shape
+  (FTY-377): the new display name. Untrusted user text, bounded and
+  non-blank-checked here; validation failures render a content-free ``422`` (the
+  sanitized handler — the name is never echoed back).
 - :class:`ItemSourceDTO` — the per-item **source descriptor** (FTY-092): the
   evidence source-type, a display-ready label, and the source ref, so a client
   renders the always-on source icon without joining ``evidence_sources`` itself.
@@ -38,6 +42,11 @@ from app.enums import (
 #: Field-name length cap for an edit request; comfortably covers every editable
 #: field while bounding unbounded input.
 MAX_FIELD_NAME_LENGTH = 64
+
+#: Item display-name length cap for a rename request (FTY-377). Matches the
+#: derived-item ``name`` column (``String(200)``, ``app.models.derived``) and the
+#: correction text columns (``app.models.corrections.CORRECTION_TEXT_MAX_LENGTH``).
+MAX_ITEM_NAME_LENGTH = 200
 
 
 class DerivedItemEditRequest(BaseModel):
@@ -71,6 +80,31 @@ class DerivedItemEditRequest(BaseModel):
         if value < 0:
             raise ValueError("value must be non-negative")
         return value
+
+
+class DerivedItemRenameRequest(BaseModel):
+    """Request body for ``PATCH .../derived-items/{item_type}/{item_id}/name`` (FTY-377).
+
+    ``name`` is the user-authored replacement display name — untrusted user text
+    (like ``raw_text``): bounded and non-blank-checked here, stored via
+    parameterized ORM inserts, never interpreted as an instruction, and never
+    logged or echoed. A validation failure on this body renders the content-free
+    ``422 invalid_request`` shape (see
+    :func:`app.routers.exact_evidence.sanitized_exact_evidence_validation_handler`)
+    rather than FastAPI's default input-echoing body.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=MAX_ITEM_NAME_LENGTH)
+
+    @field_validator("name")
+    @classmethod
+    def _strip_non_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("name must not be empty or whitespace only")
+        return stripped
 
 
 class ItemSourceDTO(BaseModel):
@@ -116,7 +150,10 @@ class DerivedFoodItemDTO(BaseModel):
     ``is_edited`` are server-derived (FTY-092): ``source`` from the item's
     ``evidence_sources`` row (``None`` when no provenance record exists), and
     ``is_edited`` ``True`` iff the item carries a ``user_edit`` value-override
-    correction — an amount-adjusted-only item stays ``False``.
+    correction — an amount-adjusted-only item stays ``False``. ``is_renamed``
+    (FTY-377) is likewise derived: ``True`` iff the item carries a ``name_edit``
+    correction — the user authored the display name. Independent of ``is_edited``
+    (a rename is not a value override).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -141,6 +178,7 @@ class DerivedFoodItemDTO(BaseModel):
     fat_g_estimated: float | None
     source: ItemSourceDTO | None = None
     is_edited: bool = False
+    is_renamed: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -151,7 +189,8 @@ class DerivedExerciseItemDTO(BaseModel):
     Mirrors :class:`DerivedFoodItemDTO`. Exercise burn is computed from MET tables
     (recorded on the estimation run), not an ``evidence_sources`` row, so ``source``
     is ``None``; ``is_edited`` follows the same ``user_edit`` rule (a corrected
-    ``active_calories`` marks it edited).
+    ``active_calories`` marks it edited) and ``is_renamed`` the same ``name_edit``
+    rule (FTY-377).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -169,6 +208,7 @@ class DerivedExerciseItemDTO(BaseModel):
     active_calories_estimated: float | None
     source: ItemSourceDTO | None = None
     is_edited: bool = False
+    is_renamed: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -178,7 +218,11 @@ class CorrectionDTO(BaseModel):
 
     The named contract consumed by FTY-052 and later learning work: a user-owned,
     typed reference to the corrected derived item, the changed field, the old/new
-    value in canonical units, the source, and the creation timestamp.
+    value, the source, and the creation timestamp. Value-type-polymorphic
+    (FTY-377): a numeric correction carries ``old_value``/``new_value`` in
+    canonical units; a ``name_edit`` text correction carries
+    ``old_value_text``/``new_value_text`` with ``new_value`` ``None`` — exactly one
+    of ``new_value``/``new_value_text`` is set.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -190,6 +234,8 @@ class CorrectionDTO(BaseModel):
     derived_exercise_item_id: uuid.UUID | None
     field: str
     old_value: float | None
-    new_value: float
+    new_value: float | None
+    old_value_text: str | None
+    new_value_text: str | None
     source: CorrectionSource
     created_at: datetime
