@@ -1,15 +1,25 @@
 /**
- * Tests for the label-image upload API client (FTY-064).
+ * Tests for the label-image upload API client (FTY-064; read fixed in FTY-381).
  *
  * Covers:
- * - Happy path: local file read → guard → raw-body POST → event returned.
+ * - Happy path: native file read → guard → raw-body upload → event returned.
  * - Save flag forwarded correctly in the query string (save=true / save=false).
- * - Correct endpoint, auth header, Content-Type, and raw-image body.
+ * - Correct endpoint, auth header, Content-Type, mimeType, and binary upload type.
  * - Client-side size guard rejects oversized files before the upload call.
  * - Client-side type guard rejects non-image content types before the upload call.
+ * - An unreadable file is rejected content-free before any upload.
  * - API error responses mapped to nonjudgmental, content-free messages.
  * - Error messages never contain image bytes, URIs, or extracted content.
  */
+
+// The native `File`/`UploadType` API is stubbed: these tests inject `openImage`,
+// so `File` is never constructed — only `UploadType` needs a concrete value.
+jest.mock("expo-file-system", () => ({
+  File: class {},
+  UploadType: { BINARY_CONTENT: 0, MULTIPART: 1 },
+}));
+
+import { UploadType } from "expo-file-system";
 
 import {
   uploadLabelImage,
@@ -19,6 +29,9 @@ import {
   LabelUploadApiError,
   LabelUploadTooLargeError,
   LabelUploadInvalidTypeError,
+  LabelUploadUnreadableError,
+  type LocalImageFile,
+  type OpenLocalImage,
 } from "./labelCapture";
 import { setUnauthorizedHandler } from "./client";
 import type { LogEventDTO } from "./logEvents";
@@ -45,21 +58,35 @@ const EVENT_DTO: LogEventDTO = {
   updated_at: "2026-06-27T10:00:00Z",
 };
 
-// A small mock blob of known size and type.
-function makeBlobResponse(sizeBytes: number, contentType: string): Response {
-  return {
-    ok: true,
-    status: 200,
-    blob: async () => ({ size: sizeBytes, type: contentType }),
-  } as unknown as Response;
-}
-
-function makeUploadResponse(body: unknown, status = 201): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: async () => body,
-  } as unknown as Response;
+/**
+ * Build a fake local image file + its opener seam. `upload` is a jest mock so
+ * tests can assert the URL/headers/body-type and whether it was called at all
+ * (the size/type/exists guards must fire *before* any upload).
+ */
+function fakeImage(opts: {
+  size?: number;
+  type?: string;
+  exists?: boolean;
+  status?: number;
+  body?: unknown;
+  uploadRejects?: Error;
+}): { openImage: OpenLocalImage; upload: jest.Mock; openMock: jest.Mock } {
+  const {
+    size = 50_000,
+    type = "image/jpeg",
+    exists = true,
+    status = 201,
+    body = EVENT_DTO,
+    uploadRejects,
+  } = opts;
+  const upload = jest.fn(
+    uploadRejects
+      ? () => Promise.reject(uploadRejects)
+      : () => Promise.resolve({ status, body: JSON.stringify(body) }),
+  );
+  const file: LocalImageFile = { exists, size, type, upload };
+  const openMock = jest.fn().mockReturnValue(file);
+  return { openImage: openMock as unknown as OpenLocalImage, upload, openMock };
 }
 
 // ─── validateImageGuard (pure) ────────────────────────────────────────────────
@@ -100,104 +127,98 @@ describe("validateImageGuard", () => {
 // ─── uploadLabelImage ─────────────────────────────────────────────────────────
 
 describe("uploadLabelImage", () => {
-  it("fetches the local file, then POSTs the raw image to the label endpoint", async () => {
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce(makeBlobResponse(50_000, "image/jpeg")) // local file
-      .mockResolvedValueOnce(makeUploadResponse(EVENT_DTO, 201));     // upload
+  const LABEL_URL_BASE =
+    "https://api.example.test/api/users/11111111-1111-1111-1111-111111111111/log-events/label";
 
-    const result = await uploadLabelImage(SESSION, "file:///label.jpg", false, fetchMock);
+  it("reads the local file, then streams the raw image to the label endpoint", async () => {
+    const { openImage, upload, openMock } = fakeImage({ size: 50_000, type: "image/jpeg" });
+
+    const result = await uploadLabelImage(SESSION, "file:///label.jpg", false, openImage);
 
     expect(result).toEqual(EVENT_DTO);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
 
-    // First call: reads the local image file.
-    const [localUri] = fetchMock.mock.calls[0] as [string];
-    expect(localUri).toBe("file:///label.jpg");
+    // The local file is opened by URI, then uploaded exactly once.
+    expect(openMock).toHaveBeenCalledWith("file:///label.jpg");
+    expect(upload).toHaveBeenCalledTimes(1);
 
-    // Second call: the raw-body upload (save flag in the query string).
-    const [uploadUrl, uploadInit] = fetchMock.mock.calls[1] as [string, RequestInit];
-    expect(uploadUrl).toBe(
-      "https://api.example.test/api/users/11111111-1111-1111-1111-111111111111/log-events/label?save=false",
-    );
-    expect(uploadInit.method).toBe("POST");
-    const headers = uploadInit.headers as Record<string, string>;
-    expect(headers.Authorization).toBe("Bearer test-token");
-    // The header declares the image type; the body is the raw image blob.
-    expect(headers["Content-Type"]).toBe("image/jpeg");
-    expect((uploadInit.body as { size: number }).size).toBe(50_000);
+    const [uploadUrl, uploadOptions] = upload.mock.calls[0] as [
+      string,
+      {
+        httpMethod: string;
+        uploadType: UploadType;
+        headers: Record<string, string>;
+        mimeType: string;
+      },
+    ];
+    expect(uploadUrl).toBe(`${LABEL_URL_BASE}?save=false`);
+    expect(uploadOptions.httpMethod).toBe("POST");
+    // Binary body (raw image bytes), not multipart — matches the contract wire shape.
+    expect(uploadOptions.uploadType).toBe(UploadType.BINARY_CONTENT);
+    expect(uploadOptions.headers.Authorization).toBe("Bearer test-token");
+    expect(uploadOptions.headers["Content-Type"]).toBe("image/jpeg");
+    expect(uploadOptions.mimeType).toBe("image/jpeg");
   });
 
   it("sends save=false in the query string when savePhoto is false", async () => {
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce(makeBlobResponse(1000, "image/jpeg"))
-      .mockResolvedValueOnce(makeUploadResponse(EVENT_DTO, 201));
-
-    await uploadLabelImage(SESSION, "file:///label.jpg", false, fetchMock);
-
-    const [uploadUrl] = fetchMock.mock.calls[1] as [string];
+    const { openImage, upload } = fakeImage({});
+    await uploadLabelImage(SESSION, "file:///label.jpg", false, openImage);
+    const [uploadUrl] = upload.mock.calls[0] as [string];
     expect(uploadUrl).toContain("?save=false");
   });
 
   it("sends save=true in the query string when savePhoto is true", async () => {
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce(makeBlobResponse(1000, "image/jpeg"))
-      .mockResolvedValueOnce(makeUploadResponse(EVENT_DTO, 201));
-
-    await uploadLabelImage(SESSION, "file:///label.jpg", true, fetchMock);
-
-    const [uploadUrl] = fetchMock.mock.calls[1] as [string];
+    const { openImage, upload } = fakeImage({});
+    await uploadLabelImage(SESSION, "file:///label.jpg", true, openImage);
+    const [uploadUrl] = upload.mock.calls[0] as [string];
     expect(uploadUrl).toContain("?save=true");
   });
 
-  it("rejects oversize images before the upload call (guard fires before network)", async () => {
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce(makeBlobResponse(MAX_UPLOAD_BYTES + 1, "image/jpeg"));
+  it("rejects an unreadable file content-free before any upload", async () => {
+    const { openImage, upload } = fakeImage({ exists: false });
 
     await expect(
-      uploadLabelImage(SESSION, "file:///huge.jpg", false, fetchMock),
+      uploadLabelImage(SESSION, "file:///gone.jpg", false, openImage),
+    ).rejects.toBeInstanceOf(LabelUploadUnreadableError);
+
+    // The guard fires before the network — no upload was attempted.
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversize images before the upload call (guard fires before network)", async () => {
+    const { openImage, upload } = fakeImage({ size: MAX_UPLOAD_BYTES + 1 });
+
+    await expect(
+      uploadLabelImage(SESSION, "file:///huge.jpg", false, openImage),
     ).rejects.toThrow(LabelUploadTooLargeError);
 
-    // Only one fetch call (the local file read); the upload was never attempted.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(upload).not.toHaveBeenCalled();
   });
 
   it("rejects non-image content types before the upload call", async () => {
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce(makeBlobResponse(1000, "application/pdf"));
+    const { openImage, upload } = fakeImage({ type: "application/pdf" });
 
     await expect(
-      uploadLabelImage(SESSION, "file:///doc.pdf", false, fetchMock),
+      uploadLabelImage(SESSION, "file:///doc.pdf", false, openImage),
     ).rejects.toThrow(LabelUploadInvalidTypeError);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(upload).not.toHaveBeenCalled();
   });
 
   it("maps a 401 response to a session-expired message", async () => {
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce(makeBlobResponse(1000, "image/jpeg"))
-      .mockResolvedValueOnce(makeUploadResponse(null, 401));
+    const { openImage } = fakeImage({ status: 401, body: null });
 
     await expect(
-      uploadLabelImage(SESSION, "file:///label.jpg", false, fetchMock),
+      uploadLabelImage(SESSION, "file:///label.jpg", false, openImage),
     ).rejects.toMatchObject({ name: "LabelUploadApiError", status: 401 });
   });
 
   it("invokes the unauthorized handler on a 401 before throwing", async () => {
     const handler = jest.fn();
     setUnauthorizedHandler(handler);
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce(makeBlobResponse(1000, "image/jpeg"))
-      .mockResolvedValueOnce(makeUploadResponse(null, 401));
+    const { openImage } = fakeImage({ status: 401, body: null });
 
     await expect(
-      uploadLabelImage(SESSION, "file:///label.jpg", false, fetchMock),
+      uploadLabelImage(SESSION, "file:///label.jpg", false, openImage),
     ).rejects.toMatchObject({ name: "LabelUploadApiError", status: 401 });
     expect(handler).toHaveBeenCalledTimes(1);
   });
@@ -205,37 +226,28 @@ describe("uploadLabelImage", () => {
   it("does not invoke the unauthorized handler on a non-401 error", async () => {
     const handler = jest.fn();
     setUnauthorizedHandler(handler);
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce(makeBlobResponse(1000, "image/jpeg"))
-      .mockResolvedValueOnce(makeUploadResponse(null, 413));
+    const { openImage } = fakeImage({ status: 413, body: null });
 
     await expect(
-      uploadLabelImage(SESSION, "file:///label.jpg", false, fetchMock),
+      uploadLabelImage(SESSION, "file:///label.jpg", false, openImage),
     ).rejects.toMatchObject({ name: "LabelUploadApiError", status: 413 });
     expect(handler).not.toHaveBeenCalled();
   });
 
   it("maps a 413 response to an oversized message", async () => {
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce(makeBlobResponse(1000, "image/jpeg"))
-      .mockResolvedValueOnce(makeUploadResponse(null, 413));
+    const { openImage } = fakeImage({ status: 413, body: null });
 
     await expect(
-      uploadLabelImage(SESSION, "file:///label.jpg", false, fetchMock),
+      uploadLabelImage(SESSION, "file:///label.jpg", false, openImage),
     ).rejects.toMatchObject({ name: "LabelUploadApiError", status: 413 });
   });
 
   it("error messages do not contain image bytes, URIs, or extracted content", async () => {
     const sensitiveUri = "file:///private/nutrition-secret.jpg";
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce(makeBlobResponse(1000, "image/jpeg"))
-      .mockResolvedValueOnce(makeUploadResponse(null, 500));
+    const { openImage } = fakeImage({ status: 500, body: null });
 
     try {
-      await uploadLabelImage(SESSION, sensitiveUri, false, fetchMock);
+      await uploadLabelImage(SESSION, sensitiveUri, false, openImage);
       throw new Error("expected uploadLabelImage to throw");
     } catch (err) {
       const message = (err as LabelUploadApiError).message;
@@ -246,13 +258,17 @@ describe("uploadLabelImage", () => {
     }
   });
 
-  it("falls back to image/jpeg when the blob has an empty type", async () => {
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce(makeBlobResponse(1000, "")) // empty type
-      .mockResolvedValueOnce(makeUploadResponse(EVENT_DTO, 201));
+  it("falls back to image/jpeg when the file reports an empty type", async () => {
+    const { openImage, upload } = fakeImage({ type: "" }); // empty type
 
-    const result = await uploadLabelImage(SESSION, "file:///label.jpg", false, fetchMock);
+    const result = await uploadLabelImage(SESSION, "file:///label.jpg", false, openImage);
     expect(result).toEqual(EVENT_DTO);
+
+    const [, uploadOptions] = upload.mock.calls[0] as [
+      string,
+      { headers: Record<string, string>; mimeType: string },
+    ];
+    expect(uploadOptions.headers["Content-Type"]).toBe("image/jpeg");
+    expect(uploadOptions.mimeType).toBe("image/jpeg");
   });
 });

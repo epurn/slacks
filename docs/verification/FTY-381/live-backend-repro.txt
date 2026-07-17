@@ -1,0 +1,26 @@
+FTY-381 — live label-upload reproduction against the shared local backend (slacks stack, API :8000)
+Date: 2026-07-17
+
+1) Client upload reaches the backend (the on-device break's downstream is now reachable):
+   POST /api/users/<uid>/log-events/label?save=false  ->  HTTP 201, event created:
+    {"id": "ef1f9563-b0a0-43b2-bd55-0e415dddc54b", "raw_text": "Nutrition label photo", "status": "failed"}
+
+2) Server-side extraction result (estimation_runs row for the event):
+   -[ RECORD 1 ]-----------------
+   attempt    | 1
+   status     | failed
+   provider   | claude_code
+   model      | sonnet
+   error      | provider_error
+   tool_names | ["label_resolve"]
+   
+
+3) Root cause of the extraction failure (infrastructure, not this story's code):
+   provider=claude_code + SLACKS_LLM_SUPPORTS_VISION=true, but the claude_code
+   adapter hard-rejects image input:
+     backend/app/llm/providers/claude_code.py:272
+     raise LLMConfigurationError("provider 'claude_code' does not support image input")
+   => every label (vision) extraction resolves to terminal 'failed' (provider_error).
+   A real label -> real proposal needs a vision-capable provider (anthropic/openai)
+   with a paid API key, which is out of scope for this mobile-capture story
+   (requires_secret_access: false; backend/pipeline changes are Non-Goals).
