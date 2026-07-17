@@ -25,6 +25,12 @@ dependencies = [
     "sqlalchemy>=2.0",
     "alembic>=1.13",
     "psycopg[binary]>=3.3.4",
+    # multipart/form-data parsing for the unified text+image log submission
+    # (FTY-375, docs/contracts/log-event-images.md): one JSON ``payload`` part
+    # plus 0..N binary ``image`` parts on the create route. The standard
+    # Starlette/FastAPI companion parser — never hand-rolled on the
+    # untrusted-upload path.
+    "python-multipart>=0.0.20",
 ]
 
 [dependency-groups]

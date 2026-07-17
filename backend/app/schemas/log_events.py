@@ -72,6 +72,47 @@ class LogEventCreateRequest(BaseModel):
         return stripped
 
 
+class LogEventMultipartPayload(BaseModel):
+    """The JSON ``payload`` part of a multipart create (FTY-375).
+
+    Field rules match :class:`LogEventCreateRequest` exactly, except ``raw_text``
+    is optional: a submission may carry images only, in which case the route
+    stores the fixed ``"Photo log"`` marker (``docs/contracts/log-event-images.md``).
+    When present, ``raw_text`` is trimmed, non-empty after trimming, and at most
+    :data:`MAX_RAW_TEXT_LENGTH` characters. The at-least-one-surface rule (text
+    and/or ≥1 image) is enforced at the route, where the image parts are known.
+
+    Validation failures on this part are rendered as a **content-free** ``422``
+    (a fixed action description, never the rejected input), because the payload
+    carries sensitive log text.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    raw_text: str | None = Field(default=None, max_length=MAX_RAW_TEXT_LENGTH)
+    idempotency_key: str | None = Field(default=None, max_length=MAX_IDEMPOTENCY_KEY_LENGTH)
+
+    @field_validator("raw_text")
+    @classmethod
+    def _strip_optional_non_empty(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("raw_text must not be empty or whitespace only")
+        return stripped
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def _strip_key_non_empty(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("idempotency_key must not be empty or whitespace only")
+        return stripped
+
+
 class LogEventDTO(BaseModel):
     """Response body for the log-event create/list/get API.
 
