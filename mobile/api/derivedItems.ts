@@ -109,6 +109,11 @@ export interface DerivedFoodItemDTO {
   readonly source?: ItemSourceDTO | null;
   /** FTY-092: true iff a direct value-override correction has been applied. */
   readonly is_edited?: boolean;
+  /**
+   * FTY-377: true iff the user has renamed this item (a `name_edit` correction
+   * exists). Independent of `is_edited` — a rename is not a value override.
+   */
+  readonly is_renamed?: boolean;
 }
 
 /** Edit response for an exercise item: current burn plus the original snapshot. */
@@ -130,6 +135,11 @@ export interface DerivedExerciseItemDTO {
   readonly source?: null;
   /** FTY-092: true iff a direct value-override correction (burn override) has been applied. */
   readonly is_edited?: boolean;
+  /**
+   * FTY-377: true iff the user has renamed this item (a `name_edit` correction
+   * exists). Independent of `is_edited` — a rename is not a value override.
+   */
+  readonly is_renamed?: boolean;
 }
 
 /** A derived food or exercise item, discriminated by `item_type`. */
@@ -172,6 +182,14 @@ function derivedItemError(
  * the edited field is a food `quantity`. One `PATCH` per field is intentional and
  * matches the contract; the UI never batches fields.
  */
+/**
+ * Item display-name length cap for a rename (FTY-377/FTY-378). Mirrors the
+ * backend bound (`MAX_ITEM_NAME_LENGTH`, `app.schemas.corrections` — the
+ * derived-item `name` column is `String(200)`), so the client can disable Save
+ * before the server would reject the name.
+ */
+export const MAX_ITEM_NAME_LENGTH = 200;
+
 export async function editDerivedItem(
   session: DerivedItemSession,
   itemType: DerivedItemType,
@@ -190,6 +208,37 @@ export async function editDerivedItem(
       headers: authHeaders(session),
       body: JSON.stringify({ field, value }),
       action: "save your correction",
+      onError: derivedItemError,
+      fetchImpl,
+    },
+  );
+}
+
+/**
+ * Rename the owner's derived item — the FTY-377 audited display-name edit.
+ * Sends the new name to the dedicated `PATCH …/name` route and returns the
+ * updated item carrying the new `name` and `is_renamed = true`; the item's
+ * numbers, `source`, and `is_edited` are untouched (a rename is not a value
+ * override). The name is sensitive user text: it is never logged here, and a
+ * failure carries only the HTTP status + a stable action label.
+ */
+export async function renameDerivedItem(
+  session: DerivedItemSession,
+  itemType: DerivedItemType,
+  itemId: string,
+  name: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<DerivedItem> {
+  return request<DerivedItem>(
+    userScopedUrl(
+      session,
+      `derived-items/${itemType}/${encodeURIComponent(itemId)}/name`,
+    ),
+    {
+      method: "PATCH",
+      headers: authHeaders(session),
+      body: JSON.stringify({ name }),
+      action: "rename this item",
       onError: derivedItemError,
       fetchImpl,
     },
