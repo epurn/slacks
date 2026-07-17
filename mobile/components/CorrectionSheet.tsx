@@ -37,6 +37,7 @@ import {
 } from "@/api/corrections";
 import {
   editDerivedItem as editDerivedItemApi,
+  renameDerivedItem as renameDerivedItemApi,
   type DerivedFoodItemDTO,
   type DerivedItem,
 } from "@/api/derivedItems";
@@ -57,6 +58,7 @@ import {
 import { isExactUpgradeEligible } from "@/components/correction/helpers";
 import { OverridePanel } from "@/components/correction/OverridePanel";
 import { ProvenanceBlock } from "@/components/correction/ProvenanceBlock";
+import { RenamePanel } from "@/components/correction/RenamePanel";
 import { SaveFoodRow } from "@/components/correction/SaveFoodRow";
 import {
   useCorrectionSheet,
@@ -66,6 +68,7 @@ import {
   useExactEvidence,
   type ExactEvidenceSeed,
 } from "@/components/correction/useExactEvidence";
+import { AppIcon } from "@/components/ui/AppIcon";
 import { DisplayText } from "@/components/ui/DisplayText";
 import { NativeSheet } from "@/components/ui/NativeSheet";
 import { provenancePresentation } from "@/components/ui/ProvenanceIcon";
@@ -85,6 +88,8 @@ export interface CorrectionSheetBaseProps {
   logPhrase?: string;
   /** Injectable for tests (FTY-051 PATCH). */
   editItem?: typeof editDerivedItemApi;
+  /** Injectable for tests (FTY-377 rename PATCH). */
+  renameItem?: typeof renameDerivedItemApi;
   /** Injectable for tests (FTY-093 list candidates). */
   listCandidates?: typeof listSourceCandidatesApi;
   /** Injectable for tests (FTY-093 re-resolve). */
@@ -174,6 +179,7 @@ export function CorrectionSheet({
   clarificationData,
   onClarificationResolved,
   editItem = editDerivedItemApi,
+  renameItem = renameDerivedItemApi,
   listCandidates = listSourceCandidatesApi,
   reResolve = reResolveItemApi,
   saveFood = saveFoodApi,
@@ -196,6 +202,7 @@ export function CorrectionSheet({
     needsClarification,
     onClarificationResolved,
     editItem,
+    renameItem,
     listCandidates,
     reResolve,
     saveFood,
@@ -279,11 +286,28 @@ export function CorrectionSheet({
       <Animated.View
         style={[styles.sheetBody, { opacity: sheet.opacity, transform: [{ scale: sheet.scale }] }]}
       >
-        {/* Header */}
+        {/* Header. The item name is itself the rename affordance (FTY-378):
+            tapping it opens the inline rename editor in place — no navigation.
+            Available for food and exercise alike; inert in clarify mode (the
+            item there is still a synthetic needs-a-detail placeholder) and
+            while the rename editor is already open. */}
         <View style={styles.header}>
-          <DisplayText scale="headline" style={styles.title} numberOfLines={1}>
-            {item.name}
-          </DisplayText>
+          <Pressable
+            onPress={sheet.openRename}
+            disabled={mode === "clarify" || mode === "rename"}
+            accessibilityRole="button"
+            accessibilityLabel="Rename item"
+            accessibilityHint="Edits this item's name in place"
+            accessibilityState={{ disabled: mode === "clarify" || mode === "rename" }}
+            style={styles.titleButton}
+          >
+            <DisplayText scale="headline" style={styles.title} numberOfLines={1}>
+              {item.name}
+            </DisplayText>
+            {mode !== "clarify" && mode !== "rename" ? (
+              <AppIcon name="pencil" size={14} color={colors.textMuted} />
+            ) : null}
+          </Pressable>
           <Pressable
             onPress={onClose}
             accessibilityLabel="Close"
@@ -312,6 +336,21 @@ export function CorrectionSheet({
             />
           ) : (
             <>
+              {/* Rename panel (FTY-378) — the inline name editor, directly
+                  under the header name it edits. */}
+              {mode === "rename" ? (
+                <RenamePanel
+                  draft={sheet.renameDraft}
+                  saving={sheet.renameSaving}
+                  error={sheet.renameError}
+                  canSave={sheet.renameCanSave}
+                  onChangeDraft={sheet.setRenameDraft}
+                  onSubmit={() => void sheet.submitRename()}
+                  onCancel={sheet.cancelRename}
+                  colors={colors}
+                />
+              ) : null}
+
               {/* Evidence / provenance block */}
               <ProvenanceBlock
                 source={source}
@@ -481,8 +520,17 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
     gap: spacing.sm,
   },
-  title: {
+  // The name + pencil sit together at the row's start; the name shrinks (never
+  // the pencil) when it runs long.
+  titleButton: {
     flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    minHeight: 44,
+  },
+  title: {
+    flexShrink: 1,
   },
   closeButton: {
     minWidth: 44,

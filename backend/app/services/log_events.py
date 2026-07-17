@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
@@ -40,6 +41,7 @@ from app.models.derived import (
 from app.models.identity import User
 from app.models.log_events import LogEvent
 from app.schemas.corrections import DerivedExerciseItemDTO, DerivedFoodItemDTO
+from app.services import attachments as attachment_service
 from app.services import item_read_model
 from app.services.daily_summary_predicates import (
     _FINALIZED_EVENT_STATUSES,
@@ -123,12 +125,23 @@ def create_event(
     current_user: User,
     raw_text: str,
     idempotency_key: str | None = None,
+    *,
+    images: Sequence[attachment_service.ValidatedImage] = (),
+    save_images: bool = False,
 ) -> tuple[LogEvent, bool]:
     """Create — or idempotently replay — a ``pending`` log event for ``owner_id``.
 
     ``raw_text`` is the already-validated, trimmed user input (see the create
     DTO). The event starts at :attr:`~app.enums.LogEventStatus.PENDING`; the
     estimator (Milestone 4) advances it later.
+
+    ``images`` are a mixed submission's **already-validated** image parts
+    (FTY-375, ``log-event-images.md``): each is persisted as a
+    ``log_attachments`` row tied to the fresh event **in the same transaction as
+    the event insert**, so a created event's images are readable the moment its
+    job is claimable and a failed create writes no row. ``save_images`` picks the
+    retention class — transient (purged at estimation-terminal, the default) or
+    ordinary saved rows (``log-attachments.md`` v3).
 
     Returns ``(event, created)``. ``created`` is :data:`True` for a fresh insert
     and :data:`False` for an idempotent replay, so the router enqueues the
@@ -142,7 +155,8 @@ def create_event(
       the key, return ``(event, True)``.
     - **Key supplied, an event already exists** → return that existing event at
       its current status, create no row, return ``(event, False)``. A divergent
-      ``raw_text`` on the replay is ignored — the stored event is authoritative.
+      ``raw_text`` on the replay is ignored — the stored event is authoritative —
+      and so are the replay's ``images``: nothing is re-ingested (FTY-375).
     - **Key supplied, the stored event is voided** (FTY-321) → fail closed with
       :class:`LogEventNotFound` (rendered ``404``): a replay is a read of the
       stored event, so it obeys the same "excluded from every read" rule as
@@ -152,7 +166,8 @@ def create_event(
     The create path is race-safe: two concurrent same-key submits collide on the
     ``(user_id, idempotency_key)`` unique index; the loser catches the integrity
     violation, re-reads the now-committed sibling, and returns it as a replay —
-    never a ``500``, never a duplicate.
+    never a ``500``, never a duplicate. The rollback also discards the loser's
+    staged attachment rows, so a raced replay ingests no images either.
     """
 
     _authorize(owner_id, current_user)
@@ -170,11 +185,24 @@ def create_event(
     )
     session.add(event)
     try:
+        if images:
+            # Flush assigns the event id (and is where a same-key race first
+            # surfaces); the staged rows then commit atomically with the event.
+            session.flush()
+            attachment_service.stage_submission_images(
+                session,
+                owner_id=owner_id,
+                current_user=current_user,
+                log_event_id=event.id,
+                images=images,
+                save=save_images,
+            )
         session.commit()
     except IntegrityError:
         # A concurrent same-key submit committed first and won the unique index.
-        # Re-read its event and return it as the idempotent replay. A no-key
-        # create cannot hit this index, so re-raise anything unexpected.
+        # Re-read its event and return it as the idempotent replay (the rollback
+        # discards any staged attachment rows). A no-key create cannot hit this
+        # index, so re-raise anything unexpected.
         session.rollback()
         if idempotency_key is None:
             raise
@@ -185,6 +213,35 @@ def create_event(
 
     session.refresh(event)
     return event, True
+
+
+def find_keyed_replay(
+    session: Session,
+    owner_id: uuid.UUID,
+    current_user: User,
+    idempotency_key: str | None,
+) -> LogEvent | None:
+    """Return the stored event a keyed submission would replay, or ``None``.
+
+    The multipart create (FTY-375) probes for a replay **before** validating its
+    image parts, because a replay ignores them entirely — not validated, not
+    persisted (``log-event-images.md``, "replay re-ingests nothing"). Always
+    authorizes first so a cross-user probe fails closed (:class:`LogEventForbidden`
+    → ``404``) before any per-image work; a voided stored event fails closed as
+    :class:`LogEventNotFound` exactly like the create path's replay.
+
+    ``None`` (no key, or no event yet for ``(owner_id, key)``) means the caller
+    should proceed to a fresh create, which re-checks the key race-safely.
+    """
+
+    _authorize(owner_id, current_user)
+    if idempotency_key is None:
+        return None
+    existing = _find_by_key(session, owner_id, idempotency_key)
+    if existing is None:
+        return None
+    event, _created = _replay(existing)
+    return event
 
 
 def _replay(existing: LogEvent) -> tuple[LogEvent, bool]:

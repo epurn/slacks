@@ -28,6 +28,12 @@ MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 #: deterministically; the allowlist (not a blocklist) is the fail-closed default.
 ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset({"image/jpeg", "image/png", "image/webp"})
 
+#: Maximum ``image`` parts one unified text+image log submission may carry
+#: (FTY-375, ``docs/contracts/log-event-images.md``). A documented tunable —
+#: generous for a few label/food photos; an over-count submission is rejected
+#: fail-closed (``422``) before any validation work or persistence.
+MAX_SUBMISSION_IMAGES = 4
+
 
 class LogAttachmentDTO(BaseModel):
     """Metadata view of a saved attachment (no raw bytes).

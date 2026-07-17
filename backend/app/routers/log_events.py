@@ -20,6 +20,16 @@ FTY-064 adds the nutrition-label upload path: a captured label image is posted a
 the raw request body and resolved synchronously in-request (the raw image is
 discarded by default and never enqueued, so it cannot reach the broker). See
 ``docs/contracts/label-upload.md``.
+
+FTY-375 adds the unified text+image submission: the create endpoint is
+content-negotiated, so a ``multipart/form-data`` POST (one JSON ``payload``
+part plus 0..N fail-closed validated ``image`` parts and a submission-level
+``save`` flag) creates the same ``pending`` event and enqueues the same
+ids-only job, with the images transiently persisted for the async worker. The
+``application/json`` path is byte-for-byte unchanged — it is served by the
+same untouched handler below, and the multipart variant is a **separate route**
+(:mod:`app.routers.log_event_multipart`) that matches only multipart requests
+and is registered ahead of it. See ``docs/contracts/log-event-images.md``.
 """
 
 from __future__ import annotations
@@ -36,6 +46,10 @@ from app.deps import CurrentUser
 from app.estimator.enqueue import EstimationEnqueuer, get_enqueuer
 from app.estimator.label_step import LabelInput
 from app.estimator.label_upload import LabelProcessor, get_label_processor
+from app.routers.log_event_multipart import (
+    MULTIPART_CREATE_OPENAPI,
+    register_multipart_create_route,
+)
 from app.schemas.corrections import DerivedFoodItemDTO
 from app.schemas.label_proposal import LabelProposalConfirmRequest, LabelProposalResponse
 from app.schemas.log_events import (
@@ -84,10 +98,17 @@ async def _read_image_body(request: Request) -> bytes:
     return await request.body()
 
 
+# The multipart (text+image) create variant registers first so route matching
+# tries it before the JSON route below; every non-multipart POST falls through
+# to the unchanged JSON handler (see app.routers.log_event_multipart).
+register_multipart_create_route(router)
+
+
 @router.post(
     "/{user_id}/log-events",
     response_model=LogEventDTO,
     status_code=status.HTTP_201_CREATED,
+    openapi_extra=MULTIPART_CREATE_OPENAPI,
 )
 def create_log_event(
     user_id: uuid.UUID,
