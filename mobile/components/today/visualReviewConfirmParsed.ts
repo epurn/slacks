@@ -108,9 +108,19 @@ registerVisualReviewPreset({
 });
 
 /**
- * The `visual-review-settled:today.confirm_parsed` testID to render inside the
- * confirm sheet's own modal, or `null` until it settles / when the preset is not
- * active (FTY-262).
+ * The `visual-review-settled:<preset>` testID to render inside the confirm
+ * sheet's own modal for the active confirm-parsed-**family** preset, or `null`
+ * until it settles / when no such preset is active (FTY-262, FTY-394).
+ *
+ * `activePreset` is the caller's active confirm-parsed-family preset name — one
+ * of `today.confirm_parsed` or `capture.confirm_parsed` (FTY-268) — or `null`
+ * outside `isE2EMode()` / when neither is active. Both presets open the *same*
+ * confirm sheet (today via this module's initial-state seam, capture via
+ * `useTodayData`'s `handleLabelUploaded`), so the sheet's marker must reflect
+ * whichever is active and keep the canonical `visual-review-settled:<preset>`
+ * shape the smoke flow waits on. When `activePreset` is `null` the effect
+ * installs no timer and this returns `null`, so the hook is inert on every real
+ * launch and in release builds.
  *
  * The marker is gated on FTY-247's **network-quiet settle contract**, not on the
  * modal simply mounting: it appears only once `QUIET_MS` has elapsed with no new
@@ -127,14 +137,13 @@ registerVisualReviewPreset({
  * sub-state is up, so it is inherently on the settled path. Keeping the gate to
  * the network-quiet timer also keeps it router-free, so it never perturbs the
  * default Today render or its tests.
- *
- * `active` is the caller's `isE2EMode() && preset === today.confirm_parsed`
- * guard; when it is false the effect installs no timer and this returns `null`,
- * so the hook is inert on every real launch and in release builds.
  */
-export function useConfirmParsedSettledMarker(active: boolean): string | null {
+export function useConfirmParsedSettledMarker(
+  activePreset: string | null,
+): string | null {
   const fetchTick = useVisualReviewFetchTick();
   const [settled, setSettled] = useState(false);
+  const active = activePreset !== null;
 
   useEffect(() => {
     if (!active) return;
@@ -147,6 +156,6 @@ export function useConfirmParsedSettledMarker(active: boolean): string | null {
   }, [active, fetchTick]);
 
   return active && settled
-    ? `visual-review-settled:${CONFIRM_PARSED_PRESET_NAME}`
+    ? `visual-review-settled:${activePreset}`
     : null;
 }

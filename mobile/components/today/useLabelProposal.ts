@@ -15,6 +15,7 @@ import { useVisualReviewCore } from "@/e2e/visualReview";
 import { type ApiSession } from "@/state/session";
 import { sortByNewest } from "@/state/today";
 
+import { CAPTURE_CONFIRM_PARSED_PRESET } from "./captureVisualReview";
 import {
   CONFIRM_PARSED_ITEM,
   CONFIRM_PARSED_PRESET_NAME,
@@ -57,23 +58,41 @@ export function useLabelProposal({
   setLabelCaptureOpen: Dispatch<SetStateAction<boolean>>;
 }) {
   const visualReviewCore = useVisualReviewCore();
-  const confirmParsedPresetActive =
-    isE2EMode() && visualReviewCore.presetName === CONFIRM_PARSED_PRESET_NAME;
+  const activePresetName = isE2EMode() ? visualReviewCore.presetName : null;
+
+  // `today.confirm_parsed` seeds the initial proposal from THIS module's
+  // initial-state seam (below); `capture.confirm_parsed` (FTY-268) seeds instead
+  // through `useTodayData`'s `handleLabelUploaded` effect. So only the `today`
+  // preset drives the initial `useState` — widening it to the capture family
+  // would double-seed the sheet (FTY-394 Non-Goal).
+  const todayConfirmParsedActive =
+    activePresetName === CONFIRM_PARSED_PRESET_NAME;
+
+  // The confirm-parsed-**family** preset that is active (`today` or `capture`),
+  // or `null`. Both open the same confirm sheet, so its in-modal settled marker
+  // must render for either and emit the active preset's id (FTY-394).
+  const confirmParsedFamilyPreset =
+    activePresetName === CONFIRM_PARSED_PRESET_NAME ||
+    activePresetName === CAPTURE_CONFIRM_PARSED_PRESET
+      ? activePresetName
+      : null;
 
   // The uncounted label parse awaiting confirm/adjust (FTY-196/197). Set after a
   // legible label upload; the confirm sheet renders it and commits it — until
   // then it never counts. `null` when there is no proposal to confirm. Seeded
-  // from the visual-review preset (FTY-262) on mount when that preset is active;
-  // `null`/`false` otherwise, which is every real launch and every release build.
+  // from the visual-review preset (FTY-262) on mount when `today.confirm_parsed`
+  // is active; `null`/`false` otherwise, which is every real launch, every
+  // release build, and the capture family (which seeds via `useTodayData`).
   const [labelProposal, setLabelProposal] = useState<DerivedFoodItemDTO | null>(
-    () => (confirmParsedPresetActive ? CONFIRM_PARSED_ITEM : null),
+    () => (todayConfirmParsedActive ? CONFIRM_PARSED_ITEM : null),
   );
   const [labelProposalVisible, setLabelProposalVisible] = useState(
-    () => confirmParsedPresetActive,
+    () => todayConfirmParsedActive,
   );
 
-  // The settled-marker testID for the confirm-parsed preset (FTY-262), or `null`
-  // when it is not the active preset OR the sub-state has not gone network-quiet
+  // The settled-marker testID for the active confirm-parsed-family preset
+  // (`today.confirm_parsed` or `capture.confirm_parsed`, FTY-262/FTY-394), or
+  // `null` when neither is active OR the sub-state has not gone network-quiet
   // yet. The shared `VisualReviewSettleOverlay` (FTY-247) renders its marker in
   // the navigator's own window, but the confirm sheet is a
   // `<Modal accessibilityViewIsModal>` — iOS accessibility restricts the
@@ -85,7 +104,7 @@ export function useLabelProposal({
   // screenshot automation waits for the loaded, settled frame — not the mid-load
   // one — identically to every other preset.
   const labelProposalSettledMarker = useConfirmParsedSettledMarker(
-    confirmParsedPresetActive,
+    confirmParsedFamilyPreset,
   );
 
   // Label capture upload (FTY-064 + FTY-196/197). The backend created and
