@@ -19,6 +19,8 @@ import {
 } from "@/api/corrections";
 import {
   editDerivedItem as editDerivedItemApi,
+  MAX_ITEM_NAME_LENGTH,
+  renameDerivedItem as renameDerivedItemApi,
   type DerivedFoodItemDTO,
   type DerivedItem,
 } from "@/api/derivedItems";
@@ -41,7 +43,9 @@ export type SheetMode =
   | "clarify"
   // FTY-312: the `Make it exact` exact-evidence sub-flow (barcode/label →
   // preview → apply-in-place). Its own step state lives in `useExactEvidence`.
-  | "make-exact";
+  | "make-exact"
+  // FTY-378: in-sheet display-name rename (the FTY-377 audited name edit).
+  | "rename";
 
 /** The override draft the "confirm_apply" seam pre-fills: the item's current calories. */
 function seamOverrideDraft(item: DerivedItem): string {
@@ -57,6 +61,7 @@ export interface UseCorrectionSheetArgs {
   needsClarification: boolean;
   onClarificationResolved?: (answer: string) => void;
   editItem: typeof editDerivedItemApi;
+  renameItem: typeof renameDerivedItemApi;
   listCandidates: typeof listSourceCandidatesApi;
   reResolve: typeof reResolveItemApi;
   saveFood: typeof saveFoodApi;
@@ -77,6 +82,7 @@ export function useCorrectionSheet({
   needsClarification,
   onClarificationResolved,
   editItem,
+  renameItem,
   listCandidates,
   reResolve,
   saveFood,
@@ -112,12 +118,16 @@ export function useCorrectionSheet({
     setMode(defaultMode);
   }
 
-  // The Change-match or advanced-override panel wants the large detent. Narrowing
-  // the allowed detents to large-only makes UIKit animate the sheet up to it; the
-  // quick-fix path (amount / save / clarify) stays at the medium detent with the
-  // timeline visible behind.
+  // The Change-match, advanced-override, or rename panel wants the large detent
+  // (each opens a keyboard or a search). Narrowing the allowed detents to
+  // large-only makes UIKit animate the sheet up to it; the quick-fix path
+  // (amount / save / clarify) stays at the medium detent with the timeline
+  // visible behind.
   const expanded =
-    mode === "change-match" || mode === "override" || mode === "make-exact";
+    mode === "change-match" ||
+    mode === "override" ||
+    mode === "make-exact" ||
+    mode === "rename";
 
   // ─── Amount stepper state ───────────────────────────────────────────────────
   const [amountPending, setAmountPending] = useState(false);
@@ -148,6 +158,11 @@ export function useCorrectionSheet({
   const [overrideSaving, setOverrideSaving] = useState(false);
   const [overrideError, setOverrideError] = useState<string | null>(null);
 
+  // ─── Rename state (FTY-378) ─────────────────────────────────────────────────
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameSaving, setRenameSaving] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+
   // ─── Clarify state ──────────────────────────────────────────────────────────
   const [clarifyText, setClarifyText] = useState("");
   const [clarifySubmitting, setClarifySubmitting] = useState(false);
@@ -171,6 +186,8 @@ export function useCorrectionSheet({
       setReResolveError(null);
       setOverrideDraft(defaultMode === "override" ? seamOverrideDraft(item) : "");
       setOverrideError(null);
+      setRenameDraft("");
+      setRenameError(null);
       setClarifyText("");
       setSaveFoodStatus("idle");
       setSaveFoodError(null);
@@ -366,6 +383,60 @@ export function useCorrectionSheet({
     setOverrideError(null);
   }, []);
 
+  // ─── Rename (FTY-378) ────────────────────────────────────────────────────────
+
+  const openRename = useCallback(() => {
+    setRenameDraft(item.name);
+    setRenameError(null);
+    setMode("rename");
+  }, [item.name]);
+
+  // Client-side gate mirroring the backend bound: a trimmed, non-empty, changed
+  // name within the 200-char column limit. The backend stays authoritative — a
+  // 422 renders as calm, content-free copy below.
+  const renameTrimmed = renameDraft.trim();
+  const renameCanSave =
+    !renameSaving &&
+    renameTrimmed !== "" &&
+    renameTrimmed !== item.name &&
+    renameTrimmed.length <= MAX_ITEM_NAME_LENGTH;
+
+  const submitRename = useCallback(async () => {
+    const trimmed = renameDraft.trim();
+    if (
+      renameSaving ||
+      trimmed === "" ||
+      trimmed === item.name ||
+      trimmed.length > MAX_ITEM_NAME_LENGTH
+    ) {
+      return;
+    }
+    const prior = item;
+    setRenameSaving(true);
+    setRenameError(null);
+    try {
+      const updated = await renameItem(session, item.item_type, item.id, trimmed);
+      setItem(updated);
+      onItemChange?.(updated);
+      setMode("normal");
+      setRenameDraft("");
+      fireCorrectionSaved();
+    } catch (err) {
+      // Revert to the prior item and stay in rename mode so the user can retry;
+      // the error copy never contains the typed name (status + action only).
+      setItem(prior);
+      setRenameError(messageForError(err, "rename this item"));
+    } finally {
+      setRenameSaving(false);
+    }
+  }, [item, renameDraft, renameSaving, renameItem, session, onItemChange, fireCorrectionSaved]);
+
+  const cancelRename = useCallback(() => {
+    setMode("normal");
+    setRenameDraft("");
+    setRenameError(null);
+  }, []);
+
   // ─── Clarify ─────────────────────────────────────────────────────────────────
 
   const handleClarifyAnswer = useCallback(
@@ -443,6 +514,15 @@ export function useCorrectionSheet({
     openOverride,
     submitOverride,
     cancelOverride,
+    // Rename (FTY-378)
+    renameDraft,
+    renameSaving,
+    renameError,
+    renameCanSave,
+    setRenameDraft,
+    openRename,
+    submitRename,
+    cancelRename,
     // Clarify
     clarifyText,
     setClarifyText,
