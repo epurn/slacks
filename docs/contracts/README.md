@@ -48,6 +48,7 @@ Use contracts for:
 | Contract | Purpose |
 |----------|---------|
 | [clarification.md](clarification.md) | Clarify-loop read/answer sub-API for a `needs_clarification` or `partially_resolved` log event |
+| [clarify-gates.md](clarify-gates.md) | Parse step's estimate-vs-ask gate machinery: calibrated clarify decision, deterministic plausibility gate, and gate-outcome/atomicity rules |
 | [corrections.md](corrections.md) | User-initiated corrections and edits to derived food and exercise items |
 | [daily-summary.md](daily-summary.md) | Read-only daily-summary endpoint for fetching a user's daily totals and entries |
 | [estimate-first-routing.md](estimate-first-routing.md) | Parse step's estimate-first routing override, deterministic detail signal, amount fills, and user-stated-nutrition extraction |
