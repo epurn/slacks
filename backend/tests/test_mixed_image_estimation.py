@@ -31,6 +31,7 @@ with transient image attachments (the FTY-375 seam), proving the
 
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from collections.abc import Iterator
@@ -94,6 +95,10 @@ from app.services.attachments import ValidatedImage, stage_submission_images
 
 _PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 _PNG_IMAGE = ValidatedImage(data=_PNG_BYTES, content_type="image/png")
+#: A second, byte-distinct image so multi-image tests can tell the surfaces
+#: apart by ``content_hash`` and script per-image panel replies.
+_PNG_BYTES_2 = b"\x89PNG\r\n\x1a\n" + b"\x01" * 16
+_PNG_IMAGE_2 = ValidatedImage(data=_PNG_BYTES_2, content_type="image/png")
 
 #: A stable parse reply for the worked case: the text surface states the count.
 _PARSE_PAYLOAD: dict[str, Any] = {
@@ -127,13 +132,31 @@ _PANEL_PAYLOAD: dict[str, Any] = {
     },
 }
 
+#: A legible panel for an entirely different product than any text candidate in
+#: the mis-attribution tests: 50 g serving → per-100g 440 / 10 / 70 / 14.
+_GRANOLA_PANEL_PAYLOAD: dict[str, Any] = {
+    "disposition": "extracted",
+    "confidence": 0.95,
+    "facts": {
+        "product_name": "Granola crunch",
+        "serving_size_amount": 50,
+        "serving_size_unit": "g",
+        "energy_kcal_per_serving": 220,
+        "protein_g_per_serving": 5,
+        "carbs_g_per_serving": 35,
+        "fat_g_per_serving": 7,
+    },
+}
+
 
 class _ScriptedVisionProvider(Provider):
     """Routes parse-prompt calls and label-extraction calls to scripted payloads.
 
     Prompt-shape routing (rather than call order) keeps the script stable under
-    the parallel self-consistency sampler. Records per-call image counts so
-    tests can assert exactly which calls carried the vision surfaces.
+    the parallel self-consistency sampler, and ``panel_payloads`` routes label
+    replies by the received image *bytes* so multi-image scripts stay stable
+    under the loader's row ordering. Records per-call image counts so tests can
+    assert exactly which calls carried the vision surfaces.
     """
 
     name = "fake"
@@ -143,6 +166,7 @@ class _ScriptedVisionProvider(Provider):
         *,
         parse_payload: dict[str, Any] | None = None,
         panel_payload: dict[str, Any] | None = None,
+        panel_payloads: dict[bytes, dict[str, Any]] | None = None,
         parse_error: Exception | None = None,
         panel_error: Exception | None = None,
         supports_vision: bool = True,
@@ -150,6 +174,7 @@ class _ScriptedVisionProvider(Provider):
         super().__init__(timeout_seconds=1.0, max_retries=0, supports_vision=supports_vision)
         self._parse_payload = parse_payload or _PARSE_PAYLOAD
         self._panel_payload = panel_payload or _PANEL_PAYLOAD
+        self._panel_payloads = panel_payloads
         self._parse_error = parse_error
         self._panel_error = panel_error
         self.parse_prompts: list[str] = []
@@ -169,6 +194,8 @@ class _ScriptedVisionProvider(Provider):
             self.panel_image_counts.append(count)
             if self._panel_error is not None:
                 raise self._panel_error
+            if self._panel_payloads is not None:
+                return dict(self._panel_payloads[images[0].data])
             return dict(self._panel_payload)
         self.parse_prompts.append(prompt)
         self.parse_image_counts.append(count)
@@ -204,21 +231,26 @@ def _seed_image_event(
     user: User,
     raw_text: str = "2 of these bars",
     *,
-    images: int = 1,
+    images: int | list[ValidatedImage] = 1,
     save: bool = False,
 ) -> LogEvent:
-    """A ``pending`` event with staged FTY-375 transient (or saved) images."""
+    """A ``pending`` event with staged FTY-375 transient (or saved) images.
+
+    ``images`` is a count of identical placeholder images, or an explicit list
+    when a test needs byte-distinct surfaces.
+    """
 
     event = LogEvent(user_id=user.id, raw_text=raw_text, status=LogEventStatus.PENDING)
     session.add(event)
     session.flush()
-    if images:
+    payloads = [_PNG_IMAGE] * images if isinstance(images, int) else images
+    if payloads:
         stage_submission_images(
             session,
             owner_id=user.id,
             current_user=user,
             log_event_id=event.id,
-            images=[_PNG_IMAGE] * images,
+            images=payloads,
             save=save,
         )
     session.commit()
@@ -402,6 +434,144 @@ def test_text_only_and_image_only_components_keep_their_own_provenance(
     assert rows["banana"].status == DerivedItemStatus.UNRESOLVED
     evidence = session.scalars(select(EvidenceSource)).all()
     assert {row.derived_food_item_id for row in evidence} == {rows["protein bar"].id}
+
+
+# ---------------------------------------------------------------------------
+# Multi-image events: no residual mis-attribution, no crash
+# ---------------------------------------------------------------------------
+
+
+def test_multi_image_event_does_not_misattribute_residual_candidate(
+    session: Session, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two images, two candidates, and only one image names a candidate: after
+    the protein-bar panel claims the protein bar, the granola panel must NOT be
+    attributed to the residual yogurt (the single-candidate shortcut does not
+    apply to a residual candidate) — the yogurt falls through to the ordinary
+    tiers with no fabricated ``user_label`` provenance."""
+
+    monkeypatch.setenv("SLACKS_LLM_SUPPORTS_VISION", "true")
+    parse_payload = {
+        **_PARSE_PAYLOAD,
+        "items": [
+            *_PARSE_PAYLOAD["items"],
+            {
+                "type": "food",
+                "name": "yogurt",
+                "quantity_text": "1",
+                "unit": None,
+                "amount": 1,
+            },
+        ],
+    }
+    event = _seed_image_event(
+        session,
+        user,
+        "a protein bar and a yogurt",
+        images=[_PNG_IMAGE, _PNG_IMAGE_2],
+    )
+    provider = _ScriptedVisionProvider(
+        parse_payload=parse_payload,
+        panel_payloads={_PNG_BYTES: _PANEL_PAYLOAD, _PNG_BYTES_2: _GRANOLA_PANEL_PAYLOAD},
+    )
+
+    result = process_estimation(
+        session,
+        log_event_id=event.id,
+        user_id=user.id,
+        pipeline=Pipeline(
+            [ParseStep(provider), ImageFactsResolveStep(provider), _SweepUnresolvedStep()]
+        ),
+    )
+
+    assert result.event_status is LogEventStatus.COMPLETED
+    rows = {
+        row.name: row
+        for row in session.scalars(
+            select(DerivedFoodItem).where(DerivedFoodItem.log_event_id == event.id)
+        )
+    }
+    assert rows["protein bar"].status == DerivedItemStatus.RESOLVED
+    assert rows["yogurt"].status == DerivedItemStatus.UNRESOLVED
+
+    # Exactly one user_label attribution: the bar image's facts on the bar item.
+    # The granola panel named neither candidate, so nothing carries its hash or
+    # its per-100g numbers.
+    evidence = session.scalars(select(EvidenceSource)).all()
+    assert [row.derived_food_item_id for row in evidence] == [rows["protein bar"].id]
+    bar_hash = hashlib.sha256(_PNG_BYTES).hexdigest()
+    assert evidence[0].content_hash == bar_hash
+    assert evidence[0].calories_per_100g == 500.0
+
+
+def test_multi_image_event_with_fewer_candidates_than_panels_completes(
+    session: Session, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One candidate, two legible panels: once the candidate is claimed the loop
+    stops instead of matching against an empty list — the event completes; it is
+    never terminally rejected (estimate-first / never-reject)."""
+
+    monkeypatch.setenv("SLACKS_LLM_SUPPORTS_VISION", "true")
+    event = _seed_image_event(session, user, images=2)
+    provider = _ScriptedVisionProvider()
+
+    result = process_estimation(
+        session,
+        log_event_id=event.id,
+        user_id=user.id,
+        pipeline=_vision_pipeline(provider),
+    )
+
+    assert result.event_status is LogEventStatus.COMPLETED
+    assert result.job_status is EstimationJobStatus.SUCCEEDED
+    assert result.should_retry is False
+    # The second image was never read: no candidate was left for it to describe.
+    assert provider.panel_image_counts == [1]
+    food = session.scalars(
+        select(DerivedFoodItem).where(DerivedFoodItem.log_event_id == event.id)
+    ).one()
+    assert food.status == DerivedItemStatus.RESOLVED
+    assert food.grams == 80.0
+    assert _attachments_for(session, event.id) == []  # terminal purge still fires
+
+
+def test_multi_image_single_candidate_requires_the_panel_to_name_it(session: Session) -> None:
+    """A multi-image event (the scoped re-estimate shape: every event image
+    re-fed against one component) gets no single-candidate shortcut: a panel
+    that does not name the candidate attributes nothing, and the candidate is
+    left for the ordinary tiers."""
+
+    provider = _ScriptedVisionProvider(
+        panel_payloads={
+            _PNG_BYTES: _GRANOLA_PANEL_PAYLOAD,
+            _PNG_BYTES_2: _GRANOLA_PANEL_PAYLOAD,
+        }
+    )
+    step = ImageFactsResolveStep(provider)
+    context = EstimationContext(
+        log_event_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        raw_text="a yogurt",
+    )
+    context.food_candidates = [
+        CandidateDraft(name="yogurt", quantity_text="1", unit=None, amount=1.0)
+    ]
+    context.images = (
+        EventImage(
+            image=ImageInput(data=_PNG_BYTES, media_type="image/png"),
+            content_hash="a" * 64,
+        ),
+        EventImage(
+            image=ImageInput(data=_PNG_BYTES_2, media_type="image/png"),
+            content_hash="b" * 64,
+        ),
+    )
+
+    step.run(context)
+
+    assert len(context.food_candidates) == 1  # left for USDA/OFF/official tiers
+    assert context.resolved_food_items == []
+    assert {"step": "image_facts_resolve", "status": "no_usable_label"} in context.trace
 
 
 # ---------------------------------------------------------------------------

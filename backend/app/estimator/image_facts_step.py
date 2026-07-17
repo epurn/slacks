@@ -73,19 +73,26 @@ def _tokens(text: str) -> set[str]:
     return set(_TOKEN_RE.findall(text.lower()))
 
 
-def _match_candidate(candidates: list[CandidateDraft], facts: PanelFacts) -> CandidateDraft | None:
+def _match_candidate(
+    candidates: list[CandidateDraft], facts: PanelFacts, *, require_name_match: bool
+) -> CandidateDraft | None:
     """Deterministically pick the text candidate a legible panel describes.
 
     A single food candidate is unambiguous — the entry's "these bars" points at
-    the pictured product. With several candidates, the panel's printed
-    ``product_name`` must name exactly one of them (best token overlap against
-    the candidate's schema-validated name + brand); an ambiguous or empty match
-    attributes nothing — mis-attributing label facts to the wrong component
-    would be fabricated provenance, so the candidate falls through to the
-    ordinary tiers instead.
+    the pictured product — but only for a single-image event that has claimed
+    nothing yet: a *residual* sole candidate (earlier images claimed the rest)
+    or any candidate on a multi-image event must be **named** by the panel, so
+    callers pass ``require_name_match=True`` there. Under the name check the
+    panel's printed ``product_name`` must name exactly one candidate (best
+    token overlap against the candidate's schema-validated name + brand); an
+    ambiguous or empty match attributes nothing — mis-attributing label facts
+    to the wrong component would be fabricated provenance, so the candidate
+    falls through to the ordinary tiers instead.
     """
 
-    if len(candidates) == 1:
+    if not candidates:
+        return None
+    if len(candidates) == 1 and not require_name_match:
         return candidates[0]
     name_tokens = _tokens(facts.product_name or "")
     if not name_tokens:
@@ -116,12 +123,24 @@ class ImageFactsResolveStep:
 
         resolved_any = False
         provider_degraded = False
+        multi_image = len(context.images) > 1
         for event_image in context.images:
+            if not context.food_candidates:
+                # Every candidate is claimed: the remaining images have nothing
+                # left to describe, and reading them could only mis-attribute.
+                break
             facts, failed = self._extract_panel(event_image)
             provider_degraded = provider_degraded or failed
             if facts is None:
                 continue
-            candidate = _match_candidate(context.food_candidates, facts)
+            candidate = _match_candidate(
+                context.food_candidates,
+                facts,
+                # A residual sole candidate (after a claim) or any candidate on
+                # a multi-image event must be named by the panel — the "these
+                # bars" single-image shortcut does not extend to either.
+                require_name_match=multi_image or resolved_any,
+            )
             if candidate is None:
                 continue
             item = self._resolve(candidate, event_image, facts)
