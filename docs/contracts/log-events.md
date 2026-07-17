@@ -49,6 +49,17 @@ backend-core / contracts lane (`backend/app/models/log_events.py`,
 
 ## Version
 
+10 (FTY-384, contract only): **structural relocation** — the soft-void (delete)
+semantics (the detailed `### Soft-void (delete) (FTY-321)` section) move out of
+this page into [log-event-soft-void.md](log-event-soft-void.md). **No semantic
+change**: the marker-not-deletion, read-model exclusion, fail-closed
+single-item-surface enumeration, any-status voiding, database-enforced
+first-write-wins idempotency, void-does-not-cancel-estimation, and no-oracle
+`404` rules are preserved verbatim. This page keeps everything else it owns for
+the void — the `voided_at` column, the `DELETE` endpoint listing and its `204`,
+the voided-replay `404` on idempotent create, and the state-machine note — and
+links to the new page for the full semantics.
+
 9 (FTY-374, contract only): create gains the **unified text+image submission**
 — the endpoint now also accepts `multipart/form-data` (one JSON `payload` part
 plus 0..N fail-closed validated `image` parts) while the `application/json`
@@ -420,72 +431,24 @@ alongside every other endpoint on this resource.
 ### Soft-void (delete) (FTY-321)
 
 `DELETE /api/users/{user_id}/log-events/{event_id}` lets a user remove a
-mistaken or unwanted logged entry. It is a **soft void**, not a hard delete:
+mistaken or unwanted logged entry as a **soft void**, not a hard delete: it sets
+a write-once terminal `voided_at` marker, and the event plus every row hanging
+off it are **retained** (nothing hard-deleted, no `ON DELETE CASCADE`) while
+being excluded from every read model and the day's totals. The full normative
+semantics live in **[log-event-soft-void.md](log-event-soft-void.md)**:
+marker-not-deletion, full read-model exclusion, the fail-closed
+single-item-surface enumeration (keyed create-replay, clarification read/answer,
+correction edit, re-match candidate-list/re-resolve, label-proposal
+read/confirm), any-status voiding, database-enforced idempotent
+first-write-wins, void-does-not-cancel-estimation with retained-and-excluded
+late derived rows, and owner-scoped no-oracle `404`s.
 
-- **Marker, not deletion.** The event's `voided_at` is set once (a terminal
-  status; there is no un-void). The event row, its derived food/exercise items,
-  its corrections, its evidence rows, and any saved label-image attachment
-  (`log-attachments.md`) are all **retained** — nothing is hard-deleted, and no
-  `ON DELETE CASCADE` fires (a void deletes no row) — so the append-only
-  audit/provenance stance holds (`corrections.md`,
-  `docs/security/data-retention.md`).
-- **Full read-model exclusion.** A voided event disappears from the day: it is
-  omitted from list-today, the day-listing (`by-date`) read, and the single
-  get-by-id (which returns `404`); its derived items are omitted from the
-  day-listing item rows; and its kcal/macros/burn no longer count toward the
-  daily summary `intake` / `exercise`, nor does it count toward
-  `uncounted_entries` (`daily-summary.md`). The clarification read and answer
-  fail closed (`404`) for a voided event.
-- **Single-item surfaces fail closed (`404`).** The endpoints that return or
-  mutate a specific stored row **directly** — and so never pass through the
-  read-time exclusion join above — each refuse a voided target with `404`,
-  making the exclusion exhaustive across the surface:
-  - the **keyed create-replay** (`POST .../log-events` with an
-    `idempotency_key` whose stored event is voided) — see
-    [Idempotent create](#idempotent-create-201-vs-200); the key stays consumed
-    and no replacement row is created;
-  - the **clarification read and answer** (`clarification.md`), as above;
-  - the **correction edit**
-    (`PATCH .../derived-items/{item_type}/{item_id}`, `corrections.md`) on an
-    item whose parent event is voided;
-  - the **re-match candidate-list and re-resolve**
-    (`POST .../derived-items/food/{item_id}/source-candidates` and
-    `.../re-resolve`, `corrections.md`) on an item whose parent event is voided;
-  - the **label-proposal read and confirm**
-    (`GET`/`POST .../log-events/{event_id}/label-proposal[/confirm]`,
-    `label-upload.md`) on a voided event — the refused confirm mutates nothing,
-    so the retained `proposed` row stays uncounted.
-
-  These are backend-core route/service boundary prechecks (each loads the
-  target's parent event and rejects when `voided_at` is set); the estimator
-  re-match capability and the worker stay void-agnostic. The `404` matches the
-  unknown-item/unknown-event shape, so there is no void oracle.
-- **Any status.** Voiding works whatever the event's estimation status
-  (`pending`, `processing`, `completed`, `failed`, `needs_clarification`) —
-  `voided_at` is orthogonal to `status`, and the event keeps its pre-void status
-  for audit.
-- **Idempotent.** Repeating the delete on an already-voided event returns `204`
-  identically and does **not** move `voided_at`; the marker is write-once,
-  **first-write-wins** — enforced database-side (the void is a conditional
-  `UPDATE … WHERE voided_at IS NULL`), so even concurrent deletes cannot
-  re-stamp an already-set marker.
-- **Void does not cancel estimation.** A void is a read-model concern, not a
-  pipeline stop: it does **not** cancel an in-flight or queued estimation job,
-  and the estimator is void-agnostic (`estimation-jobs.md` is unchanged). A
-  late estimation that completes after the void is expected and is not an
-  error: any derived rows it writes onto the voided event are
-  **retained-and-excluded** — persisted like any other derived rows, but never
-  surfaced or counted, because every derived-item and daily-summary read joins
-  each row to its parent event and drops rows whose parent has `voided_at`
-  set. Exclusion happens at read time, so it holds regardless of when the rows
-  were written.
-- **Ownership fails closed.** The event is loaded scoped to the authenticated
-  owner. A cross-user or unknown `event_id` is indistinguishable as `404` (no
-  existence oracle) and mutates nothing — the same convention as get-by-id.
-
-The delete adds no un-void/undo endpoint, no bulk delete, and no retention/purge
-job (those are out of scope). Because a voided event is excluded from get-by-id,
-a client that voids an entry treats a subsequent `404` on that id as expected.
+This page keeps the entries that page's semantics point back to: the `voided_at`
+persistence column ([Persistence](#persistence)), the `DELETE` endpoint listing
+([HTTP requests](#http-requests)) and its `204` response
+([Outputs](#outputs)), the voided-replay `404` on idempotent create
+([Idempotent create](#idempotent-create-201-vs-200)), and the state-machine note
+that void adds no `LogEventStatus` value ([State machine](#state-machine)).
 
 ## State machine
 
