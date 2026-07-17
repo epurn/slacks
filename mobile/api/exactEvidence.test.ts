@@ -14,6 +14,16 @@
  *   maps the documented statuses.
  */
 
+// The native `File`/`UploadType` API (imported transitively via labelCapture) is
+// stubbed: the label tests inject `openImage`, so `File` is never constructed —
+// only `UploadType` needs a concrete value.
+jest.mock("expo-file-system", () => ({
+  File: class {},
+  UploadType: { BINARY_CONTENT: 0, MULTIPART: 1 },
+}));
+
+import { UploadType } from "expo-file-system";
+
 import {
   requestBarcodeExactEvidenceProposal,
   uploadLabelExactEvidenceProposal,
@@ -21,6 +31,7 @@ import {
   ExactEvidenceApiError,
   ExactEvidenceEmptyBarcodeError,
 } from "./exactEvidence";
+import type { LocalImageFile, OpenLocalImage } from "./labelCapture";
 import type {
   ExactEvidenceProposal,
   ExactEvidenceProposalKind,
@@ -136,12 +147,31 @@ function jsonResponse(body: unknown, status = 200): Response {
   } as unknown as Response;
 }
 
-function makeBlobResponse(sizeBytes: number, contentType: string): Response {
-  return {
-    ok: true,
-    status: 200,
-    blob: async () => ({ size: sizeBytes, type: contentType }),
-  } as unknown as Response;
+/**
+ * Fake local image file + opener seam for the label-upload path (FTY-381). The
+ * `upload` mock records the URL/headers/body-type and lets tests assert the
+ * size/type guard fires before any upload is attempted.
+ */
+function fakeImage(opts: {
+  size?: number;
+  type?: string;
+  exists?: boolean;
+  status?: number;
+  body?: unknown;
+}): { openImage: OpenLocalImage; upload: jest.Mock; openMock: jest.Mock } {
+  const {
+    size = 50_000,
+    type = "image/jpeg",
+    exists = true,
+    status = 200,
+    body = EXACT_PROPOSAL,
+  } = opts;
+  const upload = jest
+    .fn()
+    .mockResolvedValue({ status, body: JSON.stringify(body) });
+  const file: LocalImageFile = { exists, size, type, upload };
+  const openMock = jest.fn().mockReturnValue(file);
+  return { openImage: openMock as unknown as OpenLocalImage, upload, openMock };
 }
 
 // ─── wire type surface ───────────────────────────────────────────────────────
@@ -267,80 +297,73 @@ describe("requestBarcodeExactEvidenceProposal", () => {
 // ─── uploadLabelExactEvidenceProposal ────────────────────────────────────────
 
 describe("uploadLabelExactEvidenceProposal", () => {
-  it("guards, then POSTs raw bytes to the label URL with save flag and Content-Type", async () => {
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce(makeBlobResponse(50_000, "image/jpeg")) // local file read
-      .mockResolvedValueOnce(jsonResponse(EXACT_PROPOSAL, 200)); // upload
+  it("guards, then streams raw bytes to the label URL with save flag and Content-Type", async () => {
+    const { openImage, upload, openMock } = fakeImage({ size: 50_000, type: "image/jpeg" });
 
     const result = await uploadLabelExactEvidenceProposal(
       SESSION,
       ITEM_ID,
       "file:///label.jpg",
       true,
-      fetchMock,
+      openImage,
     );
 
     expect(result).toEqual(EXACT_PROPOSAL);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(openMock).toHaveBeenCalledWith("file:///label.jpg");
+    expect(upload).toHaveBeenCalledTimes(1);
 
-    const [localUri] = fetchMock.mock.calls[0] as [string];
-    expect(localUri).toBe("file:///label.jpg");
-
-    const [uploadUrl, uploadInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    const [uploadUrl, uploadOptions] = upload.mock.calls[0] as [
+      string,
+      {
+        httpMethod: string;
+        uploadType: UploadType;
+        headers: Record<string, string>;
+        mimeType: string;
+      },
+    ];
     expect(uploadUrl).toBe(`${ITEM_BASE}/label?save=true`);
-    expect(uploadInit.method).toBe("POST");
-    const headers = uploadInit.headers as Record<string, string>;
-    expect(headers.Authorization).toBe("Bearer test-token");
-    expect(headers["Content-Type"]).toBe("image/jpeg");
-    expect((uploadInit.body as { size: number }).size).toBe(50_000);
+    expect(uploadOptions.httpMethod).toBe("POST");
+    expect(uploadOptions.uploadType).toBe(UploadType.BINARY_CONTENT);
+    expect(uploadOptions.headers.Authorization).toBe("Bearer test-token");
+    expect(uploadOptions.headers["Content-Type"]).toBe("image/jpeg");
+    expect(uploadOptions.mimeType).toBe("image/jpeg");
   });
 
   it("sends save=false when savePhoto is false", async () => {
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce(makeBlobResponse(1000, "image/jpeg"))
-      .mockResolvedValueOnce(jsonResponse(EXACT_PROPOSAL, 200));
+    const { openImage, upload } = fakeImage({});
 
-    await uploadLabelExactEvidenceProposal(SESSION, ITEM_ID, "file:///label.jpg", false, fetchMock);
+    await uploadLabelExactEvidenceProposal(SESSION, ITEM_ID, "file:///label.jpg", false, openImage);
 
-    const [uploadUrl] = fetchMock.mock.calls[1] as [string];
+    const [uploadUrl] = upload.mock.calls[0] as [string];
     expect(uploadUrl).toContain("?save=false");
   });
 
   it("rejects oversize images before the upload call (shared guard fires first)", async () => {
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce(makeBlobResponse(11 * 1024 * 1024, "image/jpeg"));
+    const { openImage, upload } = fakeImage({ size: 11 * 1024 * 1024 });
 
     await expect(
-      uploadLabelExactEvidenceProposal(SESSION, ITEM_ID, "file:///huge.jpg", false, fetchMock),
+      uploadLabelExactEvidenceProposal(SESSION, ITEM_ID, "file:///huge.jpg", false, openImage),
     ).rejects.toThrow(LabelUploadTooLargeError);
-    // Only the local file read happened; the upload was never attempted.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // The shared guard fired before the network — no upload was attempted.
+    expect(upload).not.toHaveBeenCalled();
   });
 
   it("rejects non-image content types before the upload call", async () => {
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce(makeBlobResponse(1000, "application/pdf"));
+    const { openImage, upload } = fakeImage({ type: "application/pdf" });
 
     await expect(
-      uploadLabelExactEvidenceProposal(SESSION, ITEM_ID, "file:///doc.pdf", false, fetchMock),
+      uploadLabelExactEvidenceProposal(SESSION, ITEM_ID, "file:///doc.pdf", false, openImage),
     ).rejects.toThrow(LabelUploadInvalidTypeError);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(upload).not.toHaveBeenCalled();
   });
 
   it("clears the session on a 401 (invokes the unauthorized handler before throwing)", async () => {
     const handler = jest.fn();
     setUnauthorizedHandler(handler);
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce(makeBlobResponse(1000, "image/jpeg"))
-      .mockResolvedValueOnce(jsonResponse(null, 401));
+    const { openImage } = fakeImage({ status: 401, body: null });
 
     await expect(
-      uploadLabelExactEvidenceProposal(SESSION, ITEM_ID, "file:///label.jpg", false, fetchMock),
+      uploadLabelExactEvidenceProposal(SESSION, ITEM_ID, "file:///label.jpg", false, openImage),
     ).rejects.toMatchObject({ name: "ExactEvidenceApiError", status: 401 });
     expect(handler).toHaveBeenCalledTimes(1);
   });
@@ -348,26 +371,20 @@ describe("uploadLabelExactEvidenceProposal", () => {
   it("does not invoke the unauthorized handler on a non-401 error", async () => {
     const handler = jest.fn();
     setUnauthorizedHandler(handler);
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce(makeBlobResponse(1000, "image/jpeg"))
-      .mockResolvedValueOnce(jsonResponse(null, 413));
+    const { openImage } = fakeImage({ status: 413, body: null });
 
     await expect(
-      uploadLabelExactEvidenceProposal(SESSION, ITEM_ID, "file:///label.jpg", false, fetchMock),
+      uploadLabelExactEvidenceProposal(SESSION, ITEM_ID, "file:///label.jpg", false, openImage),
     ).rejects.toMatchObject({ status: 413 });
     expect(handler).not.toHaveBeenCalled();
   });
 
   it("error messages never contain the image URI or extracted content", async () => {
     const sensitiveUri = "file:///private/label-secret.jpg";
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce(makeBlobResponse(1000, "image/jpeg"))
-      .mockResolvedValueOnce(jsonResponse(null, 500));
+    const { openImage } = fakeImage({ status: 500, body: null });
 
     try {
-      await uploadLabelExactEvidenceProposal(SESSION, ITEM_ID, sensitiveUri, false, fetchMock);
+      await uploadLabelExactEvidenceProposal(SESSION, ITEM_ID, sensitiveUri, false, openImage);
       throw new Error("expected a throw");
     } catch (err) {
       const message = (err as ExactEvidenceApiError).message;

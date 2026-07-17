@@ -11,7 +11,8 @@
       "bundleIdentifier": "com.slacks",
       "supportsTablet": false,
       "infoPlist": {
-        "NSCameraUsageDescription": "Slacks uses the camera to scan product barcodes so you can log packaged foods quickly."
+        "NSCameraUsageDescription": "Slacks uses the camera to scan product barcodes so you can log packaged foods quickly.",
+        "NSPhotoLibraryUsageDescription": "Slacks lets you choose an existing nutrition-label photo from your library to log a packaged food."
       }
     },
     "android": {
@@ -20,7 +21,13 @@
     "plugins": [
       "expo-router",
       "expo-camera",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Slacks lets you choose an existing nutrition-label photo from your library to log a packaged food."
+        }
+      ]
     ]
   }
 }
