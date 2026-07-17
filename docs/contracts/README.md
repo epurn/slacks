@@ -64,6 +64,7 @@ Use contracts for:
 | [label-upload.md](label-upload.md) | HTTP upload boundary for capturing and transmitting nutrition label photos |
 | [llm-provider.md](llm-provider.md) | Provider-agnostic LLM adapter configuration supporting OpenAI, Anthropic, Claude Code, and local models |
 | [log-attachments.md](log-attachments.md) | Log attachments table, retention policy, and discard-by-default behavior |
+| [log-event-images.md](log-event-images.md) | Unified text+image log submission: multipart create wire shape, fail-closed image validation, and async never-reject routing |
 | [log-events.md](log-events.md) | Log-event data model, status state machine, and create/list/edit API |
 | [parse-candidates.md](parse-candidates.md) | Structured parse step producing candidate food and exercise items with clarification questions |
 | [saved-foods.md](saved-foods.md) | Saved foods, aliases, and typeahead data model and API |

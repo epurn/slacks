@@ -385,14 +385,15 @@ target is never partially `null`.
 
 ## Per-item provenance read shape (FTY-092)
 
-Each derived food/exercise item the Today timeline renders carries two fields,
-**computed server-side** so the client maps the always-on **source icon** and the
-**"✎ edited"** marker from one DTO rather than joining `evidence_sources` /
-`derived_items` / `corrections` itself. They appear on the shared item DTO
-(`DerivedFoodItemDTO` / `DerivedExerciseItemDTO`) returned by every read path that
-surfaces a Today item — the corrections `PATCH` response and the FTY-198
-day-listing read (`GET /api/users/{user_id}/log-events/by-date?day=YYYY-MM-DD`) —
-so all read paths inherit them.
+Each derived food/exercise item the Today timeline renders carries derived
+provenance fields, **computed server-side** so the client maps the always-on
+**source icon** and the **"✎ edited"** marker from one DTO rather than joining
+`evidence_sources` / `derived_items` / `corrections` itself. They appear on the
+shared item DTO (`DerivedFoodItemDTO` / `DerivedExerciseItemDTO`) returned by
+every read path that surfaces a Today item — the corrections `PATCH` responses
+(edit and rename) and the FTY-198 day-listing read
+(`GET /api/users/{user_id}/log-events/by-date?day=YYYY-MM-DD`) — so all read
+paths inherit them.
 
 ```json
 {
@@ -403,7 +404,8 @@ so all read paths inherit them.
     "label": "USDA",
     "ref": "usda_fdc:168880"
   },
-  "is_edited": false
+  "is_edited": false,
+  "is_renamed": false
 }
 ```
 
@@ -436,6 +438,15 @@ until a genuine edit after the re-match makes it `true` again. A never-edited it
 an item that has only been **amount-adjusted** (a provenance-preserving portion fix,
 `corrections.md`), and an edited-then-rematched item are all `false`. Derived from the
 append-only `corrections` history, so it never drifts and needs no backfill.
+
+### `is_renamed` (FTY-377)
+
+A boolean, **true iff the item carries a `name_edit` correction** — the user
+renamed the item (the canonical rule is defined in `corrections.md`; this
+restatement defers to it). Independent of `is_edited`: a rename is a display-name
+change, never a value override, so neither flag ever implies the other. The item's
+current `name` in this read shape is always the display truth (a renamed item
+simply carries its new name).
 
 ## Rounding rule
 

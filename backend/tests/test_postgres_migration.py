@@ -26,6 +26,7 @@ from sqlalchemy import inspect
 from sqlalchemy.engine import Engine
 
 from tests.conftest import downgrade, upgrade
+from tests.corrections_helpers import assert_one_value_kind_constraint
 
 # 0014 columns, grouped by the contract they must satisfy on Postgres.
 _DERIVED_INT_COLUMNS = {"protein_target_g", "carbs_target_g", "fat_target_g"}
@@ -72,3 +73,37 @@ def test_full_chain_applies_on_postgres(pg_engine: Engine) -> None:
     # User-override columns are nullable (NULL while the target is derived).
     for name in _OVERRIDE_NULLABLE_COLUMNS:
         assert col_meta[name]["nullable"], name
+
+
+def test_corrections_polymorphic_values_on_postgres(pg_engine: Engine) -> None:
+    """The 0021 corrections generalization round-trips on Postgres (FTY-377).
+
+    Alembic's batch alter runs as real ``ALTER TABLE`` statements on Postgres (no
+    SQLite-style table recreate), and relaxing ``new_value``'s NOT NULL plus the
+    new check constraint is exactly the DDL class SQLite tolerates permissively —
+    so the shape, the constraint's runtime enforcement, and the rollback (which
+    restores NOT NULL after deleting text-valued rows) are proven against the
+    production engine, not just the test one.
+    """
+
+    upgrade(pg_engine, "head")
+
+    col_meta = {c["name"]: c for c in inspect(pg_engine).get_columns("corrections")}
+    assert col_meta["new_value"]["nullable"] is True
+    for name in ("old_value_text", "new_value_text"):
+        assert col_meta[name]["nullable"] is True, name
+        assert isinstance(col_meta[name]["type"], sa.String), name
+    checks = {c["name"] for c in inspect(pg_engine).get_check_constraints("corrections")}
+    assert {"ck_corrections_one_value_kind", "ck_corrections_one_item_reference"} <= checks
+
+    # The constraint enforces at insert time: numeric-only and text-only rows are
+    # accepted, a row with both or neither value kind is rejected.
+    assert_one_value_kind_constraint(pg_engine)
+
+    # Rollback restores the numeric-only NOT NULL shape (deleting the dev-only
+    # text-valued rows first), and the upgrade re-applies on top of it.
+    downgrade(pg_engine, "0020")
+    rolled = {c["name"]: c for c in inspect(pg_engine).get_columns("corrections")}
+    assert "new_value_text" not in rolled
+    assert rolled["new_value"]["nullable"] is False
+    upgrade(pg_engine, "head")

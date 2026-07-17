@@ -7,21 +7,24 @@ that every edit preserves the estimator's original value and appends an immutabl
 audit record instead of silently overwriting the estimate. This is the backend
 foundation for the mobile edit UI (FTY-050) and later learning/adaptation (FTY-052).
 
-It covers three things:
+It covers four things:
 
-1. the **`corrections`** table — an append-only, immutable audit row per changed
-   field, and its DTO;
+1. the **`corrections`** table — an append-only, immutable,
+   **value-type-polymorphic** (FTY-377) audit row per changed field, and its DTO;
 2. the **estimated/original snapshot columns** added to `derived_food_items` and
    `derived_exercise_items` (extending the FTY-043/FTY-044 derived-item contracts
    without redefining them);
 3. the **edit endpoint** (`PATCH` a derived item's field), its request/response
    DTOs, the deterministic **servings rescale rule**, input validation, and the
-   object-level authorization that fails closed on cross-user access.
+   object-level authorization that fails closed on cross-user access;
+4. the **rename endpoint** (`PATCH …/name`, FTY-377) — the audited display-name
+   edit — and the derived `is_renamed` flag.
 
-Out of scope: the editable item UI (FTY-050), saved foods/aliases (FTY-052),
-learning that feeds corrections back into future estimates, re-running the
-estimator or any LLM on edit (edits are deterministic user overrides), and
-deleting/undoing derived items (corrections are append-only history, not undo).
+Out of scope: the editable item UI (FTY-050), the rename UI (FTY-378), saved
+foods/aliases (FTY-052), learning that feeds corrections back into future
+estimates, re-running the estimator or any LLM on edit or rename (both are
+deterministic user operations), and deleting/undoing derived items (corrections
+are append-only history, not undo).
 
 ## Owner
 
@@ -32,9 +35,19 @@ backend-core / contracts / security-privacy lane:
 `backend/app/services/item_read_model.py` (FTY-092 — the `source` descriptor +
 `is_edited` derivation), `backend/app/routers/corrections.py`,
 `backend/app/enums.py` (`CorrectionSource`, `SourceType`), `backend/alembic/`
-(`0008`).
+(`0008`, `0021`).
 
 ## Version
+
+4 (FTY-377). The audit is now **value-type-polymorphic**: the `0021` migration
+makes `new_value` nullable, adds the bounded `old_value_text` / `new_value_text`
+columns, and adds the `ck_corrections_one_value_kind` check constraint (exactly
+one of `new_value` / `new_value_text` per row). A new **`name_edit`**
+`CorrectionSource` records a **display-name rename** — the dedicated
+`PATCH …/derived-items/{item_type}/{item_id}/name` mutation overwrites the item's
+`name` in place and appends one immutable text-valued row. A rename is **not** a
+value override: it never affects `is_edited`; the read model exposes the separate
+derived `is_renamed` flag. See **Item rename — FTY-377** below.
 
 3 (FTY-306, contract only). Applying an **exact evidence upgrade** (`Make it
 exact` — `evidence-retrieval.md`, **Exact Evidence Upgrade — FTY-306**) is
@@ -63,12 +76,28 @@ value, redefines the quantity-edit rescale as a **provenance-preserving** adjust
 `item_type` (`food` / `exercise`) and `item_id` are path parameters; `user_id`
 scopes ownership. The body forbids unknown keys.
 
+### Rename request — `DerivedItemRenameRequest` (FTY-377)
+
+`PATCH /api/users/{user_id}/derived-items/{item_type}/{item_id}/name`
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `name` | string | The new display name. Untrusted user text: non-blank after stripping, ≤ 200 chars (the derived-item `name` cap). Stored as data via parameterized ORM inserts — never executed, interpreted, logged, or echoed. |
+
+Same path-parameter/ownership shape as the edit request; the body forbids unknown
+keys. A request-validation failure (empty / whitespace-only / over-length name,
+unknown key) renders the **content-free** `422 {"error": "invalid_request"}` shape
+(the FTY-307 sanitized handler) — never FastAPI's default input-echoing body, so
+the submitted name is never reflected back.
+
 ## Outputs
 
 ### Response — `DerivedFoodItemDTO` / `DerivedExerciseItemDTO`
 
-The updated derived item carrying **both** the editable current values and the
-immutable estimated/original snapshot:
+Returned by the edit **and rename** endpoints. The updated derived item carrying
+**both** the editable current values and the immutable estimated/original
+snapshot, plus the derived `source` descriptor, `is_edited`, and `is_renamed`
+(FTY-377) flags:
 
 - food: `amount`, `grams`, `calories`/`protein_g`/`carbs_g`/`fat_g` (current),
   `calories_estimated`/`protein_g_estimated`/`carbs_g_estimated`/`fat_g_estimated`
@@ -100,7 +129,12 @@ drives the rescale, not a snapshotted estimator output.
 
 ### `corrections` audit row — `CorrectionDTO`
 
-One immutable row per changed field:
+One immutable row per changed field. **Value-type-polymorphic** (FTY-377): a
+numeric correction carries `old_value` / `new_value`; a text correction (a
+`name_edit` rename) carries `old_value_text` / `new_value_text` with `new_value`
+`NULL`. The `ck_corrections_one_value_kind` check constraint enforces exactly one
+of `new_value` / `new_value_text` per row, so each kind is well-formed and
+mutually exclusive.
 
 | Column | Meaning |
 | --- | --- |
@@ -108,10 +142,12 @@ One immutable row per changed field:
 | `user_id` | Owner (FK `users.id`, `ON DELETE CASCADE`). |
 | `item_type` | `food` / `exercise` discriminator. |
 | `derived_food_item_id` / `derived_exercise_item_id` | Exactly one is set (FK, `ON DELETE CASCADE`); a check constraint enforces the XOR. |
-| `field` | Changed field name. |
-| `old_value` | Prior value in canonical units (`NULL` only if the field had no value yet). |
-| `new_value` | New value in canonical units. |
-| `source` | Origin (`CorrectionSource`): `user_edit` (a direct value override), `amount_adjust` (a provenance-preserving portion change, FTY-092), or `re_match` (a re-resolution to a different real source, FTY-093). See **`CorrectionSource`** and **`is_edited` derivation** below. |
+| `field` | Changed field name (`name` for a rename). |
+| `old_value` | Prior value in canonical units (`NULL` if the field had no value yet, or the row is a text correction). |
+| `new_value` | New value in canonical units; `NULL` **iff** the row is a text correction (FTY-377). |
+| `old_value_text` | Prior text value — the item's previous display name on a `name_edit` row; `NULL` for numeric corrections. |
+| `new_value_text` | New text value — the user-authored display name on a `name_edit` row (≤ 200 chars, the item-name cap); `NULL` for numeric corrections. |
+| `source` | Origin (`CorrectionSource`): `user_edit` (a direct value override), `amount_adjust` (a provenance-preserving portion change, FTY-092), `re_match` (a re-resolution to a different real source, FTY-093), or `name_edit` (an audited display-name rename, FTY-377). See **`CorrectionSource`** and **`is_edited` derivation** below. |
 | `created_at` | Append timestamp. |
 
 ### `CorrectionSource`
@@ -121,10 +157,13 @@ One immutable row per changed field:
 | `user_edit` | A direct **value override** of `calories` / a single macro / `active_calories`. The load-bearing signal for `is_edited` (when not superseded by a later `re_match`). |
 | `amount_adjust` | A **provenance-preserving portion change** (FTY-092): the rows a `quantity` edit produces (the `quantity` change and each rescaled field). It never marks the item edited and never rewrites provenance. |
 | `re_match` | A **re-resolution to a different real source** (FTY-093): one row a "Change match" re-resolve appends (keyed on `calories`, the item's headline value). It is **not** a value override — it never marks the item edited — and it **supersedes** any prior `user_edit`, returning `is_edited` to `false`. It **does** rewrite the item's `evidence_sources` provenance to the new source. |
+| `name_edit` | An **audited display-name rename** (FTY-377): the one text-valued row the rename endpoint appends. It is **not** a value override — the item's numbers keep their source, so it never affects `is_edited` — and it drives the separate derived `is_renamed` flag. See **Item rename — FTY-377**. |
 
-Stored as a string column, so adding `amount_adjust` / `re_match` is additive with **no
-migration** and **no backfill** (pre-v1, no production data; the new semantics apply
-going forward).
+Stored as a string column, so adding `amount_adjust` / `re_match` / `name_edit` is
+additive with **no migration** and **no backfill** (pre-v1, no production data; the
+new semantics apply going forward). The FTY-377 **schema** generalization (the text
+columns and the one-value-kind constraint the `name_edit` rows need) is the `0021`
+migration.
 
 ### The servings rescale rule (deterministic, provenance-preserving)
 
@@ -168,6 +207,50 @@ PATCH {field: "calories", value: 280}                     # value override
   → is_edited becomes true
 ```
 
+### Item rename — FTY-377 (audited display-name edit)
+
+`PATCH /api/users/{user_id}/derived-items/{item_type}/{item_id}/name` with body
+`{ "name": "<new name>" }` is the **dedicated rename mutation** — a deterministic
+display-name edit, deliberately separate from the numeric edit endpoint so each
+boundary stays cleanly typed (overloading `DerivedItemEditRequest.value` with a
+`number | string` union would weaken the numeric validation for every value edit):
+
+1. Authorization, owner-scoped load, and the voided-parent precheck (FTY-321) are
+   **identical to the numeric edit** — cross-user, unknown, and voided-parent
+   targets all render `404` with no mutation and no existence/void oracle.
+2. The item's `name` is overwritten **in place** and exactly **one** immutable
+   `name_edit` correction row is appended atomically with it: `field = "name"`,
+   `old_value_text` = the prior name, `new_value_text` = the new name,
+   `new_value` `NULL`.
+3. A rename to the **identical current name is a safe no-op**: the item is
+   returned unchanged and no churn row is appended.
+4. The response is the updated `DerivedFoodItemDTO` / `DerivedExerciseItemDTO`,
+   carrying the new `name`, `is_renamed = true`, and the **unchanged** `source`
+   and `is_edited`.
+
+A rename never re-resolves, re-costs, or calls any LLM; the item's numbers and
+`evidence_sources` provenance are untouched. It also does **not** repoint the
+re-match candidate **seed**: the change-match search still seeds from the item's
+resolved identity, and the caller-supplied sanitized `query` override
+(`routers/re_match.py`) remains the way a user steers the search after a personal
+rename (a seed change is a possible follow-up story, not part of this contract).
+
+### `is_renamed` derivation (FTY-377)
+
+`is_renamed` is **derived, never stored**, exactly like `is_edited`:
+
+> `is_renamed` is **true iff the item has at least one `name_edit` correction** —
+> the user authored the display name.
+
+It is exposed on `DerivedFoodItemDTO` / `DerivedExerciseItemDTO` (default `false`)
+through the shared serializers, so every read path carries it. It is fully
+**independent of `is_edited`**: a rename is not a value override (the calories
+still come from USDA / the label / the model), so a never-value-edited renamed
+item reads `is_edited = false, is_renamed = true`, and a later value override
+flips `is_edited` without touching `is_renamed`. The item's current `name` itself
+flows through the existing read paths (`daily-summary.md` item shape) with no new
+join — the audit row is history, not the display source.
+
 ### `is_edited` derivation (canonical rule)
 
 An item's `is_edited` flag is **derived, never stored**:
@@ -176,11 +259,13 @@ An item's `is_edited` flag is **derived, never stored**:
 > later re-match** — i.e. a `user_edit` whose `created_at` is after the most recent
 > `re_match` row (or, when the item has never been re-matched, simply any `user_edit`).
 
-`amount_adjust` corrections never make an item edited. So a never-edited item and an
-item that has only been amount-adjusted are both `false`; an item with an outstanding
-value override is `true`. Computed at read time from the append-only audit trail, so it
-never drifts and needs no backfill. This flag is exposed per item on the
-Today/daily read-model — see `daily-summary.md`.
+`amount_adjust` corrections never make an item edited, and neither do `name_edit`
+corrections (FTY-377) — a rename is a display-name change, not a value override. So a
+never-edited item, an item that has only been amount-adjusted, and an item that has
+only been renamed are all `false`; an item with an outstanding value override is
+`true`. Computed at read time from the append-only audit trail, so it never drifts
+and needs no backfill. This flag is exposed per item on the Today/daily read-model —
+see `daily-summary.md`.
 
 > **User-stated-at-log-time nutrition is evidence, not an edit (FTY-279).** When a
 > user states a nutrition fact **in the original log text** ("… 580 cals …"), that
@@ -243,10 +328,17 @@ Today/daily read-model — see `daily-summary.md`.
 - **Quantity.** A zero/`NULL`/negative `old_quantity` (no defined ratio) →
   `422 {"error": "invalid_old_quantity", "field": "quantity"}`; a non-positive new
   quantity → `invalid_quantity`. Fails closed, nothing mutated.
+- **Name (FTY-377).** An empty, whitespace-only, or over-length (> 200 chars)
+  rename `name` is rejected at the request boundary with the content-free
+  `422 {"error": "invalid_request"}` shape — the submitted value is **never
+  echoed** (the FTY-307 sanitized validation handler covers this route). The
+  service re-checks the bound (`invalid_name`) so a non-HTTP caller cannot bypass
+  it. Surrounding whitespace is stripped before the name is stored. Fails closed,
+  nothing mutated.
 
 ## Authorization
 
-Object-level, on every edit, **failing closed**:
+Object-level, on every edit **and rename**, **failing closed**:
 
 - The caller must own `{user_id}` (`current_user.id == user_id`), and the item is
   loaded **scoped to that user**. A cross-user or unknown id is indistinguishable
@@ -281,22 +373,29 @@ Object-level, on every edit, **failing closed**:
 - **Retention.** `corrections` and the snapshot columns are user-owned derived data
   retained until the owning derived item, log event, user, or account is deleted
   (`ON DELETE CASCADE`), per `docs/security/data-retention.md`.
-- **No value logging.** Old/new values are sensitive personal data and are never
-  written to logs; error shapes carry a field name and a stable code only, never
-  the value.
+- **No value logging.** Old/new values — numbers and item names alike — are
+  sensitive personal data and are never written to logs; error shapes carry a
+  field name and a stable code only, never the value. The rename `name` is
+  additionally never echoed by request-validation failures (the content-free
+  `invalid_request` shape).
+- **Untrusted name text (FTY-377).** The rename `name` (and the text audit
+  columns holding it) is untrusted user text like `raw_text`: schema-validated,
+  bounded, stored via parameterized ORM inserts, and never executed or
+  interpreted as an instruction.
 
 ## Errors
 
 | Condition | Result |
 | --- | --- |
-| Cross-user or unknown item | `404` (no existence disclosure, no mutation). |
-| Item whose parent log event is voided (FTY-321) | `404` (fail closed, no mutation; same shape as unknown — no void oracle). |
+| Cross-user or unknown item (edit or rename) | `404` (no existence disclosure, no mutation). |
+| Item whose parent log event is voided (FTY-321; edit or rename) | `404` (fail closed, no mutation; same shape as unknown — no void oracle). |
 | Missing/invalid credentials | `401`. |
 | Unknown field for the item type | `422` `unknown_field`. |
 | Negative / non-finite value | `422` (request-boundary validation). |
 | Value above range bound | `422` `out_of_range`. |
 | Zero/invalid old quantity on a rescale | `422` `invalid_old_quantity`. |
 | Non-positive new quantity | `422` `invalid_quantity`. |
+| Empty / whitespace-only / over-length rename name, or unknown rename body key (FTY-377) | `422` `invalid_request` (content-free; the name is never echoed). |
 | Unknown `item_type` in the path | `422`. |
 
 ## Examples
@@ -306,9 +405,14 @@ See the worked example above. Covered by `tests/test_corrections_api.py`
 `test_corrections_rescale.py` (deterministic rescale math, per-field rows,
 snapshot-once, last-edit-wins), `tests/test_corrections_immutability.py`
 (`UPDATE`/`DELETE` rejected), `tests/test_corrections_migration.py`
-(apply/rollback, ownership, check constraint), and `tests/test_item_provenance.py`
-(FTY-092 — the three `is_edited` cases, provenance-preserving amount adjust vs.
-value override, and the source-descriptor mapping).
+(apply/rollback, ownership, check constraints — including the FTY-377
+one-value-kind combinations), `tests/test_postgres_migration.py` (the `0021`
+apply/constraint/rollback on Postgres), `tests/test_item_rename.py` (FTY-377 —
+rename happy paths, `is_renamed`/`is_edited` independence, no-op rename,
+fail-closed boundary, content-free validation, `name_edit` immutability, read
+paths), and `tests/test_item_provenance.py` (FTY-092 — the three `is_edited`
+cases, provenance-preserving amount adjust vs. value override, and the
+source-descriptor mapping).
 
 ## Migration / Compatibility
 
@@ -337,6 +441,20 @@ value override, and the source-descriptor mapping).
   edited. The `source` descriptor and `is_edited` flag are **derived reads** (from
   `evidence_sources` and the `corrections` history) with no new persisted column or
   read table.
+- **FTY-377 (`0021` migration + `name_edit`).** The `0021` migration generalizes
+  the audit to value-type-polymorphic rows: `new_value` becomes nullable, the
+  bounded `old_value_text` / `new_value_text` columns (`VARCHAR(200)`, the
+  item-name cap) are added, and the `ck_corrections_one_value_kind` check
+  constraint enforces exactly one of `new_value` / `new_value_text` per row. It
+  applies and rolls back cleanly — the downgrade drops the constraint and text
+  columns and restores `new_value NOT NULL`, deleting the dev-only text-valued
+  rows first (pre-v1, no production data) — proven against both SQLite and a real
+  Postgres (`tests/test_postgres_migration.py`). The `name_edit`
+  `CorrectionSource` value itself is additive over the string `source` column.
+  The append-only ORM `UPDATE`/`DELETE` guards apply to text rows unchanged, and
+  the retention posture is identical: the text columns are user-owned derived
+  data removed by the same `ON DELETE CASCADE` chain
+  (`docs/security/data-retention.md`).
 - **FTY-306 (contract only; no migration, no new enum value).** The exact
   evidence upgrade apply (`Make it exact`) reuses the existing **`re_match`**
   `CorrectionSource` and the FTY-093 audit semantics unchanged — one immutable

@@ -1,10 +1,15 @@
-"""Shared seeding helpers for the FTY-051 corrections tests.
+"""Shared seeding helpers for the FTY-051/FTY-377 corrections tests.
 
 Not a test module: it registers a user through the API and inserts resolved
 derived food/exercise items directly via the session factory so the edit tests
 have something to correct. ``snapshot`` controls whether the estimated/original
 columns are pre-populated (the estimator path) or left ``None`` (a pre-migration
 item that must snapshot on its first edit).
+
+:func:`assert_one_value_kind_constraint` is the engine-agnostic prober for the
+FTY-377 ``ck_corrections_one_value_kind`` check constraint, shared by the SQLite
+and Postgres migration tests so both engines are proven against identical row
+combinations.
 """
 
 from __future__ import annotations
@@ -12,13 +17,17 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 
 from app.db import create_session_factory
-from app.enums import DerivedItemStatus, LogEventStatus
+from app.enums import CandidateType, CorrectionSource, DerivedItemStatus, LogEventStatus
+from app.models.corrections import Correction
 from app.models.derived import DerivedExerciseItem, DerivedFoodItem
 from app.models.food_sources import EvidenceSource
+from app.models.identity import User
 from app.models.log_events import LogEvent
 
 
@@ -128,6 +137,73 @@ def seed_evidence(
         session.add(evidence)
         session.commit()
         return evidence.id
+
+
+def assert_one_value_kind_constraint(engine: Engine) -> None:
+    """Prove ``ck_corrections_one_value_kind`` (FTY-377) on a migrated ``engine``.
+
+    Seeds a user → log event → food item chain through the ORM (so foreign keys
+    are satisfied on engines that enforce them), then asserts a **numeric-only**
+    and a **text-only** correction row insert, while a row with **both** or
+    **neither** value kind set is rejected by the database check constraint.
+    Engine-agnostic on purpose: the SQLite and Postgres migration tests share it
+    so both engines are proven against identical combinations.
+    """
+
+    factory = create_session_factory(engine)
+    with factory() as session:
+        user = User()
+        session.add(user)
+        session.flush()
+        event = LogEvent(user_id=user.id, raw_text="seed", status=LogEventStatus.PENDING)
+        session.add(event)
+        session.flush()
+        item = DerivedFoodItem(
+            log_event_id=event.id,
+            user_id=user.id,
+            name="white rice",
+            quantity_text="1 serving",
+            status=DerivedItemStatus.RESOLVED,
+        )
+        session.add(item)
+        session.commit()
+        user_id, item_id = user.id, item.id
+
+    def _row(**values: object) -> Correction:
+        values.setdefault("field", "calories")
+        return Correction(
+            user_id=user_id,
+            item_type=CandidateType.FOOD,
+            derived_food_item_id=item_id,
+            **values,
+        )
+
+    # Numeric-only and text-only rows are each well-formed.
+    with factory() as session:
+        session.add(_row(old_value=200.0, new_value=180.0, source=CorrectionSource.USER_EDIT))
+        session.add(
+            _row(
+                field="name",
+                old_value_text="white rice",
+                new_value_text="jasmine rice",
+                source=CorrectionSource.NAME_EDIT,
+            )
+        )
+        session.commit()
+
+    # Both value kinds set → rejected.
+    with factory() as session:
+        session.add(
+            _row(new_value=180.0, new_value_text="jasmine rice", source=CorrectionSource.USER_EDIT)
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+
+    # Neither value kind set → rejected.
+    with factory() as session:
+        session.add(_row(source=CorrectionSource.USER_EDIT))
+        with pytest.raises(IntegrityError):
+            session.commit()
 
 
 def seed_exercise_item(

@@ -37,6 +37,15 @@ estimator / contracts / backend-core lane:
 
 ## Version
 
+12 (FTY-374, contract only): the parse/interpretation step gains **images as
+evidence surfaces** (see
+[Images as parse evidence surfaces](#images-as-parse-evidence-surfaces-fty-374))
+— an event created by the unified text+image submission (`log-event-images.md`)
+reaches this step with 0..N validated images alongside its `raw_text`: text
+supplies identity/count/context, an image supplies label facts as
+`user_label`-tier evidence, and each derived number records which surface
+backed it. No `ParseResult`/persistence/routing change; FTY-376 implements.
+
 11 (FTY-364, contract only): relocates the `### Estimate-first routing override`
 and `### User-stated nutrition facts` sections to
 [estimate-first-routing.md](estimate-first-routing.md) with no normative change;
@@ -501,6 +510,42 @@ than re-asked; this step applies it after the calibrated clarify decision and
 before the deterministic plausibility gate above, interpreting the shared mode
 semantics from [estimator-policy.md](estimator-policy.md).
 
+### Images as parse evidence surfaces (FTY-374)
+
+An event created by the unified text+image submission (`log-event-images.md`)
+arrives here carrying 0..N already-validated images, loaded by the worker and
+supplied to the provider through `structured_completion(..., images=)`
+(`llm-provider.md` v2; vision gating and the non-vision degrade path are
+`estimation-jobs.md` v6). This runs the **normal parse/interpretation path** —
+not the label-only `label_pipeline` — with images as evidence surfaces:
+
+- **Division of surfaces.** The text is the primary identity/count/context
+  surface ("2 of these bars" states a count of 2 and that the images depict
+  the bars); an image is a facts surface — a photographed nutrition label
+  yields label facts as **`user_label`-tier (rank 1) evidence**, extracted and
+  validated under the same normalized fact schema and plausibility validators
+  as the label pipeline (`label-extraction.md`, `evidence-retrieval.md`). A
+  non-label food photo is hypothesis context, never invented numbers.
+- **Per-surface provenance — every number shows where it came from.** Each
+  derived number records the surface that backed it: a count/quantity stated
+  in text, facts extracted from an image label (`user_label`), or a
+  database/reference/model-prior tier as usual. The worked case — `"2 of these
+  bars"` + a label photo — resolves as: `amount = 2` (text-stated), per-100g /
+  per-serving facts from the label (`user_label` evidence row carrying the
+  source image's `content_hash`), scaled **deterministically** by classical
+  code — provenance `user_label` with the text-supplied count. Image-derived
+  facts pass the same schema/validator trust boundary as any untrusted input;
+  prompt-injection printed on an image is data, never instructions.
+- **Interpretation, not a schema change.** The images join the
+  `InterpretationSession` as evidence at the model-consultable decision points
+  (`interpretation-session.md` v2). `ParseResult`, persistence, N=3 sampling /
+  the calibrated clarify decision, the FTY-298 policy gates, and the routing
+  table are unchanged — an image strengthens the hypothesis, so it can only
+  make clarification *rarer*, never introduce a new ask.
+- **Egress.** Images go to the configured LLM/vision provider only — never to
+  search/fetch/tools, never logged, never in `trace`/`error` (the raw-diary-
+  text boundary, extended to the image surface).
+
 ### User-stated nutrition facts (FTY-279)
 
 When the user writes an explicit nutrition fact, the parser extracts it into the
@@ -697,3 +742,9 @@ event.raw_text = "stuff"
   `InterpretationSession` contract; FTY-348 relocates it to
   [interpretation-session.md](interpretation-session.md) with no normative change.
   FTY-325/FTY-326 implement the interpreter core.
+- **FTY-374 (contract only; no code, no migration in this story).** Adds the
+  images-as-evidence-surfaces rules above (`log-event-images.md`): validated
+  images alongside `raw_text`, label facts as `user_label` (rank 1) evidence,
+  per-surface provenance, provider-only image egress. No `ParseResult`,
+  persistence, sampling, policy, or routing change. FTY-376 implements
+  (ingestion/retention is FTY-375).
