@@ -39,6 +39,14 @@ contracts lane; implementation owners on landing:
 
 ## Version
 
+2 (FTY-370, wording-only alignment; no validation, retention, or purge
+change): the async-routing passage below no longer promises a terminal
+`failed` on exhaustion for image-bearing events — retry exhaustion and per-run
+ceiling breaches degrade to a rough, honestly-labelled estimate or an honest
+still-working `processing` state per `estimation-jobs.md` v7's never-fail
+semantics; terminal `failed` stays reserved for genuinely non-food/empty
+input.
+
 1 (FTY-374, contract only).
 
 ## Inputs
@@ -90,15 +98,18 @@ worker, by contrast, retries a transient failure with backoff while the event
 honestly reports `processing` (still working), routes ambiguity to a
 clarifying question rather than failure, and degrades rather than fails on a
 configuration limit (the non-vision gating, `estimation-jobs.md` v6) — so a
-good-faith entry never becomes terminal `failed` on a *first* transient error.
-That guarantee is bounded, not absolute: the attempt-level retry policy and
+good-faith entry never becomes terminal `failed` on a transient error.
+Under the never-fail semantics (`estimation-jobs.md` v7, FTY-370) that
+guarantee holds through exhaustion too: the attempt-level retry policy and
 the per-run provider-call / wall-clock ceiling apply to image-bearing events
-**unchanged**, and retry exhaustion, a ceiling breach, or a deterministic step
-failure still drives the event to `failed` exactly as the `estimation-jobs.md`
-v6 state and error tables specify — FTY-375/FTY-376 implement those tables
-as written, with no image-specific exception. **That
-retries-before-terminal difference — not an unconditional never-`failed`
-promise — is why the mixed path is asynchronous.** The standalone synchronous
+**unchanged**, and retry exhaustion or a ceiling breach **degrades** — a
+rough, honestly-labelled estimate when the run interpreted ≥1 candidate, an
+honest still-working `processing` state with bounded long-backoff auto-retry
+otherwise — exactly as the `estimation-jobs.md` v7 state and error tables
+specify, with no image-specific exception (FTY-375/FTY-376 implement those
+tables as written). Terminal `failed` stays reserved for deterministic
+non-food/empty input. **That degrade-not-reject difference is why the mixed
+path is asynchronous.** The standalone synchronous
 label endpoint and its FTY-196 confirmation gate are unchanged and remain for
 the "photograph a label, nothing typed" flow.
 
@@ -207,6 +218,10 @@ The worked estimation case — `"2 of these bars"` + a label photo → `amount =
 
 ## Migration / Compatibility
 
+- **FTY-370 (wording-only alignment; no code, no migration).** The
+  async-routing retry/terminal wording now matches `estimation-jobs.md` v7's
+  never-fail degrade semantics; this page's image validation, retention, and
+  purge rules are untouched.
 - **FTY-374 (contract only; no code, no migration in this story).** Additive
   for the JSON path — nothing about the JSON create shape changes, so no
   back-compat shim exists or is needed; the multipart shape is new.

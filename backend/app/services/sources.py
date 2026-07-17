@@ -169,7 +169,9 @@ def list_source_capabilities(environ: Mapping[str, str] | None = None) -> Source
             SourceCapability(
                 id=OFF_SOURCE,
                 source_type=OFF_SOURCE_TYPE,
-                kinds=["barcode"],
+                # OFF now serves both barcode lookups (FTY-060) and brand-name-only
+                # name search (FTY-369) for barcode-less packaged products.
+                kinds=["barcode", "named_product"],
                 enabled=off.enabled,
                 available=off.is_available,
             ),

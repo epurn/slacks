@@ -24,9 +24,18 @@ Contracts implemented here:
   with attempts remaining leaves the job ``running`` and asks the caller to
   retry; once ``attempts`` reaches ``max_attempts`` the job and event become
   ``failed``. ``needs_clarification`` is terminal and never retried.
+- **Image-bearing events (FTY-376).** At claim time the worker loads the event's
+  image attachments by event id (``event_images.py`` — the ids-only payload never
+  carries image data) and attaches them to the context as vision evidence when
+  the configured model is vision-capable. When the event reaches an
+  **event-terminal** status (``completed``/``failed``) its transient, unsaved
+  images are hard-deleted in the same transaction as the terminal status write;
+  the worker-terminal clarification outcomes retain them for the answer-triggered
+  re-estimate (``log-attachments.md`` v3, ``estimation-jobs.md`` v6).
 
-Every run records sanitized metadata only — no raw prompts, secrets, or raw user
-text (security baseline + ``docs/security/data-retention.md``).
+Every run records sanitized metadata only — no raw prompts, secrets, raw user
+text, or image bytes/paths/hashes (security baseline +
+``docs/security/data-retention.md``).
 """
 
 from __future__ import annotations
@@ -47,13 +56,8 @@ from app.enums import (
     LogEventStatus,
 )
 from app.estimator.decision_trace import MAX_TRACE_ENTRIES
-from app.estimator.fdc import build_fdc_client
-from app.estimator.food_resolvers import BarcodeResolver, FoodResolver
+from app.estimator.event_images import EventImageLoad, load_event_images
 from app.estimator.label_step import LabelInput
-from app.estimator.off import build_off_client
-from app.estimator.official_fetch import load_official_fetch_settings
-from app.estimator.official_step import OfficialSourceResolveStep
-from app.estimator.parse_policy import ParsePolicySettings
 from app.estimator.persist import (
     _persist_candidates,
     _persist_clarification_questions,
@@ -69,15 +73,9 @@ from app.estimator.pipeline import (
     Pipeline,
     PipelineOutcome,
     PipelineResult,
-    default_pipeline,
-    label_pipeline,
 )
-from app.estimator.reference_fetch import load_reference_fetch_settings
-from app.estimator.run_budget import BudgetedProvider, is_run_budget_breach
-from app.estimator.search import build_search_provider
-from app.estimator.user_text_macro_estimator import UserTextMacroEstimator
-from app.estimator.user_text_step import UserTextResolveStep
-from app.llm import build_provider, load_llm_settings
+from app.estimator.run_budget import is_run_budget_breach
+from app.estimator.worker_pipeline import build_worker_pipeline
 from app.models.derived import (
     ClarificationAnswer,
     ClarificationQuestion,
@@ -86,8 +84,8 @@ from app.models.derived import (
 from app.models.estimation import EstimationJob, EstimationRun
 from app.models.identity import UserProfile
 from app.models.log_events import LogEvent
+from app.services.attachments import purge_transient_for_event
 from app.services.log_events import transition_event
-from app.settings import load_settings
 
 #: Maximum number of estimation attempts before the job is marked ``failed``.
 #: Conservative default (one initial try plus two retries); tunable per the
@@ -389,6 +387,7 @@ def _finalize_scoped_reestimate(
     prior_food: list[DerivedFoodItem],
     *,
     user_id: uuid.UUID,
+    images: EventImageLoad,
 ) -> ProcessResult:
     """Re-cost only the answered open component(s), preserving every resolved sibling.
 
@@ -414,6 +413,10 @@ def _finalize_scoped_reestimate(
             raw_text=component.name,
             weight_kg=weight_kg,
             answered_clarifications=answered,
+            # The event's still-retained image evidence rides the scoped round
+            # too (``estimation-jobs.md`` v6: a clarify loop never loses it).
+            images=images.images,
+            image_evidence_degraded_reason=images.degraded_reason,
         )
         result = _run_pipeline(pipeline, context)
         if result.outcome is PipelineOutcome.FAILED and is_run_budget_breach(result.error):
@@ -425,6 +428,8 @@ def _finalize_scoped_reestimate(
             run.error = result.error
             job.status = EstimationJobStatus.FAILED
             session.add_all([run, job])
+            # Event-terminal: purge transient images atomically with the write.
+            purge_transient_for_event(session, event.id)
             transition_event(session, event, LogEventStatus.FAILED)
             return _result(job, event, run, should_retry=False)
         if (
@@ -470,6 +475,9 @@ def _finalize_scoped_reestimate(
     run.status = EstimationRunStatus.COMPLETED
     job.status = EstimationJobStatus.SUCCEEDED
     session.add_all([run, job])
+    # Event-terminal: the clarify loop is over, so the retained transient images
+    # are purged atomically with the completion (``log-attachments.md`` v3).
+    purge_transient_for_event(session, event.id)
     transition_event(session, event, LogEventStatus.COMPLETED)
     return _result(job, event, run, should_retry=False)
 
@@ -510,54 +518,10 @@ def process_estimation(
     """
 
     if pipeline is None:
-        app_settings = load_settings()
-        # Bound this run's total sequential provider work (FTY-363): every step shares
-        # this one budgeted provider, so the whole attempt fails closed on breach.
-        provider = BudgetedProvider(build_provider(load_llm_settings()))
-        if label_upload is not None:
-            # A label event has an image, not NL text: extract it deterministically
-            # rather than running the text parse pipeline.
-            pipeline = label_pipeline(provider)
-        else:
-            # The food step (FTY-044/060) needs this session for the product cache and
-            # evidence writes, so the default pipeline is built per call here where the
-            # session is in scope. A barcode candidate prefers the Open Food Facts source
-            # (enabled by default); a generic food uses USDA FDC (disabled without a key,
-            # leaving the candidate unresolved). The official-source step (FTY-062/166)
-            # runs last for the candidates the food step deferred: it searches (FTY-079)
-            # and fetches official pages (FTY-078), then public reference pages
-            # (FTY-166), else falls through to a model-prior estimate. Building the
-            # clients/adapters makes no network call.
-            resolver = FoodResolver(session=session, source=build_fdc_client())
-            barcode_resolver = BarcodeResolver(session=session, source=build_off_client())
-            search_provider = build_search_provider()
-            reference_fetch_settings = load_reference_fetch_settings()
-            official_step = OfficialSourceResolveStep(
-                provider=provider,
-                search_provider=search_provider,
-                fetch_settings=load_official_fetch_settings(),
-                reference_fetch_settings=reference_fetch_settings,
-                model_prior_confidence_floor=app_settings.estimator_model_prior_confidence_floor,
-                clarify_mode=app_settings.estimator_clarify_mode,
-            )
-            # The user-text tier (FTY-280) resolves a stated calorie total directly and
-            # fills its missing macros from the same reference search/fetch path before
-            # the model prior. It runs before the food step (rank 1).
-            user_text_step = UserTextResolveStep(
-                macro_estimator=UserTextMacroEstimator(
-                    provider=provider,
-                    search_provider=search_provider,
-                    reference_fetch_settings=reference_fetch_settings,
-                )
-            )
-            pipeline = default_pipeline(
-                provider,
-                parse_policy=ParsePolicySettings.from_app_settings(app_settings),
-                food_resolver=resolver,
-                barcode_resolver=barcode_resolver,
-                official_step=official_step,
-                user_text_step=user_text_step,
-            )
+        # Pipeline selection + construction (extracted to ``worker_pipeline.py``):
+        # a label event runs ``label_pipeline``; everything else — image-bearing
+        # unified submissions included (FTY-376) — runs ``default_pipeline``.
+        pipeline = build_worker_pipeline(session, label_upload)
 
     # Enforce ownership before any write: a missing or cross-user event fails
     # closed and no job row is created on its behalf.
@@ -608,6 +572,17 @@ def process_estimation(
     session.commit()
     session.refresh(run)
 
+    # Image-bearing events (FTY-376): load the event's image attachments by id —
+    # the ids-only job payload never carries image data; the database is the only
+    # channel from create to worker — gated on vision capability. Transient rows
+    # are retained across the clarify loop (``log-attachments.md`` v3), so an
+    # answer-triggered re-estimate reloads them here identically.
+    image_load = (
+        load_event_images(session, log_event_id, user_id)
+        if label_upload is None
+        else EventImageLoad()
+    )
+
     # FTY-329 scoped re-estimate: a previously-``partially_resolved`` event carries
     # committed food items from an earlier round, so this re-estimate re-costs **only**
     # the open, newly-answered component(s) and leaves the already-``resolved`` siblings
@@ -618,7 +593,7 @@ def process_estimation(
     prior_food = _load_event_food_items(session, log_event_id)
     if label_upload is None and prior_food:
         return _finalize_scoped_reestimate(
-            session, pipeline, job, event, run, prior_food, user_id=user_id
+            session, pipeline, job, event, run, prior_food, user_id=user_id, images=image_load
         )
 
     context = EstimationContext(
@@ -628,6 +603,8 @@ def process_estimation(
         weight_kg=_load_user_weight_kg(session, user_id),
         label_input=label_upload,
         answered_clarifications=_load_answered_clarifications(session, log_event_id),
+        images=image_load.images,
+        image_evidence_degraded_reason=image_load.degraded_reason,
     )
     result = _run_pipeline(pipeline, context)
 
@@ -691,6 +668,11 @@ def _finalize(
         run.status = EstimationRunStatus.COMPLETED
         job.status = EstimationJobStatus.SUCCEEDED
         session.add_all([run, job])
+        # Event-terminal: hard-delete the event's transient, unsaved images in
+        # the same transaction as the terminal status write (FTY-376,
+        # ``log-attachments.md`` v3). Saved rows are never touched; a no-op for
+        # an event without transient attachments.
+        purge_transient_for_event(session, event.id)
         transition_event(session, event, LogEventStatus.COMPLETED)
         return _result(job, event, run, should_retry=False)
 
@@ -726,6 +708,9 @@ def _finalize(
     if terminal:
         job.status = EstimationJobStatus.FAILED
         session.add_all([run, job])
+        # Event-terminal (every failed flavour: deterministic, retry-exhausted,
+        # run-budget breach): purge transient images atomically with the write.
+        purge_transient_for_event(session, event.id)
         transition_event(session, event, LogEventStatus.FAILED)
         return _result(job, event, run, should_retry=False)
 

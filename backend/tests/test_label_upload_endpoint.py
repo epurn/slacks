@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 
 from app.db import create_session_factory
 from app.enums import DerivedItemStatus, LogEventStatus
-from app.estimator import processing
+from app.estimator import worker_pipeline
 from app.estimator.label_step import LabelInput, LabelResolveStep
 from app.estimator.pipeline import Pipeline
 from app.estimator.processing import process_estimation
@@ -242,8 +242,8 @@ def test_transient_provider_error_resolves_to_a_terminal_failed_event(
     """
 
     fake = FakeProvider(responses=[LLMTransientError("boom")], supports_vision=True)
-    monkeypatch.setattr(processing, "load_llm_settings", lambda: None)
-    monkeypatch.setattr(processing, "build_provider", lambda _settings: fake)
+    monkeypatch.setattr(worker_pipeline, "load_llm_settings", lambda: None)
+    monkeypatch.setattr(worker_pipeline, "build_provider", lambda _settings: fake)
     user_id, auth = _register(client, "label-upload-transient@example.com")
 
     response = _upload(client, user_id, auth)

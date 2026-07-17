@@ -48,6 +48,7 @@ Use contracts for:
 | Contract | Purpose |
 |----------|---------|
 | [clarification.md](clarification.md) | Clarify-loop read/answer sub-API for a `needs_clarification` or `partially_resolved` log event |
+| [clarify-gates.md](clarify-gates.md) | Parse step's estimate-vs-ask gate machinery: calibrated clarify decision, deterministic plausibility gate, and gate-outcome/atomicity rules |
 | [corrections.md](corrections.md) | User-initiated corrections and edits to derived food and exercise items |
 | [daily-summary.md](daily-summary.md) | Read-only daily-summary endpoint for fetching a user's daily totals and entries |
 | [estimate-first-routing.md](estimate-first-routing.md) | Parse step's estimate-first routing override, deterministic detail signal, amount fills, and user-stated-nutrition extraction |
@@ -65,6 +66,7 @@ Use contracts for:
 | [llm-provider.md](llm-provider.md) | Provider-agnostic LLM adapter configuration supporting OpenAI, Anthropic, Claude Code, and local models |
 | [log-attachments.md](log-attachments.md) | Log attachments table, retention policy, and discard-by-default behavior |
 | [log-event-images.md](log-event-images.md) | Unified text+image log submission: multipart create wire shape, fail-closed image validation, and async never-reject routing |
+| [log-event-soft-void.md](log-event-soft-void.md) | Soft-void (delete) semantics for a log event: marker-not-deletion, read-model exclusion, and fail-closed single-item surfaces |
 | [log-events.md](log-events.md) | Log-event data model, status state machine, and create/list/edit API |
 | [parse-candidates.md](parse-candidates.md) | Structured parse step producing candidate food and exercise items with clarification questions |
 | [saved-foods.md](saved-foods.md) | Saved foods, aliases, and typeahead data model and API |

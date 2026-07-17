@@ -47,6 +47,15 @@ or migration: it reuses `derived_food_items`,
 
 ## Version
 
+2 (FTY-370, contract only). Reconciles the async-worker retry/terminal wording
+below with `estimation-jobs.md` v7's never-fail semantics: a `provider_transient_error`
+(`StepError`) that exhausts the bounded retries no longer lands terminal `failed`
+— the worker **degrades** (a rough, honestly-labelled estimate when ≥1 candidate
+was interpreted, otherwise the honest still-working `processing` state). Terminal
+`failed` stays reserved for the deterministic non-food/unusable/schema-invalid
+gates. The synchronous single-attempt label seam (`label-upload.md`) is unchanged.
+No schema, provider, or validation change.
+
 1 (FTY-061). The source-hierarchy classification `user_label` (rank 1, above any
 database lookup) is recorded on the estimation run `source_refs` and on each
 `evidence_sources` row this step produces.
@@ -75,7 +84,7 @@ string fields length-bounded, and a closed `disposition` vocabulary.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `disposition` | enum | `extracted` \| `unreadable` \| `not_a_label`. |
-| `confidence` | float [0,1] | Extraction confidence; gated by the shared FTY-159 clarify-policy mechanism (`app/estimator/clarify_policy.py`, `LABEL_CLARIFY_POLICY`). The label operating point (0.5) is a **documented tunable**, not data-derived — no label-image eval set exists yet; a dedicated label-image eval slice is the recorded follow-up (see `parse-candidates.md`, "Calibrated clarify decision"). |
+| `confidence` | float [0,1] | Extraction confidence; gated by the shared FTY-159 clarify-policy mechanism (`app/estimator/clarify_policy.py`, `LABEL_CLARIFY_POLICY`). The label operating point (0.5) is a **documented tunable**, not data-derived — no label-image eval set exists yet; a dedicated label-image eval slice is the recorded follow-up (see `clarify-gates.md`, "Calibrated clarify decision"). |
 | `facts` | `PanelFacts \| null` | Required when `extracted`; ignored otherwise. |
 | `reason` | string? | Short sanitized label for `not_a_label`; never echoed image text. |
 
@@ -160,7 +169,7 @@ panel facts: serving 40 g, 200 kcal / 10 P / 20 C / 8 F per serving
 | Not a nutrition label (unusable input) | `StepFailed` (`unusable_label`) | nothing | `processing → failed` |
 | Invalid/mistyped image bytes | `StepFailed` (`invalid_label_image`) | nothing | `processing → failed` |
 | Schema-invalid reply | `StepFailed` (`schema_validation_failed`) | nothing | `processing → failed` |
-| Transient provider failure | `StepError` (retryable) | nothing | retries within bound, then `failed` |
+| Transient provider failure | `StepError` (retryable) | rough estimate on degrade (`food-resolution.md` v22) | retries within bound, then **degrades** (FTY-370, `estimation-jobs.md` v7): `processing → completed` / `partially_resolved` with ≥1 interpreted candidate, else honest still-working `processing`; never terminal `failed` |
 
 ## Authorization
 
@@ -195,7 +204,7 @@ object-level ownership and retention.
 | Schema-invalid provider reply | Terminal `failed` (`schema_validation_failed`); rejected, never persisted. |
 | Unreadable / low-confidence label | `needs_clarification` (`label_unreadable`). |
 | Unresolvable serving size / quantity | `needs_clarification`. |
-| Transient provider error | `StepError`; retried within the bound, then `failed`. |
+| Transient provider error | `StepError`; retried within the bound, then **degrades** (FTY-370) per `estimation-jobs.md` v7 — a rough, honestly-labelled estimate when ≥1 candidate was interpreted, else the honest still-working `processing` state; never terminal `failed`. (The synchronous single-attempt label seam is `label-upload.md`; this row is the async worker path.) |
 
 ## Examples
 

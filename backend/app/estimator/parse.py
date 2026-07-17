@@ -57,6 +57,11 @@ from app.estimator.detail_signals import (
     parse_leading_count,
     parse_range_midpoint,
 )
+from app.estimator.event_images import (
+    IMAGE_EVIDENCE_UNAVAILABLE_ASSUMPTION,
+    PHOTO_ONLY_MARKER_TEXT,
+    PHOTO_WITHOUT_VISION_QUESTION,
+)
 from app.estimator.exercise import has_exercise_detail
 from app.estimator.interpretation import InterpretationSession, representative_sample
 from app.estimator.parse_policy import ParsePolicySettings
@@ -170,22 +175,48 @@ class ParseStep:
             # spend an LLM call on it.
             raise StepFailed("empty_input")
 
+        if context.image_evidence_degraded_reason is not None:
+            self._degrade_image_surface(context, raw)
+
         # The session owns interpretation for the run's lifetime (FTY-325): it
         # draws the sample set, forms the initial hypothesis, re-interprets on
         # structural sample disagreement, and stays on the context so later
         # steps (FTY-326) can consult it. Provider failures surface from it
-        # with the same step-signal mapping as before.
+        # with the same step-signal mapping as before. The event's image
+        # evidence surfaces (FTY-376) ride every interpretation call.
         session = InterpretationSession(
             self.provider,
             raw,
             policy=self.policy,
             answered=context.answered_clarifications,
+            images=[event_image.image for event_image in context.images],
             step_name=self.name,
         )
         context.interpretation_session = session
         signal = session.interpret_initial(context)
         self._route(context, session, signal)
         context.record_step(self.name, "ok")
+
+    @staticmethod
+    def _degrade_image_surface(context: EstimationContext, raw: str) -> None:
+        """Degrade honestly when the event has images a non-vision model can't read.
+
+        The estimate-first / never-reject clause for a configuration limit
+        (``estimation-jobs.md`` v6): with a usable text surface the run simply
+        proceeds text-only, recording a content-free assumption so the estimate
+        is honestly labelled as missing its image evidence. An image-only event
+        (the fixed photo-marker ``raw_text``, no usable text surface) routes to
+        a clarifying question — never a terminal failure — with no provider
+        call spent on the bare marker.
+        """
+
+        if raw == PHOTO_ONLY_MARKER_TEXT:
+            context.clarification_questions = [
+                ClarificationDraft(text=PHOTO_WITHOUT_VISION_QUESTION)
+            ]
+            raise NeedsClarification("photo_without_vision")
+        if IMAGE_EVIDENCE_UNAVAILABLE_ASSUMPTION not in context.assumptions:
+            context.assumptions.append(IMAGE_EVIDENCE_UNAVAILABLE_ASSUMPTION)
 
     def _route(
         self,

@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.db import create_session_factory
 from app.enums import EstimationJobStatus, LogEventStatus
-from app.estimator import processing
+from app.estimator import worker_pipeline
 from app.estimator.pipeline import EstimationContext, Pipeline, PipelineOutcome, StepFailed
 from app.estimator.processing import process_estimation
 from app.estimator.run_budget import (
@@ -202,7 +202,7 @@ def test_default_worker_path_wraps_provider_in_run_budget(
 
     user_id, event_id = _seed_event(client, "wrapped@example.com")
     built = FakeProvider(responses=[], model="fake-model")
-    monkeypatch.setattr(processing, "build_provider", lambda _settings: built)
+    monkeypatch.setattr(worker_pipeline, "build_provider", lambda _settings: built)
 
     captured: dict[str, Provider] = {}
 
@@ -210,7 +210,7 @@ def test_default_worker_path_wraps_provider_in_run_budget(
         captured["wrapped"] = wrapped
         return BudgetedProvider(wrapped, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(processing, "BudgetedProvider", _spy)
+    monkeypatch.setattr(worker_pipeline, "BudgetedProvider", _spy)
 
     # The build path constructs the real pipeline (no network at construction) and runs
     # it; the fake has no scripted response, so the run fails, but the wrap happened

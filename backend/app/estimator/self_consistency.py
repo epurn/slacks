@@ -45,7 +45,7 @@ from dataclasses import dataclass
 from app.estimator.parse_prompt import build_parse_prompt
 from app.estimator.parse_recovery import recoverable_parse_result_schema
 from app.estimator.pipeline import AnsweredClarification
-from app.llm.base import Provider
+from app.llm.base import ImageInput, Provider
 from app.schemas.parse import ParsedCandidate, ParseDisposition, ParseResult
 
 #: Number of parse samples drawn per input. The research grounding this story
@@ -158,6 +158,7 @@ def evaluate_self_consistency(
     raw_text: str,
     *,
     answered: Sequence[AnsweredClarification] = (),
+    images: Sequence[ImageInput] = (),
     num_samples: int = SELF_CONSISTENCY_NUM_SAMPLES,
     first_window: int = SELF_CONSISTENCY_FIRST_WINDOW,
     max_repair_attempts: int = 0,
@@ -166,16 +167,19 @@ def evaluate_self_consistency(
 
     Samples run in parallel (latency ~flat vs one call); when the first
     ``first_window`` samples are unanimous the rest are skipped (cost guard for
-    easy inputs). ``answered`` is forwarded to every sample's prompt (FTY-171).
-    Any sample failure propagates the provider/validation error unchanged — the
-    parse step's existing error mapping owns routing it, and a partially-failed
-    sample set is never silently scored.
+    easy inputs). ``answered`` is forwarded to every sample's prompt (FTY-171),
+    and ``images`` — the event's vision evidence surfaces (FTY-376) — to every
+    sample's provider call. Any sample failure propagates the
+    provider/validation error unchanged — the parse step's existing error
+    mapping owns routing it, and a partially-failed sample set is never
+    silently scored.
     """
 
     samples = collect_parse_samples(
         provider,
         raw_text,
         answered=answered,
+        images=images,
         num_samples=num_samples,
         first_window=first_window,
         max_repair_attempts=max_repair_attempts,
@@ -188,6 +192,7 @@ def collect_parse_samples(
     raw_text: str,
     *,
     answered: Sequence[AnsweredClarification] = (),
+    images: Sequence[ImageInput] = (),
     num_samples: int = SELF_CONSISTENCY_NUM_SAMPLES,
     first_window: int = SELF_CONSISTENCY_FIRST_WINDOW,
     max_repair_attempts: int = 0,
@@ -198,6 +203,9 @@ def collect_parse_samples(
     sample's prompt as structured detail on an answer-triggered re-estimate
     (FTY-171) — each sample must see the same production prompt, answers
     included, or agreement would be measured against a different parse.
+    ``images`` (FTY-376) attaches the event's vision evidence surfaces to every
+    sample's provider call, with the matching image-evidence framing in the
+    prompt; empty leaves the text-only call byte-for-byte unchanged.
 
     The stop rule (documented tunable): draw ``min(first_window, num_samples)``
     samples in parallel; if that window is unanimous (agreement exactly 1.0,
@@ -213,14 +221,17 @@ def collect_parse_samples(
         msg = "first_window must be >= 1"
         raise ValueError(msg)
 
-    prompt = build_parse_prompt(raw_text, answered)
+    prompt = build_parse_prompt(raw_text, answered, image_count=len(images))
     window = min(first_window, num_samples)
-    samples = _sample_parallel(provider, prompt, window, max_repair_attempts=max_repair_attempts)
+    samples = _sample_parallel(
+        provider, prompt, window, images=images, max_repair_attempts=max_repair_attempts
+    )
     if len(samples) < num_samples and not _is_unanimous(samples):
         samples += _sample_parallel(
             provider,
             prompt,
             num_samples - len(samples),
+            images=images,
             max_repair_attempts=max_repair_attempts,
         )
     return samples
@@ -319,7 +330,12 @@ def _is_unanimous(samples: Sequence[ParseResult]) -> bool:
 
 
 def _sample_parallel(
-    provider: Provider, prompt: str, count: int, *, max_repair_attempts: int
+    provider: Provider,
+    prompt: str,
+    count: int,
+    *,
+    images: Sequence[ImageInput],
+    max_repair_attempts: int,
 ) -> tuple[ParseResult, ...]:
     """Draw ``count`` parse samples concurrently and return them in submit order.
 
@@ -330,19 +346,39 @@ def _sample_parallel(
     """
 
     if count == 1:
-        return (_sample_once(provider, prompt, max_repair_attempts=max_repair_attempts),)
+        return (
+            _sample_once(provider, prompt, images=images, max_repair_attempts=max_repair_attempts),
+        )
     with ThreadPoolExecutor(max_workers=count, thread_name_prefix="parse-sample") as pool:
         futures = [
-            pool.submit(_sample_once, provider, prompt, max_repair_attempts=max_repair_attempts)
+            pool.submit(
+                _sample_once,
+                provider,
+                prompt,
+                images=images,
+                max_repair_attempts=max_repair_attempts,
+            )
             for _ in range(count)
         ]
         return tuple(future.result() for future in futures)
 
 
-def _sample_once(provider: Provider, prompt: str, *, max_repair_attempts: int) -> ParseResult:
-    """Draw one structured sample through the public provider contract."""
+def _sample_once(
+    provider: Provider,
+    prompt: str,
+    *,
+    images: Sequence[ImageInput],
+    max_repair_attempts: int,
+) -> ParseResult:
+    """Draw one structured sample through the public provider contract.
+
+    ``images`` rides the same call for an image-bearing event (FTY-376); an
+    empty sequence keeps the text-only call byte-for-byte unchanged.
+    """
 
     schema = recoverable_parse_result_schema(max_repair_attempts)
+    if images:
+        return provider.structured_completion(prompt, schema, images=list(images))
     return provider.structured_completion(prompt, schema)
 
 

@@ -383,7 +383,7 @@ def test_load_fixtures_parses_data_file(tmp_path: Path) -> None:
 
 def test_shipped_fixture_data_file_loads() -> None:
     # The real data file the smoke ships loads and covers every story fixture.
-    assert len(smoke.load_fixtures()) == len(smoke.FIXTURES) == 8
+    assert len(smoke.load_fixtures()) == len(smoke.FIXTURES) == 9
 
 
 def test_branded_snack_fixture_expects_two_items() -> None:

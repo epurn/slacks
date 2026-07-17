@@ -53,8 +53,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
-from app.estimator.branded_routing import identity_variants
+from app.estimator.branded_routing import (
+    identity_variants,
+    is_evidence_brand_compatible,
+    product_hint,
+)
 from app.estimator.evidence_utils import _record_source_ref
+from app.estimator.food_resolvers import OffNameResolver, _ResolvedProduct
+from app.estimator.food_serving import NutritionFacts
 from app.estimator.interpretation_tools import (
     add_evidence_record,
     current_food_candidate,
@@ -62,6 +68,12 @@ from app.estimator.interpretation_tools import (
     reinterpret_food_candidate,
 )
 from app.estimator.model_prior import _model_prior
+from app.estimator.off import (
+    OFF_SOURCE,
+    OFF_SOURCE_TYPE,
+    OffResponseError,
+    OffTransientError,
+)
 from app.estimator.official_fetch import OfficialFetchSettings, fetch_official_source
 from app.estimator.pipeline import (
     CandidateDraft,
@@ -90,6 +102,7 @@ from app.estimator.searched_reference import (
     REFERENCE_SEARCH_INTENT,
     REFERENCE_SOURCE,
     REFERENCE_SOURCE_TYPE,
+    SearchedReferenceFacts,
     searched_reference_per_100g,
 )
 from app.estimator.web_evidence_trace import (
@@ -99,7 +112,7 @@ from app.estimator.web_evidence_trace import (
     traced_fetch,
 )
 from app.llm.base import Provider
-from app.schemas.official_source import OFFICIAL_SOURCE_SCHEMA_VERSION
+from app.schemas.official_source import OFFICIAL_SOURCE_SCHEMA_VERSION, FactBasis
 from app.settings import DEFAULT_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR, EstimatorClarifyMode
 
 __all__ = [
@@ -142,6 +155,11 @@ class OfficialSourceResolveStep:
     reference_fetch_settings: ReferenceFetchSettings
     fetch_fn: FetchOfficial = fetch_official_source
     reference_fetch_fn: FetchReference = fetch_searched_result
+    #: The name-keyed Open Food Facts resolver (FTY-369). Optional so a build without
+    #: OFF (or a composition test) keeps the pre-FTY-369 official→reference→model-prior
+    #: chain; when present, it fills the branded ``product_database`` gap between the
+    #: official-source and reference tiers for a barcode-less branded product.
+    off_name_resolver: OffNameResolver | None = None
     model_prior_confidence_floor: float = DEFAULT_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR
     clarify_mode: EstimatorClarifyMode = "estimate_first"
     name: str = "official_source_resolve"
@@ -195,25 +213,7 @@ class OfficialSourceResolveStep:
         candidate = current_food_candidate(context, candidate, index)
         ledger_start = _evidence_ledger_size(context)
         reasons: list[str] = []
-        item = None
-        if _has_brand(candidate):
-            item = self._try_official_source(context, candidate, reasons, index)
-        else:
-            reasons.append("generic food (official_source not applicable by session hypothesis)")
-            context.record_decision(
-                self.name,
-                "source",
-                candidate_index=index,
-                tier=OFFICIAL_SOURCE_TYPE,
-                outcome="not_applicable_by_session",
-            )
-            add_evidence_record(
-                context,
-                tier=OFFICIAL_SOURCE_TYPE,
-                outcome="not_applicable_by_session",
-            )
-        if item is None:
-            item = self._try_reference_source(context, candidate, reasons, index)
+        item = self._resolve_evidence_tiers(context, candidate, reasons, index)
         if (
             item is None
             and allow_requery
@@ -254,6 +254,48 @@ class OfficialSourceResolveStep:
         for assumption in item.assumptions:
             if assumption not in context.assumptions:
                 context.assumptions.append(assumption)
+        return item
+
+    def _resolve_evidence_tiers(
+        self,
+        context: EstimationContext,
+        candidate: CandidateDraft,
+        reasons: list[str],
+        index: int | None,
+    ) -> ResolvedFoodItem | None:
+        """Run the ordered web/product evidence tiers, returning the first hit.
+
+        Tier order follows the evidence-retrieval hierarchy: official source (rank 2,
+        branded only) → Open Food Facts by name (rank 3 ``product_database``, FTY-369) →
+        reference source (rank 5). ``None`` means every tier produced nothing confident,
+        so :meth:`_resolve` re-interprets/re-queries once and then falls to model prior.
+        A generic food (no brand) records official source as not-applicable and starts at
+        OFF/reference.
+        """
+
+        if _has_brand(candidate):
+            item = self._try_official_source(context, candidate, reasons, index)
+        else:
+            reasons.append("generic food (official_source not applicable by session hypothesis)")
+            context.record_decision(
+                self.name,
+                "source",
+                candidate_index=index,
+                tier=OFFICIAL_SOURCE_TYPE,
+                outcome="not_applicable_by_session",
+            )
+            add_evidence_record(
+                context, tier=OFFICIAL_SOURCE_TYPE, outcome="not_applicable_by_session"
+            )
+            item = None
+        if item is None:
+            # FTY-369: the branded product_database tier (rank 3) — OFF by name —
+            # consults between official source (rank 2) and reference (rank 5), so a
+            # trivially findable branded packaged product lands as product_database
+            # evidence instead of falling straight to a bare model prior.
+            item = self._try_off_name_search(context, candidate, reasons, index)
+        if item is None:
+            item = self._try_reference_source(context, candidate, reasons, index)
         return item
 
     def _try_official_source(
@@ -300,6 +342,163 @@ class OfficialSourceResolveStep:
         if item is None and len(reasons) == reason_count:
             reasons.append("official_source returned no confident match")
         return item
+
+    def _try_off_name_search(
+        self,
+        context: EstimationContext,
+        candidate: CandidateDraft,
+        reasons: list[str],
+        index: int | None,
+    ) -> ResolvedFoodItem | None:
+        """Consult Open Food Facts **by name** for a branded product (FTY-369).
+
+        The ``product_database`` tier for a barcode-less branded item: it searches the
+        same bounded, sanitized identity-query variants the web tiers use
+        (:func:`identity_variants`), and each OFF candidate must pass the same
+        brand/product-compatibility gate FDC branded routing applies
+        (:func:`is_evidence_brand_compatible`) — a foreign product (different brand or
+        item) is rejected and the chain continues. Returns ``None`` (→ reference source)
+        when OFF is unavailable, not applicable (no brand/hint identity), misses, or
+        errors, appending a sanitized reason. An OFF transport/response error degrades
+        to the next tier rather than failing the run — infrastructure trouble never
+        rejects an entry.
+        """
+
+        resolver = self.off_name_resolver
+        gate_brand = _off_gate_brand(candidate)
+        if resolver is None or not resolver.enabled:
+            reasons.append("product_database disabled")
+            self._record_off(context, index, "disabled")
+            return None
+        if gate_brand is None:
+            # A generic food (no brand identity) has no packaged product to match by
+            # name; product_database does not apply to it (rank-3 is branded/hinted).
+            reasons.append("product_database not applicable (no brand identity)")
+            self._record_off(context, index, "not_applicable_by_session")
+            return None
+
+        _record_source_ref(context, OFF_SOURCE)
+
+        def _accept(evidence_name: str) -> bool:
+            return is_evidence_brand_compatible(
+                evidence_name, name=candidate.name, brand=gate_brand
+            )
+
+        reason_count = len(reasons)
+        for query in identity_variants(candidate):
+            try:
+                resolved = resolver.resolve_compatible(query, accept=_accept)
+            except OffTransientError:
+                reasons.append("product_database transient error")
+                self._record_off(context, index, "off_transient_error")
+                return None
+            except OffResponseError:
+                reasons.append("product_database response error")
+                self._record_off(context, index, "off_response_error")
+                return None
+            if resolved is None:
+                continue
+            item = self._build_off_item(context, candidate, resolved, index, reasons)
+            if item is not None:
+                return item
+        if len(reasons) == reason_count:
+            reasons.append("product_database returned no confident match")
+        self._record_off(context, index, "miss")
+        return None
+
+    def _build_off_item(
+        self,
+        context: EstimationContext,
+        candidate: CandidateDraft,
+        resolved: _ResolvedProduct,
+        index: int | None,
+        reasons: list[str],
+    ) -> ResolvedFoodItem | None:
+        """Cost a cached OFF name hit with the shared serving math + plausibility gate.
+
+        The cached product's canonical per-100g facts flow through the same
+        :func:`_build_item` serving math the web tiers use (``product_database``
+        provenance, ``source_ref = open_food_facts:<code>``); the resolved total then
+        clears the FTY-368 resolved-value plausibility gate exactly as the exact and
+        web-evidence paths do. Returns ``None`` (→ next variant/tier) on an unscalable
+        quantity or an implausible total.
+        """
+
+        product = resolved.product
+        per_100g = NutritionFacts(
+            calories=product.calories_per_100g,
+            protein_g=product.protein_per_100g,
+            carbs_g=product.carbs_per_100g,
+            fat_g=product.fat_per_100g,
+        )
+        reference = SearchedReferenceFacts(
+            facts=per_100g,
+            source_ref=product.source_ref,
+            hash_key=product.source_ref,
+            default_serving_g=product.default_serving_g,
+            assumptions=(),
+            basis=FactBasis.PER_100G.value,
+            per_100g_facts=per_100g,
+            product_name=product.description,
+        )
+        item = _build_item(
+            context,
+            candidate,
+            reference,
+            source_type=OFF_SOURCE_TYPE,
+            source_ref=product.source_ref,
+            hash_key=product.source_ref,
+            base_assumptions=(),
+            step_name=self.name,
+            clarify_mode=self.clarify_mode,
+            quantity_question=QUANTITY_QUESTION,
+            allow_unresolvable_fallthrough=self.clarify_mode == "estimate_first",
+            candidate_index=index,
+        )
+        if item is None:
+            unscalable = "product_database returned unscalable serving math"
+            if unscalable not in reasons:
+                reasons.append(unscalable)
+            self._record_off(context, index, "rejected_unresolvable_quantity", product.source_ref)
+            return None
+        verdict = check_resolved_food_total(
+            name=candidate.name,
+            unit=candidate.unit,
+            amount=candidate.amount,
+            quantity_text=candidate.quantity_text,
+            grams=item.grams,
+            calories=item.calories,
+        )
+        if not verdict.plausible:
+            if index is not None and verdict.reason is not None:
+                context.plausibility_refit_reasons[index] = verdict.reason
+            implausible = "product_database returned implausible resolved total"
+            if implausible not in reasons:
+                reasons.append(implausible)
+            self._record_off(context, index, IMPLAUSIBLE_RESOLVED_TOTAL_OUTCOME, product.source_ref)
+            return None
+        _record_source_ref(context, OFF_SOURCE)
+        self._record_off(context, index, "accepted", product.source_ref)
+        return item
+
+    def _record_off(
+        self,
+        context: EstimationContext,
+        index: int | None,
+        outcome: str,
+        source_ref: str | None = None,
+    ) -> None:
+        """Record one sanitized OFF-name-search decision + evidence-view entry."""
+
+        context.record_decision(
+            self.name,
+            "source",
+            candidate_index=index,
+            tier=OFF_SOURCE_TYPE,
+            source_ref=source_ref,
+            outcome=outcome,
+        )
+        add_evidence_record(context, tier=OFF_SOURCE_TYPE, outcome=outcome, source_ref=source_ref)
 
     def _try_reference_source(
         self,
@@ -492,6 +691,21 @@ def _has_brand(candidate: CandidateDraft) -> bool:
     """Whether ``candidate`` names a branded product (has a non-blank ``brand``)."""
 
     return bool(candidate.brand and candidate.brand.strip())
+
+
+def _off_gate_brand(candidate: CandidateDraft) -> str | None:
+    """The brand identity OFF name search gates its candidates against (FTY-369).
+
+    A packaged ``product_database`` match must be gated to a **branded/hinted**
+    identity so a foreign product is rejected: the parsed ``brand`` when present, else
+    the stranded product hint the parser left in the quantity phrase
+    (:func:`product_hint`). ``None`` for a plain generic food (no brand, no hint), which
+    has no packaged product to match by name — the tier does not apply to it.
+    """
+
+    if _has_brand(candidate):
+        return candidate.brand
+    return product_hint(candidate.quantity_text) or None
 
 
 _REQUERY_EVIDENCE_OUTCOMES = frozenset(

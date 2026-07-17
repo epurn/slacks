@@ -43,7 +43,9 @@ from app.estimator.decision_trace import (
 )
 
 if TYPE_CHECKING:
+    from app.estimator.event_images import EventImage
     from app.estimator.food_resolvers import BarcodeResolver, FoodResolver
+    from app.estimator.image_facts_step import ImageFactsResolveStep
     from app.estimator.interpretation import InterpretationSession
     from app.estimator.label_step import LabelInput
     from app.estimator.official_step import OfficialSourceResolveStep
@@ -392,6 +394,16 @@ class EstimationContext:
     #: (FTY-061) extracts from, when this event carries one. ``None`` for a plain
     #: text estimation; the label step is a no-op without it.
     label_input: LabelInput | None = None
+    #: The event's validated image evidence surfaces (FTY-376): loaded by the
+    #: worker from ``log_attachments`` by event id at claim time, attached only
+    #: when the configured model is vision-capable. Vision-provider-only egress —
+    #: bytes and hashes never enter ``trace``/``error`` or logs.
+    images: tuple[EventImage, ...] = ()
+    #: Content-free reason the event's images could **not** be attached (a
+    #: non-vision deployment). The parse step degrades honestly on it —
+    #: text-only estimation with a persisted assumption, or a clarifying
+    #: question for an image-only event — never a terminal failure.
+    image_evidence_degraded_reason: str | None = None
     #: Every answered (question, answer) pair persisted for this event, oldest
     #: first (FTY-171). Empty on a first estimate; on an answer-triggered
     #: re-estimate the parse step applies these as structured detail alongside the
@@ -639,6 +651,7 @@ def default_pipeline(
     barcode_resolver: BarcodeResolver | None = None,
     official_step: OfficialSourceResolveStep | None = None,
     user_text_step: UserTextResolveStep | None = None,
+    image_facts_step: ImageFactsResolveStep | None = None,
 ) -> Pipeline:
     """Build the v1 estimation pipeline: NL parse, exercise calc, food resolution.
 
@@ -671,14 +684,20 @@ def default_pipeline(
         ParseStep(provider) if parse_policy is None else ParseStep(provider, policy=parse_policy)
     )
     steps: list[EstimationStep] = [parse_step, ExerciseCalculateStep()]
+    # The user-text step (FTY-280) runs *before* the food step: it is the rank-1
+    # ``user_text`` tier, so a candidate the user stated a calorie total for is
+    # resolved from that evidence and removed from the food candidates the food
+    # step then resolves from USDA/OFF. Wired only alongside the food step (it
+    # produces the same resolved-item/evidence shape the worker persists).
+    if food_resolver is not None and user_text_step is not None:
+        steps.append(user_text_step)
+    # The image-facts step (FTY-376) resolves candidates a photographed nutrition
+    # label backs — the other rank-1 user-provided tier — so it too runs before
+    # any database lookup, claiming its candidates from the food step's pool. A
+    # no-op when the event carries no images.
+    if image_facts_step is not None:
+        steps.append(image_facts_step)
     if food_resolver is not None:
-        # The user-text step (FTY-280) runs *before* the food step: it is the rank-1
-        # ``user_text`` tier, so a candidate the user stated a calorie total for is
-        # resolved from that evidence and removed from the food candidates the food
-        # step then resolves from USDA/OFF. Wired only alongside the food step (it
-        # produces the same resolved-item/evidence shape the worker persists).
-        if user_text_step is not None:
-            steps.append(user_text_step)
         steps.append(
             FoodResolveStep(
                 food_resolver,

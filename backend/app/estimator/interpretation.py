@@ -74,7 +74,7 @@ from app.schemas.parse import ParsedCandidate, ParseDisposition, ParseResult
 
 if TYPE_CHECKING:
     from app.estimator.parse_policy import ParsePolicySettings
-    from app.llm.base import Provider
+    from app.llm.base import ImageInput, Provider
 
 __all__ = [
     "MAX_EVIDENCE_EXCERPT_CHARS",
@@ -229,6 +229,7 @@ class InterpretationSession:
         *,
         policy: ParsePolicySettings,
         answered: Sequence[AnsweredClarification] = (),
+        images: Sequence[ImageInput] = (),
         step_name: str = "parse",
         max_revision_calls: int = MAX_HYPOTHESIS_REVISION_CALLS,
     ) -> None:
@@ -244,6 +245,11 @@ class InterpretationSession:
         #: provider only, never copied into trace/assumptions/refs/errors.
         self.raw_text = raw_text
         self.clarification_answers = tuple(answered)
+        #: The event's validated image evidence surfaces (FTY-374/FTY-376):
+        #: attached to **every** model interpretation call in the session —
+        #: initial samples and re-interpretation alike — under the same boundary
+        #: as the raw text (vision provider only, never tools/traces/logs).
+        self.images = tuple(images)
         self.evidence_ledger: list[EvidenceRecord] = []
         #: Transient model-facing evidence excerpts (FTY-326): bounded inert
         #: page/snippet text of unaccepted reads, consumed (and cleared) at the
@@ -453,6 +459,7 @@ class InterpretationSession:
                 self._provider,
                 self.raw_text,
                 answered=self.clarification_answers,
+                images=self.images,
                 max_repair_attempts=self._policy.max_repair_attempts,
             )
         except StructuredOutputValidationError as exc:
@@ -491,10 +498,19 @@ class InterpretationSession:
             hypothesis_items=[item.candidate for item in hypothesis.items],
             evidence_labels=[record.as_label() for record in self.evidence_ledger],
             evidence_texts=evidence_texts,
+            image_count=len(self.images),
         )
         schema = recoverable_parse_result_schema(self._policy.max_repair_attempts)
         try:
-            revised = self._provider.structured_completion(prompt, schema)
+            # The session's image surfaces ride every interpretation call
+            # (FTY-376), the re-ask included, under the same provider-only
+            # boundary as the raw text.
+            if self.images:
+                revised = self._provider.structured_completion(
+                    prompt, schema, images=list(self.images)
+                )
+            else:
+                revised = self._provider.structured_completion(prompt, schema)
         except StructuredOutputValidationError as exc:
             # Untrusted-analyst boundary, unchanged: a re-ask reply is validated
             # exactly like a sample, and invalid output fails the run closed

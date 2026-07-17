@@ -81,10 +81,11 @@ def test_healthz_sources_reports_provider_capabilities(client: TestClient) -> No
     assert response.status_code == 200
     sources = {s["id"]: s for s in response.json()["sources"]}
 
-    # Open Food Facts (barcode) needs no credentials: enabled + available by default.
+    # Open Food Facts needs no credentials: enabled + available by default. It serves
+    # barcode lookups (FTY-060) and brand-name-only name search (FTY-369).
     off = sources["open_food_facts"]
     assert off["source_type"] == "product_database"
-    assert off["kinds"] == ["barcode"]
+    assert off["kinds"] == ["barcode", "named_product"]
     assert off["enabled"] is True
     assert off["available"] is True
 
