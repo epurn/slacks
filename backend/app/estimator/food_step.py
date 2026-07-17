@@ -88,6 +88,10 @@ from app.estimator.pipeline import (
     StepFailed,
     collect_component_clarification,
 )
+from app.estimator.resolved_plausibility import (
+    IMPLAUSIBLE_RESOLVED_TOTAL_OUTCOME,
+    check_resolved_food_total,
+)
 from app.settings import EstimatorClarifyMode
 
 
@@ -499,6 +503,39 @@ class FoodResolveStep:
             fat_g=product.fat_per_100g,
         )
         scaled = scale_facts(facts, grams)
+        # FTY-368: resolved-value plausibility gate. A dish-class item whose
+        # final total falls outside the generous class band (or beneath a stated
+        # component alone) is never committed as-is: the rejection is recorded
+        # and the candidate falls back to the official/reference/model-prior
+        # refit routing, which appends the resolved_plausibility_refit label.
+        verdict = check_resolved_food_total(
+            name=candidate.name,
+            unit=candidate.unit,
+            amount=candidate.amount,
+            quantity_text=candidate.quantity_text,
+            grams=scaled.grams,
+            calories=scaled.calories,
+        )
+        if not verdict.plausible:
+            context.record_decision(
+                self.name,
+                "source",
+                candidate_index=candidate_index,
+                tier=product.source,
+                source_ref=product.source_ref,
+                source_desc=product.description,
+                outcome=IMPLAUSIBLE_RESOLVED_TOTAL_OUTCOME,
+            )
+            add_evidence_record(
+                context,
+                tier=product.source,
+                outcome=IMPLAUSIBLE_RESOLVED_TOTAL_OUTCOME,
+                source_ref=product.source_ref,
+                source_desc=product.description,
+            )
+            if verdict.reason is not None:
+                context.plausibility_refit_reasons[candidate_index] = verdict.reason
+            return None
         # Record the source that actually backed this resolution (covers a cache hit).
         _record_source_ref(context, product.source)
         context.record_decision(

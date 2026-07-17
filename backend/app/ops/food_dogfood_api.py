@@ -46,10 +46,15 @@ _TERMINAL_STATUSES: frozenset[str] = frozenset(
     {"completed", "failed", "needs_clarification", "partially_resolved"}
 )
 
-#: Per-event poll budget: how long to wait for estimation to finish, and the
-#: gap between polls. Live estimation (search + fetch + LLM) can take a while,
-#: so the ceiling is generous; the worker normally finishes far sooner.
-POLL_TIMEOUT_SECONDS = 90.0
+#: Shared poll budget: how long to wait for every submitted event to finish, and
+#: the gap between polls. This is orchestration tuning, never a pass/fail
+#: assertion: the smoke submits the whole fixture set up front, the worker
+#: serializes them across its pool, and a search-heavy entry (branded lookup,
+#: composed dish) takes 60-120 s of live search + fetch + LLM on the reference
+#: 2-CPU stack — so the LAST fixture in the queue can legitimately reach its
+#: terminal state several minutes after submission (FTY-368: the old 90 s window
+#: reported still-correct runs as "did not reach 'completed'").
+POLL_TIMEOUT_SECONDS = 360.0
 POLL_INTERVAL_SECONDS = 2.0
 
 #: HTTP status codes the client treats as success.

@@ -327,6 +327,20 @@ def test_all_story_fixtures_are_present() -> None:
     assert "compliments brand chicken strips (i had 4)" in raw_texts
     # The 2026-07-10 live failure, exact phrase.
     assert any("toppables brand crackers" in t and "dill pickle hummus" in t for t in raw_texts)
+    # The 2026-07-16 composed-dish failure (FTY-368), exact phrase.
+    assert "tuna salad sandwich on white bread, about 1/2 a can of tuna" in raw_texts
+
+
+def test_tuna_salad_sandwich_fixture_pins_the_composed_dish_band() -> None:
+    sandwich = next(f for f in smoke.FIXTURES if f.key == "tuna-salad-sandwich")
+    assert sandwich.expected_item_count == 1
+    # The 250 kcal floor is the detector for the incident's 65-kcal
+    # bread-slice-only resolution (name/label/ref carry no stable portion token).
+    assert sandwich.total_kcal_low == 250.0
+    assert sandwich.total_kcal_high == 450.0
+    assert sandwich.expected_items == (
+        smoke.ItemBand(match="sandwich", kcal_low=250.0, kcal_high=450.0),
+    )
 
 
 def test_load_fixtures_parses_data_file(tmp_path: Path) -> None:
@@ -369,7 +383,7 @@ def test_load_fixtures_parses_data_file(tmp_path: Path) -> None:
 
 def test_shipped_fixture_data_file_loads() -> None:
     # The real data file the smoke ships loads and covers every story fixture.
-    assert len(smoke.load_fixtures()) == len(smoke.FIXTURES) == 7
+    assert len(smoke.load_fixtures()) == len(smoke.FIXTURES) == 8
 
 
 def test_branded_snack_fixture_expects_two_items() -> None:
