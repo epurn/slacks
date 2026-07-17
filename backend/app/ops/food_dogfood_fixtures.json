@@ -87,6 +87,18 @@
         { "match": "cracker", "kcal_low": 30.0, "kcal_high": 250.0 },
         { "match": "hummus", "kcal_low": 10.0, "kcal_high": 120.0 }
       ]
+    },
+    {
+      "key": "tuna-salad-sandwich",
+      "raw_text": "tuna salad sandwich on white bread, about 1/2 a can of tuna",
+      "expected_item_count": 1,
+      "total_kcal_low": 250.0,
+      "total_kcal_high": 450.0,
+      "forbid_source_types": [],
+      "forbid_substrings": [],
+      "expected_items": [
+        { "match": "sandwich", "kcal_low": 250.0, "kcal_high": 450.0 }
+      ]
     }
   ]
 }

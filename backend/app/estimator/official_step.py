@@ -51,7 +51,7 @@ calculators; raw pages are never stored.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from app.estimator.branded_routing import identity_variants
 from app.estimator.evidence_utils import _record_source_ref
@@ -72,6 +72,11 @@ from app.estimator.pipeline import (
 )
 from app.estimator.reference_fetch import ReferenceFetchSettings, fetch_searched_result
 from app.estimator.resolved_item import _build_item
+from app.estimator.resolved_plausibility import (
+    IMPLAUSIBLE_RESOLVED_TOTAL_OUTCOME,
+    check_resolved_food_total,
+    refit_assumption,
+)
 from app.estimator.search import (
     OFFICIAL_SOURCE,
     OFFICIAL_SOURCE_TYPE,
@@ -236,6 +241,15 @@ class OfficialSourceResolveStep:
                 unknown_food_question=UNKNOWN_FOOD_QUESTION,
                 quantity_question=QUANTITY_QUESTION,
             )
+        # FTY-368: a candidate that reached this refit because the exact path's
+        # resolved total tripped the plausibility gate carries the content-free
+        # refit label, so the rough re-estimate is never presented as if the
+        # trusted row had scaled cleanly.
+        refit_reason = None if index is None else context.plausibility_refit_reasons.get(index)
+        if refit_reason is not None:
+            label = refit_assumption(refit_reason)
+            if label not in item.assumptions:
+                item = replace(item, assumptions=(*item.assumptions, label))
         # Surface the resolution's assumptions on the run too (content-free metadata).
         for assumption in item.assumptions:
             if assumption not in context.assumptions:
@@ -417,7 +431,30 @@ class OfficialSourceResolveStep:
                 candidate_index=candidate_index,
             )
             if item is not None:
-                return item
+                # FTY-368: the resolved-value gate also bounds web-evidence
+                # totals — an implausible dish total falls through to the next
+                # variant/tier instead of committing, exactly like the exact path.
+                verdict = check_resolved_food_total(
+                    name=candidate.name,
+                    unit=candidate.unit,
+                    amount=candidate.amount,
+                    quantity_text=candidate.quantity_text,
+                    grams=item.grams,
+                    calories=item.calories,
+                )
+                if verdict.plausible:
+                    return item
+                note(
+                    decision="serving",
+                    source_ref=found.source_ref,
+                    outcome=IMPLAUSIBLE_RESOLVED_TOTAL_OUTCOME,
+                )
+                if candidate_index is not None and verdict.reason is not None:
+                    context.plausibility_refit_reasons[candidate_index] = verdict.reason
+                implausible = f"{source_type} returned implausible resolved total"
+                if implausible not in reasons:
+                    reasons.append(implausible)
+                continue
             note(
                 decision="serving",
                 source_ref=found.source_ref,
@@ -463,6 +500,7 @@ _REQUERY_EVIDENCE_OUTCOMES = frozenset(
         "partial",
         "failed",
         "rejected_brand_mismatch",
+        "rejected_implausible_resolved_total",
         "rejected_incompatible_serving",
         "rejected_unresolvable_quantity",
         "skipped_long_source_ref",
