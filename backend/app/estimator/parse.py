@@ -228,8 +228,14 @@ class ParseStep:
 
         samples = signal.samples
         if all(sample.disposition is ParseDisposition.UNPARSEABLE for sample in samples):
-            # The samples agree the input is not a log at all: terminal, with a
-            # coarse fixed label (the model's ``reason`` stays untrusted text).
+            # Widened bar (FTY-370/FTY-371): terminal ``unparseable_input`` fires only
+            # when the samples *unanimously* judge the input genuinely not
+            # food/exercise/consumable at all (e.g. "asdf", "how's the weather"). An
+            # informal/homemade/compositional/borderline-consumable description is
+            # recognized as food (the widened parse prompt), so a mixed set — even one
+            # ``unparseable`` sample beside recognized ones — never reaches here and
+            # routes to an estimate or a clarifying question below. The fixed label stays
+            # coarse; the model's ``reason`` remains untrusted text.
             raise StepFailed("unparseable_input")
 
         result = session.result
