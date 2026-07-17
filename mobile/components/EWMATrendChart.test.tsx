@@ -1,16 +1,64 @@
+import { AccessibilityInfo, Animated } from "react-native";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { Circle, Polyline } from "react-native-svg";
 
 import { EWMATrendChart } from "./EWMATrendChart";
 import type { WeightEntryDTO } from "@/api/weightEntries";
 import { computeEWMAFromEntries } from "@/state/trends";
+import { mockReduceMotion } from "@/testUtils/reduceMotion";
 import { lightPalette, typeScale } from "@/theme";
+import { reducedMotionDuration } from "@/theme/motion";
 
 // Tests render with the default (light) theme, so the chart draws with the
 // light palette's accent / secondary colours.
 const RAW_DOT_R = 3;
 const TREND_DOT_R = 4;
 const RAW_DOT_OPACITY = 0.35;
+const DRAW_IN_MS = 400;
+
+// A fake Animated driver so the draw-in settles deterministically and no
+// animation loop keeps ticking after a test tears down (CalorieHero.test
+// precedent). Auto-finishes by default; a test that needs the mid-reveal frame
+// sets `autoFinishAnimations = false` and completes via `pendingAnimations`.
+type AnimCallback = (result: { finished: boolean }) => void;
+let pendingAnimations: AnimCallback[] = [];
+let autoFinishAnimations = true;
+const FAKE_ANIM = {
+  start: (cb?: AnimCallback) => {
+    if (autoFinishAnimations) cb?.({ finished: true });
+    else if (cb) pendingAnimations.push(cb);
+  },
+  stop: () => {},
+};
+let timingSpy: jest.SpyInstance;
+
+/** The draw-in's own timing calls (its reveal duration), ignoring any other. */
+function drawInTimings() {
+  return timingSpy.mock.calls.filter(
+    ([, cfg]) => (cfg as { duration?: number }).duration === DRAW_IN_MS,
+  );
+}
+
+beforeEach(() => {
+  // Reduce Motion off by default so the draw-in takes its reveal path.
+  mockReduceMotion(false);
+  pendingAnimations = [];
+  autoFinishAnimations = true;
+  timingSpy = jest.spyOn(Animated, "timing").mockReturnValue(FAKE_ANIM as never);
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
+
+function flattenedStyle(style: unknown): Record<string, unknown> {
+  if (Array.isArray(style)) {
+    return Object.assign({}, ...style.map(flattenedStyle));
+  }
+  return typeof style === "object" && style !== null
+    ? (style as Record<string, unknown>)
+    : {};
+}
 
 function rawCircles(tree: ReactTestRenderer) {
   return tree.root
@@ -393,6 +441,163 @@ describe("EWMATrendChart — multiple entries", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Trend smoothing render (the EWMA-specific quality property)
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Draw-in (FTY-380)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MORE_ENTRIES: readonly WeightEntryDTO[] = [
+  ...ENTRIES,
+  entry("4", 71.5, "2026-06-27"),
+];
+const MORE_EWMA_KG = computeEWMAFromEntries(MORE_ENTRIES);
+
+function chartWith(
+  entries: readonly WeightEntryDTO[],
+  ewmaKg: readonly number[],
+  loading = false,
+  rangeKey = "1M",
+) {
+  return (
+    <EWMATrendChart
+      entries={entries}
+      ewmaKg={ewmaKg}
+      unitsPreference="metric"
+      loading={loading}
+      error={null}
+      today={TEST_TODAY}
+      width={TEST_WIDTH}
+      rangeKey={rangeKey}
+    />
+  );
+}
+
+function canvasOpacity(tree: ReactTestRenderer): number {
+  const canvas = tree.root.findByProps({ testID: "ewma-chart-canvas" });
+  const opacity = flattenedStyle(canvas.props.style).opacity;
+  // Mid-reveal the opacity is an Animated interpolation; resolve its current
+  // value. Settled/armed it is a plain number.
+  return typeof opacity === "number"
+    ? opacity
+    : (opacity as { __getValue: () => number }).__getValue();
+}
+
+describe("EWMATrendChart — draw-in (FTY-380)", () => {
+  it("arms once on loading → data: stroke reveal mid-flight, then a resting render identical to the static chart", () => {
+    autoFinishAnimations = false;
+    const tree = render(chartWith([], [], true));
+    expect(drawInTimings()).toHaveLength(0);
+
+    act(() => tree.update(chartWith(ENTRIES, EWMA_KG)));
+    expect(drawInTimings()).toHaveLength(1);
+
+    // Mid-reveal: the trend line carries the stroke-reveal dash props and the
+    // canvas is still fading in — but the geometry (points) is already final.
+    const midLine = tree.root.findAllByType(Polyline)[0]!;
+    expect(midLine.props.strokeDasharray).toBeDefined();
+    expect(midLine.props.strokeDashoffset).toBeDefined();
+    const midPoints = midLine.props.points as string;
+    expect(canvasOpacity(tree)).toBe(0);
+
+    // Complete the reveal: the resting render drops the dash props entirely and
+    // the canvas is fully opaque — pixel-identical to the pre-FTY-380 chart.
+    act(() => {
+      pendingAnimations.shift()?.({ finished: true });
+    });
+    const settledLine = tree.root.findAllByType(Polyline)[0]!;
+    expect(settledLine.props.strokeDasharray).toBeUndefined();
+    expect(settledLine.props.strokeDashoffset).toBeUndefined();
+    expect(settledLine.props.points).toBe(midPoints);
+    expect(canvasOpacity(tree)).toBe(1);
+    expect(trendCircles(tree)).toHaveLength(ENTRIES.length);
+  });
+
+  it("does not re-arm on an unrelated re-render with identical data", () => {
+    const tree = render(chartWith(ENTRIES, EWMA_KG));
+    expect(drawInTimings()).toHaveLength(1);
+
+    // Fresh array/object identities, same content — a focus refetch returning
+    // the same series, or any unrelated re-render.
+    const cloned = ENTRIES.map((e) => ({ ...e }));
+    act(() => tree.update(chartWith(cloned, computeEWMAFromEntries(cloned))));
+
+    expect(drawInTimings()).toHaveLength(1);
+    expect(canvasOpacity(tree)).toBe(1);
+  });
+
+  it("re-arms exactly once when the data set changes (a range change)", () => {
+    const tree = render(chartWith(ENTRIES, EWMA_KG));
+    expect(drawInTimings()).toHaveLength(1);
+
+    act(() => tree.update(chartWith(MORE_ENTRIES, MORE_EWMA_KG)));
+    expect(drawInTimings()).toHaveLength(2);
+    expect(canvasOpacity(tree)).toBe(1);
+  });
+
+  it("re-arms when the settled range changes even if the series content is identical", () => {
+    const tree = render(chartWith(ENTRIES, EWMA_KG, false, "1M"));
+    expect(drawInTimings()).toHaveLength(1);
+
+    // A 1M → 3M switch whose wider window holds no additional entries: the
+    // refetch resolves the same content under the new settled range — still a
+    // user-initiated data-settle, so the reveal replays once.
+    act(() => tree.update(chartWith(ENTRIES, EWMA_KG, false, "3M")));
+    expect(drawInTimings()).toHaveLength(2);
+    expect(canvasOpacity(tree)).toBe(1);
+  });
+
+  it("renders instantly fully drawn under Reduce Motion — no reveal, no animated stroke offset", () => {
+    mockReduceMotion(true);
+    const tree = render(chartWith(ENTRIES, EWMA_KG));
+
+    expect(timingSpy).not.toHaveBeenCalled();
+    const line = tree.root.findAllByType(Polyline)[0]!;
+    expect(line.props.strokeDasharray).toBeUndefined();
+    expect(line.props.strokeDashoffset).toBeUndefined();
+    expect(canvasOpacity(tree)).toBe(1);
+  });
+});
+
+describe("EWMATrendChart — draw-in bounded Reduce-Motion wait (FTY-379 gate)", () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    // The accessibility read never settles — the FTY-379 hazard.
+    jest
+      .spyOn(AccessibilityInfo, "isReduceMotionEnabled")
+      .mockReturnValue(new Promise<boolean>(() => {}));
+    jest
+      .spyOn(AccessibilityInfo, "addEventListener")
+      .mockReturnValue({ remove: jest.fn() } as never);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it("reveals with the no-motion fade after the bounded wait — never left suppressed", () => {
+    const tree = render(chartWith(ENTRIES, EWMA_KG));
+
+    // Armed but the setting is unknown: held hidden, nothing animating yet.
+    expect(canvasOpacity(tree)).toBe(0);
+    expect(timingSpy).not.toHaveBeenCalled();
+
+    // Past the deadline the chart reveals with the no-motion fade (the short
+    // reduced-motion duration), not the stroke sweep.
+    act(() => {
+      jest.advanceTimersByTime(400);
+    });
+    expect(drawInTimings()).toHaveLength(0);
+    const fadeCalls = timingSpy.mock.calls.filter(
+      ([, cfg]) => (cfg as { duration?: number }).duration === reducedMotionDuration,
+    );
+    expect(fadeCalls).toHaveLength(1);
+
+    // The fade completes (FAKE_ANIM auto-finishes): settled, fully drawn.
+    const line = tree.root.findAllByType(Polyline)[0]!;
+    expect(line.props.strokeDasharray).toBeUndefined();
+    expect(canvasOpacity(tree)).toBe(1);
+  });
+});
 
 describe("EWMATrendChart — trend smoothing render", () => {
   it("renders without crash for a noisy series that includes a spike", () => {

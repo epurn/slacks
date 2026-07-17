@@ -228,6 +228,10 @@ export function TrendsScreen({
   const [weightError, setWeightError] = useState<string | null>(null);
   const [weightReload, setWeightReload] = useState(0);
   const [chartWidth, setChartWidth] = useState(0);
+  // The range whose entries are currently displayed — set with the resolved
+  // read (never on the tap), so the chart's draw-in replays exactly once per
+  // range switch, at data-settle (FTY-380).
+  const [settledRange, setSettledRange] = useState<DateRangeKey>(range);
 
   const reloadWeight = useCallback(() => {
     setWeightPhase("loading");
@@ -241,6 +245,7 @@ export function TrendsScreen({
       (loaded) => {
         if (!active) return;
         setEntries(loaded);
+        setSettledRange(range);
         setWeightError(null);
         setWeightPhase("ready");
       },
@@ -256,7 +261,8 @@ export function TrendsScreen({
     // `focusSeq` refetches on each focus gain (FTY-365) without touching
     // `weightPhase`, so the chart keeps its data until fresh entries replace
     // it in place — only `reloadWeight` (the user retry) shows loading.
-  }, [apiSession, listWeightEntries, from, to, weightReload, focusSeq]);
+    // (`range` is derived state alongside from/to; it adds no extra runs.)
+  }, [apiSession, listWeightEntries, from, to, range, weightReload, focusSeq]);
 
   // ── EWMA + headline ───────────────────────────────────────────────────────
   const ewmaKg = useMemo(() => computeEWMAFromEntries(entries), [entries]);
@@ -515,6 +521,7 @@ export function TrendsScreen({
               onRetry={reloadWeight}
               today={todayStr}
               width={chartWidth}
+              rangeKey={settledRange}
             />
             <Pressable
               testID="log-weight-btn"
