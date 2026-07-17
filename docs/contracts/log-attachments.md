@@ -32,7 +32,7 @@ schema / evidence write (FTY-061); the mobile capture/upload UI (FTY-064); and
 
 security-privacy / backend-core lane: `backend/app/models/attachments.py`,
 `backend/app/schemas/attachments.py`, `backend/app/services/attachments.py`,
-`backend/alembic/` (`0011`).
+`backend/alembic/` (`0011`, `0022`).
 
 ## Version
 
@@ -73,8 +73,8 @@ indexed); `content_type` (string, not null — the validated image media type);
 the bytes); `data` (binary, not null — the saved image bytes); `created_at` /
 `updated_at` (timestamptz, not null). Additive: no prior table is altered.
 
-**FTY-374 pins one additive column** (migration owned by the downstream FTY-375
-implementation story, reversible, no backfill semantics beyond the default):
+**FTY-374 pins one additive column** (landed as the reversible `0022` migration,
+FTY-375; no backfill semantics beyond the default):
 `transient` (boolean, not null, default `false`). Existing rows — every
 explicit-save row from the FTY-077/FTY-306 flows — keep `false` and are
 unaffected. A `true` marks a mixed-submission image persisted only for the
@@ -238,3 +238,13 @@ ingest_upload(session, owner_id=uid, current_user=user,
   existing rows default to `false` with no behaviour change to the FTY-077 /
   FTY-306 explicit-save flows. The worker-side terminal purge and image load
   are `estimation-jobs.md` v6, implemented by FTY-375/FTY-376.
+- **FTY-375 (as built).** The pinned column landed as the `0022` migration:
+  additive on top of `0021`, fully reversible (`alembic downgrade 0021`), and
+  pre-existing explicit-save rows are backfilled to `transient = false` by the
+  server default — verified by an apply/rollback test and exercised against
+  Postgres by the FTY-143 migration guard. The ingestion side writes transient
+  rows in the same transaction as the event create
+  (`services/log_events.create_event`), and the purge is
+  `services/attachments.purge_transient_for_event` — a hard delete of the
+  event's `transient = true` rows only, committed by its caller so FTY-376 can
+  run it inside the worker's terminal-status transaction.

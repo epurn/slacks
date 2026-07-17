@@ -3569,6 +3569,36 @@
               "schema": {
                 "$ref": "#/components/schemas/LogEventCreateRequest"
               }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "image": {
+                    "description": "0..4 image parts (image/jpeg, image/png, image/webp; at most 10 MiB each), validated fail-closed.",
+                    "items": {
+                      "format": "binary",
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "payload": {
+                    "description": "JSON payload part: {\"raw_text\"?: str, \"idempotency_key\"?: str}. Field rules match the application/json body; raw_text may be omitted only when at least one image part is present.",
+                    "type": "string"
+                  },
+                  "save": {
+                    "description": "Optional submission-level retention choice (also accepted as a query flag). Default false: images are transient and purged at estimation-terminal.",
+                    "enum": [
+                      "true",
+                      "false"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "payload"
+                ],
+                "type": "object"
+              }
             }
           },
           "required": true

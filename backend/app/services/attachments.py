@@ -20,6 +20,15 @@ Two guarantees, both fail-closed:
    Validation runs on both the discard and the save path, so an invalid upload never
    reaches storage or a downstream consumer.
 
+FTY-375 adds the **transient** retention class for the unified text+image log
+submission (``docs/contracts/log-attachments.md`` v3): each validated image of a
+mixed submission is persisted as a row marked ``transient`` — in the same
+transaction as the event create, so the ids-only async worker can load it by
+event id — and hard-deleted by :func:`purge_transient_for_event` when the event's
+estimation reaches a terminal status, unless the submission chose ``save=true``
+(written as ordinary saved rows instead). Discard-by-default is preserved: with
+``save`` absent/false, no image survives estimation.
+
 Object-level authorization fails closed: a caller may only save attachments under
 their own ``user_id`` (:class:`AttachmentForbidden`). The stored bytes are untrusted
 input — validated as data, never logged, never interpreted.
@@ -29,7 +38,12 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any, cast
 
+from sqlalchemy import delete
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from app.models.attachments import LogAttachment
@@ -159,6 +173,91 @@ def ingest_upload(
     session.commit()
     session.refresh(attachment)
     return attachment
+
+
+@dataclass(frozen=True)
+class ValidatedImage:
+    """An ``image`` part that already passed :func:`validate_upload` (FTY-375).
+
+    ``content_type`` is the **canonical** allowlist value the validator returned,
+    never the raw client string. Carrying validated parts as a distinct type keeps
+    the persistence path unable to accept unvalidated bytes by construction.
+    """
+
+    data: bytes
+    content_type: str
+
+
+def stage_submission_images(
+    session: Session,
+    *,
+    owner_id: uuid.UUID,
+    current_user: User,
+    log_event_id: uuid.UUID,
+    images: Sequence[ValidatedImage],
+    save: bool = False,
+) -> list[LogAttachment]:
+    """Stage a mixed submission's validated images as ``log_attachments`` rows.
+
+    Adds one row per image to ``session`` **without committing** — the caller
+    owns the transaction, so the rows commit atomically with the ``pending``
+    event they belong to (``log-attachments.md`` v3: write at create, tied to
+    the event; a rejected submission writes no row).
+
+    Retention class is the submission-level ``save`` choice: ``save=False`` (the
+    default) writes ``transient=True`` rows that live only for the estimation
+    window and are hard-deleted by :func:`purge_transient_for_event` at the
+    event's terminal status; ``save=True`` writes ordinary durable saved rows
+    (``transient=False``) the purge never touches.
+
+    Authorization fails closed like :func:`ingest_upload`: a cross-user call
+    raises :class:`AttachmentForbidden` and stages nothing.
+    """
+
+    _authorize(owner_id, current_user)
+    rows = [
+        LogAttachment(
+            user_id=owner_id,
+            log_event_id=log_event_id,
+            content_type=image.content_type,
+            byte_size=len(image.data),
+            content_hash=hashlib.sha256(image.data).hexdigest(),
+            data=image.data,
+            transient=not save,
+        )
+        for image in images
+    ]
+    session.add_all(rows)
+    return rows
+
+
+def purge_transient_for_event(session: Session, log_event_id: uuid.UUID) -> int:
+    """Hard-delete an event's transient, unsaved attachment rows (FTY-375).
+
+    The one sanctioned application-level row deletion (``log-attachments.md`` v3,
+    ``docs/security/data-retention.md``): a ``transient=True`` row is a working
+    buffer for the estimation window, not audit history. Deletes bytes and all —
+    saved rows (``transient=False``, whether an explicit FTY-077/FTY-306 save or
+    a mixed submission's ``save=true`` promotion) are never touched.
+
+    Does **not** commit: the worker (FTY-376) calls this in the same transaction
+    as the event's terminal status write, so the purge is atomic with the
+    outcome — no purge job, no orphaned window. Returns the number of rows
+    deleted (idempotent: a second call finds nothing and returns 0).
+    """
+
+    # ``Session.execute`` is typed as the base ``Result``; a DML statement always
+    # returns a ``CursorResult``, which carries the matched-row count.
+    result = cast(
+        "CursorResult[Any]",
+        session.execute(
+            delete(LogAttachment).where(
+                LogAttachment.log_event_id == log_event_id,
+                LogAttachment.transient.is_(True),
+            )
+        ),
+    )
+    return int(result.rowcount)
 
 
 def _authorize(owner_id: uuid.UUID, current_user: User) -> None:

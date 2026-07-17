@@ -8,9 +8,13 @@ stores model output (that is evidence, ``evidence_sources``).
 Retention is **discard by default** (``docs/security/data-retention.md``): an
 uploaded image is kept only while needed and discarded afterwards unless the user
 explicitly saves the attachment. The default flow persists no raw image; an
-explicit save writes exactly one row here. The retention behaviour itself lives in
-:mod:`app.services.attachments` — this model is just the persisted shape of a
-saved image.
+explicit save writes exactly one row here. FTY-374/FTY-375 add a second,
+**transient** retention class (``transient = true``): a unified text+image
+submission's images are persisted only for the estimation window so the ids-only
+async worker can load them by event id, then hard-deleted at the event's terminal
+estimation status unless the submission chose ``save=true``. The retention
+behaviour itself lives in :mod:`app.services.attachments` — this model is just the
+persisted shape of a stored image.
 
 Both ``user_id`` and ``log_event_id`` are foreign keys with ``ON DELETE CASCADE``
 so a saved attachment is object-level owned and removed with its owning log event,
@@ -26,7 +30,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import ForeignKey, Integer, LargeBinary, String, Uuid
+from sqlalchemy import Boolean, ForeignKey, Integer, LargeBinary, String, Uuid, false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, UtcDateTime
@@ -70,6 +74,16 @@ class LogAttachment(Base):
     #: The saved image bytes. Untrusted input, size- and content-type-validated at
     #: the service boundary before storage; never logged.
     data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    #: Transient retention marker (FTY-374/FTY-375, ``log-attachments.md`` v3).
+    #: ``True`` marks a mixed-submission image persisted only for the estimation
+    #: window: the worker hard-deletes it in the same transaction as the event's
+    #: terminal estimation status (:func:`app.services.attachments.purge_transient_for_event`).
+    #: ``False`` (the default) is an ordinary durable saved row — the FTY-077 /
+    #: FTY-306 explicit saves and a mixed submission's ``save=true`` promotion —
+    #: never touched by the purge.
+    transient: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         UtcDateTime, nullable=False, default=_utcnow, onupdate=_utcnow
