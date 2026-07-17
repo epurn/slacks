@@ -478,7 +478,7 @@ def _candidate_has_detail(item: ParsedCandidate) -> bool:
 
     if item.type is CandidateType.EXERCISE:
         return has_exercise_detail(item.unit, item.amount, item.quantity_text)
-    return has_food_detail(item.amount, item.quantity_text) or has_stated_nutrition(
+    return has_food_detail(item.amount, item.quantity_text, item.unit) or has_stated_nutrition(
         item.stated_calories,
         item.stated_protein_g,
         item.stated_carbs_g,

@@ -50,8 +50,13 @@ checks each extracted item against the active shared clarification policy
   delimited whole number left in `quantity_text` — see **Deterministic amount fills**
   below), a **stated worded portion** (FTY-275): a household / cooking measure (`cup`, `tsp`, `tbsp`,
   `fl oz`, `pint`, `quart`, `gallon` and their spellings), a colloquial / approximate
-  measure word (`splash`, `drizzle`, `dash`, `pinch`, `handful`, `glug`), or an
-  indefinite-article measure (`a`/`an` = one); **or a stated nutrition fact**
+  measure word (`splash`, `drizzle`, `dash`, `pinch`, `handful`, `glug`), an
+  indefinite-article measure (`a`/`an` = one), **a stated serving/count unit**
+  (FTY-382 — `1 serving`, `a serving`, `2 servings`, `1 bar`, and the plain
+  count/portion vocabulary the FTY-156 plausibility validator recognizes in
+  `plausibility._COUNT_UNITS`, recognised from the structured `unit` or a bare
+  serving/count word left in `quantity_text`, excluding the empty no-unit sentinel);
+  **or a stated nutrition fact**
   (FTY-279 — a `stated_calories` total or a `stated_*` macro the user wrote). Each
   means the user *stated* a usable detail, so a generic source-miss defers to estimation
   (or, for a stated nutrition fact, resolves directly from that `user_text` evidence)

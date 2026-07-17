@@ -491,6 +491,52 @@ def test_amountless_recognized_foods_are_rough_estimated_in_default_mode(
         assert "estimated_default_serving" in (evidence.assumptions or [])
 
 
+@pytest.mark.parametrize(
+    "parsed_item",
+    [
+        # The 2026-07-16 dogfood repro: a stated serving with no measured amount and no
+        # source serving size (empty FDC). FTY-382: it must resolve through the rough
+        # serving-prior / model-prior default, never a quantity clarification — whether
+        # the model tagged the count in the unit alone or stranded the number.
+        {
+            "type": "food",
+            "name": "made good mornings oat bars",
+            "quantity_text": "1 serving",
+            "unit": "serving",
+        },
+        {
+            "type": "food",
+            "name": "made good mornings oat bars",
+            "quantity_text": "",
+            "unit": "serving",
+        },
+    ],
+)
+def test_stated_serving_without_source_resolves_via_rough_serving_prior(
+    client: TestClient, session: Session, parsed_item: dict[str, Any]
+) -> None:
+    user_id, event_id = _seed_event(
+        client, "fty382-serving@example.com", "made good mornings oat bars, 1 serving"
+    )
+    pipeline = _pipeline(
+        session,
+        parsed_items=[parsed_item],
+        estimates=[_per_serving_estimate(calories=110.0, serving_g=40.0)],
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    assert result.event_status is LogEventStatus.COMPLETED
+    assert _questions(session, event_id) == []
+    food = _foods(session, event_id)[0]
+    assert food.status == DerivedItemStatus.RESOLVED
+    assert food.calories is not None
+    assert food.calories > 0
+    # Honest rough provenance (the serving-prior / model-prior default), not a source
+    # serving size; the exact serving-math path differs by whether a count was stranded.
+    _assert_model_prior_rough(_evidence(session, event_id)[0])
+
+
 def test_model_prior_as_logged_fallback_resolves_without_grams(
     client: TestClient, session: Session
 ) -> None:
