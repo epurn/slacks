@@ -39,6 +39,18 @@ estimator / contracts / backend-core / security-privacy lane:
 
 ## Version
 
+21 (FTY-370, contract only): pins the **budget/transience-degraded rough
+estimate** — a candidate a run could not resolve before breaching the FTY-363
+per-run ceiling (`run_wall_clock_deadline_exceeded` /
+`run_provider_call_budget_exceeded`) or exhausting bounded transient retries
+(`provider_transient_error`; `estimation-jobs.md` v7) is committed with rough
+provenance (the `model_prior` / default-serving rough evidence shapes) plus an
+explicit **content-free** degraded assumption, visibly distinct from
+trusted/exact values and user-correctable — and the degrade producer must be
+able to run **without further provider budget**. No schema, migration,
+serving-math, or source-hierarchy change; FTY-371/FTY-372 implement. See
+**Budget/transience-degraded rough estimates (FTY-370)**.
+
 20 (FTY-308): implements the **barcode** half of the exact-evidence upgrade propose
 routing below. `POST .../exact-upgrade/barcode` resolves the typed/scanned barcode
 through the existing cache-first hardened OFF path (no second barcode mapper): a
@@ -589,7 +601,7 @@ FDC facts (per 100 g): 130 kcal / 2.0 g protein / 28 g carbs / 0.2 g fat
 | No confident source match, **detail-rich** generic food (FTY-167) | _(deferred → model-prior)_ | via official step (`model_prior`) | per the official step |
 | Unresolvable quantity, `estimate_first` | _(falls forward → rough estimate)_ | default-serving/reference/model-prior evidence + assumptions | `processing → completed` |
 | Unresolvable quantity, active policy allows amount asking or all rough paths unavailable/unsafe | `NeedsClarification` | clarification question | `processing → needs_clarification` |
-| Transient source failure (timeout/5xx) | `StepError` (retryable) | nothing | retries within bound, then `failed` |
+| Transient source failure (timeout/5xx) | `StepError` (retryable) | nothing | retries within bound, then degrades to a rough estimate / honest still-working `processing` — never terminal `failed` (`estimation-jobs.md` v7, FTY-370) |
 | Non-retryable source error (4xx/non-JSON/policy) | `StepFailed` (terminal) | nothing | `processing → failed` |
 | Source unconfigured (no key) | _(skipped; falls forward under `estimate_first`)_ | next source / reference / model/default-prior rough evidence + `source_disabled:usda_fdc` assumption for recognizable items; clarification only when no identity remains, all rough paths are unavailable/unsafe, or active policy asks | per resulting source / policy |
 | No food candidates (exercise-only) | _(no-op, completes)_ | — | _(unchanged)_ |
@@ -871,7 +883,7 @@ user-owned `evidence_sources` row records `source_type = product_database`,
 | Barcode OFF no match / invalid barcode / no usable or implausible energy, no identity or active policy asks | `NeedsClarification` (`barcode_unknown`) | clarification question | `processing → needs_clarification` |
 | Unresolvable quantity, `estimate_first` | _(falls back)_ | default-serving/reference/model-prior rough evidence + assumptions | per the source it falls to |
 | Unresolvable quantity, active policy asks or rough paths unavailable/unsafe | `NeedsClarification` (`unresolvable_quantity`) | clarification question | `processing → needs_clarification` |
-| OFF transient failure (timeout/5xx) | `StepError` (`off_transient_error`, retryable) | nothing | retries within bound, then `failed` |
+| OFF transient failure (timeout/5xx) | `StepError` (`off_transient_error`, retryable) | nothing | retries within bound, then degrades — never terminal `failed` (`estimation-jobs.md` v7, FTY-370) |
 | OFF non-retryable error (4xx/non-JSON/policy) | `StepFailed` (`off_response_error`) | nothing | `processing → failed` |
 | OFF disabled/unavailable for a barcode candidate | _(falls back)_ | next source / rough estimate when policy allows, else `needs_clarification` | per the source it falls to |
 
@@ -1065,6 +1077,31 @@ cannot infer grams, it may record `estimated_default_serving` or bounded `basis 
 as_logged`; unusable estimates clarify with legacy unavailable/unusable labels
 plus sanitized detail (`provider_error`, `low_confidence`,
 `non_resolved_disposition`, or `unusable_facts`).
+
+### Budget/transience-degraded rough estimates (FTY-370)
+
+A candidate degraded because its run breached the FTY-363 per-run ceiling
+(`run_wall_clock_deadline_exceeded` / `run_provider_call_budget_exceeded`) or
+exhausted the bounded transient retries (`provider_transient_error`-class —
+`estimation-jobs.md` v7, **Never-fail degrade semantics**) commits with **rough
+provenance, never as a trusted value**: it reuses the model-prior /
+default-serving rough evidence shapes above (`source_type = model_prior`, or
+the concrete source whose facts the run already gathered plus a
+default-serving assumption — fact bases per `evidence-retrieval.md`) and
+carries an explicit, **content-free** assumption marking it a
+budget/transience-degraded estimate (a fixed label built from the breach/
+exhaustion reason, e.g. `degraded:run_wall_clock_deadline_exceeded` — never
+raw diary text, prompts, or provider output), so the item stays visibly
+distinguishable from trusted/exact/saved/edited values and user-correctable
+like any rough estimate (`estimator-policy.md`, **Rough provenance and
+editability**).
+
+The degrade producer must be able to run **without further provider budget**:
+when no provider headroom remains, it produces a deterministic rough estimate
+— from evidence the run already gathered, a default serving over already-known
+facts, or a documented deterministic prior — so degradation can never itself
+block on the exhausted budget. The concrete producer is the downstream
+**FTY-371**; the worker routing that invokes it is **FTY-372**.
 
 ### Persistence
 
@@ -1336,6 +1373,14 @@ The backend exposes four health-check endpoints, all returning structured JSON w
 
 ## Migration / Compatibility
 
+- **FTY-370 (contract only; no code, no migration).** Adds the
+  budget/transience-degraded rough-estimate provenance and the budget-free
+  degrade requirement (**Budget/transience-degraded rough estimates** above);
+  the transient-exhaustion routing rows now degrade instead of landing
+  terminal `failed`. No schema, DTO, serving-math, or source-hierarchy change
+  — the degrade reuses the existing `model_prior` / default-serving evidence
+  shapes and the `0012` `assumptions` column. FTY-371/FTY-372 implement under
+  `estimation-jobs.md` v7's never-fail semantics.
 - **FTY-334 (brand cutover, mechanical rename).** The FDC, OFF, official-fetch,
   and reference-fetch environment keys documented here now use the `SLACKS_`
   prefix, and the Open Food Facts user-agent is `Slacks/1.0`, both renamed as

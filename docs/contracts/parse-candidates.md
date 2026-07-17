@@ -5,8 +5,8 @@
 Define the structured **parse step** (FTY-042) of the estimation pipeline: how a
 `pending` log event's raw text becomes schema-validated food/exercise
 **candidates** (persisted unresolved), or **clarification questions** when the
-input is ambiguous, or a terminal **failure** when it is empty/garbage/adversarial
-or the model output is invalid.
+input is ambiguous, or a terminal **failure** when it is empty or genuinely not
+food/exercise at all, or the model output is invalid.
 
 This covers three things:
 
@@ -37,6 +37,13 @@ estimator / contracts / backend-core lane:
 
 ## Version
 
+13 (FTY-370, contract only): narrows terminal `unparseable_input` to input the
+samples **unanimously** judge genuinely not food/exercise/consumable at all
+(e.g. "asdf", "how's the weather"); any informal, unbranded, homemade,
+compositional, or borderline-consumable description (a homemade assembly of
+ingredients; gum or supplements the user is logging) routes to an estimate or a
+clarifying question — never `unparseable`. `empty_input` / `schema_validation_failed` unchanged; FTY-371 implements (`estimation-jobs.md` v7).
+
 12 (FTY-374, contract only): the parse/interpretation step gains **images as
 evidence surfaces** (see
 [Images as parse evidence surfaces](#images-as-parse-evidence-surfaces-fty-374))
@@ -49,10 +56,7 @@ backed it. No `ParseResult`/persistence/routing change; FTY-376 implements.
 11 (FTY-364, contract only): relocates the `### Estimate-first routing override`
 and `### User-stated nutrition facts` sections to
 [estimate-first-routing.md](estimate-first-routing.md) with no normative change;
-this page keeps the parse schema, sampling, routing table, question-quality, and
-persistence rules and links to the new page for the routing/detail-signal and
-user-stated-nutrition semantics. The two headings remain as compatibility
-anchors that link onward.
+the two headings remain as compatibility anchors that link onward.
 
 10 (FTY-348, contract only): relocates the FTY-324 (v9) interpretation-session and
 hypothesis-revision semantics to [interpretation-session.md](interpretation-session.md)
@@ -339,7 +343,7 @@ recognizable candidate for downstream rough resolution with content-free assumpt
 | calibrated-confident, ≥1 item, but a food candidate is implausible | `NeedsClarification` (`implausible_candidate`) | clarification question | `processing → needs_clarification` |
 | provider asks / no sample `parsed`, but a recognizable schema-validated identity is present and `estimate_first` is active | _(completes)_ | rough candidates `unresolved` + content-free assumptions; provider questions discarded | `processing → completed` |
 | active policy allows asking, and either no recognizable schema-validated candidate remains or the hybrid score is below the calibrated operating point | `NeedsClarification` | clarification questions (pooled across samples or synthesized by backend policy) | `processing → needs_clarification` |
-| unanimously `unparseable`, or a trusted set with no items | `StepFailed` (terminal) | nothing | `processing → failed` |
+| unanimously `unparseable` **and** the input is genuinely not food/exercise/consumable at all (FTY-370 — e.g. "asdf", "how's the weather"; never an informal/homemade/compositional/borderline-consumable food description), or a trusted set with no items | `StepFailed` (terminal) | nothing | `processing → failed` |
 | empty/whitespace input | `StepFailed` (terminal, no LLM call) | nothing | `processing → failed` |
 | schema-invalid sample / non-retryable provider error | `StepFailed` (terminal) | nothing | `processing → failed` |
 | transient provider error | `StepError` (retryable) | nothing | _(stays `processing`, retried)_ |
@@ -496,14 +500,11 @@ estimate first, and any remaining question stays item-scoped under this target.
 ### Estimate-first routing override (FTY-167, FTY-298)
 
 The estimate-first routing override — the deterministic **detail signal**
-(`app/estimator/detail_signals.py`) as a strengthening signal, the per-item
-food/exercise detail-signal enumeration (structured amount, numeric range,
-stranded bare count, stated worded portions, stated nutrition facts; exercise
-duration/distance/step/game count), the `estimate_first` vs `balanced`/`strict`
-policy interaction, the "bounded schema-shape repair is not an independent
-clarify branch" rule, and the **deterministic amount fills** (range midpoint /
-stranded count) that recover a missing count before the FTY-156 plausibility gate
-— is specified in
+(`app/estimator/detail_signals.py`), the per-item food/exercise detail-signal
+enumeration, the `estimate_first` vs `balanced`/`strict` policy interaction,
+the "bounded schema-shape repair is not an independent clarify branch" rule,
+and the **deterministic amount fills** (range midpoint / stranded count) — is
+specified in
 [estimate-first-routing.md](estimate-first-routing.md#estimate-first-routing-override-fty-167-fty-298).
 That page owns how a recognizable-but-underspecified entry is estimated rather
 than re-asked; this step applies it after the calibrated clarify decision and
@@ -548,12 +549,10 @@ not the label-only `label_pipeline` — with images as evidence surfaces:
 
 ### User-stated nutrition facts (FTY-279)
 
-When the user writes an explicit nutrition fact, the parser extracts it into the
-optional `stated_*` fields on that item's candidate (see the `ParsedCandidate`
-schema under **Inputs** and the `stated_*` bullet under `## Validation`) rather
-than dropping it. The extract-don't-invent / as-logged / bounded-untrusted /
-prompt-injection-safe rules, and the "a stated nutrition fact is a detail
-signal" cross-reference, are specified in
+When the user writes an explicit nutrition fact, the parser extracts it into
+the optional `stated_*` fields on that item's candidate (see **Inputs** and
+`## Validation`) rather than dropping it. The extract-don't-invent / as-logged
+/ bounded-untrusted / prompt-injection-safe rules are specified in
 [estimate-first-routing.md](estimate-first-routing.md#user-stated-nutrition-facts-fty-279).
 
 ## Validation
@@ -612,7 +611,7 @@ both `users` and `log_events` enforces object-level ownership.
 | Condition | Result |
 | --- | --- |
 | Empty/whitespace text | Terminal `failed` (`empty_input`); no LLM call, nothing persisted. |
-| Unanimously `unparseable` / no-item trusted set | Terminal `failed`; nothing persisted. |
+| Unanimously `unparseable` genuinely-non-food input (FTY-370) / no-item trusted set | Terminal `failed` (`unparseable_input`); nothing persisted. An informal/homemade/compositional/borderline-consumable description is never `unparseable` — it routes to estimate/clarify. |
 | Schema-invalid model output, unsafe/unrecoverable shape, or exhausted bounded repair cap (any sample) | Rejected; terminal `failed` (`schema_validation_failed`); nothing persisted. |
 | Accepted provider clarification output missing a specific question or 2–5 options | Rejected; terminal `failed` (`clarification_quality_failed`); nothing persisted. Provider questions overridden by `estimate_first` are discarded instead. |
 | Non-retryable provider error (`LLMResponseError`/`LLMConfigurationError`) | Terminal `failed` (`provider_error`). |
@@ -647,11 +646,9 @@ event.raw_text = "crackers and peanut butter"        # recognizable, amountless 
 
 ```
 event.raw_text = "stuff"
-  → no recognizable food or exercise identity survives validation and any
-     bounded schema-shape repair
-  → estimate_first has no safe object to estimate
-  → backend synthesizes a targeted clarification if one can help, otherwise the
-     parse fails closed as unparseable
+  → no recognizable identity survives validation/bounded repair, but the input
+     is not clearly non-food: genuinely indeterminate, never `unparseable_input`
+  → backend synthesizes a targeted clarification (FTY-370)
 ```
 
 ## Migration / Compatibility
@@ -748,3 +745,6 @@ event.raw_text = "stuff"
   per-surface provenance, provider-only image egress. No `ParseResult`,
   persistence, sampling, policy, or routing change. FTY-376 implements
   (ingestion/retention is FTY-375).
+- **FTY-370 (contract only; no code, no migration).** Narrows terminal
+  `unparseable_input` to unanimous genuinely-non-food input; no `ParseResult`,
+  persistence, sampling, or policy change. FTY-371 implements (`estimation-jobs.md` v7).

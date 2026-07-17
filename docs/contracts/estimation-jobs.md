@@ -35,6 +35,24 @@ estimator / backend-core / contracts lane:
 
 ## Version
 
+7 (FTY-370, contract only; no schema change, no new status): **never-fail
+failure semantics**. Terminal `processing → failed` is reserved for
+deterministic **non-food/empty input** (`empty_input`, and the narrowed
+`unparseable_input` — `parse-candidates.md` v13); **infrastructure exhaustion
+is never terminal `failed`**. A per-run ceiling breach (FTY-363:
+`run_wall_clock_deadline_exceeded` / `run_provider_call_budget_exceeded`) or
+`provider_transient_error`-class retry exhaustion now **degrades**: with ≥1
+interpreted food/exercise candidate the worker commits a rough,
+honestly-labelled estimate (`processing → completed`, or
+`processing → partially_resolved` when an open item-scoped question remains —
+`food-resolution.md` v21 owns the degraded provenance); with nothing
+interpreted the event stays in an honest still-working `processing` state with
+bounded, long-backoff auto-retry. The degrade write shares the terminal writes'
+atomicity/idempotency/sanitization invariants. Implemented downstream by
+**FTY-371** (estimator degrade producer + parse widening) and **FTY-372**
+(worker degrade routing + retry semantics). See
+[Never-fail degrade semantics](#never-fail-degrade-semantics-fty-370).
+
 6 (FTY-374, contract only; no schema change to these tables): the worker learns
 to feed a **unified text+image submission** (`log-events.md` v9) to the
 estimator. The `EstimationJobPayload` is **unchanged — ids only, reaffirmed**:
@@ -52,11 +70,12 @@ See [Image-bearing events](#image-bearing-events-fty-374).
 5 (FTY-363, descriptive; no schema change): the retry/terminal state machine gains
 a **per-run provider-call / wall-clock ceiling** — a run-scoped bound on total
 sequential provider work *within one attempt*, distinct from the attempt-level
-retries. A run that breaches it terminates `processing → failed` immediately as a
-`StepFailed`-class (deterministic, non-retryable) failure with a content-free
-reason, so a pathological input can no longer keep an event `processing` past the
-live smoke's poll window. No schema change; the attempt-level bounds are unchanged.
-See [Retry policy](#retry-policy).
+retries. As shipped, a run that breached it terminated `processing → failed`
+immediately as a `StepFailed`-class (deterministic, non-retryable) failure with a
+content-free reason, so a pathological input could no longer keep an event
+`processing` past the live smoke's poll window. **v7 (FTY-370) redefines the
+breach outcome to degrade, never terminal `failed`**; the ceiling itself and the
+attempt-level bounds are unchanged. See [Retry policy](#retry-policy).
 
 4 (FTY-255, additive): estimation runs record a **sanitized structured decision
 trace**. Alongside the coarse step labels, the food-resolution steps append
@@ -165,9 +184,10 @@ a non-success outcome by raising:
 - `NeedsClarification(reason)` — terminal, **not** retried (only the user can
   resolve ambiguous input);
 - `StepFailed(reason)` — terminal, **not** retried: a deterministic failure
-  (empty/garbage/unparseable input, or model output that failed schema validation)
-  where retrying the same input cannot help. The worker fails the event
-  immediately rather than burning retries (added in FTY-042);
+  (genuinely non-food/empty input — `parse-candidates.md` v13 — or model output
+  that failed schema validation) where retrying the same input cannot help. The
+  worker fails the event immediately rather than burning retries (added in
+  FTY-042);
 - `StepError(message)` — a *retryable* transient failure.
 
 `default_pipeline(provider)` wires the real FTY-042 parse step ahead of the real
@@ -205,8 +225,9 @@ The worker reuses the FTY-030 `LEGAL_TRANSITIONS` map (it does not redefine it):
 | needs clarification, **no** component costed | `needs_clarification` | `needs_clarification` | `processing → needs_clarification` |
 | needs clarification, **≥1 sibling committed** (item-scoped, FTY-278) | `needs_clarification` | `needs_clarification` | `processing → partially_resolved` |
 | failed (retryable), retries remain | `failed` | `running` | _(stays `processing`)_ |
-| failed (retryable), bound reached | `failed` | `failed` | `processing → failed` |
-| failed (deterministic, `StepFailed`) | `failed` | `failed` | `processing → failed` (immediate, no retry) |
+| infra exhaustion (transient bound reached or per-run ceiling breach), **≥1 interpreted candidate** (FTY-370 degrade) | `completed` (or `needs_clarification` when an open item-scoped question remains) | `succeeded` (or `needs_clarification`) | `processing → completed` / `processing → partially_resolved` |
+| infra exhaustion (transient bound reached or per-run ceiling breach), **nothing interpreted** (FTY-370 still-working) | `failed` | `running` | _(stays `processing`; bounded long-backoff auto-retry)_ |
+| failed (deterministic non-food/empty input, `StepFailed`) | `failed` | `failed` | `processing → failed` (immediate, no retry) |
 
 The **run/job status is `needs_clarification` for both clarification outcomes** —
 it is the worker-terminal, awaiting-answer status, re-opened only by the
@@ -214,6 +235,65 @@ clarification resolve. FTY-278 adds no run/job status: whether the event lands
 `needs_clarification` (nothing costed) or `partially_resolved` (costable siblings
 committed) is decided at the **event** transition, and the resolve re-opens the
 `needs_clarification` job identically in either case.
+
+### Never-fail degrade semantics (FTY-370)
+
+A food/exercise log run terminates in `failed` **only when the input is
+genuinely not food/exercise (or empty)** — the deterministic input
+classifications `empty_input` and the narrowed `unparseable_input`
+(`parse-candidates.md` v13). Infrastructure trouble is never grounds for a
+terminal `failed`: when a run breaches the FTY-363 per-run ceiling
+(`run_wall_clock_deadline_exceeded` / `run_provider_call_budget_exceeded`) or
+exhausts the bounded attempt-level retries on a transient failure
+(`provider_transient_error`-class `StepError`), the worker **degrades** instead
+of failing:
+
+- **≥1 interpreted food/exercise candidate** (on the `EstimationContext` or the
+  interpretation hypothesis): the worker commits a **rough, honestly-labelled
+  estimate** for every interpreted-but-unresolved candidate — produced without
+  further provider budget (`food-resolution.md` v21, **Budget/transience-degraded
+  rough estimates**) — and the event lands `completed`
+  (`processing → completed`), or `partially_resolved`
+  (`processing → partially_resolved`) when the terminal write also carries an
+  open item-scoped question alongside the committed siblings (the existing
+  `log-events.md` v6 shape; already-`resolved` siblings are preserved untouched,
+  exactly as on any terminal write). Components that already resolved exactly
+  keep their exact provenance; only the degraded candidates carry the rough,
+  content-free degraded marking.
+- **Nothing interpreted** (e.g. the breach happened during parse): the event
+  stays in an honest **still-working / will-retry** state — the existing
+  `processing` status, no new status — with the job non-terminal (`running`) and
+  a **bounded, long-backoff auto-retry** scheduled beyond the attempt-level
+  bound. The still-working retry ceiling and backoff schedule are **documented
+  tunables living next to the FTY-363/retry constants**
+  (`backend/app/estimator/run_budget.py`); their values are the FTY-372
+  implementers' documented judgement. Exhausting that ceiling stops further
+  auto-retries but still never lands `failed` — the event remains honestly
+  `processing`, and a later delivery/attempt may still complete it.
+
+Invariants, identical to the existing terminal writes:
+
+- **Atomicity.** The degraded rows (derived items, evidence, assumptions) and
+  the status transition commit in a **single transaction**, exactly as the
+  `completed` / `partially_resolved` paths already do — including the FTY-374
+  transient-attachment purge when the degrade lands a terminal status.
+- **Idempotency.** A degrade that lands the job terminal (`succeeded` /
+  `needs_clarification`) makes redelivery a no-op, unchanged; the still-working
+  case leaves the job non-terminal so a redelivered/scheduled task runs a normal
+  new attempt.
+- **Sanitization.** Every degrade/terminal reason is a fixed, content-free label
+  (`run_wall_clock_deadline_exceeded`, `run_provider_call_budget_exceeded`,
+  `provider_transient_error`, …) — no raw prompt, provider output, user text,
+  fetched page, or credential in reasons, `trace`, `error`, or logs (the
+  FTY-255/FTY-363 baseline, unchanged).
+
+The deterministic fail-closed validation classes are **not** redefined by
+FTY-370 (its Non-Goals): `empty_input` and unanimous genuinely-non-food
+`unparseable_input` stay terminal `failed`, and the untrusted-output gates
+(`schema_validation_failed`, `clarification_quality_failed`, `provider_error`,
+source response errors) keep their step contracts' fail-closed behaviour — they
+reject invalid provider/source output, and revisiting them is the downstream
+implementers' scope, not this contract's.
 
 ### Answer-triggered re-estimate (FTY-171)
 
@@ -384,7 +464,11 @@ surface (`docs/security/data-retention.md`, "Estimation runs").
 
 - **Bounded retries.** `DEFAULT_MAX_ATTEMPTS = 3` (the initial attempt plus two
   retries). Each attempt increments `estimation_jobs.attempts`; once it reaches
-  `max_attempts`, the job and event are marked `failed`.
+  `max_attempts`, the worker **degrades** rather than failing (FTY-370): a rough
+  estimate is committed when the run interpreted ≥1 candidate, otherwise the
+  event stays in the honest still-working `processing` state with the bounded
+  long-backoff schedule below (see
+  [Never-fail degrade semantics](#never-fail-degrade-semantics-fty-370)).
 - **Exponential backoff.** `retry_countdown(retries)` = `10s × 2^retries`, capped
   at `600s` → 10s, 20s, 40s. Celery schedules the retry; the worker core only
   reports whether a retry is due.
@@ -398,20 +482,28 @@ surface (`docs/security/data-retention.md`, "Estimation runs").
   and time-checked; a run exceeding a total provider-call budget
   (`DEFAULT_MAX_PROVIDER_CALLS`) or a wall-clock deadline
   (`DEFAULT_RUN_DEADLINE_SECONDS`, an injectable-clock elapsed check, below the
-  live smoke's 90s poll window) terminates as a **`StepFailed`-class**
-  (deterministic, non-retryable) failure — `processing → failed` immediately, **no
-  additional attempt consumed** on the same input (a re-run would hit the same
-  bound). The failure reason is a fixed, content-free label
-  (`run_provider_call_budget_exceeded` / `run_wall_clock_deadline_exceeded`) — no
-  raw prompt, provider output, user text, or credential. This is a runaway-cost /
-  denial-of-service guard on the untrusted-input path, so failing closed on breach
-  is the security-preferred behaviour. The ceiling terminates the run identically on
-  **both** run shapes: the first-pass worker path and the answer-triggered **scoped
-  re-estimate** — a breach there fails the run closed (`processing → failed`) rather
-  than reopening a component question. Defaults live next to the retry constants
-  (`backend/app/estimator/run_budget.py`) and may be tuned like them. The
-  attempt-level retry bound, backoff schedule, and per-call rate-limit retry above
-  are unchanged.
+  live smoke's 90s poll window) **stops all further provider work in that run
+  and degrades** (FTY-370): with ≥1 interpreted candidate the run commits a
+  rough, honestly-labelled estimate — produced **without further provider
+  budget** (`food-resolution.md` v21) — and terminates `processing → completed`
+  / `processing → partially_resolved`; with nothing interpreted the event stays
+  in the honest still-working `processing` state with the bounded long-backoff
+  auto-retry. A breach is **never** terminal `processing → failed`. The breach
+  reason is a fixed, content-free label (`run_provider_call_budget_exceeded` /
+  `run_wall_clock_deadline_exceeded`) — no raw prompt, provider output, user
+  text, or credential. The ceiling remains a runaway-cost / denial-of-service
+  guard on the untrusted-input path: it still strictly bounds the work one run
+  may spend, but the bound's *effect* is now "stop and estimate roughly", not
+  "reject the entry". The ceiling applies identically on **both** run shapes:
+  the first-pass worker path and the answer-triggered **scoped re-estimate** — a
+  breach there degrades the open component the same way while the
+  already-`resolved` siblings stay preserved untouched, rather than failing the
+  event. Defaults — including the FTY-370 still-working retry ceiling and
+  long-backoff schedule for the nothing-interpreted case — live next to the
+  retry constants (`backend/app/estimator/run_budget.py`) and may be tuned like
+  them (the hard ceiling *values* are unchanged by FTY-370). The attempt-level
+  retry bound, backoff schedule, and per-call rate-limit retry above are
+  unchanged.
 - These values are conservative documented defaults and may be tuned (story
   planning notes).
 
@@ -460,9 +552,9 @@ surface (`docs/security/data-retention.md`, "Estimation runs").
 | Redelivered task for a terminal job | No-op; no new run, no re-advance. |
 | Event missing or owned by another user | `EstimationEventNotFound` (fail closed); event untouched. |
 | Transient step failure (`StepError`), retries remain | Run `failed`; job stays `running`; task retried with backoff. |
-| Transient step failure (`StepError`), bound reached | Run + job + event `failed`. |
-| Deterministic step failure (`StepFailed`) | Run + job + event `failed` immediately (no retry). |
-| Per-run ceiling breached (`StepFailed`-class, FTY-363: provider-call budget or wall-clock deadline) | Run + job + event `failed` immediately (no retry); content-free reason. |
+| Transient step failure (`StepError`), bound reached | **Degrades (FTY-370)**: rough estimate committed (`completed` / `partially_resolved`) with ≥1 interpreted candidate; honest still-working `processing` + bounded long-backoff auto-retry with none. Never terminal `failed`. |
+| Deterministic step failure (`StepFailed`: non-food/empty input, or a fail-closed validation gate) | Run + job + event `failed` immediately (no retry). |
+| Per-run ceiling breached (FTY-363: provider-call budget or wall-clock deadline) | **Degrades (FTY-370)** exactly as transient exhaustion above; content-free reason; never terminal `failed`. |
 | Ambiguous input (`NeedsClarification`) | Run + job `needs_clarification`; event `needs_clarification` (nothing costed) or `partially_resolved` (costable siblings committed — FTY-278). Terminal for the worker; only the clarification resolve re-opens it — v2/v3. |
 
 ## Examples
@@ -520,6 +612,18 @@ POST /api/users/{uid}/log-events  →  201 pending event
   the retry policy, and the FTY-363 ceiling are all unchanged. Implementation:
   **FTY-375** (ingestion/retention + the `log-attachments.md` v3 migration) and
   **FTY-376** (worker/pipeline consumption).
+- **v7 (FTY-370, contract only; no code, no schema change, no new status).**
+  Redefines what infrastructure exhaustion *produces*: a per-run ceiling breach
+  (FTY-363) or transient-retry exhaustion degrades to a rough estimate
+  (`processing → completed` / `processing → partially_resolved`) or an honest
+  still-working `processing` state with bounded long-backoff auto-retry — never
+  terminal `failed`, which is reserved for genuinely non-food/empty input.
+  Every outcome uses the existing run/job/event status vocabulary and the
+  existing `LEGAL_TRANSITIONS` map (`log-events.md`) — no new transition. The
+  ceiling *values*, attempt-level bounds, claim/idempotency/ownership rules,
+  and sanitization baseline are unchanged. Implementation: **FTY-371**
+  (estimator: parse widening + budget-free degrade producer) and **FTY-372**
+  (worker: degrade routing + still-working retry semantics).
 - **FTY-334 (brand cutover, mechanical rename).** The LLM model reference for
   `estimation_runs.model` documented here now uses the `SLACKS_LLM_MODEL`
   environment key, renamed from the legacy prefix as part of the repo-wide brand
