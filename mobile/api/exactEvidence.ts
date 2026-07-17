@@ -44,9 +44,10 @@ import {
 } from "@/api/client";
 import type { ApiSession } from "@/api/client";
 import type { DerivedFoodItemDTO, ItemSourceDTO } from "@/api/derivedItems";
-// Share the existing label-capture guard rather than duplicating the limits, so
-// the exact-upgrade label path enforces the same first-line size/type boundary.
-import { validateImageGuard } from "@/api/labelCapture";
+// Share the existing label-capture read + guard rather than duplicating them, so
+// the exact-upgrade label path enforces the same first-line size/type boundary
+// and uses the same robust native file upload fixed in FTY-381.
+import { openLocalImage, uploadImageBinary, type OpenLocalImage } from "@/api/labelCapture";
 
 /** Which evidence kind produced the proposal (`docs/contracts/evidence-retrieval.md`). */
 export type ExactEvidenceProposalKind = "barcode" | "label";
@@ -236,38 +237,34 @@ export async function uploadLabelExactEvidenceProposal(
   itemId: string,
   imageUri: string,
   savePhoto: boolean,
-  fetchImpl: typeof fetch = fetch,
+  openImage: OpenLocalImage = openLocalImage,
 ): Promise<ExactEvidenceProposal> {
-  // Read the local image file to check size/type before upload (guard fires first).
-  const fileResponse = await fetchImpl(imageUri);
-  const blob = await fileResponse.blob();
-
-  // Camera captures may omit the charset part; normalize before the guard.
-  const contentType = (blob.type || "image/jpeg").split(";")[0].trim().toLowerCase();
-  validateImageGuard(blob.size, contentType);
-
   const url =
     userScopedUrl(
       session,
       `derived-items/food/${encodeURIComponent(itemId)}/exact-upgrade/label`,
     ) + `?save=${savePhoto ? "true" : "false"}`;
-  const response = await fetchImpl(url, {
-    method: "POST",
-    // Raw image bytes as the body; the header declares the image type.
-    headers: { Authorization: `Bearer ${session.token}`, "Content-Type": contentType },
-    body: blob,
-  });
 
-  if (!response.ok) {
+  // Shared native read + guard + upload (FTY-381): reads the local image, runs
+  // the size/type guard first, then streams the raw bytes from disk — never the
+  // fragile `fetch(file://).blob()` path that failed before the POST.
+  const { status, body } = await uploadImageBinary(
+    url,
+    session.token,
+    imageUri,
+    openImage,
+  );
+
+  if (status < 200 || status >= 300) {
     // This raw-body path bypasses request(), so it must clear the session on a
     // 401 itself, before throwing, so the caller's catch/finally still runs.
-    if (response.status === 401) {
+    if (status === 401) {
       notifyUnauthorized();
     }
-    throw exactEvidenceError(response.status, "read that label");
+    throw exactEvidenceError(status, "read that label");
   }
 
-  return response.json() as Promise<ExactEvidenceProposal>;
+  return JSON.parse(body) as ExactEvidenceProposal;
 }
 
 /**
