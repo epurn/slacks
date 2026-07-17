@@ -435,6 +435,12 @@ class EstimationContext:
     #: ``partially_resolved``; when nothing else is costable these fall back to
     #: whole-event ``needs_clarification`` questions.
     item_scoped_clarifications: list[ComponentClarification] = field(default_factory=list)
+    #: Candidate indices whose resolution tripped the resolved-value plausibility
+    #: gate (FTY-368), mapped to the gate's content-free reason label. The
+    #: official/reference/model-prior refit reads this to append the
+    #: ``resolved_plausibility_refit:<reason>`` assumption, keeping the refit
+    #: visible on the final item's provenance. Never carries user text.
+    plausibility_refit_reasons: dict[int, str] = field(default_factory=dict)
 
     def record_step(self, name: str, status: str) -> None:
         """Append a sanitized trace entry for a completed step.

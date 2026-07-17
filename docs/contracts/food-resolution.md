@@ -39,6 +39,25 @@ estimator / contracts / backend-core / security-privacy lane:
 
 ## Version
 
+21 (FTY-368): composed-dish portions respect stated structure, and a
+**resolved-value plausibility gate** bounds final dish totals. The FTY-254
+common-portion table now declines any **composed/assembled dish** (closed
+vocabulary — sandwich, wrap, burger, taco, …; snack idioms like `cracker
+sandwich` excluded), so a table food named as one component (`… on white
+bread`) can never supply the whole dish's grams (the 2026-07-16 live 65-kcal
+tuna-salad-sandwich incident). After serving math produces a final total, a
+deterministic gate (`backend/app/estimator/resolved_plausibility.py`) rejects a
+dish-class item resolved outside a generous, cited dish-class band (100–3000
+kcal per counted dish) or with resolved grams beneath a **stated component
+amount** (`about 1/2 a can of tuna` bounds the sandwich from below). The
+rejection is traced content-free (`rejected_implausible_resolved_total`, a
+re-query trigger), the candidate refits through the existing
+official/reference/model-prior tiers, and the refit item carries the
+`resolved_plausibility_refit:<reason>` assumption so a rough re-estimate is
+never presented as a cleanly-scaled trusted row. The terminal model-prior tier
+stays ungated — the honest rough last resort, never a terminal failure. No
+schema, DTO, or endpoint change.
+
 20 (FTY-308): implements the **barcode** half of the exact-evidence upgrade propose
 routing below. `POST .../exact-upgrade/barcode` resolves the typed/scanned barcode
 through the existing cache-first hardened OFF path (no second barcode mapper): a
@@ -522,12 +541,20 @@ pat/stick, with small/medium/large/jumbo size cues read from the parse) resolves
 via the documented common-portion table (`common_portions.py`, published USDA
 household weights), keeping the trusted-source facts and recording an explicit
 `estimated_common_portion:<food> <cue> <grams> g` assumption on the evidence row.
+The table declines a **composed/assembled dish** (FTY-368 — sandwich, wrap,
+burger, taco, … by closed vocabulary): the dish is the sum of its parts, so one
+component's household weight never stands in for the whole dish's grams.
 Otherwise the active shared policy ([estimator-policy.md](estimator-policy.md))
 determines whether that gap falls forward to rough default-serving/reference/
 model-prior estimation or asks for more detail. Calories/macros then scale per-100g
 facts by `grams / 100`, rounded to 0.1 when grams are resolved; count-serving facts
 scale the source serving facts by the count ratio; rough-prior paths store their own
-basis and assumptions. Storage is canonical (kcal, grams); the 1 ml ≈ 1 g density
+basis and assumptions. Once serving math lands a **final total**, the
+resolved-value plausibility gate (FTY-368, `resolved_plausibility.py`) re-routes
+a dish-class total outside the generous dish band — or with grams beneath a
+stated component amount — back through the rough tiers, tagged
+`resolved_plausibility_refit:<reason>`, instead of committing the absurd value;
+the terminal model-prior tier itself stays ungated. Storage is canonical (kcal, grams); the 1 ml ≈ 1 g density
 and the simple grams/millilitres/count scope are documented assumptions, with richer
 portion inference deferred.
 

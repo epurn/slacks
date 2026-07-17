@@ -38,6 +38,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from app.estimator.food_serving import _COUNT_UNITS
+from app.estimator.resolved_plausibility import is_composed_dish
 
 #: Sanity cap on the counted units a common-portion default may multiply; a
 #: larger count is not a casual counted snack and fails closed to the existing
@@ -176,6 +177,12 @@ def resolve_common_portion_grams(
     if amount is None or not math.isfinite(amount):
         return None
     if amount <= 0 or amount > MAX_COMMON_PORTION_COUNT:
+        return None
+    if is_composed_dish(name, unit):
+        # FTY-368: a composed/assembled dish (sandwich, wrap, burger, …) is the
+        # sum of its parts — a table food named as one component ("… on white
+        # bread") must never supply the whole dish's grams. Fail closed so the
+        # caller keeps its existing routing (rough tiers per the active policy).
         return None
     matched = _match_spec(name, unit)
     if matched is None:

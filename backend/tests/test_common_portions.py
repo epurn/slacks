@@ -110,6 +110,31 @@ def test_composite_dishes_do_not_match_the_component_food() -> None:
     assert _resolve("egg salad", amount=1, quantity_text="1") is None
 
 
+def test_composed_dishes_never_take_a_component_common_portion() -> None:
+    # FTY-368 regression: the live incident applied a 30 g bread-slice weight as
+    # the grams of a whole sandwich whose name merely ended in "... white bread".
+    assert (
+        _resolve(
+            "tuna salad sandwich on white bread",
+            unit="sandwich",
+            amount=1,
+            quantity_text="about 1/2 a can of tuna",
+        )
+        is None
+    )
+
+
+def test_a_dish_word_in_the_unit_also_declines_the_table() -> None:
+    assert _resolve("egg on toast", unit="sandwich", amount=1, quantity_text="1") is None
+
+
+def test_plain_table_foods_still_resolve_after_the_dish_guard() -> None:
+    portion = _resolve("bread", unit="slices", amount=2, quantity_text="2 slices of bread")
+
+    assert portion is not None
+    assert portion.grams == pytest.approx(60.0)
+
+
 def test_unknown_foods_fail_closed() -> None:
     assert _resolve("curry", amount=1, quantity_text="a bowl") is None
 
