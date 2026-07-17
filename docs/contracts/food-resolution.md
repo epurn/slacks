@@ -39,6 +39,25 @@ estimator / contracts / backend-core / security-privacy lane:
 
 ## Version
 
+22 (FTY-369): the Open Food Facts `product_database` source gains a **name-search**
+path for barcode-less **branded** products. A branded candidate USDA/OFF-by-barcode
+cannot resolve now consults OFF **by name** (`off.py` `OffClient.search_by_name` +
+`OffNameResolver` in `food_resolvers.py`, wired into `official_step.py`) before the
+chain falls to model prior, so a trivially findable packaged product (the 2026-07-16
+`made good mornings … oat bars` incident) lands as `product_database` evidence instead
+of a bare `user_text`/`model_prior` estimate. Name queries are built from the bounded
+`identity_variants` machinery (item identity only — name + brand + product hint,
+deduplicated, hard-capped), each passing the `sanitize_query` chokepoint and the OFF
+host allowlist; each OFF hit passes the same `is_evidence_brand_compatible` gate FDC
+branded routing applies, so a foreign product is rejected and the chain continues. The
+tier sits at its hierarchy rank — **after** official source, **before** reference and
+model prior — and never displaces an applicable `user_label`/`user_text`/
+`official_source` result. Name hits cache and record through the existing `products`
+(`(open_food_facts, <name query>)`, `barcode = NULL`) and `evidence_sources` shapes;
+no schema, DTO, or endpoint change. Reuses the hardened OFF transport, schema
+validation, plausibility gate, and serving math — a new query kind, not a new fetch
+capability.
+
 21 (FTY-368): composed-dish portions respect stated structure, and a
 **resolved-value plausibility gate** bounds final dish totals. The FTY-254
 common-portion table now declines any **composed/assembled dish** (closed
@@ -833,11 +852,35 @@ OFF is queried first; a confident match is preferred over a generic USDA estimat
 
 ### Owner (additional)
 
-`backend/app/estimator/off.py` (OFF client, settings, mapping, barcode normalization),
-`BarcodeResolver` + the source-hierarchy routing in
-`backend/app/estimator/food_step.py`, the `products.barcode` key
+`backend/app/estimator/off.py` (OFF client, settings, mapping, barcode normalization,
+and the FTY-369 name-search path), `BarcodeResolver` + the source-hierarchy routing in
+`backend/app/estimator/food_step.py`, the `OffNameResolver` +
+`OfficialSourceResolveStep` name-search tier (`backend/app/estimator/food_resolvers.py`,
+`backend/app/estimator/official_step.py`, FTY-369), the `products.barcode` key
 (`backend/app/models/food_sources.py` + `0010` migration), and the source-diagnostics
 endpoint (`backend/app/routers/health.py`, `backend/app/services/sources.py`).
+
+### Name search for barcode-less branded products (FTY-369)
+
+Not every branded packaged product carries a barcode in the log. When a **branded**
+candidate cannot be costed by USDA (generic) or OFF-by-barcode, the official-source
+step consults OFF **by name** as the `product_database` tier — after official source,
+before reference and model prior — through `OffClient.search_by_name` +
+`OffNameResolver`. It reuses this same hardened, allowlisted OFF transport
+(`hardened_fetch.get_json`) against OFF's public `cgi/search.pl` name endpoint (JSON,
+the same pinned `fields` list, a bounded `page_size`); the reply validates against an
+`OffProductResponse`-style schema and each candidate goes through the identical
+energy/plausibility gate and serving math the barcode path uses. Every name query is
+**item identity only**, built from the bounded `identity_variants` machinery (name +
+brand + product hint, deduplicated, capped at `MAX_IDENTITY_VARIANTS`) and passed
+through the `sanitize_query` chokepoint before egress — never profile, goals, body
+metrics, history, ids, or raw diary text. Each OFF hit must pass the same
+`is_evidence_brand_compatible` gate FDC branded routing applies, so a search that
+returns a **different** product (another brand or item) is rejected and the chain
+continues. A compatible hit caches as a global name-keyed `products` row
+(`source = open_food_facts`, `query_key` = the normalized name query, `barcode = NULL`,
+`source_ref = open_food_facts:<code>`) and records `source_type = product_database`
+evidence — never the raw OFF payload or query.
 
 ### Config (`OffSettings`, `SLACKS_OFF_` env vars)
 
@@ -914,9 +957,10 @@ estimation source status is surfaced.
 ### Diagnostics
 
 `GET /healthz/sources` returns each evidence source's capability descriptor
-(`id`, `source_type`, `kinds`, `enabled`, `available`) — Open Food Facts (`barcode`)
-and USDA FDC (`generic_food`) — so a self-hoster can confirm which sources are on
-without any trial call. It carries no secrets and makes no external calls.
+(`id`, `source_type`, `kinds`, `enabled`, `available`) — Open Food Facts
+(`barcode`, `named_product` — FTY-369) and USDA FDC (`generic_food`) — so a
+self-hoster can confirm which sources are on without any trial call. It carries no
+secrets and makes no external calls.
 
 ## Official-Source Fetch Boundary (FTY-078)
 
@@ -1016,11 +1060,14 @@ empty for a generic food (`"white rice"`). A candidate carrying a non-blank `bra
 Inside the official step, a **branded** candidate is searched against official sources
 first (a named product has an authoritative page); a **generic** candidate has no brand
 page, so official search is skipped whether it is detail-rich or a default
-`estimate_first` amountless rough-estimate candidate. Either way, on a miss the
-candidate falls through to the **reference-source tier** (FTY-166 — a
-public-nutrition-reference search + searched-result fetch), and only when that also
-produces nothing confident to the **model-prior** estimate, whose `assumptions` name
-the per-tier reason (e.g.
+`estimate_first` amountless rough-estimate candidate. On an official-source miss a
+**branded/hinted** candidate then consults the **Open Food Facts name-search tier**
+(FTY-369, the `product_database` rank between official source and reference — see
+**Name search for barcode-less branded products** above); a foreign OFF hit is rejected
+and the chain continues. Either way, on a miss the candidate falls through to the
+**reference-source tier** (FTY-166 — a public-nutrition-reference search +
+searched-result fetch), and only when that also produces nothing confident to the
+**model-prior** estimate, whose `assumptions` name the per-tier reason (e.g.
 `"generic food (no official page to search); reference_source returned no confident
 match; estimated from model prior"`). The result always carries its explicit
 `source_type` and stays user-editable — never a silent guess.

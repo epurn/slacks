@@ -37,7 +37,7 @@ import socket
 from collections.abc import Mapping
 from enum import Enum
 from typing import Any, Final, Protocol, runtime_checkable
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from pydantic import (
     BaseModel,
@@ -49,7 +49,7 @@ from pydantic import (
 )
 
 from app.estimator.evidence_utils import _content_hash
-from app.estimator.fdc import ProductFacts
+from app.estimator.fdc import ProductFacts, normalize_query
 from app.estimator.food_serving import NutritionFacts, nutrition_facts_plausible
 from app.estimator.hardened_fetch import (
     FetchPolicyError,
@@ -58,6 +58,7 @@ from app.estimator.hardened_fetch import (
     Resolver,
     get_json,
 )
+from app.estimator.search_sanitization import sanitize_query
 
 #: OFF settings are read from variables with this prefix, e.g. ``SLACKS_OFF_BASE_URL``.
 ENV_PREFIX = "SLACKS_OFF_"
@@ -80,6 +81,15 @@ _OFF_STATUS_FOUND: Final[int] = 1
 
 #: Bound the description we persist from the (untrusted) OFF payload.
 _MAX_DESCRIPTION_LEN: Final[int] = 300
+
+#: Bound the product ``code`` we read from the (untrusted) OFF search payload before
+#: it becomes a ``source_ref``. A GTIN is ≤14 digits; a longer value is corrupt.
+_MAX_CODE_LEN: Final[int] = 64
+
+#: Bound on the OFF name-search candidate window inspected for a compatible product
+#: (FTY-369). Name search can return many hits; branded resolution needs only a small
+#: ranked window, and a bound caps how much untrusted JSON we validate/iterate.
+_MAX_SEARCH_RESULTS: Final[int] = 10
 
 #: Valid GTIN/UPC/EAN digit lengths (EAN-8, UPC-A, EAN-13, GTIN-14).
 _VALID_BARCODE_LENGTHS: Final[frozenset[int]] = frozenset({8, 12, 13, 14})
@@ -160,6 +170,30 @@ class BarcodeSource(Protocol):
         ...
 
 
+@runtime_checkable
+class NameProductSource(Protocol):
+    """A product-database source the resolver can query **by name** (FTY-369).
+
+    The name-keyed counterpart to :class:`BarcodeSource`, used for brand-name-only
+    packaged products that carry no barcode. Real OFF (:meth:`OffClient.search_by_name`)
+    or a network-free test fake.
+    """
+
+    @property
+    def enabled(self) -> bool:
+        """Whether the source is enabled and may be queried."""
+        ...
+
+    def search_by_name(self, query: str) -> tuple[ProductFacts, ...]:
+        """Return the bounded candidate products for ``query``, each energy-bearing.
+
+        Only the sanitized item identity egresses. The caller applies the
+        brand/product-compatibility gate to pick a candidate. Raises
+        :class:`OffTransientError` / :class:`OffResponseError` on a failure.
+        """
+        ...
+
+
 class OffSettings(BaseModel):
     """Validated OFF client configuration, read from ``SLACKS_OFF_`` env vars.
 
@@ -203,6 +237,25 @@ class OffSettings(BaseModel):
         base = self.base_url.rstrip("/")
         fields = "code,product_name,nutriments,serving_quantity,serving_size"
         return f"{base}/api/v2/product/{barcode}.json?fields={fields}"
+
+    def search_url(self, query: str) -> str:
+        """The OFF v1 name/text search endpoint for a sanitized ``query`` (FTY-369).
+
+        Uses OFF's public ``cgi/search.pl`` free-text endpoint on the same allowlisted
+        host as the barcode path, with ``json=1`` and the same pinned nutriment
+        ``fields`` list, and a bounded ``page_size``. ``query`` is item identity only
+        and already through :func:`sanitize_query`; it is URL-encoded here so no raw
+        character reaches the request line.
+        """
+
+        base = self.base_url.rstrip("/")
+        fields = "code,product_name,nutriments,serving_quantity,serving_size"
+        encoded = quote(query, safe="")
+        return (
+            f"{base}/cgi/search.pl?search_terms={encoded}"
+            f"&search_simple=1&action=process&json=1"
+            f"&page_size={_MAX_SEARCH_RESULTS}&fields={fields}"
+        )
 
     @property
     def allowed_hosts(self) -> frozenset[str]:
@@ -250,6 +303,10 @@ class OffProduct(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     product_name: str = Field(default="")
+    #: The product's GTIN/barcode, present on OFF name-search hits (FTY-369); used to
+    #: form a stable ``open_food_facts:<code>`` source ref. Empty on the barcode path,
+    #: which uses the queried barcode instead.
+    code: str = Field(default="")
     nutriments: OffNutriments = Field(default_factory=OffNutriments)
     #: Serving size in grams when OFF supplies one (count-unit serving math).
     serving_quantity: float | None = None
@@ -267,6 +324,21 @@ class OffProduct(BaseModel):
             return value[:_MAX_DESCRIPTION_LEN]
         return value
 
+    @field_validator("code", mode="before")
+    @classmethod
+    def _coerce_code(cls, value: Any) -> Any:
+        """Coerce the untrusted OFF ``code`` to a bounded string (OFF may send a number).
+
+        ``None`` becomes empty; any scalar is stringified and length-bounded so a
+        corrupt/oversized value can never grow a source ref. Non-scalar shapes fall
+        through to normal validation, which fails closed into OffResponseError.
+        """
+        if value is None:
+            return ""
+        if isinstance(value, (str, int)):
+            return str(value)[:_MAX_CODE_LEN]
+        return value
+
 
 class OffProductResponse(BaseModel):
     """The validated shape of an OFF ``/api/v2/product/<barcode>.json`` reply."""
@@ -275,6 +347,19 @@ class OffProductResponse(BaseModel):
 
     status: int = 0
     product: OffProduct | None = None
+
+
+class OffSearchResponse(BaseModel):
+    """The validated shape of an OFF ``/cgi/search.pl`` name-search reply (FTY-369).
+
+    A bounded list of candidate products, each the same untrusted :class:`OffProduct`
+    shape the barcode path validates; only the used fields are trusted, and the list is
+    windowed by the caller before mapping.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    products: list[OffProduct] = Field(default_factory=list)
 
 
 # Transport callable signature, injectable so tests drive a network-free fake.
@@ -379,6 +464,49 @@ class OffClient:
             raise OffResponseError("off_response_error") from exc
         return _map_product(normalized, response)
 
+    def search_by_name(self, query: str) -> tuple[ProductFacts, ...]:
+        """Search OFF **by product name** and map candidate products to per-100g facts.
+
+        The name-keyed counterpart to :meth:`lookup` (FTY-369). Only the sanitized item
+        identity is sent — normalized, passed through the :func:`sanitize_query`
+        chokepoint, then URL-encoded — never any profile, goals, history, or raw diary
+        text. Returns the bounded list of energy-bearing, plausibility-passing
+        candidates for the query (empty when the source is disabled, the query is empty,
+        or nothing usable is found); the caller applies the brand/product-compatibility
+        gate. Maps transport/policy failures to :class:`OffTransientError` /
+        :class:`OffResponseError`, exactly like :meth:`lookup`.
+        """
+
+        if not self.enabled:
+            return ()
+
+        query_key = normalize_query(query)
+        if not query_key:
+            return ()
+        egress_query = sanitize_query(query_key)
+        if not egress_query:
+            return ()
+
+        headers = {"User-Agent": self._settings.user_agent}
+        try:
+            raw = self._transport(
+                self._settings.search_url(egress_query),
+                headers=headers,
+                timeout_seconds=self._settings.timeout_seconds,
+                allowed_hosts=self._settings.allowed_hosts,
+                resolver=self._resolver,
+            )
+        except FetchTransientError as exc:
+            raise OffTransientError("off_transient_error") from exc
+        except (FetchResponseError, FetchPolicyError) as exc:
+            raise OffResponseError("off_response_error") from exc
+
+        try:
+            response = OffSearchResponse.model_validate(raw)
+        except ValidationError as exc:
+            raise OffResponseError("off_response_error") from exc
+        return _map_search_products(query_key, response)
+
 
 def _map_product(
     barcode: str, response: OffProductResponse
@@ -418,6 +546,51 @@ def _map_product(
         barcode=barcode,
     )
     return facts_row, None
+
+
+def _map_search_products(query_key: str, response: OffSearchResponse) -> tuple[ProductFacts, ...]:
+    """Map the bounded OFF name-search window to canonical per-100g facts (FTY-369).
+
+    Each usable product becomes a name-keyed :class:`ProductFacts` (``barcode = None``,
+    ``query_key`` = the normalized name query, ``source_ref = open_food_facts:<code>``);
+    products with no usable/plausible energy or no code are dropped, preserving OFF's
+    own relevance order. The caller applies the brand/product-compatibility gate.
+    """
+
+    mapped: list[ProductFacts] = []
+    for product in response.products[:_MAX_SEARCH_RESULTS]:
+        facts = _search_product_to_facts(query_key, product)
+        if facts is not None:
+            mapped.append(facts)
+    return tuple(mapped)
+
+
+def _search_product_to_facts(query_key: str, product: OffProduct) -> ProductFacts | None:
+    """Map one OFF name-search product to name-keyed per-100g :class:`ProductFacts`.
+
+    Returns ``None`` when the product carries no stable ``code`` (no usable source ref)
+    or no plausible energy on a usable basis — the same energy/plausibility gate the
+    barcode path applies. ``query_key`` is the normalized name query, the cache key.
+    """
+
+    code = product.code.strip()
+    if not code:
+        return None
+    serving_g = product.serving_quantity if (product.serving_quantity or 0) > 0 else None
+    facts = _facts_per_100g(product.nutriments, serving_g)
+    if facts is None:
+        return None
+    source_ref = f"{OFF_SOURCE}:{code}"
+    return ProductFacts(
+        source=OFF_SOURCE,
+        source_ref=source_ref,
+        query_key=query_key,
+        description=product.product_name,
+        facts=facts,
+        default_serving_g=serving_g,
+        content_hash=_content_hash(source_ref, facts),
+        barcode=None,
+    )
 
 
 def _facts_per_100g(nutriments: OffNutriments, serving_g: float | None) -> NutritionFacts | None:

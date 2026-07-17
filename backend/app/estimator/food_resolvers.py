@@ -17,6 +17,7 @@ flushed row from a user-owned ``evidence_sources`` row on commit.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -37,6 +38,7 @@ from app.estimator.fdc_ranking import (
 from app.estimator.off import (
     OFF_SOURCE,
     BarcodeSource,
+    NameProductSource,
     OffMissReason,
     normalize_barcode,
 )
@@ -230,3 +232,69 @@ class BarcodeResolver:
         return _ResolvedProduct(
             product=_cache_product(self._session, facts), fetched_at=datetime.now(UTC)
         ), None
+
+
+class OffNameResolver:
+    """Resolves a branded product **by name** against Open Food Facts (FTY-369).
+
+    The name-keyed counterpart to :class:`BarcodeResolver`: a branded, barcode-less
+    packaged product named in the log is looked up through OFF's public name search, and
+    the first candidate that passes the caller's brand/product-compatibility gate is
+    cached as a global name-keyed ``products`` row and returned. It owns the ``products``
+    cache for ``(open_food_facts, <name query>)`` rows — ``barcode`` is ``None`` and
+    ``query_key`` holds the normalized name query — distinct from the barcode resolver's
+    ``(open_food_facts, <barcode>)`` rows, so the two never collide.
+
+    Constructed by the worker (which holds the session) and injected into the
+    official-source step, where it fills the branded ``product_database`` gap between the
+    official-source and reference tiers before the chain reaches model prior.
+    """
+
+    def __init__(self, *, session: Session, source: NameProductSource) -> None:
+        self._session = session
+        self._source = source
+
+    @property
+    def enabled(self) -> bool:
+        """Whether the underlying OFF source is enabled and may be queried."""
+
+        return self._source.enabled
+
+    def resolve_compatible(
+        self, query: str, *, accept: Callable[[str], bool]
+    ) -> _ResolvedProduct | None:
+        """Return the first OFF name hit accepted by ``accept`` (cache-first).
+
+        ``accept`` is the caller's brand/product-compatibility predicate over an OFF
+        candidate's stated product name (the step passes
+        :func:`~app.estimator.branded_routing.is_evidence_brand_compatible`). A cached
+        name row is re-checked against it, so a later foreign query never silently
+        reuses a stale product; a **cache hit makes no external call**. On a miss OFF is
+        searched by name and the first accepted, energy-bearing candidate is cached
+        (flushed) and returned. Returns ``None`` when nothing compatible is found.
+        Propagates :class:`~app.estimator.off.OffTransientError` /
+        :class:`~app.estimator.off.OffResponseError` for the step to route.
+        """
+
+        query_key = normalize_query(query)
+        if not query_key:
+            return None
+
+        cached = self._session.scalars(
+            select(Product).where(
+                Product.source == OFF_SOURCE,
+                Product.query_key == query_key,
+                Product.barcode.is_(None),
+            )
+        ).one_or_none()
+        if cached is not None:
+            if accept(cached.description):
+                return _ResolvedProduct(product=cached, fetched_at=cached.updated_at)
+            return None
+
+        for facts in self._source.search_by_name(query):
+            if accept(facts.description):
+                return _ResolvedProduct(
+                    product=_cache_product(self._session, facts), fetched_at=datetime.now(UTC)
+                )
+        return None

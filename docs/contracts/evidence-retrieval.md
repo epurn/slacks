@@ -44,9 +44,10 @@ contracts lane, with estimator / backend-core / security-privacy touch:
 `docs/contracts/evidence-retrieval.md` (this contract). The first concrete
 implementation lives in `backend/app/estimator/` (`fdc.py`,
 `hardened_fetch.py`, `food_sources.py`); see `food-resolution.md`. The Open Food
-Facts barcode adapter (`off.py`, `product_database` tier) is implemented in
-FTY-060 behind these same boundaries; see `food-resolution.md` (**Barcode
-Source**). The user-provided nutrition-label adapter (`label_step.py`,
+Facts adapter (`off.py`, `product_database` tier) is implemented in
+FTY-060 behind these same boundaries; it serves both **barcode** lookups and,
+since FTY-369, **name search** for barcode-less branded products; see
+`food-resolution.md` (**Barcode Source**). The user-provided nutrition-label adapter (`label_step.py`,
 `user_label` tier — rank 1) is implemented in FTY-061; see `label-extraction.md`.
 The official-source **search** adapter (`search.py`, the `official_source` tier's
 search half) is implemented in FTY-079 behind the **Search Request / Response
@@ -55,6 +56,27 @@ consumed by the official-source resolution step (FTY-062). See **Search Provider
 Adapter — FTY-079 / FTY-164**.
 
 ## Version
+
+11 (FTY-369): extends the `product_database` tier (`open_food_facts`) to serve
+`named_product` lookups via **Open Food Facts name search**, so a barcode-less
+branded packaged product named in the log resolves against OFF by name instead of
+falling straight to a bare model prior. The name-search path reuses the existing
+hardened, allowlisted OFF transport, `OffProductResponse`-style schema validation,
+plausibility gate, and serving math — it is a new **query kind** on the same trust
+boundary, not a new fetch/browse capability. Every name query is **item identity
+only**, built from the bounded `identity_variants` machinery (name + brand + product
+hint, deduplicated and hard-capped), and passes the `sanitize_query` chokepoint
+before egress; no profile, goals, body metrics, history, ids, or raw diary text may
+ride along. Each OFF name hit must pass the same brand/product-compatibility gate FDC
+branded routing applies (`is_evidence_brand_compatible`) — a foreign product is
+rejected, never blended. In the pipeline the tier consults **between official source
+(rank 2) and reference (rank 5)**: it fills the branded gap before model prior and
+never displaces an applicable higher-tier (`user_label` / `user_text` /
+`official_source`) result. Name hits cache and record through the existing `products`
+(global cache keyed by `(source, query_key)`, name query key, `barcode = NULL`) and
+`evidence_sources` shapes; no DTO or schema migration. OFF's capability `kinds`
+gains `named_product` in `/healthz/sources`. Source hierarchy, statuses, fact schema,
+egress/fetch gates, and retention rules are otherwise unchanged.
 
 10 (FTY-308): implements the **barcode** exact-evidence proposal generator (the
 `kind = barcode` half of the **Exact Evidence Upgrade** below). It reuses the existing
@@ -216,7 +238,7 @@ configured v1 provider sits:
 | 1 | `user_label` | user-provided | nutrition-label image (OCR) or manually entered label facts; user-confirmed barcode/package facts |
 | 1 | `user_text` | user-provided | explicit nutrition facts stated in the log entry text — a calorie total and/or macros, recorded `as_logged` (FTY-279) |
 | 2 | `official_source` | search + hardened fetch | official restaurant / manufacturer / product page |
-| 3 | `product_database` | `open_food_facts` | barcoded and packaged food products |
+| 3 | `product_database` | `open_food_facts` | barcoded and packaged food products; barcode-less **branded** products by name search (FTY-369) |
 | 4 | `trusted_nutrition_database` | `usda_fdc` | generic foods and common serving references |
 | 5 | `reference_source` | search + hardened searched-result fetch | public nutrition reference pages, when the higher tiers miss or do not apply (FTY-166) |
 | 6 | `model_prior` | `model_prior` | last-resort rough/default-prior fallback only, with explicit assumptions and editability (see **Fallback Rule**) |

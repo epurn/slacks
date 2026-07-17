@@ -99,6 +99,15 @@
       "expected_items": [
         { "match": "sandwich", "kcal_low": 250.0, "kcal_high": 450.0 }
       ]
+    },
+    {
+      "key": "made-good-oat-bar",
+      "raw_text": "made good mornings - chocolate chip organic soft baked oat bars, 1 serving",
+      "expected_item_count": 1,
+      "total_kcal_low": 90.0,
+      "total_kcal_high": 130.0,
+      "forbid_source_types": ["model_prior", "user_text"],
+      "forbid_substrings": []
     }
   ]
 }

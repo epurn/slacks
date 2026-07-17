@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.estimator.fdc import build_fdc_client
-from app.estimator.food_resolvers import BarcodeResolver, FoodResolver
+from app.estimator.food_resolvers import BarcodeResolver, FoodResolver, OffNameResolver
 from app.estimator.image_facts_step import ImageFactsResolveStep
 from app.estimator.off import build_off_client
 from app.estimator.official_fetch import load_official_fetch_settings
@@ -66,7 +66,11 @@ def build_worker_pipeline(session: Session, label_upload: LabelInput | None) -> 
     # fetches official pages (FTY-078), then public reference pages (FTY-166),
     # else falls through to a model-prior estimate.
     resolver = FoodResolver(session=session, source=build_fdc_client())
-    barcode_resolver = BarcodeResolver(session=session, source=build_off_client())
+    # One OFF client backs both the barcode resolver (FTY-060) and the name-search
+    # resolver (FTY-369); building it makes no network call.
+    off_client = build_off_client()
+    barcode_resolver = BarcodeResolver(session=session, source=off_client)
+    off_name_resolver = OffNameResolver(session=session, source=off_client)
     search_provider = build_search_provider()
     reference_fetch_settings = load_reference_fetch_settings()
     official_step = OfficialSourceResolveStep(
@@ -74,6 +78,7 @@ def build_worker_pipeline(session: Session, label_upload: LabelInput | None) -> 
         search_provider=search_provider,
         fetch_settings=load_official_fetch_settings(),
         reference_fetch_settings=reference_fetch_settings,
+        off_name_resolver=off_name_resolver,
         model_prior_confidence_floor=app_settings.estimator_model_prior_confidence_floor,
         clarify_mode=app_settings.estimator_clarify_mode,
     )
