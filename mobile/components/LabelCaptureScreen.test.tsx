@@ -639,6 +639,103 @@ describe("LabelCaptureScreen – submit", () => {
   });
 });
 
+// ─── Photo-library fallback (FTY-381) ────────────────────────────────────────
+
+describe("LabelCaptureScreen – photo-library fallback", () => {
+  it("offers a Choose from Library affordance in the camera phase", () => {
+    const tree = mount(
+      <LabelCaptureScreen
+        onSubmit={noopSubmit()}
+        onClose={jest.fn()}
+        permissionsHook={makeGrantedHook()}
+      />,
+    );
+    expect(hasA11yLabel(tree, "Choose from Library")).toBe(true);
+  });
+
+  it("picks a library photo → preview → uploads it via onSubmit (end-to-end path)", async () => {
+    const onSubmit = noopSubmit();
+    const pickPhoto = jest
+      .fn()
+      .mockResolvedValue({ uri: "file:///library-label.jpg" });
+    const tree = mount(
+      <LabelCaptureScreen
+        onSubmit={onSubmit}
+        onClose={jest.fn()}
+        permissionsHook={makeGrantedHook()}
+        pickPhoto={pickPhoto}
+      />,
+    );
+
+    await act(async () => {
+      press(tree, "Choose from Library");
+    });
+
+    // The picked photo lands in the same preview as a capture.
+    expect(hasA11yLabel(tree, "Upload label")).toBe(true);
+    expect(hasA11yLabel(tree, "Take photo")).toBe(false);
+
+    await act(async () => {
+      press(tree, "Upload label");
+    });
+
+    // The picked URI feeds the same submit handler + save semantics as a capture.
+    expect(pickPhoto).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith({
+      imageUri: "file:///library-label.jpg",
+      savePhoto: false,
+    });
+  });
+
+  it("stays in the camera phase with no error when the picker is canceled", async () => {
+    const pickPhoto = jest.fn().mockResolvedValue(null); // user canceled
+    const tree = mount(
+      <LabelCaptureScreen
+        onSubmit={noopSubmit()}
+        onClose={jest.fn()}
+        permissionsHook={makeGrantedHook()}
+        pickPhoto={pickPhoto}
+      />,
+    );
+
+    await act(async () => {
+      press(tree, "Choose from Library");
+    });
+
+    // No preview, no error — the shutter (camera phase) is still shown.
+    expect(hasA11yLabel(tree, "Take photo")).toBe(true);
+    expect(hasA11yLabel(tree, "Upload label")).toBe(false);
+    const content = textContent(tree);
+    expect(content).not.toContain("Couldn't open your photo library");
+  });
+
+  it("surfaces a content-free, actionable error when the picker throws", async () => {
+    const pickPhoto = jest
+      .fn()
+      .mockRejectedValue(new Error("file:///private/secret.jpg failed to open"));
+    const tree = mount(
+      <LabelCaptureScreen
+        onSubmit={noopSubmit()}
+        onClose={jest.fn()}
+        permissionsHook={makeGrantedHook()}
+        pickPhoto={pickPhoto}
+      />,
+    );
+
+    await act(async () => {
+      press(tree, "Choose from Library");
+    });
+
+    const content = textContent(tree);
+    expect(content).toContain("Couldn't open your photo library");
+    // The rejection's message (which carried a path) must never reach the UI.
+    expect(content).not.toContain("secret");
+    expect(content).not.toMatch(/file:|data:/);
+    // Not a dead end: the user can still retry from the camera surface.
+    expect(hasA11yLabel(tree, "Choose from Library")).toBe(true);
+  });
+});
+
 // ─── Security / sensitivity ───────────────────────────────────────────────────
 
 describe("LabelCaptureScreen – security and sensitivity", () => {
