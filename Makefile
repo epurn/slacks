@@ -1,4 +1,4 @@
-.PHONY: verify governance packages backend mobile contracts sim-smoke food-smoke
+.PHONY: verify governance packages backend mobile contracts sim-smoke food-smoke tailscale-serve
 
 # Root verification entry point. Runs repository governance plus any package
 # checks that have opted in. `make verify` stays the single contract for CI and
@@ -43,3 +43,12 @@ sim-smoke:
 # providers). This is live-local API smoke, not the hermetic E2E fixture mode.
 food-smoke:
 	cd backend && uv run python -m app.ops.food_dogfood_smoke
+
+# Tailnet HTTPS ingress helper (FTY-367). Starts/re-applies `tailscale serve`
+# so the local API is reachable at https://<host>.<tailnet-name>.ts.net —
+# TLS on 443 with a valid tailnet cert, tailnet-only (serve, never funnel).
+# Requires Tailscale installed + logged in with MagicDNS and HTTPS certificates
+# enabled; see docs/operations/tailscale-https.md. Prints URLs/status only, no
+# secrets, and is NOT part of `make verify`.
+tailscale-serve:
+	@scripts/tailscale-serve.sh

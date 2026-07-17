@@ -9,7 +9,10 @@ docker compose up              # starts all services; migrations run first
 ```
 
 For the full self-host walkthrough (prerequisites, provider config, first-boot
-checklist, smoke check) see the README **Self-Hosting** section.
+checklist, smoke check) see the README **Self-Hosting** section. To reach the
+stack over **HTTPS on port 443 across your tailnet** (encrypted transport,
+valid certificate, no high port in the URL) see
+[HTTPS over Tailscale](tailscale-https.md) (FTY-367).
 
 ## Services
 
@@ -102,7 +105,7 @@ Key variable groups (see `.env.example` for full documentation):
 | --- | --- | --- |
 | Auth | `SLACKS_AUTH_SECRET`, `SLACKS_AUTH_TOKEN_TTL_SECONDS` | Auth secret is required; generate before first boot. |
 | Datastores | `POSTGRES_*`, `SLACKS_DATABASE_URL`, `REDIS_PORT`, `SLACKS_REDIS_URL` | Service hostnames must match compose service names. |
-| Host ports | `API_PORT` | Published host port for the API; containers always listen on fixed ports. `POSTGRES_PORT` / `REDIS_PORT` are meaningful only if you re-enable loopback-only host mappings for direct datastore access (see Services above). |
+| Host ports | `API_PORT`, `API_BIND_HOST` | Published host port for the API; containers always listen on fixed ports. `API_BIND_HOST` is optional: unset publishes on all interfaces (the local-dev default); `127.0.0.1` is the tailnet-served posture ([HTTPS over Tailscale](tailscale-https.md)). `POSTGRES_PORT` / `REDIS_PORT` are meaningful only if you re-enable loopback-only host mappings for direct datastore access (see Services above). |
 | Application | `SLACKS_ENVIRONMENT`, `SLACKS_LOG_LEVEL` | App config. |
 | LLM provider | `SLACKS_LLM_*` | Optional; defaults to `fake` (model-prior-with-status). See LLM providers below. |
 | Estimator policy | `SLACKS_ESTIMATOR_*` | Optional estimate-vs-ask clarification policy; defaults to estimate-first and does not change privacy/logging/provider validation rules. |
@@ -488,6 +491,10 @@ without elevated privileges.
 
 ## Out of Scope
 
-TLS / reverse proxy / HTTPS termination, production hardening, resource limits,
-object storage, and hosted/cloud deployment are intentionally out of scope for
-this local self-host stack.
+Public-internet ingress, production hardening, resource limits, object storage,
+and hosted/cloud deployment are intentionally out of scope for this local
+self-host stack. Transport encryption on a private tailnet is **in** scope via
+the `tailscale serve` paved path — TLS terminated on 443 with a valid tailnet
+certificate, proxying to the loopback-bound API port — documented in
+[HTTPS over Tailscale](tailscale-https.md) (FTY-367). An in-Compose reverse
+proxy / mounted-certificate setup remains out of scope.
