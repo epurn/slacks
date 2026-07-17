@@ -23,7 +23,7 @@
  *     returns false.
  */
 
-import { AccessibilityInfo } from 'react-native';
+import { AccessibilityInfo, LogBox } from 'react-native';
 import type { PermissionResponse } from 'expo';
 import type { useCameraPermissions } from 'expo-camera';
 import type { LogEventDTO } from '@/api/logEvents';
@@ -758,4 +758,8 @@ export function setupE2EMode(): void {
   installE2EMockFetch();
   markOnboardingComplete(E2E_SESSION.userId);
   applyE2EReduceMotion();
+  // Silence the dev-client LogBox: its toasts (e.g. an expo-notifications
+  // entitlement warning) float over bottom-of-screen UI and pollute the
+  // visual-review screenshot evidence. Dead in release (isE2EMode() is false).
+  LogBox.ignoreAllLogs(true);
 }

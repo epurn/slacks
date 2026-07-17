@@ -12,6 +12,7 @@
 // Importing the module under test registers the presets as a side effect.
 import {
   CAPTURE_BARCODE_GRANTED_PRESET,
+  CAPTURE_CONFIRM_PARSED_COMMITTED,
   CAPTURE_CONFIRM_PARSED_EVENT,
   CAPTURE_CONFIRM_PARSED_PRESET,
   CAPTURE_CONFIRM_PARSED_PROPOSAL,
@@ -23,7 +24,12 @@ import { __deactivateVisualReview } from "@/e2e/visualReview/session";
 import { createE2EMockFetch } from "@/e2e/launchMode";
 import { E2E_SESSION } from "@/e2e/fixtures";
 import { toApiSession } from "@/state/session";
-import { getLabelProposal, LabelProposalApiError } from "@/api/labelProposal";
+import { getDailySummary } from "@/api/dailySummary";
+import {
+  confirmLabelProposal,
+  getLabelProposal,
+  LabelProposalApiError,
+} from "@/api/labelProposal";
 
 const apiSession = toApiSession(E2E_SESSION);
 
@@ -77,5 +83,43 @@ describe("capture.confirm_parsed seeds the real label-proposal read", () => {
     await expect(
       getLabelProposal(apiSession, "some-other-event-id", mockFetch),
     ).rejects.toBeInstanceOf(LabelProposalApiError);
+  });
+});
+
+describe("capture.confirm_parsed proves confirm → counted through the seam (FTY-381)", () => {
+  it("returns the resolved committed item from the confirm POST", async () => {
+    activateVisualReviewPreset(CAPTURE_CONFIRM_PARSED_PRESET, null);
+    const mockFetch = createE2EMockFetch();
+    await expect(
+      confirmLabelProposal(
+        apiSession,
+        CAPTURE_CONFIRM_PARSED_EVENT.id,
+        {},
+        mockFetch,
+      ),
+    ).resolves.toEqual(CAPTURE_CONFIRM_PARSED_COMMITTED);
+    expect(CAPTURE_CONFIRM_PARSED_COMMITTED.status).toBe("resolved");
+  });
+
+  it("flips the daily summary from uncounted to counted once the confirm POST lands", async () => {
+    activateVisualReviewPreset(CAPTURE_CONFIRM_PARSED_PRESET, null);
+    const mockFetch = createE2EMockFetch();
+
+    // Reading the proposal (the sheet open) resets the seam to the uncounted day.
+    await getLabelProposal(apiSession, CAPTURE_CONFIRM_PARSED_EVENT.id, mockFetch);
+    const before = await getDailySummary(apiSession, undefined, mockFetch);
+    expect(before.intake.calories).toBe(0);
+    expect(before.has_intake).toBe(false);
+
+    // Confirming ("Looks right") commits the parse; the hero now counts it.
+    await confirmLabelProposal(
+      apiSession,
+      CAPTURE_CONFIRM_PARSED_EVENT.id,
+      {},
+      mockFetch,
+    );
+    const after = await getDailySummary(apiSession, undefined, mockFetch);
+    expect(after.intake.calories).toBe(190);
+    expect(after.has_intake).toBe(true);
   });
 });
