@@ -28,10 +28,21 @@
  * host passes it to the label-upload endpoint, which persists the raw image as a
  * `log_attachment`; when off, the backend discards it after extraction.
  *
- * Security: the captured image is not retained on-device beyond this flow — the
- * URI is handed only to the caller-provided `onSubmit`. Errors carry only HTTP
- * status — never image bytes, URIs, or extracted content. Camera permission is
- * handled by CameraCapture (FTY-063), reused without changes.
+ * Photo-library fallback (FTY-381): the live camera is unavailable on the iOS
+ * simulator (no hardware camera) and `takePictureAsync` yields a blank/failing
+ * frame there, so the camera phase also offers a first-party "Choose from
+ * Library" pick (`expo-image-picker`). This is a genuine user path — a label
+ * photo already in the library — and the honest degrade when live capture can't
+ * produce a frame; it feeds the exact same `onSubmit` handler and `save`
+ * semantics. The picked asset is ephemeral, treated identically to a capture:
+ * its URI is handed only to `onSubmit` and never persisted or logged here.
+ *
+ * Security: the captured/picked image is not retained on-device beyond this flow
+ * — the URI is handed only to the caller-provided `onSubmit`. Errors carry only
+ * HTTP status — never image bytes, URIs, or extracted content. Camera permission
+ * is handled by CameraCapture (FTY-063), reused without changes; the library
+ * pick uses `launchImageLibraryAsync`, which needs no photo-library permission
+ * (iOS presents the out-of-process picker), so no extra permission is requested.
  */
 
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -45,6 +56,7 @@ import {
   View,
 } from "react-native";
 import { CameraView } from "expo-camera";
+import * as ImagePicker from "expo-image-picker";
 
 import {
   LabelUploadApiError,
@@ -100,6 +112,12 @@ export interface LabelCaptureScreenProps {
    * the captured photo URI.
    */
   takePhoto?: () => Promise<CapturedPhoto>;
+  /**
+   * Injectable photo-library pick for tests. Defaults to
+   * `expo-image-picker`'s `launchImageLibraryAsync`. Resolves to the picked
+   * photo, or `null` when the user cancels the picker.
+   */
+  pickPhoto?: () => Promise<CapturedPhoto | null>;
   /** Injectable for tests; forwarded to CameraCapture. */
   permissionsHook?: CameraCaptureProps["permissionsHook"];
 }
@@ -121,6 +139,7 @@ export function LabelCaptureScreen({
   onSubmit,
   onClose,
   takePhoto,
+  pickPhoto,
   permissionsHook,
 }: LabelCaptureScreenProps) {
   const { colors } = useTheme();
@@ -140,7 +159,20 @@ export function LabelCaptureScreen({
     return { uri: result.uri };
   }, []);
 
+  const defaultPickPhoto = useCallback(async (): Promise<CapturedPhoto | null> => {
+    // `launchImageLibraryAsync` uses the OS out-of-process picker on iOS, which
+    // needs no photo-library permission and returns a single image asset.
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: "images",
+      quality: 0.8,
+      selectionLimit: 1,
+    });
+    if (result.canceled || result.assets.length === 0) return null;
+    return { uri: result.assets[0].uri };
+  }, []);
+
   const doTakePhoto = takePhoto ?? defaultTakePhoto;
+  const doPickPhoto = pickPhoto ?? defaultPickPhoto;
 
   // The flash control only exists in the camera/error phases, so gate the torch
   // to those phases: once the user leaves (preview/uploading), the torch turns
@@ -158,6 +190,20 @@ export function LabelCaptureScreen({
       setPhase("error");
     }
   }, [doTakePhoto]);
+
+  const handlePickFromLibrary = useCallback(async () => {
+    try {
+      const picked = await doPickPhoto();
+      if (!picked) return; // user canceled the picker — stay in the camera phase
+      setUploadError(null);
+      setPhoto(picked);
+      setPhase("preview");
+    } catch {
+      // Picker failed to open/read — surface an actionable, content-free error.
+      setUploadError("Couldn't open your photo library. Please try again.");
+      setPhase("error");
+    }
+  }, [doPickPhoto]);
 
   const handleRetake = useCallback(() => {
     setPhoto(null);
@@ -215,6 +261,7 @@ export function LabelCaptureScreen({
             {(phase === "camera" || phase === "error") && (
               <ShutterControls
                 onShutter={() => void handleShutter()}
+                onPickFromLibrary={() => void handlePickFromLibrary()}
                 error={phase === "error" ? uploadError : null}
                 colors={colors}
               />
@@ -294,10 +341,12 @@ function FlashToggle({
 
 function ShutterControls({
   onShutter,
+  onPickFromLibrary,
   error,
   colors,
 }: {
   onShutter: () => void;
+  onPickFromLibrary: () => void;
   error: string | null;
   colors: ColorPalette;
 }) {
@@ -321,6 +370,19 @@ function ShutterControls({
         style={styles.shutterButton}
       >
         <View style={styles.shutterInner} />
+      </Pressable>
+      {/* Photo-library fallback (FTY-381): the honest degrade when the live
+          camera can't produce a frame (e.g. the camera-less iOS simulator) and a
+          genuine path for a label photo already in the library. */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Choose from Library"
+        accessibilityHint="Pick a nutrition-label photo from your library instead of the camera"
+        onPress={onPickFromLibrary}
+        style={styles.libraryButton}
+      >
+        <AppIcon name="photo.on.rectangle" size={18} color="#FFFFFF" />
+        <Text style={styles.libraryButtonLabel}>Choose from Library</Text>
       </Pressable>
     </View>
   );
@@ -468,6 +530,24 @@ function makeStyles(colors: ColorPalette) {
       backgroundColor: "#FFFFFF",
       borderWidth: 2,
       borderColor: "rgba(255,255,255,0.6)",
+    },
+    libraryButton: {
+      // Secondary "Choose from Library" control sitting under the shutter over
+      // the live camera feed — fixed translucent-white chrome (the camera feed
+      // is not a themed surface), matching the other camera-overlay controls.
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingHorizontal: 18,
+      paddingVertical: 10,
+      borderRadius: 20,
+      backgroundColor: "rgba(0,0,0,0.55)",
+      minHeight: 44,
+    },
+    libraryButtonLabel: {
+      color: "#FFFFFF",
+      fontSize: typeScale.callout,
+      fontWeight: "600",
     },
     previewControls: {
       width: "100%",

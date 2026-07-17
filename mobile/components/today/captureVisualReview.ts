@@ -33,6 +33,7 @@
  * outside the `isE2EMode()`-gated deep-link route.
  */
 
+import type { DailySummaryDTO } from "@/api/dailySummary";
 import type { DerivedFoodItemDTO } from "@/api/derivedItems";
 import type { LogEventDTO } from "@/api/logEvents";
 import { E2E_SESSION } from "@/e2e/fixtures";
@@ -89,6 +90,53 @@ export const CAPTURE_CONFIRM_PARSED_PROPOSAL: DerivedFoodItemDTO = {
   source: { source_type: "user_label", label: "Label scan", ref: "user_label" },
 };
 
+/**
+ * The committed, now-counted item the confirm POST returns (FTY-196): the same
+ * synthetic parse flipped `proposed → resolved` so it counts. Fabricated for
+ * testing only; carries no real nutrition data. Used to prove the confirm →
+ * counted-on-Today acknowledgement through the injectable proposal seam when the
+ * dogfood backend has no vision-capable provider (FTY-381) — no live upload, no
+ * real proposal ever injected into a running backend.
+ */
+export const CAPTURE_CONFIRM_PARSED_COMMITTED: DerivedFoodItemDTO = {
+  ...CAPTURE_CONFIRM_PARSED_PROPOSAL,
+  status: "resolved",
+  is_edited: false,
+};
+
+/** Zero-intake day behind the sheet before the parse is confirmed (hermetic). */
+const CAPTURE_CONFIRM_PARSED_SUMMARY_UNCOUNTED: DailySummaryDTO = {
+  date: "2026-01-01",
+  intake: { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
+  has_intake: false,
+  uncounted_entries: 1,
+  target: {
+    calories: { effective: 2000, derived: 2000, source: "derived" },
+    protein_g: { effective: 150, derived: 150, source: "derived" },
+    carbs_g: { effective: 200, derived: 200, source: "derived" },
+    fat_g: { effective: 65, derived: 65, source: "derived" },
+  },
+  exercise: { active_calories: 0 },
+};
+
+/** The same day AFTER the confirm — the parse now counts toward the hero/totals. */
+const CAPTURE_CONFIRM_PARSED_SUMMARY_COUNTED: DailySummaryDTO = {
+  ...CAPTURE_CONFIRM_PARSED_SUMMARY_UNCOUNTED,
+  intake: { calories: 190, protein_g: 4, carbs_g: 29, fat_g: 7 },
+  has_intake: true,
+  uncounted_entries: 0,
+};
+
+/**
+ * Whether the confirm POST has been received in this activation. The
+ * daily-summary fixture reads it so Today's hero jumps from the uncounted day to
+ * the counted one the moment the confirm commits — exactly what a real confirm
+ * does (refetch the summary, FTY-196). Reset on each proposal read (the sheet
+ * open) so re-activating the preset starts uncounted again. Module state, inert
+ * outside `isE2EMode()` (nothing reads it there — the preset never activates).
+ */
+let confirmParsedCommitted = false;
+
 /** Match the label-proposal GET for the synthetic confirm-parsed event. */
 function isConfirmParsedProposalRead(
   ctx: VisualReviewFetchContext,
@@ -97,6 +145,16 @@ function isConfirmParsedProposalRead(
     ctx.method === "GET" &&
     ctx.pathEnd.endsWith(
       `/log-events/${CAPTURE_CONFIRM_PARSED_EVENT.id}/label-proposal`,
+    )
+  );
+}
+
+/** Match the confirm POST for the synthetic confirm-parsed event (FTY-196). */
+function isConfirmParsedConfirmPost(ctx: VisualReviewFetchContext): boolean {
+  return (
+    ctx.method === "POST" &&
+    ctx.pathEnd.endsWith(
+      `/log-events/${CAPTURE_CONFIRM_PARSED_EVENT.id}/label-proposal/confirm`,
     )
   );
 }
@@ -118,9 +176,47 @@ registerVisualReviewPreset({
   route: "/",
   settledPath: "/",
   responses: [
+    // The proposal read (sheet open): return the uncounted parse and reset the
+    // committed flag so a re-activation always starts from the uncounted day.
     {
       match: isConfirmParsedProposalRead,
-      body: { proposal: CAPTURE_CONFIRM_PARSED_PROPOSAL },
+      body: () => {
+        confirmParsedCommitted = false;
+        return { proposal: CAPTURE_CONFIRM_PARSED_PROPOSAL };
+      },
+    },
+    // The confirm POST ("Looks right"): commit the parse and return the resolved
+    // item useLabelProposal swaps into the timeline as a counted row.
+    {
+      match: isConfirmParsedConfirmPost,
+      body: () => {
+        confirmParsedCommitted = true;
+        return CAPTURE_CONFIRM_PARSED_COMMITTED;
+      },
+    },
+    // The event feed behind the sheet: the single completed label event, so the
+    // seam-injected row is never wiped by the initial load and persists as a
+    // counted row after confirm. Kept a `completed` event so Today never polls
+    // it away (polling is gated on pending work).
+    {
+      match: (ctx) =>
+        ctx.method === "GET" && ctx.pathEnd.endsWith("/log-events/by-date"),
+      body: [] as unknown[],
+    },
+    {
+      match: (ctx) =>
+        ctx.method === "GET" && ctx.pathEnd.endsWith("/log-events"),
+      body: [CAPTURE_CONFIRM_PARSED_EVENT],
+    },
+    // The hero/totals: uncounted before confirm, counted after — a pure function
+    // of whether the confirm POST has landed this activation.
+    {
+      match: (ctx) =>
+        ctx.method === "GET" && ctx.pathEnd.endsWith("/daily-summary"),
+      body: () =>
+        confirmParsedCommitted
+          ? CAPTURE_CONFIRM_PARSED_SUMMARY_COUNTED
+          : CAPTURE_CONFIRM_PARSED_SUMMARY_UNCOUNTED,
     },
   ],
 });
