@@ -82,7 +82,7 @@ matter what confidence the model reported. A single implausible candidate
 routes the whole event to `needs_clarification` with a targeted question. This
 catches parses no verbalized-confidence score can be trusted to catch, because
 it does not depend on the model self-assessing at all. See
-`docs/contracts/parse-candidates.md` ("Deterministic plausibility gate") for
+`docs/contracts/clarify-gates.md` ("Deterministic plausibility gate") for
 the exact bounds and rationale.
 
 ### Cross-cutting — estimate-first prompting (shipped, FTY-155 + FTY-167)

@@ -84,7 +84,7 @@ string fields length-bounded, and a closed `disposition` vocabulary.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `disposition` | enum | `extracted` \| `unreadable` \| `not_a_label`. |
-| `confidence` | float [0,1] | Extraction confidence; gated by the shared FTY-159 clarify-policy mechanism (`app/estimator/clarify_policy.py`, `LABEL_CLARIFY_POLICY`). The label operating point (0.5) is a **documented tunable**, not data-derived — no label-image eval set exists yet; a dedicated label-image eval slice is the recorded follow-up (see `parse-candidates.md`, "Calibrated clarify decision"). |
+| `confidence` | float [0,1] | Extraction confidence; gated by the shared FTY-159 clarify-policy mechanism (`app/estimator/clarify_policy.py`, `LABEL_CLARIFY_POLICY`). The label operating point (0.5) is a **documented tunable**, not data-derived — no label-image eval set exists yet; a dedicated label-image eval slice is the recorded follow-up (see `clarify-gates.md`, "Calibrated clarify decision"). |
 | `facts` | `PanelFacts \| null` | Required when `extracted`; ignored otherwise. |
 | `reason` | string? | Short sanitized label for `not_a_label`; never echoed image text. |
 
