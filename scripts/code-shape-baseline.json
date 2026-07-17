@@ -5,6 +5,12 @@
     "test": 1000
   },
   "large_files": {
+    "backend/app/estimator/official_step.py": {
+      "kind": "source",
+      "lane": "estimator",
+      "lines": 809,
+      "reason": "+63 in FTY-371 wiring the soft-degradation fall-forward into the pending-candidate loop: once the run crosses the soft budget the step switches remaining interpreted candidates to the rough degrade producer (primary model-prior mode with hard-ceiling headroom, else the provider-free deterministic prior) so a slow multi-component resolution lands completed/partially_resolved inside the hard ceiling instead of breaching it. The genuine cleanup (decomposing this 5-tier orchestrator into per-tier modules) is a broader refactor filed as a suggest_refactor planner note; this story keeps the narrowest wiring."
+    },
     "backend/tests/test_daily_summary_api.py": {
       "kind": "test",
       "lane": "backend",

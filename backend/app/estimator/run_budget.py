@@ -58,6 +58,23 @@ DEFAULT_MAX_PROVIDER_CALLS = 128
 #: here; the ~15s margin below 90s absorbs a typical in-flight call plus the commit.
 DEFAULT_RUN_DEADLINE_SECONDS = 75.0
 
+#: The **soft** degradation point below the FTY-363 hard ceiling (FTY-371). A slow
+#: multi-component resolution that crosses either soft bound stops resolving *exactly*
+#: and falls forward to rough, budget-cheap degraded estimates for its remaining
+#: interpreted candidates (the estimator's degrade producer, ``degrade.py``), landing a
+#: ``completed`` / ``partially_resolved`` outcome **inside** the hard ceiling instead of
+#: breaching it and failing — a regression guard against the live
+#: ``run_wall_clock_deadline_exceeded`` casualty that rotates nondeterministically across
+#: dissimilar branded/homemade fixtures on a resource-constrained host (raising the hard
+#: ceiling only moves that red; graceful degradation is the fix). The soft bounds sit far
+#: enough below the hard ones to leave headroom for the degrade producer's own bounded
+#: per-candidate model-prior calls before the hard ceiling; when even that headroom is
+#: gone the producer degrades **without** a provider call. :meth:`soft_budget_reason`
+#: reports a crossing *without* raising — unlike the hard ceiling it is not a failure,
+#: just a signal to switch strategy — so the run stays alive.
+DEFAULT_SOFT_RUN_DEADLINE_SECONDS = 45.0
+DEFAULT_SOFT_MAX_PROVIDER_CALLS = 96
+
 #: Content-free, sanitized terminal-failure reasons persisted on the run's ``error``.
 #: Fixed labels — never raw prompts, provider output, user text, or credentials.
 PROVIDER_CALL_BUDGET_EXCEEDED = "run_provider_call_budget_exceeded"
@@ -112,6 +129,8 @@ class BudgetedProvider(Provider):
         *,
         max_provider_calls: int = DEFAULT_MAX_PROVIDER_CALLS,
         deadline_seconds: float = DEFAULT_RUN_DEADLINE_SECONDS,
+        soft_max_provider_calls: int = DEFAULT_SOFT_MAX_PROVIDER_CALLS,
+        soft_deadline_seconds: float = DEFAULT_SOFT_RUN_DEADLINE_SECONDS,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._wrapped = wrapped
@@ -119,6 +138,8 @@ class BudgetedProvider(Provider):
         self.model = wrapped.model
         self._max_provider_calls = max_provider_calls
         self._deadline_seconds = deadline_seconds
+        self._soft_max_provider_calls = soft_max_provider_calls
+        self._soft_deadline_seconds = soft_deadline_seconds
         # Injectable monotonic clock seam (mirrors the injectable-sleep pattern): tests
         # pass a fake that advances past the deadline without any real wall-clock wait.
         self._clock = clock
@@ -131,6 +152,38 @@ class BudgetedProvider(Provider):
         """How many provider calls this run has forwarded (test/introspection only)."""
 
         return self._calls_made
+
+    def soft_budget_reason(self) -> str | None:
+        """The soft-budget crossing label (FTY-371), or ``None`` when there is headroom.
+
+        Returns the same content-free breach label the hard ceiling would use — but
+        **without raising**: the soft point is not a failure, it is the signal for a
+        slow multi-component resolution to stop resolving exactly and fall forward to the
+        degrade producer for its remaining candidates. The deadline is checked before the
+        call count so an over-time run degrades even with call budget to spare, matching
+        :meth:`_charge_or_fail`.
+        """
+
+        with self._lock:
+            if self._clock() - self._started_at > self._soft_deadline_seconds:
+                return WALL_CLOCK_DEADLINE_EXCEEDED
+            if self._calls_made >= self._soft_max_provider_calls:
+                return PROVIDER_CALL_BUDGET_EXCEEDED
+            return None
+
+    def can_make_provider_call(self) -> bool:
+        """Whether one more provider call would still clear the **hard** ceiling.
+
+        The degrade producer's headroom check (FTY-371): ``True`` means its bounded
+        primary (model-prior) mode may spend one more call before the hard ceiling;
+        ``False`` means it must degrade **without** a provider call. Read-only — it
+        reserves nothing; :meth:`_charge_or_fail` remains the single mutating chokepoint.
+        """
+
+        with self._lock:
+            if self._clock() - self._started_at > self._deadline_seconds:
+                return False
+            return self._calls_made < self._max_provider_calls
 
     def structured_completion(
         self,
