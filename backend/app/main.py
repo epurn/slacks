@@ -87,11 +87,12 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
         openapi_url=None if is_production else "/openapi.json",
     )
     app.add_middleware(SecurityHeadersMiddleware)
-    # The exact-evidence apply and barcode-propose endpoints carry untrusted, sensitive
-    # input (a signed proposal_ref, a barcode, or client-injected facts): their
-    # request-validation failures must render a content-free 422 instead of FastAPI's
-    # default body, which would echo the rejected input back to the caller
-    # (FTY-307/FTY-308). The handler is a no-op for every other route.
+    # The exact-evidence apply/propose endpoints and the derived-item rename carry
+    # untrusted, sensitive input (a signed proposal_ref, a barcode, client-injected
+    # facts, or a user-authored item name): their request-validation failures must
+    # render a content-free 422 instead of FastAPI's default body, which would echo
+    # the rejected input back to the caller (FTY-307/FTY-308/FTY-377). The handler
+    # is a no-op for every other route.
     # Starlette types the handler arg as (Request, Exception); the handler narrows to
     # the RequestValidationError it is registered for, matching FastAPI's own default
     # request-validation handler signature.

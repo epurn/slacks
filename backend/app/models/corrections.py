@@ -15,9 +15,15 @@ application edit, so it is intentionally outside the guard.
 Each row carries ``user_id`` (object-level ownership, ``ON DELETE CASCADE``) and a
 single typed reference to the corrected item: exactly one of
 ``derived_food_item_id`` / ``derived_exercise_item_id`` is set, with ``item_type``
-as the discriminator. ``old_value`` / ``new_value`` are stored in the derived
-item's canonical units (kcal, grams, or servings); the sensitive personal values
-are data only and are never written to logs.
+as the discriminator.
+
+The audit is **value-type-polymorphic** (FTY-377): a numeric correction stores
+``old_value`` / ``new_value`` in the derived item's canonical units (kcal, grams,
+or servings); a text correction — a ``name_edit`` display-name change — stores the
+prior/new name in ``old_value_text`` / ``new_value_text`` with ``new_value``
+``NULL``. A check constraint enforces exactly one of ``new_value`` /
+``new_value_text`` per row, so each kind stays well-formed. The sensitive personal
+values (numbers and names alike) are data only and are never written to logs.
 """
 
 from __future__ import annotations
@@ -38,6 +44,11 @@ from sqlalchemy.orm import Mapped, Mapper, mapped_column
 from app.db import Base, UtcDateTime
 from app.enums import CandidateType, CorrectionSource
 from app.models.derived import DerivedExerciseItem, DerivedFoodItem
+
+#: Length cap for the text-valued correction columns. Matches the derived-item
+#: ``name`` column cap (``String(200)``, :class:`app.models.derived._DerivedItem`)
+#: — a ``name_edit`` row only ever stores an item name, so it needs no more room.
+CORRECTION_TEXT_MAX_LENGTH = 200
 
 
 def _utcnow() -> datetime:
@@ -66,6 +77,13 @@ class Correction(Base):
             "(derived_food_item_id IS NOT NULL) <> (derived_exercise_item_id IS NOT NULL)",
             name="ck_corrections_one_item_reference",
         ),
+        # Exactly one value kind is set (FTY-377): a numeric correction carries
+        # ``new_value``, a text correction (``name_edit``) carries ``new_value_text``
+        # — never both, never neither.
+        CheckConstraint(
+            "(new_value IS NOT NULL) <> (new_value_text IS NOT NULL)",
+            name="ck_corrections_one_value_kind",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -90,10 +108,23 @@ class Correction(Base):
     #: ``active_calories``). Stored as data; validated against the editable set at
     #: the endpoint before a row is ever written.
     field: Mapped[str] = mapped_column(String(64), nullable=False)
-    #: Prior value in canonical units; ``None`` only when the field had no value yet.
+    #: Prior value in canonical units; ``None`` when the field had no value yet or
+    #: the row is a text correction.
     old_value: Mapped[float | None] = mapped_column(Float, nullable=True)
-    #: New value in canonical units.
-    new_value: Mapped[float] = mapped_column(Float, nullable=False)
+    #: New value in canonical units; ``None`` iff the row is a text correction
+    #: (``new_value_text`` set — the check constraint enforces exactly one).
+    new_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: Prior text value for a ``name_edit`` row (the item's previous display name);
+    #: ``None`` for numeric corrections.
+    old_value_text: Mapped[str | None] = mapped_column(
+        String(CORRECTION_TEXT_MAX_LENGTH), nullable=True
+    )
+    #: New text value for a ``name_edit`` row (the user-authored display name);
+    #: ``None`` for numeric corrections. Untrusted user text: schema-validated,
+    #: stored as data, never interpreted or logged.
+    new_value_text: Mapped[str | None] = mapped_column(
+        String(CORRECTION_TEXT_MAX_LENGTH), nullable=True
+    )
     #: Origin of the change (:class:`~app.enums.CorrectionSource`); v1 is ``user_edit``.
     source: Mapped[str] = mapped_column(
         String(32), nullable=False, default=CorrectionSource.USER_EDIT
