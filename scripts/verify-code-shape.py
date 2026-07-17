@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """Guard first-party code shape and backend-estimator boundaries.
 
-The guard is dependency-free and intentionally baseline-aware: existing large
-files and known boundary crossings are pinned in ``code-shape-baseline.json`` so
-they can shrink without blocking unrelated work, but new or larger exceptions
-fail the governance gate.
+The guard is dependency-free. It enforces two contracts with different weights:
+
+* **LOC thresholds are advisory (warn-only).** Every first-party file over its
+  kind's threshold is reported as a stable, greppable ``loc-advisory:`` line so
+  authors and reviewers can see it (and file a refactor story), but it never
+  fails the gate. Oversized files are addressed through dedicated refactor
+  stories, not by blocking unrelated PRs.
+* **Backend/estimator boundary imports are blocking.** A crossing that is not
+  in the ``boundary_imports`` allowlist of ``code-shape-baseline.json`` fails
+  the governance gate.
 """
 
 from __future__ import annotations
@@ -99,8 +105,6 @@ def load_baseline(path: Path) -> dict[str, Any]:
         fail("code shape baseline must have version 1")
     if not isinstance(baseline.get("loc_thresholds"), dict):
         fail("code shape baseline must define loc_thresholds")
-    if not isinstance(baseline.get("large_files"), dict):
-        fail("code shape baseline must define large_files")
     if not isinstance(baseline.get("boundary_imports"), list):
         fail("code shape baseline must define boundary_imports")
     return baseline
@@ -297,34 +301,28 @@ def classify_boundary_import(path: str, module: str, line: int) -> BoundaryImpor
     return None
 
 
-def validate_large_files(source_files: list[SourceFile], baseline: dict[str, Any]) -> list[str]:
+def loc_advisories(source_files: list[SourceFile], baseline: dict[str, Any]) -> list[str]:
+    """Advisory (warn-only) lines for first-party files over their LOC threshold.
+
+    LOC is never blocking: over-threshold files are surfaced as one stable,
+    greppable ``loc-advisory:`` line each so authors/reviewers can file refactor
+    stories, but they do not contribute to the violations list.
+    """
     thresholds = baseline["loc_thresholds"]
     source_threshold = int(thresholds.get("source", 0))
     test_threshold = int(thresholds.get("test", 0))
-    large_baseline: dict[str, Any] = baseline["large_files"]
-    violations: list[str] = []
+    advisories: list[str] = []
 
     for source_file in source_files:
         threshold = test_threshold if source_file.kind == "test" else source_threshold
         if source_file.lines <= threshold:
             continue
+        advisories.append(
+            f"loc-advisory: {source_file.path} — {source_file.lines} LOC "
+            f"exceeds {source_file.kind} threshold {threshold}"
+        )
 
-        entry = large_baseline.get(source_file.path)
-        if entry is None:
-            violations.append(
-                f"{source_file.path}: {source_file.lines} LOC exceeds "
-                f"{source_file.kind} threshold {threshold} and is not baselined"
-            )
-            continue
-
-        baseline_lines = int(entry.get("lines", 0))
-        if source_file.lines > baseline_lines:
-            violations.append(
-                f"{source_file.path}: {source_file.lines} LOC exceeds pinned "
-                f"baseline {baseline_lines}; shrink it or update the reviewed baseline"
-            )
-
-    return violations
+    return advisories
 
 
 def validate_boundary_imports(
@@ -344,25 +342,6 @@ def validate_boundary_imports(
     return violations
 
 
-def stale_large_baseline(source_files: list[SourceFile], baseline: dict[str, Any]) -> list[str]:
-    by_path = {item.path: item for item in source_files}
-    stale: list[str] = []
-    for path, entry in sorted(baseline["large_files"].items()):
-        source_file = by_path.get(path)
-        if source_file is None:
-            stale.append(f"{path}: no longer present")
-            continue
-        threshold = baseline["loc_thresholds"][source_file.kind]
-        if source_file.lines <= threshold:
-            stale.append(
-                f"{path}: now {source_file.lines} LOC, "
-                f"below {source_file.kind} threshold {threshold}"
-            )
-        elif source_file.lines < int(entry["lines"]):
-            stale.append(f"{path}: shrank from {entry['lines']} to {source_file.lines} LOC")
-    return stale
-
-
 def stale_boundary_baseline(findings: list[BoundaryImport], baseline: dict[str, Any]) -> list[str]:
     active = {finding.key for finding in findings}
     stale: list[str] = []
@@ -376,7 +355,7 @@ def stale_boundary_baseline(findings: list[BoundaryImport], baseline: dict[str, 
 def print_report(
     source_files: list[SourceFile],
     findings: list[BoundaryImport],
-    stale_large: list[str],
+    advisories: list[str],
     stale_boundaries: list[str],
 ) -> None:
     print("code shape report")
@@ -385,6 +364,13 @@ def print_report(
     for item in largest:
         print(f"  {item.lines:4d} {item.kind:6s} {item.lane:10s} {item.path}")
 
+    print("LOC advisories (warn-only, non-blocking):")
+    if advisories:
+        for advisory in advisories:
+            print(advisory)
+    else:
+        print("  none")
+
     print("boundary exceptions:")
     if findings:
         for finding in findings:
@@ -392,9 +378,9 @@ def print_report(
     else:
         print("  none")
 
-    if stale_large or stale_boundaries:
+    if stale_boundaries:
         print("baseline shrink opportunities:")
-        for item in stale_large + stale_boundaries:
+        for item in stale_boundaries:
             print(f"  {item}")
 
 
@@ -402,14 +388,13 @@ def validate(root: Path, baseline_path: Path, *, report: bool = True) -> list[st
     baseline = load_baseline(baseline_path)
     source_files = collect_source_files(root)
     boundaries = collect_boundary_imports(root)
-    violations = validate_large_files(source_files, baseline)
-    violations.extend(validate_boundary_imports(boundaries, baseline))
+    violations = validate_boundary_imports(boundaries, baseline)
 
     if report:
         print_report(
             source_files,
             boundaries,
-            stale_large_baseline(source_files, baseline),
+            loc_advisories(source_files, baseline),
             stale_boundary_baseline(boundaries, baseline),
         )
 
@@ -421,21 +406,10 @@ def write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def fixture_baseline(
-    root: Path, large_files: dict[str, int], boundaries: list[dict[str, str]]
-) -> Path:
+def fixture_baseline(root: Path, boundaries: list[dict[str, str]]) -> Path:
     baseline = {
         "version": 1,
         "loc_thresholds": {"source": 3, "test": 3},
-        "large_files": {
-            path: {
-                "kind": classify_kind(path),
-                "lane": classify_lane(path),
-                "lines": lines,
-                "reason": "fixture baseline",
-            }
-            for path, lines in large_files.items()
-        },
         "boundary_imports": [
             {
                 "direction": item["direction"],
@@ -464,37 +438,26 @@ def run_self_test() -> None:
             "path": "backend/app/estimator/parse.py",
             "module": "app.services",
         }
-        baseline = fixture_baseline(
-            root,
-            {"mobile/state/Huge.ts": 5},
-            [boundary],
-        )
+
+        # LOC is advisory: an over-threshold file with no baseline entry must
+        # NOT fail the gate (no violations) while the boundary import is allowed.
+        baseline = fixture_baseline(root, [boundary])
         if validate(root, baseline, report=False):
-            fail("self-test expected the fully baselined fixture to pass")
+            fail("self-test expected an over-threshold file to be advisory (exit zero)")
 
-        baseline_without_large = fixture_baseline(root, {}, [boundary])
-        violations = validate(root, baseline_without_large, report=False)
-        if not any("mobile/state/Huge.ts" in item for item in violations):
-            fail("self-test expected an unbaselined large source file violation")
+        # ...and it must surface as a stable, greppable loc-advisory: line.
+        advisories = loc_advisories(collect_source_files(root), load_baseline(baseline))
+        expected = "loc-advisory: mobile/state/Huge.ts — 5 LOC exceeds source threshold 3"
+        if expected not in advisories:
+            fail(f"self-test expected advisory line {expected!r}, got {advisories!r}")
+        if len([a for a in advisories if a.startswith("loc-advisory: mobile/state/Huge.ts")]) != 1:
+            fail("self-test expected exactly one advisory line per over-threshold file")
 
-        baseline_without_boundary = fixture_baseline(
-            root,
-            {"mobile/state/Huge.ts": 5},
-            [],
-        )
+        # Boundary imports remain blocking: an unbaselined crossing fails.
+        baseline_without_boundary = fixture_baseline(root, [])
         violations = validate(root, baseline_without_boundary, report=False)
         if not any("estimator_to_backend" in item for item in violations):
             fail("self-test expected an unbaselined estimator-to-service import violation")
-
-        write(root / "mobile/state/Huge.ts", "\n".join(["export const x = 1;"] * 6) + "\n")
-        baseline_with_old_size = fixture_baseline(
-            root,
-            {"mobile/state/Huge.ts": 5},
-            [boundary],
-        )
-        violations = validate(root, baseline_with_old_size, report=False)
-        if not any("pinned baseline 5" in item for item in violations):
-            fail("self-test expected a baselined file growth violation")
 
     print("code shape self-tests passed")
 
