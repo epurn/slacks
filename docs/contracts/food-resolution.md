@@ -39,7 +39,7 @@ estimator / contracts / backend-core / security-privacy lane:
 
 ## Version
 
-22 (FTY-370, contract only): pins the **budget/transience-degraded rough
+23 (FTY-370, contract only): pins the **budget/transience-degraded rough
 estimate** — a candidate a run could not resolve before breaching the FTY-363
 per-run ceiling (`run_wall_clock_deadline_exceeded` /
 `run_provider_call_budget_exceeded`) or exhausting bounded transient retries
@@ -51,7 +51,7 @@ able to run **without further provider budget**. No schema, migration,
 serving-math, or source-hierarchy change; FTY-371/FTY-372 implement. See
 **Budget/transience-degraded rough estimates (FTY-370)**.
 
-21 (FTY-368): composed-dish portions respect stated structure, and a
+22 (FTY-368): composed-dish portions respect stated structure, and a
 **resolved-value plausibility gate** bounds final dish totals. The FTY-254
 common-portion table now declines any **composed/assembled dish** (closed
 vocabulary — sandwich, wrap, burger, taco, …; snack idioms like `cracker
@@ -69,6 +69,24 @@ official/reference/model-prior tiers, and the refit item carries the
 never presented as a cleanly-scaled trusted row. The terminal model-prior tier
 stays ungated — the honest rough last resort, never a terminal failure. No
 schema, DTO, or endpoint change.
+
+21 (FTY-309): implements the **label** half of the exact-evidence upgrade propose
+routing below. `POST .../exact-upgrade/label?save={bool}` validates the raw label
+image bytes (the `label-upload.md` wire shape) as **data** fail-closed — size /
+content-type allowlist / magic number, `413` / `415` **before any model call** —
+then runs the existing schema-validated label extraction (`label-extraction.md`):
+a confident read yields an `exact` `user_label` proposal (through the FTY-307
+signed-`proposal_ref` foundation), an unreadable/not-a-label/unusable read a
+clearly-labelled identity `fallback` through the existing reference-source →
+model-prior tiers (`failure_reason` in the fixed `label_unreadable` / `not_a_label`
+/ `no_usable_facts` set), else a `none` read. Loading and eligibility use the same
+owner-scoped item loader as the barcode route (`not_upgradeable` `422` for an
+already source-backed **or owned exercise** item). `save=true` writes exactly
+**one** user-owned `log_attachments` row on the item's **owning log event**;
+`save=false` and every `none`/provider-outage outcome retain nothing. A
+vision-provider **error** surfaces a retryable `503`, never a disguised miss, and
+propose never mutates the item — apply (FTY-307) does. No schema, migration, or
+estimator change.
 
 20 (FTY-308): implements the **barcode** half of the exact-evidence upgrade propose
 routing below. `POST .../exact-upgrade/barcode` resolves the typed/scanned barcode
