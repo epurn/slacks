@@ -57,6 +57,19 @@ Adapter — FTY-079 / FTY-164**.
 
 ## Version
 
+12 (FTY-386): narrows the re-match `needs_clarification` residual. When a re-resolve
+target cannot cost a count item's quantity itself (a USDA survey/SR candidate carries no
+`servingSize`), re-resolve now **carries the item's already-resolved `grams`** forward and
+scales the new source's per-100g facts by it, recording the content-free
+`portion_grams_carried` assumption label on the rewritten evidence row; `grams` is
+unchanged and only the density source moves. `needs_clarification` remains **only** for the
+genuine-indeterminate residual — a count item with no usable carried grams (`grams`
+`null`/non-positive). This deliberately supersedes the FTY-093 unconditional
+"cannot-cost → clarify" rule for the carried-grams case (a pre-v1 clean break aligned with
+the estimate-first policy). No wire-shape, DTO, status-vocabulary, or schema change:
+success still returns the updated `DerivedFoodItemDTO`, the residual the same `422`. See
+**Item Re-match — FTY-093**, step 2.
+
 11 (FTY-369): extends the `product_database` tier (`open_food_facts`) to serve
 `named_product` lookups via **Open Food Facts name search**, so a barcode-less
 branded packaged product named in the log resolves against OFF by name instead of
@@ -217,7 +230,8 @@ FTY-093 adds the **item re-match** capability (list alternative source matches +
 re-resolve an item to a chosen source) on top of the existing resolution pipeline,
 without changing the source hierarchy, the lookup-status vocabulary, the fallback
 rule, the normalized-fact schema, the serving math, or the `evidence_sources` record
-shape. It introduces **no** schema migration. See **Item Re-match — FTY-093**.
+shape. It introduces **no** schema migration. See **Item Re-match — FTY-093** (whose
+re-resolve costing order is extended by FTY-386, version 12 above).
 
 FTY-166 adds the **`reference_source`** evidence tier: when official sources miss
 (or do not apply — a detail-rich generic food has no brand page), the estimator
@@ -1167,20 +1181,39 @@ The write operation takes the existing item plus a **chosen candidate reference*
    that does not resolve to a server-cached candidate is **rejected; nothing mutates**
    (the client cannot inject facts, and re-resolve issues **no** fresh network egress).
 2. **Recompute at the current portion.** The item's current `amount` / quantity is kept
-   (the FTY-092 portion is the user's choice); `resolve_grams` runs against the new
-   source's `default_serving_g`, then `scale_facts` produces new `calories` / macros,
-   rounded 0.1 (the FTY-044 serving math, reused unchanged). If the new source cannot
-   cost the current quantity, the operation routes to **`needs_clarification`** rather
-   than fabricate a number (consistent with FTY-044 routing).
+   (the FTY-092 portion is the user's choice) and costed in a fixed order (FTY-386
+   extends the FTY-093 preference):
+   1. **Source costs the quantity itself.** `resolve_grams` runs against the new
+      source's `default_serving_g` (the FTY-044 serving math, reused unchanged) — a
+      measured mass/volume quantity, a quantity-text parse, or a count against a source
+      **with** a serving size resolves here exactly as before.
+   2. **Carry the item's resolved grams (FTY-386).** When step 1 yields no grams **and**
+      the item already carries a positive resolved `grams` (the portion mass its prior
+      resolution estimated — e.g. `1 sandwich ≈ 180 g`), the re-match costs
+      `scale_facts(new_source_per_100g, item.grams)`: only the density source changes,
+      `grams` is unchanged, and the rewritten evidence records the **content-free
+      `portion_grams_carried` assumption label** so the provenance honestly says the
+      portion mass predates the new source. This supersedes the earlier unconditional
+      "cannot-cost → `needs_clarification`" rule for count items against serving-less
+      USDA survey/SR sources (which carry no `servingSize`) — a pre-v1 clean break
+      aligned with the ratified estimate-first policy: never dead-end on a portion the
+      system already resolved.
+   3. **Clarify only as the genuine-indeterminate residual.** When step 1 yields no grams
+      **and** the item has no usable carried grams (`grams` is `null`/non-positive — an
+      unresolved or as-logged prior item), the operation routes to
+      **`needs_clarification`** rather than fabricate a number (consistent with FTY-044
+      routing). Nothing mutates.
 3. **Rewrite provenance to the new source.** The item's `evidence_sources` row is
    updated **in place** (`source_type`, `source_ref`, `content_hash`, `fetched_at`, the
-   immutable per-100g facts snapshot, `product_id` link, `assumptions`). The chosen
-   candidate is always a `Product`, whose density facts are always per-100g, so
-   `basis` is **reset to `per_100g`** and `field_provenance` is **reset to `null`**
-   (a single database source gives every fact field a homogeneous origin) — the
-   rewrite never leaves a stale `as_logged` / `per_serving` basis or a stale per-field
-   origin map over the new per-100g snapshot (FTY-316). The item keeps its `id`,
-   `log_event_id`, name slot, and timeline position.
+   immutable per-100g facts snapshot, `product_id` link, `assumptions`). `assumptions`
+   records the content-free `portion_grams_carried` label on the carried-grams path
+   (step 2.2) and is otherwise **cleared** — a re-match the source could cost itself
+   carries no assumption. The chosen candidate is always a `Product`, whose density
+   facts are always per-100g, so `basis` is **reset to `per_100g`** and
+   `field_provenance` is **reset to `null`** (a single database source gives every fact
+   field a homogeneous origin) — the rewrite never leaves a stale `as_logged` /
+   `per_serving` basis or a stale per-field origin map over the new per-100g snapshot
+   (FTY-316). The item keeps its `id`, `log_event_id`, name slot, and timeline position.
 4. **Re-snapshot `*_estimated` to the newly computed values.** A re-match is a fresh
    source-backed estimate, not a manual override, so the estimated/original snapshot is
    **reset** to the new source's computed values and the item is **not** marked
@@ -1249,7 +1282,7 @@ a client cannot smuggle nutrition values through it.
 | Cross-user / unknown item (either operation) | `404`, fail-closed, no mutation, no existence disclosure. |
 | Re-resolve reference not re-derivable (uncached) | `422` `{ "error": "source_not_resolvable" }`; nothing mutates. |
 | Re-resolve body carries facts / extra keys | `422` (request validation, `extra="forbid"`). |
-| New source cannot cost the current quantity | `422` `{ "error": "needs_clarification", "question": … }`; no fabricated number. |
+| New source cannot cost the current quantity **and** the item carries no usable grams (`grams` `null`/non-positive) | `422` `{ "error": "needs_clarification", "question": … }`; no fabricated number. A count item that **does** carry resolved grams is costed via those carried grams (FTY-386, step 2.2) and succeeds — it never reaches this residual. |
 | Listing with no enabled candidate source | `200` with an empty candidate list. |
 | Listing source fails transiently / answers unusably | `503` `{ "error": "alternatives_unavailable" }`; retryable. **Not** a `200` empty list — an empty list means "no matches", never "the source was down", so a source failure is surfaced honestly rather than silently looking like no alternatives exist. Mirrors the estimator's transient/response routing (`food_step.py`). |
 
@@ -1264,8 +1297,12 @@ excludes energy-less results; re-resolve recompute + provenance rewrite + `*_est
 re-snapshot + not-`user_edited` + no `user_edit` row + the `re_match` audit row that
 clears a pre-existing edit (`is_edited` false after edit-then-rematch, true again after a
 later edit) + determinism; identity / portion preserved; an un-re-derivable reference and
-client-supplied facts rejected with no mutation; needs-clarification when uncostable; and
-cross-user / unknown / unauthenticated fail-closed.
+client-supplied facts rejected with no mutation; a count item re-matched to a
+**serving-less** source costed via its **carried grams** with the `portion_grams_carried`
+assumption label (FTY-386), while a measured mass/volume quantity still costs from its own
+quantity and clears `assumptions`; needs-clarification only as the residual (`grams`
+`null`/non-positive against a serving-less source); and cross-user / unknown /
+unauthenticated fail-closed.
 
 ## Exact Evidence Upgrade — FTY-306
 

@@ -608,12 +608,138 @@ def test_re_resolve_rejects_unre_derivable_reference(
     assert item.calories == pytest.approx(300.0)
 
 
+def test_re_resolve_costs_serving_less_source_via_carried_grams(
+    client: TestClient, db_engine: Engine, session: Session
+) -> None:
+    """FTY-386: a count item re-matched to a serving-less source costs via carried grams.
+
+    A ``1 sandwich`` item whose prior resolution already estimated a 180 g portion is
+    re-aimed at a USDA candidate with **no** ``default_serving_g``. Rather than dead-end
+    on ``needs_clarification``, re-resolve carries the item's own ``grams`` forward and
+    scales the new source's per-100g facts by it: the item completes, ``grams`` is
+    unchanged, provenance is rewritten, ``*_estimated`` re-snapshots, the ``re_match``
+    audit row is appended, and the rewritten evidence carries the content-free
+    carried-grams assumption label.
+    """
+
+    user_id, _auth = register(client, "rematch-carried@example.com")
+    # A count-quantity item (1 "sandwich") resolved to a 180 g portion by its prior source.
+    item_id = seed_food_item(db_engine, user_id, amount=1.0, calories=300.0, grams=180.0)
+    with create_session_factory(db_engine)() as setup:
+        seeded = setup.get(DerivedFoodItem, item_id)
+        assert seeded is not None
+        seeded.unit = "sandwich"
+        seeded.quantity_text = "1 sandwich"
+        setup.commit()
+    seed_evidence(
+        db_engine,
+        user_id,
+        item_id,
+        source_type="trusted_nutrition_database",
+        source_ref="usda_fdc:OLD",
+    )
+    # The chosen candidate: 120 kcal / 6 P / 12 C / 3 F per 100 g, but NO serving size.
+    _add_candidate_product(
+        session, source_ref="usda_fdc:NOSERV", calories_per_100g=120.0, default_serving_g=None
+    )
+
+    source = FakeListSource([])
+    item = _capability(session, source).re_resolve(
+        owner_id=uuid.UUID(user_id),
+        current_user=_user(session, user_id),
+        item_id=item_id,
+        source_ref="usda_fdc:NOSERV",
+    )
+
+    # No network egress: the carried grams are read from the persisted item + cache,
+    # never fetched (re-resolve issues no listing query).
+    assert source.queries == []
+    # Costed via the carried 180 g portion (×1.8 of the per-100g facts); grams unchanged.
+    assert item.grams == pytest.approx(180.0)
+    assert item.calories == pytest.approx(216.0)
+    assert item.protein_g == pytest.approx(10.8)
+    assert item.carbs_g == pytest.approx(21.6)
+    assert item.fat_g == pytest.approx(5.4)
+    # *_estimated re-snapshots to the new computed values (FTY-093 re-resolution rule).
+    assert item.calories_estimated == pytest.approx(216.0)
+    assert item.protein_g_estimated == pytest.approx(10.8)
+    assert item.status == DerivedItemStatus.RESOLVED
+
+    evidence = session.scalars(
+        select(EvidenceSource).where(EvidenceSource.derived_food_item_id == item_id)
+    ).all()
+    assert len(evidence) == 1
+    assert evidence[0].source_ref == "usda_fdc:NOSERV"
+    assert evidence[0].calories_per_100g == pytest.approx(120.0)
+    # Honest provenance: the portion mass predates the new source, and FTY-316 resets hold.
+    # The label is a fixed content-free token — no item name, quantity text, or value.
+    assert evidence[0].assumptions == ["portion_grams_carried"]
+    assert evidence[0].basis == "per_100g"
+    assert evidence[0].field_provenance is None
+
+    # One re_match audit row, no user_edit (unchanged re-resolution semantics).
+    rows = session.scalars(
+        select(Correction).where(Correction.derived_food_item_id == item_id)
+    ).all()
+    assert len(rows) == 1
+    assert rows[0].source == CorrectionSource.RE_MATCH
+
+
+def test_re_resolve_mass_quantity_costs_via_resolve_grams_not_carried(
+    client: TestClient, db_engine: Engine, session: Session
+) -> None:
+    """Regression (FTY-386): a mass-quantity item costs from its own quantity, unchanged.
+
+    A ``200 g`` item is resolvable by ``resolve_grams`` regardless of the chosen source's
+    serving size, so it takes the unchanged first-preference path even against a
+    serving-less source: it costs at 200 g (its stated mass, **not** the carried 999 g),
+    and the rewritten evidence clears ``assumptions`` — the carried-grams fallback never
+    fires for a measured quantity.
+    """
+
+    user_id, _auth = register(client, "rematch-mass@example.com")
+    item_id = seed_food_item(db_engine, user_id, amount=200.0, calories=300.0, grams=999.0)
+    with create_session_factory(db_engine)() as setup:
+        seeded = setup.get(DerivedFoodItem, item_id)
+        assert seeded is not None
+        seeded.unit = "g"
+        seeded.quantity_text = "200 g"
+        setup.commit()
+    _add_candidate_product(
+        session, source_ref="usda_fdc:NOSERV", calories_per_100g=120.0, default_serving_g=None
+    )
+
+    item = _capability(session, FakeListSource([])).re_resolve(
+        owner_id=uuid.UUID(user_id),
+        current_user=_user(session, user_id),
+        item_id=item_id,
+        source_ref="usda_fdc:NOSERV",
+    )
+
+    # Costed from the stated 200 g (×2.0 of per-100g facts), never the carried 999 g.
+    assert item.grams == pytest.approx(200.0)
+    assert item.calories == pytest.approx(240.0)
+    evidence = session.scalars(
+        select(EvidenceSource).where(EvidenceSource.derived_food_item_id == item_id)
+    ).all()
+    assert len(evidence) == 1
+    assert evidence[0].assumptions is None  # measured path clears assumptions as before
+
+
 def test_re_resolve_routes_to_clarification_when_uncostable(
     client: TestClient, db_engine: Engine, session: Session
 ) -> None:
+    """Residual (FTY-386): a count item with **no** carried grams still clarifies.
+
+    When the chosen source cannot cost the quantity **and** the item carries no usable
+    portion mass (``grams`` is ``None`` — an unresolved / as-logged prior item), the
+    genuine-indeterminate residual stays: re-resolve raises ``ReMatchNeedsClarification``
+    deterministically and nothing mutates.
+    """
+
     user_id, _auth = register(client, "rematch-clarify@example.com")
-    # A count quantity (2 servings) with a source that has no serving size cannot cost.
-    item_id = seed_food_item(db_engine, user_id, amount=2.0, calories=300.0)
+    # A count quantity (2 servings) with NO carried grams and a serving-less source.
+    item_id = seed_food_item(db_engine, user_id, amount=2.0, calories=300.0, grams=None)
     _add_candidate_product(
         session, source_ref="usda_fdc:NOSERV", calories_per_100g=120.0, default_serving_g=None
     )
@@ -630,6 +756,7 @@ def test_re_resolve_routes_to_clarification_when_uncostable(
     item = session.get(DerivedFoodItem, item_id)
     assert item is not None
     assert item.calories == pytest.approx(300.0)  # no fabricated number
+    assert item.grams is None  # nothing mutated
 
 
 # ---------------------------------------------------------------------------

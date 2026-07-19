@@ -17,11 +17,15 @@ compatible food*, not a trusted lexical search hit:
   **density-changing form** the user did not state (dehydrated / dried /
   powdered / flour / …), and a row missing an **added ingredient** the user
   stated (``buttered`` toast is not plain toast).
-- :func:`fdc_preference_key` — orders the surviving compatible rows: prefer
-  common/fresh/simple forms (fewest unstated demoted-form tokens such as
+- :func:`fdc_preference_key` — orders the surviving compatible rows: prefer a
+  whole-food row over one naming an unstated **part of the food**
+  (``white``/``yolk``/``shell`` — a whole-egg row beats
+  ``Eggs, Grade A, Large, egg white`` for ``large eggs``), then common/fresh/
+  simple forms (fewest unstated demoted-form tokens such as
   ``canned``/``pickled``/``juice``), then the row covering more of the query's
   own tokens (``Egg, whole, cooked, scrambled`` beats ``Egg, whole, raw`` for
-  ``scrambled eggs``), then USDA's original relevance order.
+  ``scrambled eggs``), then USDA's original relevance order. A query that states
+  the part (``egg whites``) keeps it via the same stated-token exemption.
 
 Everything here is pure string policy over the already-validated FDC
 description — no I/O, no LLM, no user context. A query that rejects every row
@@ -102,6 +106,20 @@ DEMOTED_FORM_TOKENS: Final[frozenset[str]] = frozenset(
 #: "buttered toast" (the butter is the point). A bounded documented tunable —
 #: kept deliberately tiny; composite dishes are the rough-estimate tiers' job.
 ADDED_INGREDIENT_QUERY_TOKENS: Final[frozenset[str]] = frozenset({"buttered"})
+
+#: Description tokens naming a **part of a whole food** — the white, the yolk, the
+#: shell — whose calorie identity differs sharply from the whole food (an egg
+#: white is ~55 kcal/100g against a whole egg's ~143). A row naming a part the
+#: query did **not** itself state is *demoted* behind any whole-food row, so
+#: ``large eggs`` resolves to a whole-egg row rather than
+#: ``Eggs, Grade A, Large, egg white`` (the 2026-07-05 poisoned-cache incident,
+#: FTY-388), while a query that states the part (``2 egg whites``) keeps it
+#: through the same ``_contains_token`` stated-token exemption the rejected /
+#: demoted forms use. This is a *demotion*, not a rejection: a part row stays a
+#: compatible fallback when it is the only row (like ``canned tuna`` for
+#: ``tuna``). A bounded documented tunable, matched singular/plural-safe through
+#: :func:`_variants` exactly like the other form vocabularies.
+PART_OF_FOOD_TOKENS: Final[frozenset[str]] = frozenset({"white", "yolk", "shell"})
 
 
 def _tokens(text: str) -> tuple[str, ...]:
@@ -235,36 +253,68 @@ def is_fdc_description_compatible(query_key: str, description: str) -> bool:
     )
 
 
-def fdc_preference_key(query_key: str, description: str) -> tuple[int, int]:
+def _unstated_part_count(query_tokens: tuple[str, ...], description_tokens: tuple[str, ...]) -> int:
+    """Count the description's :data:`PART_OF_FOOD_TOKENS` the query did not state.
+
+    A part named by the row (``egg white``) but absent from the query is an
+    unstated part; a query that states it (``egg whites`` — matched
+    singular/plural-safe through :func:`_variants`) is exempt and contributes
+    nothing. Deterministic, bounded, no I/O.
+    """
+
+    count = 0
+    for token in frozenset(description_tokens):
+        part_token = _matched_token(token, PART_OF_FOOD_TOKENS)
+        if part_token is not None and not _contains_token(query_tokens, part_token):
+            count += 1
+    return count
+
+
+def fdc_preference_key(query_key: str, description: str) -> tuple[int, int, int]:
     """Sort key ordering *compatible* rows; lower sorts first (preferred).
 
-    ``(unstated demoted-form count, -query-token coverage)``: prefer the
+    ``(unstated part-of-food count, unstated demoted-form count, -query-token
+    coverage)``: prefer a whole-food row over one naming an unstated
+    :data:`PART_OF_FOOD_TOKENS` part (a whole-egg row beats
+    ``Eggs, Grade A, Large, egg white`` for ``large eggs`` — FTY-388), then the
     common/fresh/simple form (fewest :data:`DEMOTED_FORM_TOKENS` the query did
     not state), then the row naming more of the query's own tokens (a
     ``scrambled`` row beats a plain raw-egg row for ``scrambled eggs``). Callers
-    tie-break by the source's original relevance order.
+    tie-break by the source's original relevance order. The part-of-food term
+    leads because a part is a larger calorie-identity error than an unstated
+    preparation form; a query that states the part is exempt, so its behaviour is
+    unchanged.
     """
 
     query_tokens = _tokens(query_key)
     description_tokens = _tokens(description)
+    part = _unstated_part_count(query_tokens, description_tokens)
     demoted = sum(
         1
         for token in frozenset(description_tokens)
         if token in DEMOTED_FORM_TOKENS and not _contains_token(query_tokens, token)
     )
     coverage = sum(1 for token in query_tokens if _contains_token(description_tokens, token))
-    return (demoted, -coverage)
+    return (part, demoted, -coverage)
 
 
 def is_fdc_description_rank_stable(query_key: str, description: str) -> bool:
     """Whether a cached compatible row can safely bypass FDC candidate ranking.
 
-    A row is rank-stable only when it has no unstated demoted forms and already
-    covers every token in the query. Otherwise a fresh ranked lookup may find a
-    better row: a plain/fresh row over a canned row, or a stated-preparation row
+    A row is rank-stable only when it names no unstated part-of-food, has no
+    unstated demoted forms, and already covers every token in the query.
+    Otherwise a fresh ranked lookup may find a better row: a whole-food row over
+    an unstated-part row (``large eggs`` cached to an egg-white row self-heals —
+    FTY-388), a plain/fresh row over a canned row, or a stated-preparation row
     over a generic compatible row (``scrambled eggs`` over raw egg).
     """
 
     query_tokens = _tokens(query_key)
-    unstated_demoted_forms, negative_coverage = fdc_preference_key(query_key, description)
-    return unstated_demoted_forms == 0 and -negative_coverage == len(query_tokens)
+    unstated_parts, unstated_demoted_forms, negative_coverage = fdc_preference_key(
+        query_key, description
+    )
+    return (
+        unstated_parts == 0
+        and unstated_demoted_forms == 0
+        and -negative_coverage == len(query_tokens)
+    )

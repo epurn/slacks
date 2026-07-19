@@ -82,9 +82,18 @@ PER_100G_BASIS: Final[str] = "per_100g"
 MAX_ALTERNATIVES: Final[int] = 10
 
 #: Fixed, sanitized clarification question used when the chosen source cannot cost the
-#: item's current quantity — surfaced in place of any raw user text, mirroring the
-#: FTY-044 ``unresolvable_quantity`` routing (ask, never fabricate a number).
+#: item's current quantity **and** the item carries no usable portion mass to fall back
+#: on — surfaced in place of any raw user text, mirroring the FTY-044
+#: ``unresolvable_quantity`` routing (ask, never fabricate a number).
 QUANTITY_QUESTION = "How much did you have (for example, in grams, millilitres, or servings)?"
+
+#: Content-free assumption label recorded on the rewritten evidence row when a re-match
+#: costs the item via its **carried portion grams** (FTY-386): the chosen source could
+#: not cost the count/quantity itself (no serving size), so the portion mass the item's
+#: prior resolution already estimated is carried forward and only the density source
+#: changes. A fixed token — never the item name, quantity text, or any nutrition value —
+#: so the provenance honestly says the portion mass predates the new source.
+PORTION_GRAMS_CARRIED_ASSUMPTION: Final[str] = "portion_grams_carried"
 
 #: Map a source-system id to its evidence source-hierarchy classification. Covers
 #: every system a cached candidate could carry so a re-derived ``products`` row is
@@ -141,8 +150,12 @@ class ReMatchNeedsClarification(Exception):
     """Raised when the chosen source cannot cost the item's current quantity.
 
     The new source carries no serving size that resolves the item's count/quantity to
-    grams, so the re-match routes to clarification rather than fabricate a number
-    (consistent with FTY-044 ``needs_clarification`` routing). Nothing mutates.
+    grams **and** the item carries no usable portion mass (``grams`` is ``None`` or
+    non-positive) to fall back on, so the re-match routes to clarification rather than
+    fabricate a number (consistent with FTY-044 ``needs_clarification`` routing). Since
+    FTY-386 this residual is narrow: a count item whose prior resolution already
+    estimated a portion mass is costed via that carried mass instead of clarified.
+    Nothing mutates.
     """
 
     def __init__(self, question: str) -> None:
@@ -381,9 +394,15 @@ class ReMatchCapability:
         the ``*_estimated`` originals to the new computed values. The item is **not**
         marked ``user_edited`` and no ``user_edit`` correction is written; instead a
         ``re_match`` audit row is appended that supersedes any prior ``user_edit`` (so the
-        item's ``is_edited`` returns to ``false``). Issues no network egress. Raises
-        :class:`ReMatchNeedsClarification` when the new source cannot cost the current
-        quantity (never a fabricated number).
+        item's ``is_edited`` returns to ``false``). Issues no network egress.
+
+        Costing follows the FTY-093 order, extended by FTY-386: the chosen source costs
+        the current quantity itself when it can; otherwise the item's already-resolved
+        portion ``grams`` is carried forward (recording the content-free
+        :data:`PORTION_GRAMS_CARRIED_ASSUMPTION` label) so a count item against a
+        serving-less source still completes; only when neither is possible (``grams`` is
+        ``None``/non-positive) does it raise :class:`ReMatchNeedsClarification` — never a
+        fabricated number.
         """
 
         self._authorize(owner_id, current_user)
@@ -393,14 +412,26 @@ class ReMatchCapability:
         if product is None:
             raise SourceNotResolvable(source_ref)
 
+        # Costing order (FTY-093 preference, extended by FTY-386):
+        # 1. the chosen source costs the current quantity itself (its serving size /
+        #    the quantity's own mass or volume) — unchanged first preference;
+        # 2. else carry the item's already-resolved portion grams forward (FTY-386):
+        #    a count item whose prior resolution estimated "1 sandwich ≈ N g" keeps
+        #    that N — only the density source changes, never a fabricated number;
+        # 3. else the item has no usable portion mass to fall back on → clarify.
         grams = resolve_grams(
             unit=item.unit,
             amount=item.amount,
             quantity_text=item.quantity_text,
             default_serving_g=product.default_serving_g,
         )
+        carried_grams = False
         if grams is None:
-            raise ReMatchNeedsClarification(QUANTITY_QUESTION)
+            if item.grams is not None and item.grams > 0:
+                grams = item.grams
+                carried_grams = True
+            else:
+                raise ReMatchNeedsClarification(QUANTITY_QUESTION)
 
         facts = NutritionFacts(
             calories=product.calories_per_100g,
@@ -412,7 +443,7 @@ class ReMatchCapability:
 
         prior_calories = item.calories
         apply_resolved_facts(item, scaled)
-        self._rewrite_evidence(item, product)
+        self._rewrite_evidence(item, product, carried_grams=carried_grams)
         record_re_match_correction(
             self.session, item, old_calories=prior_calories, new_calories=scaled.calories
         )
@@ -468,20 +499,25 @@ class ReMatchCapability:
 
         return self.session.scalars(select(Product).where(Product.source_ref == source_ref)).first()
 
-    def _rewrite_evidence(self, item: DerivedFoodItem, product: Product) -> None:
+    def _rewrite_evidence(
+        self, item: DerivedFoodItem, product: Product, *, carried_grams: bool
+    ) -> None:
         """Rewrite the item's ``evidence_sources`` provenance to the chosen source.
 
         Updates the item's existing evidence row in place (or creates one if absent) so
         the item keeps a single provenance record now pointing at the new source: the
         ``source_type`` / ``source_ref`` / ``content_hash`` / ``fetched_at`` / immutable
-        per-100g snapshot / ``product_id`` link. ``assumptions`` is cleared — a re-match
-        to a database source carries none. ``basis`` is reset to ``per_100g`` — the
-        chosen candidate is always a :class:`Product`, whose density facts are always
-        per-100g, so the basis label must agree with the snapshot this rewrite writes
-        (FTY-316) rather than carry over a stale ``as_logged``/``per_serving`` basis.
-        ``field_provenance`` is reset to ``None`` — a single database source gives every
-        field a homogeneous origin, so a stale per-field origin map must not survive
-        onto the new snapshot.
+        per-100g snapshot / ``product_id`` link. ``assumptions`` records the content-free
+        :data:`PORTION_GRAMS_CARRIED_ASSUMPTION` label when the quantity was costed via
+        the item's carried portion grams (FTY-386 — the portion mass predates the new
+        source), and is otherwise **cleared** — a re-match a database source could cost
+        itself carries no assumption, exactly as before. ``basis`` is reset to
+        ``per_100g`` — the chosen candidate is always a :class:`Product`, whose density
+        facts are always per-100g, so the basis label must agree with the snapshot this
+        rewrite writes (FTY-316) rather than carry over a stale ``as_logged``/
+        ``per_serving`` basis. ``field_provenance`` is reset to ``None`` — a single
+        database source gives every field a homogeneous origin, so a stale per-field
+        origin map must not survive onto the new snapshot.
         """
 
         evidence = self.session.scalars(
@@ -508,7 +544,7 @@ class ReMatchCapability:
         evidence.carbs_per_100g = product.carbs_per_100g
         evidence.fat_per_100g = product.fat_per_100g
         evidence.field_provenance = None
-        evidence.assumptions = None
+        evidence.assumptions = [PORTION_GRAMS_CARRIED_ASSUMPTION] if carried_grams else None
 
     @staticmethod
     def _authorize(owner_id: uuid.UUID, current_user: User) -> None:
