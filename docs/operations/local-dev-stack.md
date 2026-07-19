@@ -407,11 +407,28 @@ representative fixtures and what each proves:
 | `two scrambled eggs and one slice buttered toast` | Completes with **two** derived items, each costed with honest provenance and inside its **own** plausible calorie band (eggs and toast are banded separately). |
 | `100 grams banana` | Completes; measured amount resolves; not banana powder. |
 | `4 toppables brand crackers with 1tbsp of loblaws store brand (PC/presidents choice) dill pickle hummus` | The 2026-07-10 live failure — completes with **two** derived items (no `needs_clarification`, no `failed`), each inside its **own** plausible calorie band (crackers and hummus are banded separately, so a bad split cannot hide behind a passing total) with honest source/provenance. |
+| `made good mornings - chocolate chip organic soft baked oat bars, 1 serving` | Completes; a stated serving is a usable portion (never `needs_clarification`), and does **not** resolve via a `model_prior`/`user_text` shortcut. |
 
-For every fixture the smoke also asserts that a log carrying a count or measured
-amount **never** produces a generic no-option quantity clarification, and that
-each completed item carries a source/provenance status with positive calories (a
-silent zero is not an acknowledgement).
+The FTY-373 **never-fail** regression fixtures pin the 2026-07-16 live-dogfood
+failures where informal/homemade/consumable food or infra trouble came back
+terminal `failed`. They carry `never_fail: true`: the fixture only has to reach a
+terminal **non-**`failed` estimate — a rough degraded `completed` or a
+`partially_resolved` passes, but terminal `failed` (a deadline/budget/transient
+breach surfaced as a failed entry) and a reflexive `needs_clarification` do not.
+Their calorie bands are wide rough-estimate plausibility tolerances (the coarse
+degrade prior costs an unresolvable serving at ~200 kcal, so a band spans both a
+good live estimate and that rough fallback), never a nutrition table.
+
+| Never-fail fixture | Asserted live outcome |
+| --- | --- |
+| `homemade banh mi on a brioche style bun … and 3 ground pork meat` | The exact 2026-07-16 phrase that failed ×3 (`run_wall_clock_deadline_exceeded`, then `provider_transient_error`) → a rough, honestly-labelled estimate, **at least one** item, never terminal `failed`. |
+| `nicorette 4mg gum` / `nicorette brand gum` | The consumable pair — recognized and estimated (`nicorette 4mg gum` was previously `unparseable_input`), never `failed`. |
+| `a big bowl of the chicken and rice casserole i threw together last night …` / `some leftover thrown together veggie curry i made …` | Adversarial thrown-together assemblies of unbranded ingredients → recognized and estimated, never terminal `failed`. |
+
+For every strict (non-never-fail) fixture the smoke also asserts that a log
+carrying a count or measured amount **never** produces a generic no-option
+quantity clarification, and that each completed item carries a source/provenance
+status with positive calories (a silent zero is not an acknowledgement).
 
 ### Prerequisites
 
@@ -447,6 +464,11 @@ silent zero is not an acknowledgement).
     multi-item entry produced a bad split: one item costed implausibly low/high
     even though the entry **total** looked fine, or an expected item (e.g. the
     hummus) never appeared as its own derived item.
+  - **`never-fail invariant forbids …` / `must be estimated, not clarified/failed`**
+    — a never-fail fixture (informal/homemade/consumable phrase) came back
+    terminal `failed` (a deadline/budget/transient breach surfaced as a failed
+    entry) or as a reflexive `needs_clarification` instead of a rough estimate —
+    the FTY-370/371/372 never-fail contract regressed.
 
 ### Live-local vs. hermetic E2E
 

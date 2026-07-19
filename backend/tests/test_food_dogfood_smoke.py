@@ -302,6 +302,80 @@ def test_expected_item_band_matches_are_case_insensitive() -> None:
     assert smoke.assess_fixture(_snack_spec(), outcome).passed
 
 
+# --------------------------------------------------------------------------- #
+# Assessment — the FTY-373 never-fail invariant
+# --------------------------------------------------------------------------- #
+
+
+def _never_fail_spec(**overrides: object) -> smoke.FixtureSpec:
+    """A never-fail fixture: at-least-one item, wide band, non-``failed`` terminal."""
+
+    base: dict[str, object] = {
+        "expected_item_count": None,
+        "total_kcal_low": 1.0,
+        "total_kcal_high": 1400.0,
+        "never_fail": True,
+    }
+    base.update(overrides)
+    return _spec(**base)
+
+
+def _rough_item(**overrides: object) -> smoke.SmokeItem:
+    """A rough model-prior degrade row (positive calories, honest provenance)."""
+
+    base = {
+        "name": "banh mi",
+        "source_type": SourceType.MODEL_PRIOR.value,
+        "source_ref": "model_prior",
+        "source_label": "rough estimate",
+        "calories": 200.0,
+    }
+    base.update(overrides)
+    return smoke.SmokeItem(**base)  # type: ignore[arg-type]
+
+
+def test_never_fail_fixture_passes_on_rough_completed_estimate() -> None:
+    spec = _never_fail_spec(key="homemade-banh-mi", total_kcal_low=150.0)
+    outcome = smoke.FixtureOutcome(status="completed", items=(_rough_item(),))
+    assert smoke.assess_fixture(spec, outcome).passed
+
+
+def test_never_fail_fixture_passes_on_partially_resolved() -> None:
+    # A mixed log where one component resolved and one still needs info is a
+    # non-``failed`` estimate — the never-fail invariant treats it as a pass.
+    outcome = smoke.FixtureOutcome(status="partially_resolved", items=(_rough_item(),))
+    assert smoke.assess_fixture(_never_fail_spec(), outcome).passed
+
+
+def test_never_fail_fixture_fails_on_terminal_failed() -> None:
+    # The whole point: an infra/deadline breach surfaced as ``failed`` must fail
+    # the fixture even in never-fail mode.
+    outcome = smoke.FixtureOutcome(status="failed", items=())
+    assessment = smoke.assess_fixture(_never_fail_spec(), outcome)
+    assert not assessment.passed
+    assert any("never-fail invariant forbids" in f for f in assessment.failures)
+
+
+def test_never_fail_fixture_fails_on_reflexive_clarification() -> None:
+    # "Estimate first" — a never-fail phrase that comes back as a question, not an
+    # estimate, is still a regression.
+    outcome = smoke.FixtureOutcome(
+        status="needs_clarification", items=(), clarification_texts=("How much?",)
+    )
+    assessment = smoke.assess_fixture(_never_fail_spec(), outcome)
+    assert not assessment.passed
+    assert any("must be estimated, not clarified/failed" in f for f in assessment.failures)
+
+
+def test_strict_fixture_still_fails_on_partially_resolved() -> None:
+    # never_fail defaults False, so the strict counted-entry guard is untouched:
+    # a partially_resolved counted entry is still a regression.
+    outcome = smoke.FixtureOutcome(status="partially_resolved", items=(_item(),))
+    assessment = smoke.assess_fixture(_spec(), outcome)
+    assert not assessment.passed
+    assert any("expected 'completed'" in f for f in assessment.failures)
+
+
 def test_absurd_calories_fail_per_item_ceiling() -> None:
     spec = _spec(total_kcal_low=0.0, total_kcal_high=1e9)
     outcome = smoke.FixtureOutcome(
@@ -362,6 +436,7 @@ def test_load_fixtures_parses_data_file(tmp_path: Path) -> None:
                 "expected_item_count": None,
                 "total_kcal_low": 0.0,
                 "total_kcal_high": 500.0,
+                "never_fail": True,
             },
         ]
     }
@@ -375,6 +450,9 @@ def test_load_fixtures_parses_data_file(tmp_path: Path) -> None:
     assert fixtures[0].expected_items == (
         smoke.ItemBand(match="banana", kcal_low=50.0, kcal_high=200.0),
     )
+    # never_fail defaults False when absent, and reads through when set.
+    assert fixtures[0].never_fail is False
+    assert fixtures[1].never_fail is True
     # A null expected_item_count means "at least one".
     assert fixtures[1].expected_item_count is None
     assert fixtures[1].forbid_source_types == ()
@@ -383,7 +461,7 @@ def test_load_fixtures_parses_data_file(tmp_path: Path) -> None:
 
 def test_shipped_fixture_data_file_loads() -> None:
     # The real data file the smoke ships loads and covers every story fixture.
-    assert len(smoke.load_fixtures()) == len(smoke.FIXTURES) == 9
+    assert len(smoke.load_fixtures()) == len(smoke.FIXTURES) == 14
 
 
 def test_branded_snack_fixture_expects_two_items() -> None:
@@ -404,6 +482,55 @@ def test_multi_item_fixtures_carry_per_item_bands() -> None:
 def test_compliments_fixture_forbids_generic_fdc() -> None:
     fixture = next(f for f in smoke.FIXTURES if f.key == "compliments-chicken-strips")
     assert SourceType.TRUSTED_NUTRITION_DATABASE in fixture.forbid_source_types
+
+
+def test_never_fail_regression_fixtures_present_with_wide_rough_bands() -> None:
+    # FTY-373: the exact 2026-07-16 live-repro phrases and adversarial informal
+    # assemblies ship as never-fail fixtures with wide rough-estimate bands and no
+    # brittle forbid_* — each must reach a terminal non-``failed`` estimate.
+    by_key = {f.key: f for f in smoke.FIXTURES}
+    never_fail_keys = {
+        "homemade-banh-mi",
+        "nicorette-4mg-gum",
+        "nicorette-brand-gum",
+        "homemade-chicken-rice-casserole",
+        "thrown-together-veggie-curry",
+    }
+    assert never_fail_keys <= set(by_key)
+    for key in never_fail_keys:
+        fixture = by_key[key]
+        assert fixture.never_fail is True, key
+        # "At least one" item, wide band, no brittle forbid_* — a rough estimate
+        # tolerance, not a nutrition table.
+        assert fixture.expected_item_count is None, key
+        assert fixture.total_kcal_low < fixture.total_kcal_high, key
+        assert fixture.forbid_source_types == (), key
+        assert fixture.expected_items == (), key
+
+    # The exact banh-mi live-repro phrase (failed ×3 in the 2026-07-16 dogfood DB)
+    # is pinned verbatim.
+    banh_mi = by_key["homemade-banh-mi"]
+    assert "banh mi" in banh_mi.raw_text and "brioche" in banh_mi.raw_text
+    assert "3 ground pork meat" in banh_mi.raw_text
+    # The nicorette pair pins both the was-``unparseable`` form and its already-ok twin.
+    assert by_key["nicorette-4mg-gum"].raw_text == "nicorette 4mg gum"
+    assert by_key["nicorette-brand-gum"].raw_text == "nicorette brand gum"
+
+
+def test_existing_counted_fixtures_are_not_never_fail() -> None:
+    # never_fail defaults False and stays off the strict counted/branded fixtures,
+    # so their "a supplied count must resolve" guard is untouched (Non-Goals: no
+    # loosening of existing assertions).
+    strict_keys = {
+        "compliments-chicken-strips",
+        "branded-crackers-and-hummus",
+        "made-good-oat-bar",
+        "one-banana",
+        "two-large-eggs",
+    }
+    for fixture in smoke.FIXTURES:
+        if fixture.key in strict_keys:
+            assert fixture.never_fail is False, fixture.key
 
 
 # --------------------------------------------------------------------------- #
