@@ -1465,9 +1465,12 @@ retained so references naming this section still resolve.
   boundaries, retention, source refs, assumptions, and rough-provenance labels are
   unchanged. FTY-325/FTY-326 wire misses/rejections back into the interpreter
   without adding providers or widening egress.
-- **FTY-306 (contract only; no schema/code in this story).** Adds the **Exact
-  Evidence Upgrade** section: the `Make it exact` proposal/apply taxonomy for
-  existing low-trust/incomplete food items. It introduces **no new source tier,
+- **FTY-306 (contract only; no schema/code in this story).** Adds the
+  [**Exact Evidence Upgrade**](exact-evidence-upgrade.md) section: the `Make it
+  exact` proposal/apply taxonomy for existing low-trust/incomplete food items
+  (relocated to its own [exact-evidence-upgrade.md](exact-evidence-upgrade.md)
+  page by FTY-396, version 13 above, with no normative change). It introduces
+  **no new source tier,
   lookup status, or evidence-record field**: an exact barcode proposal reuses
   `product_database` / `open_food_facts:<barcode>`, an exact label proposal reuses
   `user_label` / `user_label:<content_hash>`, and a fallback reuses
