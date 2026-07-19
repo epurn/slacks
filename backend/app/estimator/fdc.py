@@ -445,7 +445,7 @@ class FdcClient:
         interpretation session can revise the identity or deliberately keep it.
         """
 
-        ranked: list[tuple[tuple[int, int], int, ProductFacts]] = []
+        ranked: list[tuple[tuple[int, int, int], int, ProductFacts]] = []
         rejected: list[ProductFacts] = []
         for index, food in enumerate(response.foods):
             facts = _food_to_facts(query_key, food)

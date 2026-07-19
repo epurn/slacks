@@ -39,6 +39,24 @@ estimator / contracts / backend-core / security-privacy lane:
 
 ## Version
 
+24 (FTY-388): FDC candidate ranking demotes an **unstated part of a food**. A
+row naming `white` / `yolk` / `shell` — a part whose calorie identity differs
+sharply from the whole food (an egg white is ~55 kcal/100g against a whole egg's
+~143) — that the query did **not** itself state now ranks **behind** any
+whole-food row (`backend/app/estimator/fdc_ranking.py`, `PART_OF_FOOD_TOKENS`), so
+`large eggs` selects a whole-egg row instead of `Eggs, Grade A, Large, egg white`
+(the 2026-07-05 poisoned-cache incident). It is a **demotion**, not a rejection:
+a part row stays compatible and still resolves when it is the only row, and a
+query that states the part (`2 egg whites`) keeps it through the same
+`_contains_token` stated-token exemption the rejected/demoted forms use — matched
+singular/plural-safe like the other form vocabularies. The demotion is the
+leading term of `fdc_preference_key` (a part is a larger identity error than an
+unstated preparation form) and joins `is_fdc_description_rank_stable`, so a
+**`products` cache row poisoned before the fix** (`large eggs` / `eggs` →
+`usda_fdc:747997`) is no longer rank-stable: it re-fetches and self-heals to a
+compatible whole-food row on read, with no operator `DELETE`. A bounded documented
+tunable; no schema, DTO, or endpoint change.
+
 23 (FTY-369): the Open Food Facts `product_database` source gains a **name-search**
 path for barcode-less **branded** products. A branded candidate USDA/OFF-by-barcode
 cannot resolve now consults OFF **by name** (`off.py` `OffClient.search_by_name` +
@@ -494,9 +512,10 @@ miss it calls FDC `/foods/search` (data types `Foundation` / `SR Legacy`, whose
 nutrient values are **per 100 g**), selects the **best-ranked compatible**
 energy-bearing result (FTY-254, `fdc_ranking.py` — head-noun identity match, no
 unstated density-changing form, stated added ingredients present; preferred by
+fewest unstated part-of-food tokens (FTY-388 — `white`/`yolk`/`shell`), then
 fewest unstated demoted forms, then query-token coverage, then relevance order —
-see **Version 15**), maps it to canonical per-100g facts, and caches it as a
-`products` row. Rejecting every result is a **miss**, not a wrong-food match —
+see **Version 24**, **Version 15**), maps it to canonical per-100g facts, and
+caches it as a `products` row. Rejecting every result is a **miss**, not a wrong-food match —
 but since FTY-326 the gate is a bounding pre-filter, not the final row-acceptance
 authority: the bounded rejected energy-bearing rows are first recorded on the
 interpretation-session ledger as `rejected_incompatible_row` evidence (sanitized
@@ -506,7 +525,8 @@ lookup before the miss stands. If the session keeps its hypothesis, the rejectio
 is deliberate and resolution falls forward exactly as before. A
 **compatible rank-stable** cache hit makes **no** external call. Incompatible
 cached rows are never served; compatible but non-rank-stable rows (e.g. `tuna`
-cached to canned tuna, `scrambled eggs` to raw egg) re-fetch once and refresh the
+cached to canned tuna, `scrambled eggs` to raw egg, or `large eggs` cached to the
+egg-white row before FTY-388) re-fetch once and refresh the
 single `(source, query_key)` row when a better result is available, otherwise
 fall back to the compatible cache.
 
