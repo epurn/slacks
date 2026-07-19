@@ -128,6 +128,71 @@ def test_rank_stable_cache_rows_must_have_no_demotions_and_full_query_coverage()
 
 
 # ---------------------------------------------------------------------------
+# Part-of-food demotion (FTY-388): an unstated white/yolk/shell part never
+# outranks a whole-food row, but a query stating the part keeps it.
+# ---------------------------------------------------------------------------
+
+#: The concrete poisoned-cache row: FDC 747997 "egg white" (~55 kcal/100g).
+_EGG_WHITE_ROW = "Eggs, Grade A, Large, egg white"
+#: The compatible whole-egg row that ties it on query-token coverage.
+_EGG_WHOLE_ROW = "Eggs, Grade A, Large, egg whole"
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["large eggs", "eggs", "egg"],
+)
+def test_part_of_food_row_stays_gate_compatible(query: str) -> None:
+    # The demotion is a preference-order signal, not a rejection: the egg-white
+    # row still passes the compatibility gate (head noun present, no rejected
+    # form), so the reported coverage tie is genuinely between two eligible rows.
+    assert is_fdc_description_compatible(query, _EGG_WHITE_ROW) is True
+    assert is_fdc_description_compatible(query, _EGG_WHOLE_ROW) is True
+
+
+def test_unstated_part_row_ranks_below_the_whole_food_row_on_a_coverage_tie() -> None:
+    # Both rows are gate-compatible and cover both query tokens (large, eggs);
+    # the part-of-food term breaks the tie for the whole-egg row.
+    whole = fdc_preference_key("large eggs", _EGG_WHOLE_ROW)
+    white = fdc_preference_key("large eggs", _EGG_WHITE_ROW)
+    assert whole < white
+
+
+@pytest.mark.parametrize(
+    ("query", "description"),
+    [
+        ("egg whites", _EGG_WHITE_ROW),  # plural query token, singular row token
+        ("egg white", _EGG_WHITE_ROW),
+        ("2 egg yolks", "Egg, yolk, raw, fresh"),
+        ("egg shell", "Egg, shell, dried"),
+    ],
+)
+def test_stated_part_is_not_demoted(query: str, description: str) -> None:
+    # A query that names the part is exempt: the part token contributes no
+    # demotion, so its preference key has a zero part-of-food term.
+    assert fdc_preference_key(query, description)[0] == 0
+
+
+def test_unstated_part_leads_the_preference_key() -> None:
+    # An unstated part outweighs an unstated demoted form and higher coverage:
+    # a whole (frozen) egg is closer in calorie identity than an egg white.
+    whole_frozen = fdc_preference_key("eggs", "Eggs, whole, frozen")
+    white = fdc_preference_key("eggs", _EGG_WHITE_ROW)
+    assert whole_frozen < white
+
+
+def test_unstated_part_row_is_never_rank_stable() -> None:
+    # The poisoned-cache self-heal hinges on this: an egg-white cache row for a
+    # whole-egg query is compatible but NOT rank-stable, so it re-fetches.
+    assert is_fdc_description_rank_stable("large eggs", _EGG_WHITE_ROW) is False
+    assert is_fdc_description_rank_stable("eggs", _EGG_WHITE_ROW) is False
+    # A whole-egg row with full coverage stays rank-stable (served from cache).
+    assert is_fdc_description_rank_stable("large eggs", _EGG_WHOLE_ROW) is True
+    # A query that states the part keeps the part row rank-stable.
+    assert is_fdc_description_rank_stable("egg whites", _EGG_WHITE_ROW) is True
+
+
+# ---------------------------------------------------------------------------
 # Client-level ranking with fake FDC result lists
 # ---------------------------------------------------------------------------
 
@@ -282,6 +347,55 @@ def test_lookup_falls_back_to_relevance_order_between_equal_rows() -> None:
 
     assert facts is not None
     assert facts.source_ref == "usda_fdc:1"
+
+
+def test_lookup_prefers_the_whole_egg_over_the_egg_white_on_a_relevance_tie() -> None:
+    """FTY-388: the poisoned tie — FDC lists the egg-white row first for
+    ``large eggs`` and it ties the whole-egg row on coverage. The whole-food row
+    must win, so the entry costs ~143 kcal/100g (2 × 50 g ≈ 143 kcal), not 55."""
+
+    response = {
+        "foods": [
+            _fdc_food(747997, _EGG_WHITE_ROW, 55.0, protein=11.0, carbs=0.7, fat=0.2),
+            _fdc_food(748967, _EGG_WHOLE_ROW, 143.0, protein=12.6, carbs=0.7, fat=9.5),
+        ]
+    }
+
+    facts = _client(response).lookup("large eggs")
+
+    assert facts is not None
+    assert facts.source_ref == "usda_fdc:748967"
+    assert facts.facts.calories == pytest.approx(143.0)
+
+
+def test_lookup_keeps_the_egg_white_when_the_query_states_the_part() -> None:
+    """The stated-token exemption: ``2 egg whites`` still resolves to the
+    egg-white row even when a whole-egg row is also returned."""
+
+    response = {
+        "foods": [
+            _fdc_food(748967, _EGG_WHOLE_ROW, 143.0, protein=12.6, carbs=0.7, fat=9.5),
+            _fdc_food(747997, _EGG_WHITE_ROW, 55.0, protein=11.0, carbs=0.7, fat=0.2),
+        ]
+    }
+
+    facts = _client(response).lookup("egg whites")
+
+    assert facts is not None
+    assert facts.source_ref == "usda_fdc:747997"
+    assert facts.facts.calories == pytest.approx(55.0)
+
+
+def test_lookup_keeps_the_egg_white_when_it_is_the_only_compatible_row() -> None:
+    """Demotion, not rejection: a lone part row still resolves (like canned tuna
+    for ``tuna``) — the whole-food row simply wins when both are present."""
+
+    response = {"foods": [_fdc_food(747997, _EGG_WHITE_ROW, 55.0, protein=11.0, fat=0.2)]}
+
+    facts = _client(response).lookup("large eggs")
+
+    assert facts is not None
+    assert facts.source_ref == "usda_fdc:747997"
 
 
 def test_list_matches_still_surfaces_every_energy_bearing_alternative() -> None:

@@ -523,6 +523,47 @@ def test_incomplete_coverage_cached_product_is_refreshed_from_the_ranked_source(
     )
 
 
+def test_poisoned_egg_white_cached_product_self_heals_to_the_whole_egg_row(
+    session: Session,
+) -> None:
+    """FTY-388: a live stack cached ``large eggs`` to the egg-white FDC row
+    (``usda_fdc:747997``, 55 kcal/100g) before the part-of-food demotion existed.
+    The stored description now names an unstated part, so the cache row is no
+    longer rank-stable: resolution re-fetches and self-heals to the whole-egg row
+    in place — no manual DB deletion, and the entry costs ~143 kcal/100g."""
+
+    poisoned = _seed_cached_product(
+        session,
+        query_key="large eggs",
+        description="Eggs, Grade A, Large, egg white",
+        source_ref="usda_fdc:747997",
+        calories=55.0,
+    )
+    whole = ProductFacts(
+        source=FDC_SOURCE,
+        source_ref="usda_fdc:748967",
+        query_key="large eggs",
+        description="Eggs, Grade A, Large, egg whole",
+        facts=NutritionFacts(calories=143.0, protein_g=12.56, carbs_g=0.72, fat_g=9.51),
+        default_serving_g=None,
+        content_hash="whole-egg-hash",
+    )
+    source = FakeFoodSource({"large eggs": whole})
+    resolver = FoodResolver(session=session, source=source)
+
+    resolved = resolver.resolve_product("large eggs")
+
+    assert resolved is not None
+    # The poisoned row was not served: the ranked source was consulted again.
+    assert source.lookups == ["large eggs"]
+    # Refreshed in place onto the single (source, query_key) cache row.
+    assert resolved.product.id == poisoned.id
+    assert resolved.product.source_ref == "usda_fdc:748967"
+    assert resolved.product.description == "Eggs, Grade A, Large, egg whole"
+    assert resolved.product.calories_per_100g == pytest.approx(143.0)
+    assert len(session.scalars(select(Product).where(Product.query_key == "large eggs")).all()) == 1
+
+
 def test_demoted_compatible_cached_product_remains_usable_without_a_replacement(
     session: Session,
 ) -> None:

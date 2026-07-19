@@ -45,7 +45,7 @@ is never terminal `failed`**. A per-run ceiling breach (FTY-363:
 interpreted food/exercise candidate the worker commits a rough,
 honestly-labelled estimate (`processing → completed`, or
 `processing → partially_resolved` when an open item-scoped question remains —
-`food-resolution.md` v22 owns the degraded provenance); with nothing
+`food-resolution.md` v23 owns the degraded provenance); with nothing
 interpreted the event stays in an honest still-working `processing` state with
 bounded, long-backoff auto-retry. The degrade write shares the terminal writes'
 atomicity/idempotency/sanitization invariants. Implemented downstream by
@@ -251,7 +251,7 @@ of failing:
 - **≥1 interpreted food/exercise candidate** (on the `EstimationContext` or the
   interpretation hypothesis): the worker commits a **rough, honestly-labelled
   estimate** for every interpreted-but-unresolved candidate — produced without
-  further provider budget (`food-resolution.md` v22, **Budget/transience-degraded
+  further provider budget (`food-resolution.md` v23, **Budget/transience-degraded
   rough estimates**) — and the event lands `completed`
   (`processing → completed`), or `partially_resolved`
   (`processing → partially_resolved`) when the terminal write also carries an
@@ -485,7 +485,7 @@ surface (`docs/security/data-retention.md`, "Estimation runs").
   live smoke's 90s poll window) **stops all further provider work in that run
   and degrades** (FTY-370): with ≥1 interpreted candidate the run commits a
   rough, honestly-labelled estimate — produced **without further provider
-  budget** (`food-resolution.md` v22) — and terminates `processing → completed`
+  budget** (`food-resolution.md` v23) — and terminates `processing → completed`
   / `processing → partially_resolved`; with nothing interpreted the event stays
   in the honest still-working `processing` state with the bounded long-backoff
   auto-retry. A breach is **never** terminal `processing → failed`. The breach
