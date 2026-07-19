@@ -45,7 +45,7 @@ is never terminal `failed`**. A per-run ceiling breach (FTY-363:
 interpreted food/exercise candidate the worker commits a rough,
 honestly-labelled estimate (`processing → completed`, or
 `processing → partially_resolved` when an open item-scoped question remains —
-`food-resolution.md` v23 owns the degraded provenance); with nothing
+`food-resolution-changelog.md` v23 owns the degraded provenance); with nothing
 interpreted the event stays in an honest still-working `processing` state with
 bounded, long-backoff auto-retry. The degrade write shares the terminal writes'
 atomicity/idempotency/sanitization invariants. Implemented downstream by
@@ -92,7 +92,7 @@ model. No schema change (`trace` is already JSON). See
 3 (FTY-278, contract only): the answer-triggered re-estimate under **item-scoped
 partial resolution**. The new first-class `partially_resolved` event status
 (`log-events.md` v6) carries committed `resolved` derived items (the costable
-siblings of a mixed log — `food-resolution.md` v9); answering an **item-scoped**
+siblings of a mixed log — `food-resolution-changelog.md` v9); answering an **item-scoped**
 question re-estimates the same event (`partially_resolved → processing`) and must
 **preserve those siblings** without re-costing, duplicating, or double-counting
 them. The v2 job/run mechanics (re-open the terminal job, cumulative attempts,
@@ -251,8 +251,8 @@ of failing:
 - **≥1 interpreted food/exercise candidate** (on the `EstimationContext` or the
   interpretation hypothesis): the worker commits a **rough, honestly-labelled
   estimate** for every interpreted-but-unresolved candidate — produced without
-  further provider budget (`food-resolution.md` v23, **Budget/transience-degraded
-  rough estimates**) — and the event lands `completed`
+  further provider budget (`food-resolution-changelog.md` v23; **Budget/transience-degraded
+  rough estimates** in `food-resolution.md`) — and the event lands `completed`
   (`processing → completed`), or `partially_resolved`
   (`processing → partially_resolved`) when the terminal write also carries an
   open item-scoped question alongside the committed siblings (the existing
@@ -333,7 +333,7 @@ in the one transaction that persists the `clarification_answers` row:
 - **Resolved siblings preserved untouched, never double-counted (FTY-278, contract only):**
   when the event carries committed `resolved` siblings from an earlier round
   (the `partially_resolved` item-scoped partial state — `log-events.md` v6,
-  `food-resolution.md` v9),
+  `food-resolution-changelog.md` v9),
   the re-estimate re-costs **only the open (newly-answered) component** and
   **leaves the already-`resolved` siblings untouched** — it neither re-costs,
   re-creates, nor replaces them. The answered component's own row is advanced
@@ -488,7 +488,7 @@ surface (`docs/security/data-retention.md`, "Estimation runs").
   live smoke's 90s poll window) **stops all further provider work in that run
   and degrades** (FTY-370): with ≥1 interpreted candidate the run commits a
   rough, honestly-labelled estimate — produced **without further provider
-  budget** (`food-resolution.md` v23) — and terminates `processing → completed`
+  budget** (`food-resolution-changelog.md` v23) — and terminates `processing → completed`
   / `processing → partially_resolved`; with nothing interpreted the event stays
   in the honest still-working `processing` state with the bounded long-backoff
   auto-retry. A breach is **never** terminal `processing → failed`. The breach

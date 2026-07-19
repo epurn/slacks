@@ -59,7 +59,7 @@ uncounted; additive, no migration, populated identically in the single-day and
 range reads.
 5 (FTY-278, contract only) makes the finalized-state filter and `uncounted_entries`
 account for the **item-scoped partial clarification** state (`log-events.md` v6,
-`food-resolution.md` v9): the new first-class `partially_resolved` event status
+`food-resolution-changelog.md` v9): the new first-class `partially_resolved` event status
 carries committed `resolved` siblings, so the finalized filter's event-status
 clause relaxes from `completed`-only to `completed` **or** `partially_resolved`,
 and `uncounted_entries` counts the **unresolved component** awaiting details
@@ -316,7 +316,7 @@ event's transient status alone:
   counted across the window and drops only when its own component resolves — so no
   surface dips.
 - **`partially_resolved` events are included (FTY-278).** Under the item-scoped
-  partial contract (`log-events.md` v6, `food-resolution.md` v9) a
+  partial contract (`log-events.md` v6, `food-resolution-changelog.md` v9) a
   `partially_resolved` event carries committed `resolved` siblings — a mixed
   log's costable components — committed in the same terminal transaction as the
   `processing → partially_resolved` transition, exactly as FTY-043/FTY-044 commit
