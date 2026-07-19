@@ -86,53 +86,70 @@ export function FloatingSwitcher({
   // The raised active capsule is a single element that slides under whichever
   // segment is active, rather than a background style toggled per-segment —
   // that's what lets it glide (FTY-323) instead of jump-cutting.
+  //
+  // The transit is driven purely by transforms (`translateX` + `scaleX`) so it
+  // can run on the native driver (FTY-387): the capsule's box is fixed at a
+  // static `left: 0` / `width: baseWidth`, and every segment position is reached
+  // by translating + scaling that box on the UI thread. Animating `left`/`width`
+  // instead would force the spring onto the JS thread, where the heavy first
+  // Trends mount stalls it and the glide degrades to a jump cut exactly when a
+  // new user first sees it. `baseWidth` is the width of the first measured active
+  // segment; all transforms are expressed relative to it and its centre.
   const [segmentLayouts, setSegmentLayouts] = useState<Record<string, SegmentLayout>>({});
-  const [capsuleX] = useState(() => new Animated.Value(0));
-  const [capsuleWidth] = useState(() => new Animated.Value(0));
+  const [baseWidth, setBaseWidth] = useState(0);
+  const [translateX] = useState(() => new Animated.Value(0));
+  const [scaleX] = useState(() => new Animated.Value(1));
   const hasPositioned = useRef(false);
   const prevActiveKey = useRef(activeKey);
 
-  const handleSegmentLayout = useCallback((key: string, event: LayoutChangeEvent) => {
-    const { x, width } = event.nativeEvent.layout;
-    setSegmentLayouts((prev) => {
-      const existing = prev[key];
-      if (existing && existing.x === x && existing.width === width) return prev;
-      return { ...prev, [key]: { x, width } };
-    });
-  }, []);
+  const handleSegmentLayout = useCallback(
+    (key: string, event: LayoutChangeEvent) => {
+      const { x, width } = event.nativeEvent.layout;
+      setSegmentLayouts((prev) => {
+        const existing = prev[key];
+        if (existing && existing.x === x && existing.width === width) return prev;
+        return { ...prev, [key]: { x, width } };
+      });
+      // Pin the capsule's static box to the first measured active segment. All
+      // transforms are expressed relative to this base, so the box never
+      // re-renders again and the transit stays purely transform-driven.
+      if (key === activeKey) setBaseWidth((prev) => (prev === 0 ? width : prev));
+    },
+    [activeKey],
+  );
 
   useEffect(() => {
     const target = segmentLayouts[activeKey];
-    if (!target) return;
+    if (!target || baseWidth === 0) return;
 
-    if (!hasPositioned.current) {
-      // First measurement — snap into place, no animate-in from the origin.
-      capsuleX.setValue(target.x);
-      capsuleWidth.setValue(target.width);
-      hasPositioned.current = true;
-      prevActiveKey.current = activeKey;
-      return;
-    }
+    // Map the measured segment rect onto the fixed base box `[0, baseWidth]`
+    // (centre at baseWidth/2): scaleX matches the target width; translateX moves
+    // the (scaled) centre to the target's centre. RN scales around the view
+    // centre and applies the outer translate in unscaled pixels, so the rendered
+    // rect lands exactly on `[target.x, target.x + target.width]`.
+    const tx = target.x + target.width / 2 - baseWidth / 2;
+    const s = target.width / baseWidth;
 
-    const selectionChanged = prevActiveKey.current !== activeKey;
+    const firstPosition = !hasPositioned.current;
+    const selectionChanged = !firstPosition && prevActiveKey.current !== activeKey;
     prevActiveKey.current = activeKey;
+    hasPositioned.current = true;
 
-    if (!selectionChanged || reduceMotion) {
-      // A re-layout of the same segment (Dynamic Type, rotation) snaps in
-      // place; Reduce Motion degrades the selection change to an instant
-      // swap — no spring.
-      capsuleX.setValue(target.x);
-      capsuleWidth.setValue(target.width);
+    if (firstPosition || !selectionChanged || reduceMotion) {
+      // First measurement snaps into place (no animate-in from the origin); a
+      // re-layout of the same segment (Dynamic Type, rotation) snaps in place;
+      // Reduce Motion degrades the selection change to an instant swap — no
+      // spring.
+      translateX.setValue(tx);
+      scaleX.setValue(s);
       return;
     }
 
-    Animated.spring(capsuleX, { ...defaultSpring, toValue: target.x, useNativeDriver: false }).start();
-    Animated.spring(capsuleWidth, {
-      ...defaultSpring,
-      toValue: target.width,
-      useNativeDriver: false,
-    }).start();
-  }, [activeKey, segmentLayouts, reduceMotion, capsuleX, capsuleWidth]);
+    // Native-driver transit: the transform springs run on the UI thread, so the
+    // glide is visible even while the first Trends mount stalls the JS thread.
+    Animated.spring(translateX, { ...defaultSpring, toValue: tx, useNativeDriver: true }).start();
+    Animated.spring(scaleX, { ...defaultSpring, toValue: s, useNativeDriver: true }).start();
+  }, [activeKey, segmentLayouts, reduceMotion, baseWidth, translateX, scaleX]);
 
   return (
     <View
@@ -176,8 +193,9 @@ export function FloatingSwitcher({
             style={[
               styles.activeCapsule,
               {
-                left: capsuleX,
-                width: capsuleWidth,
+                left: 0,
+                width: baseWidth,
+                transform: [{ translateX }, { scaleX }],
                 backgroundColor: colors.surfaceRaised,
                 borderColor: colors.switcherBorder,
                 shadowColor: '#000000',
@@ -238,10 +256,11 @@ const styles = StyleSheet.create({
     padding: spacing.xs,
     gap: spacing.xs,
   },
-  // The sliding active-capsule background — positioned absolutely within
-  // `row` and animated to the measured bounds of the active segment, so
-  // selecting the other segment glides the capsule across (FTY-323) instead
-  // of jump-cutting a per-segment background.
+  // The sliding active-capsule background — positioned absolutely within `row`
+  // with a fixed box, then translated + scaled on the native driver to the
+  // measured bounds of the active segment, so selecting the other segment
+  // glides the capsule across (FTY-323) on the UI thread (FTY-387) instead of
+  // jump-cutting a per-segment background.
   activeCapsule: {
     position: 'absolute',
     top: 0,
