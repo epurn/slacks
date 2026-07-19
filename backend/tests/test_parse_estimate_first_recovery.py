@@ -401,6 +401,71 @@ def test_balanced_mode_does_not_reask_for_a_stated_detail() -> None:
     assert context.clarification_questions == []
 
 
+@pytest.mark.parametrize(
+    ("quantity_text", "unit"),
+    [
+        ("1 serving", "serving"),  # a stated serving with the count in the phrase
+        ("", "serving"),  # the bare serving unit — no number stranded in the phrase
+        ("serving", "serving"),  # the serving word stranded in the phrase
+        ("", "servings"),
+        ("", "bar"),  # plain count/portion vocabulary ("1 bar")
+    ],
+)
+def test_balanced_mode_does_not_reask_for_a_stated_serving(quantity_text: str, unit: str) -> None:
+    # FTY-382: a stated serving/count is a usable portion, so the clarify gate must
+    # not re-ask for a missing amount — even when the model left the structured
+    # amount empty and stranded no number in the phrase (the bare "serving" case).
+    provider = FakeProvider(
+        responses=_sampled(
+            {
+                **_parsed(
+                    [
+                        {
+                            "type": "food",
+                            "name": "made good oat bars",
+                            "quantity_text": quantity_text,
+                            "unit": unit,
+                        }
+                    ],
+                    confidence=_low(),
+                ),
+                "clarification_questions": [_clarify("How much made good oat bars did you have?")],
+            }
+        )
+    )
+    context = _context(raw_text="made good mornings oat bars, 1 serving")
+
+    _run(provider, context, policy=ParsePolicySettings(mode="balanced"))
+
+    assert [candidate.name for candidate in context.food_candidates] == ["made good oat bars"]
+    assert context.clarification_questions == []
+
+
+def test_balanced_mode_still_clarifies_bare_identity_without_a_stated_portion() -> None:
+    # Boundary preserved (FTY-382 Non-Goal): a component with no usable stated detail
+    # ("some milk") may still clarify — only a stated serving/count is protected.
+    provider = FakeProvider(
+        responses=_sampled(
+            {
+                **_parsed(
+                    [{"type": "food", "name": "milk", "quantity_text": "some milk"}],
+                    confidence=_low(),
+                ),
+                "clarification_questions": [
+                    _clarify("How much milk did you have?", ["a splash", "1/2 cup", "1 cup"])
+                ],
+            }
+        )
+    )
+    context = _context(raw_text="some milk")
+
+    with pytest.raises(NeedsClarification):
+        _run(provider, context, policy=ParsePolicySettings(mode="balanced"))
+
+    assert context.food_candidates == []
+    assert _question_texts(context) == ["How much milk did you have?"]
+
+
 def test_strict_mode_can_keep_old_style_abstention_for_stated_detail() -> None:
     provider = FakeProvider(
         responses=_sampled(

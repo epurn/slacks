@@ -14,7 +14,13 @@
     "expected_items: per-item plausibility bands for multi-item fixtures. Each",
     "band's lowercase 'match' substring must locate a derived item (name/label/",
     "ref), and every matched item's calories must sit inside [kcal_low,",
-    "kcal_high] — so a bad split cannot hide behind a passing total band."
+    "kcal_high] — so a bad split cannot hide behind a passing total band.",
+    "The 'made-good-oat-bar' fixture (raw_text '...1 serving') also guards FTY-382:",
+    "a stated serving is a usable portion, so the entry must reach 'completed' and",
+    "never 'needs_clarification' — enforced by the completed-status check for every",
+    "fixture (app/ops/food_dogfood_smoke.py _status_failures). FTY-369 owns its",
+    "product_database provenance via forbid_source_types; the two assertions ride the",
+    "one shared row rather than duplicating the same submitted text."
   ],
   "fixtures": [
     {

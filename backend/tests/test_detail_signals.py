@@ -205,3 +205,33 @@ def test_game_count_misses(text: str) -> None:
 )
 def test_has_food_detail(amount: float | None, text: str, expected: bool) -> None:
     assert has_food_detail(amount, text) is expected
+
+
+@pytest.mark.parametrize(
+    ("amount", "text", "unit", "expected"),
+    [
+        # A stated serving/count unit is a usable portion (FTY-382): the user named
+        # how many they had, so it is estimated from a rough serving-prior, never
+        # re-asked for a missing amount — even when the model left the structured
+        # amount empty and stranded no number in the phrase (the bare "serving" case).
+        (None, "1 serving", "serving", True),  # via unit and the stranded count
+        (None, "", "serving", True),  # bare serving unit, no number in the phrase
+        (None, "serving", "serving", True),  # serving word stranded in the phrase
+        (None, "2 servings", "servings", True),
+        (None, "", "servings", True),
+        (None, "1 bar", "bar", True),  # plain count/portion vocabulary
+        (None, "", "bar", True),
+        (None, "", "piece", True),
+        (None, "a serving", None, True),  # indefinite article standing for one
+        # Boundary preserved: a bare identity with no serving/count unit still clarifies.
+        (None, "some milk", None, False),
+        (None, "milk", "", False),
+        (None, "", None, False),
+        (None, "some crackers", "", False),
+        (None, "a", None, False),  # bare article with no following portion word
+    ],
+)
+def test_has_food_detail_stated_serving_or_count(
+    amount: float | None, text: str, unit: str | None, expected: bool
+) -> None:
+    assert has_food_detail(amount, text, unit) is expected

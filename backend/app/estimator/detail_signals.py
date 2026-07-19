@@ -29,6 +29,7 @@ from app.estimator.food_serving import (
     _VOLUME_UNIT_GRAMS,
     _grams_from_text,
 )
+from app.estimator.plausibility import _COUNT_UNITS
 
 # ---------------------------------------------------------------------------
 # Numeric ranges — "a handful (5-10) of onion rings".
@@ -367,6 +368,18 @@ _COLLOQUIAL_MEASURE_WORDS: Final[frozenset[str]] = frozenset(
 #: leading standalone indefinite article, so it is not treated as a stated portion.
 _INDEFINITE_MEASURE_RE: Final[re.Pattern[str]] = re.compile(r"\b(?:an?)\s+\S", re.IGNORECASE)
 
+#: Stated serving / plain-count portion units (FTY-382). A serving or count/portion
+#: unit — ``1 serving``, ``a serving``, ``2 servings``, ``1 bar`` — is a *usable stated
+#: portion*: the user named how many they had, so a source-serving miss defers to a
+#: rough serving-prior estimate rather than re-asking for an amount they already gave.
+#: Mirrors the count/portion vocabulary the FTY-156 plausibility validator recognizes
+#: (:data:`app.estimator.plausibility._COUNT_UNITS`) so the two stay in sync, excluding
+#: the empty no-unit sentinel — a bare identity with no unit ("some milk", "milk")
+#: states no portion and must still be allowed to clarify.
+_STATED_SERVING_COUNT_UNITS: Final[frozenset[str]] = frozenset(
+    unit for unit in _COUNT_UNITS if unit
+)
+
 
 def has_stated_nutrition(
     stated_calories: float | None,
@@ -391,16 +404,18 @@ def has_stated_nutrition(
     )
 
 
-def has_food_detail(amount: float | None, quantity_text: str) -> bool:
+def has_food_detail(amount: float | None, quantity_text: str, unit: str | None = None) -> bool:
     """Whether a food candidate carries enough amount detail to estimate.
 
     ``True`` when the model supplied a positive structured ``amount`` (a count or a
     measured quantity), ``quantity_text`` states a numeric range (which resolves to a
     midpoint), ``quantity_text`` states a bare count ("(i had 4)", "2 large") the
-    model stranded there, or ``quantity_text`` carries a stated worded portion — a
+    model stranded there, ``quantity_text`` carries a stated worded portion — a
     household measure, a colloquial measure word, or an indefinite-article measure
-    (FTY-275). A bare identity with no stated portion ("some crackers", "some milk",
-    bare "milk") returns ``False`` so it still routes to clarification.
+    (FTY-275) — or the candidate states a **serving/count unit** ("1 serving",
+    "a serving", "2 servings", "1 bar"; FTY-382) in ``unit`` or ``quantity_text``.
+    A bare identity with no stated portion ("some crackers", "some milk", bare "milk")
+    returns ``False`` so it still routes to clarification.
     """
 
     if amount is not None and amount > 0:
@@ -410,7 +425,9 @@ def has_food_detail(amount: float | None, quantity_text: str) -> bool:
         return True
     if parse_leading_count(text) is not None:
         return True
-    return _states_worded_portion(text)
+    if _states_worded_portion(text):
+        return True
+    return _states_serving_or_count(unit, text)
 
 
 def _states_worded_portion(quantity_text: str) -> bool:
@@ -425,3 +442,21 @@ def _states_worded_portion(quantity_text: str) -> bool:
     if words & _HOUSEHOLD_UNIT_WORDS or words & _COLLOQUIAL_MEASURE_WORDS:
         return True
     return _INDEFINITE_MEASURE_RE.search(quantity_text) is not None
+
+
+def _states_serving_or_count(unit: str | None, quantity_text: str) -> bool:
+    """Whether a stated serving / plain-count unit states a usable portion (FTY-382).
+
+    Pure and total: a serving or count/portion unit — recognised from the structured
+    ``unit`` field ("serving", "servings", "bar", "piece") or a bare serving/count word
+    the model left in ``quantity_text`` ("serving") — means the user named how many they
+    had. That is a usable stated portion the estimator scales from (a rough serving-prior
+    when no source serving size exists), not an amount to re-ask. A bare identity with no
+    serving/count unit ("some milk", bare "milk") states no portion and returns ``False``.
+    """
+
+    normalized_unit = (unit or "").strip().lower()
+    if normalized_unit in _STATED_SERVING_COUNT_UNITS:
+        return True
+    words = frozenset(_WORD_RE.findall((quantity_text or "").lower()))
+    return bool(words & _STATED_SERVING_COUNT_UNITS)

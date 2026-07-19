@@ -35,8 +35,13 @@ from app.schemas.parse import ParsedCandidate
 #: "about a tsp") or an indefinite article ("a"/"an" = 1) — is resolved to a concrete
 #: amount+unit and estimated, never re-clarified (FTY-275). needs_clarification is
 #: reserved for input that is genuinely indeterminate — no count, no portion word, no
-#: standard serving cue, or the item itself is ambiguous. The security framing
-#: (untrusted DATA, no fabricated calories/brands/barcodes) is unchanged.
+#: standard serving cue, or the item itself is ambiguous. Widened food recognition
+#: (FTY-371): informal, unbranded, homemade, compositional, or borderline-consumable
+#: descriptions — a homemade assembly of ingredients, gum, mints, or a supplement — are
+#: recognized as loggable food/consumable items and routed to an estimate or a
+#: clarifying question; "unparseable" is reserved for input that is genuinely not
+#: food/exercise/consumable at all. The security framing (untrusted DATA, no fabricated
+#: calories/brands/barcodes) is unchanged.
 _PROMPT_TEMPLATE = """\
 You are a nutrition log parser. Extract the food and exercise items from the \
 user's log entry below into the required structured schema.
@@ -98,8 +103,19 @@ amount, preparation, or duration), and options contains 2-5 short, plausible, \
 common quick-pick answers for that exact question. Options are suggestions only; \
 the user can always type a different answer. Never use a generic fallback like \
 "How much was it?" or "Could you clarify?".
-- If the entry is empty, gibberish, or not a food/exercise log at all, set \
-disposition "unparseable" and a short reason.
+- Recognize anything a person could consume as a loggable food/consumable item, \
+however informal: an unbranded homemade dish, a compositional description built \
+from ingredients ("banh mi on a brioche bun with shredded carrot, sriracha mayo, \
+cucumber"), a snack idiom, and logged consumables such as chewing gum, mints, or a \
+dietary supplement ("nicorette 4mg gum", "one multivitamin"). Extract these as \
+food items and estimate or clarify per the rules above — never classify them \
+"unparseable". A stated milligram/strength dose ("4mg") is a product/identity cue, \
+not a nutrition fact to invent from.
+- Set disposition "unparseable" ONLY for input that is genuinely not a \
+food/exercise/consumable log at all — empty, gibberish, or unrelated text ("asdf", \
+"how's the weather") — and give a short reason. When in doubt about an informal, \
+homemade, compositional, or borderline-consumable description, estimate or ask a \
+clarifying question; never reject it as unparseable.
 - Set confidence in [0, 1] reflecting how sure you are of the extraction. A \
 confident estimate of a typical portion warrants a genuinely high confidence.
 

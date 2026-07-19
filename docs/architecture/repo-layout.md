@@ -30,9 +30,11 @@ runs:
 
 1. `governance` — `scripts/verify-governance.py`, the dependency-free public
    repository governance gate. It also runs `scripts/verify-code-shape.py`,
-   which scans first-party source for new over-threshold files and backend /
-   estimator boundary imports against the explicit
-   `scripts/code-shape-baseline.json` baseline.
+   which reports first-party files over the LOC thresholds as advisory
+   (warn-only) `loc-advisory:` lines — oversized files are addressed by
+   dedicated refactor stories, not by blocking unrelated PRs — and blocks on
+   backend / estimator boundary imports not in the explicit
+   `scripts/code-shape-baseline.json` allowlist.
 2. `packages` — each package's optional verify hook.
 
 ### How a package plugs into `make verify`

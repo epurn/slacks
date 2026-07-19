@@ -58,6 +58,7 @@ from app.estimator.branded_routing import (
     is_evidence_brand_compatible,
     product_hint,
 )
+from app.estimator.degrade import DegradeProducer
 from app.estimator.evidence_utils import _record_source_ref
 from app.estimator.food_resolvers import OffNameResolver, _ResolvedProduct
 from app.estimator.food_serving import NutritionFacts
@@ -89,6 +90,7 @@ from app.estimator.resolved_plausibility import (
     check_resolved_food_total,
     refit_assumption,
 )
+from app.estimator.run_budget import BudgetedProvider
 from app.estimator.search import (
     OFFICIAL_SOURCE,
     OFFICIAL_SOURCE_TYPE,
@@ -162,6 +164,10 @@ class OfficialSourceResolveStep:
     off_name_resolver: OffNameResolver | None = None
     model_prior_confidence_floor: float = DEFAULT_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR
     clarify_mode: EstimatorClarifyMode = "estimate_first"
+    #: The rough-estimate degrade producer (FTY-371) for the soft-degradation
+    #: fall-forward. Optional so a composition/unit test can inject a spy; when unset a
+    #: default is built from this step's own provider + rough-fallback config.
+    degrade_producer: DegradeProducer | None = None
     name: str = "official_source_resolve"
 
     def run(self, context: EstimationContext) -> None:
@@ -175,7 +181,19 @@ class OfficialSourceResolveStep:
 
         context.schema_version = OFFICIAL_SOURCE_SCHEMA_VERSION
 
+        # FTY-371 soft-degradation fall-forward: once this slow multi-component
+        # resolution crosses the soft budget, stop resolving exactly and switch every
+        # remaining candidate to the rough degrade producer, landing a completed /
+        # partially_resolved outcome inside the hard ceiling instead of breaching it.
+        degrade_reason: str | None = None
         for candidate in pending:
+            if degrade_reason is None:
+                degrade_reason = self._soft_degrade_reason()
+            if degrade_reason is not None:
+                context.resolved_food_items.append(
+                    self._degrade(context, candidate, degrade_reason)
+                )
+                continue
             try:
                 item = self._resolve(context, candidate)
             except NeedsClarification as exc:
@@ -186,11 +204,56 @@ class OfficialSourceResolveStep:
                 continue
             context.resolved_food_items.append(item)
 
-        # Every pending candidate is now resolved or collected as an item-scoped
-        # clarification; clear so the worker does not also persist them as unresolved
-        # leftovers (which would double-represent a component).
+        # Every pending candidate is now resolved, degraded, or collected as an
+        # item-scoped clarification; clear so the worker does not also persist them as
+        # unresolved leftovers (which would double-represent a component).
         context.pending_official_candidates.clear()
         context.record_step(self.name, "ok")
+
+    def _degrade(
+        self, context: EstimationContext, candidate: CandidateDraft, reason: str
+    ) -> ResolvedFoodItem:
+        """Fall forward: turn one remaining candidate into a rough degraded estimate.
+
+        Primary (bounded model-prior) mode when the run still has hard-ceiling headroom,
+        else the provider-free deterministic prior — either way a ``resolved`` rough row.
+        """
+
+        index = trace_candidate_index(context, candidate)
+        candidate = current_food_candidate(context, candidate, index)
+        return self._degrade_producer().degrade_food_candidate(
+            context,
+            candidate,
+            reason=reason,
+            index=index,
+            budget_free=not self._has_provider_headroom(),
+        )
+
+    def _soft_degrade_reason(self) -> str | None:
+        """The soft-budget crossing label, or ``None`` when the run has headroom.
+
+        Only a :class:`BudgetedProvider` carries the run budget; a composition test with
+        a bare provider never soft-degrades (``None``), keeping its exact-resolution path.
+        """
+
+        provider = self.provider
+        return provider.soft_budget_reason() if isinstance(provider, BudgetedProvider) else None
+
+    def _has_provider_headroom(self) -> bool:
+        """Whether the degrade producer's primary mode may still spend a provider call."""
+
+        provider = self.provider
+        return provider.can_make_provider_call() if isinstance(provider, BudgetedProvider) else True
+
+    def _degrade_producer(self) -> DegradeProducer:
+        """The injected degrade producer, or a default built from this step's config."""
+
+        return self.degrade_producer or DegradeProducer(
+            provider=self.provider,
+            clarify_mode=self.clarify_mode,
+            model_prior_confidence_floor=self.model_prior_confidence_floor,
+            step_name=self.name,
+        )
 
     def _resolve(
         self,

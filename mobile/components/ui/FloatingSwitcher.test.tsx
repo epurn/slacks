@@ -256,7 +256,7 @@ describe('FloatingSwitcher — pressed feedback (FTY-323)', () => {
   });
 });
 
-describe('FloatingSwitcher — active capsule motion (FTY-323)', () => {
+describe('FloatingSwitcher — active capsule motion (FTY-323, native-driver FTY-387)', () => {
   const FAKE_ANIM = {
     start: (cb?: (r: { finished: boolean }) => void) => cb?.({ finished: true }),
     stop: () => {},
@@ -267,19 +267,41 @@ describe('FloatingSwitcher — active capsule motion (FTY-323)', () => {
     springSpy = jest.spyOn(Animated, 'spring').mockReturnValue(FAKE_ANIM as never);
   });
 
+  // The capsule box is fixed at `left: 0` / `width: baseWidth`; its resting
+  // rect is reached via a `[{ translateX }, { scaleX }]` transform. Segments in
+  // the fixture: index {x: 4, width: 92}, trends {x: 100, width: 98}. baseWidth
+  // is the first measured active segment's width (index → 92). So the trends
+  // resting transform is translateX = 100 + 98/2 - 92/2 = 103, scaleX = 98/92.
+  const capsuleTransform = (tree: ReactTestRenderer) => {
+    const capsule = tree.root.find((n) => n.props.testID === 'floating-switcher-capsule');
+    const flat = StyleSheet.flatten(capsule.props.style) as {
+      left?: number;
+      width?: number;
+      transform?: Array<Record<string, { __getValue?: () => number }>>;
+    };
+    const get = (key: 'translateX' | 'scaleX') => {
+      const entry = flat.transform?.find((t) => key in t);
+      return entry?.[key]?.__getValue?.();
+    };
+    return { left: flat.left, width: flat.width, translateX: get('translateX'), scaleX: get('scaleX') };
+  };
+
   it('snaps into place on initial layout — no spring on mount', () => {
     const tree = renderSwitcher('light', 'index');
     layoutSegments(tree);
 
     expect(springSpy).not.toHaveBeenCalled();
 
-    const capsule = tree.root.find((n) => n.props.testID === 'floating-switcher-capsule');
-    const flat = StyleSheet.flatten(capsule.props.style) as { left?: unknown; width?: unknown };
-    expect((flat.left as { __getValue?: () => number }).__getValue?.()).toBe(4);
-    expect((flat.width as { __getValue?: () => number }).__getValue?.()).toBe(92);
+    // The fixed box adopts the first active segment's width; the transform sits
+    // at that segment's x with an identity scale — no animate-in from origin.
+    const t = capsuleTransform(tree);
+    expect(t.left).toBe(0);
+    expect(t.width).toBe(92);
+    expect(t.translateX).toBe(4);
+    expect(t.scaleX).toBe(1);
   });
 
-  it('animates the capsule across with Animated.spring when the active segment changes', () => {
+  it('animates the capsule across with a native-driver spring when the active segment changes', () => {
     const tree = renderSwitcher('light', 'index');
     layoutSegments(tree);
     springSpy.mockClear();
@@ -287,12 +309,14 @@ describe('FloatingSwitcher — active capsule motion (FTY-323)', () => {
     updateSwitcher(tree, 'light', 'trends');
 
     expect(springSpy).toHaveBeenCalled();
-    // Both axes (position and width) animate, since the two labels differ in width.
-    expect(springSpy.mock.calls.some((call) => call[1]?.toValue === 100)).toBe(true);
-    expect(springSpy.mock.calls.some((call) => call[1]?.toValue === 98)).toBe(true);
-    // Springs the raised capsule with useNativeDriver: false (left/width can't
-    // run on the native driver) using the shared short-spring config.
-    expect(springSpy.mock.calls.every((call) => call[1]?.useNativeDriver === false)).toBe(true);
+    // Both axes (translate and scale) animate, since the two labels differ in width.
+    expect(springSpy.mock.calls.some((call) => call[1]?.toValue === 103)).toBe(true);
+    expect(springSpy.mock.calls.some((call) => call[1]?.toValue === 98 / 92)).toBe(true);
+    // The selection-change transit runs on the native driver (transforms are
+    // UI-thread-eligible), so it survives a JS-thread stall on the cold Trends
+    // mount (FTY-387). No `left`/`width` spring remains on the selection path.
+    expect(springSpy.mock.calls.every((call) => call[1]?.useNativeDriver === true)).toBe(true);
+    expect(springSpy.mock.calls.every((call) => call[1]?.toValue !== 100)).toBe(true);
   });
 
   it('a re-layout of the still-active segment (Dynamic Type) snaps without a spring', () => {
@@ -307,6 +331,11 @@ describe('FloatingSwitcher — active capsule motion (FTY-323)', () => {
     });
 
     expect(springSpy).not.toHaveBeenCalled();
+    // The base box is unchanged; the same-segment re-snap is expressed via the
+    // transform (scaleX 110/92) so the resting rect still tracks the new width.
+    const t = capsuleTransform(tree);
+    expect(t.width).toBe(92);
+    expect(t.scaleX).toBe(110 / 92);
   });
 
   it('Reduce Motion: swaps the capsule position instantly instead of springing', () => {
@@ -318,9 +347,8 @@ describe('FloatingSwitcher — active capsule motion (FTY-323)', () => {
     updateSwitcher(tree, 'light', 'trends');
 
     expect(springSpy).not.toHaveBeenCalled();
-    const capsule = tree.root.find((n) => n.props.testID === 'floating-switcher-capsule');
-    const flat = StyleSheet.flatten(capsule.props.style) as { left?: unknown; width?: unknown };
-    expect((flat.left as { __getValue?: () => number }).__getValue?.()).toBe(100);
-    expect((flat.width as { __getValue?: () => number }).__getValue?.()).toBe(98);
+    const t = capsuleTransform(tree);
+    expect(t.translateX).toBe(103);
+    expect(t.scaleX).toBe(98 / 92);
   });
 });

@@ -61,9 +61,15 @@ def seed_food_item(
     protein_g: float | None = 4.0,
     carbs_g: float | None = 44.0,
     fat_g: float | None = 0.4,
+    grams: float | None = 150.0,
     snapshot: bool = True,
 ) -> uuid.UUID:
-    """Insert a resolved ``derived_food_items`` row and return its id."""
+    """Insert a resolved ``derived_food_items`` row and return its id.
+
+    ``grams`` is the resolved portion mass the facts were scaled by; pass ``None`` to
+    seed an item that carries no usable portion mass (e.g. the FTY-386 residual case
+    where a serving-less re-match still has to clarify).
+    """
 
     event_id = _seed_event(db_engine, user_id)
     factory = create_session_factory(db_engine)
@@ -76,7 +82,7 @@ def seed_food_item(
             unit=None,
             amount=amount,
             status=DerivedItemStatus.RESOLVED,
-            grams=150.0,
+            grams=grams,
             calories=calories,
             protein_g=protein_g,
             carbs_g=carbs_g,

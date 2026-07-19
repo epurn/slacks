@@ -122,7 +122,7 @@ def _is_resolution_deferrable(candidate: CandidateDraft) -> bool:
 
     return (
         _is_official_eligible(candidate)
-        or has_food_detail(candidate.amount, candidate.quantity_text)
+        or has_food_detail(candidate.amount, candidate.quantity_text, candidate.unit)
         or has_stated_nutrition(
             candidate.stated_calories,
             candidate.stated_protein_g,
