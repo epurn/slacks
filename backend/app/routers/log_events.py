@@ -45,7 +45,12 @@ from app.db import get_session
 from app.deps import CurrentUser
 from app.estimator.enqueue import EstimationEnqueuer, get_enqueuer
 from app.estimator.label_step import LabelInput
-from app.estimator.label_upload import LabelProcessor, get_label_processor
+from app.estimator.label_upload import (
+    LabelExtractionUnavailable,
+    LabelProcessor,
+    get_label_processor,
+    purge_label_extraction,
+)
 from app.routers.log_event_multipart import (
     MULTIPART_CREATE_OPENAPI,
     register_multipart_create_route,
@@ -175,8 +180,11 @@ def upload_label_event(
     ``pending`` event, then the FTY-061 label pipeline resolves it synchronously:
     the raw image only ever lives in this request (it is never enqueued), and is
     retained as a ``log_attachment`` only when ``save`` is set, discarded by
-    default. Returns the event at its post-extraction status. Errors carry only an
-    HTTP status — never image bytes or extracted content.
+    default. Returns the event at its post-extraction status. A transient
+    vision-provider failure that exhausts the seam's bounded in-request retry budget
+    returns a retryable ``503`` with **nothing persisted** (FTY-390): the client still
+    holds the image and retries. Errors carry only an HTTP status — never image bytes or
+    extracted content.
     """
 
     try:
@@ -201,7 +209,21 @@ def upload_label_event(
         raise _NOT_FOUND from exc
 
     label = LabelInput(data=data, content_type=canonical_type, save=save)
-    process_label(session, log_event_id=event.id, user_id=event.user_id, label_upload=label)
+    try:
+        process_label(session, log_event_id=event.id, user_id=event.user_id, label_upload=label)
+    except LabelExtractionUnavailable as exc:
+        # FTY-390: a transient vision-provider blip exhausted the seam's bounded
+        # in-request retry budget. Roll back and purge every row this upload created so
+        # nothing persists (no event / food / evidence / attachment, even on save=true),
+        # then return a retryable 503 — the client still holds the image and retries,
+        # so the timeline is never littered with a dead ``failed`` entry
+        # (``label-upload.md``). The 503 body is content-free.
+        session.rollback()
+        purge_label_extraction(session, event.id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="label extraction is temporarily unavailable",
+        ) from exc
     session.refresh(event)
     return LogEventDTO.model_validate(event)
 
