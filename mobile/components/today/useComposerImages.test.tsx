@@ -177,6 +177,32 @@ describe("useComposerImages", () => {
     expect(captured.value.attachError).toMatch(new RegExp(`up to ${MAX_SUBMISSION_IMAGES}`));
   });
 
+  it("prefers the specific size/type message over the count message when a batch trips both", async () => {
+    // A single multi-select batch that both contains an oversize image AND
+    // pushes past the 4-photo ceiling. The specific size reason is the more
+    // useful one to surface, so the generic count message must not clobber it.
+    const batch = [
+      image({ uri: "file:///0.jpg" }),
+      image({ uri: "file:///big.jpg", size: MAX_UPLOAD_BYTES + 1 }),
+      image({ uri: "file:///1.jpg" }),
+      image({ uri: "file:///2.jpg" }),
+      image({ uri: "file:///3.jpg" }),
+      image({ uri: "file:///4.jpg" }),
+    ];
+    const { captured } = renderHook({
+      presentSourceChooser: jest.fn().mockResolvedValue("library"),
+      pickFromLibrary: jest.fn().mockResolvedValue(batch),
+    });
+
+    await act(async () => {
+      await captured.value.attach();
+    });
+
+    expect(captured.value.images).toHaveLength(MAX_SUBMISSION_IMAGES);
+    expect(captured.value.attachError).toMatch(/too large/i);
+    expect(captured.value.attachError).not.toMatch(new RegExp(`up to ${MAX_SUBMISSION_IMAGES}`));
+  });
+
   it("refuses to attach once already at the limit", async () => {
     const pick = jest
       .fn()

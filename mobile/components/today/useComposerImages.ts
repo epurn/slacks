@@ -207,21 +207,27 @@ export function useComposerImages(
     if (!picked || picked.length === 0) return; // cancelled
 
     const accepted: ComposerImage[] = [];
-    let rejected = false;
+    let countLimited = false;
+    let guardRejected = false;
     for (const image of picked) {
       if (images.length + accepted.length >= MAX_SUBMISSION_IMAGES) {
-        rejected = true;
+        countLimited = true;
         break;
       }
       try {
         validateImageGuard(image.size, image.type);
         accepted.push(image);
       } catch (error) {
-        rejected = true;
+        guardRejected = true;
         setAttachError(guardMessage(error));
       }
     }
-    if (rejected && accepted.length + images.length >= MAX_SUBMISSION_IMAGES) {
+    // A size/type rejection carries the specific, more useful reason (set
+    // above), so it wins over the generic count-limit message when a
+    // multi-select batch trips both (an oversize/wrong-type image AND the
+    // 4-photo ceiling). Only surface the count message when the count limit was
+    // the sole reason anything was dropped.
+    if (countLimited && !guardRejected) {
       setAttachError(`You can attach up to ${MAX_SUBMISSION_IMAGES} photos.`);
     }
     if (accepted.length > 0) {

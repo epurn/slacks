@@ -30,6 +30,7 @@ import {
   inputValue,
   mount,
   press,
+  savedFood,
   textContent,
   typeInto,
 } from "./today/todayTestUtils";
@@ -266,5 +267,76 @@ describe("TodayScreen composer image attachment", () => {
     expect(hasA11yLabel(tree, "Attached photo 1")).toBe(true);
     expect(inputValue(tree, "Log food or exercise")).toBe("2 of these bars");
     expect(textContent(tree)).toContain("That photo is too large to upload.");
+  });
+});
+
+describe("TodayScreen image submit after a saved-food chip is selected", () => {
+  // The typeahead debounce (TypeaheadSuggestionBar) runs on a timer.
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  it("routes a saved-food-then-photo submit through the estimator (no synthetic saved-food row)", async () => {
+    // Selecting a saved-food suggestion sets selectedSavedFood AND fills the
+    // composer via the raw setter (TodayScreen onSelectSavedFood), so the ref is
+    // still armed when the user then attaches a photo. A photo submission is
+    // NEVER an estimator-skip (submit-routing contract) — the image path must
+    // insert a plain pending row, not the saved food's synthetic resolved item.
+    const yogurt = savedFood(); // Greek yogurt, 200 kcal
+    const searchSavedFoods = jest
+      .fn()
+      .mockResolvedValue({ items: [yogurt], limit: 20 });
+    const create = jest.fn();
+    let resolveCreate!: (dto: LogEventDTO) => void;
+    const createWithImages = jest.fn().mockReturnValue(
+      new Promise<LogEventDTO>((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={jest.fn().mockResolvedValue([])}
+        create={create}
+        createWithImages={createWithImages}
+        searchSavedFoods={searchSavedFoods}
+        getClarification={emptyClarification()}
+        useActive={INACTIVE}
+        composerImagePickers={libraryPickers()}
+        generateKey={() => "img-key-saved"}
+      />,
+    );
+    await act(async () => {});
+
+    // Type, let the debounce fire, and tap the saved-food suggestion.
+    typeInto(tree, "Log food or exercise", "greek");
+    await act(async () => {
+      jest.advanceTimersByTime(400);
+    });
+    press(tree, "Use saved food: Greek yogurt");
+
+    // Now attach a photo and submit: the image path must win.
+    await act(async () => {
+      press(tree, "Attach photo");
+    });
+    await act(async () => {
+      press(tree, "Add entry");
+    });
+
+    // The multipart (photo) path ran, not the JSON saved-food path.
+    expect(createWithImages).toHaveBeenCalledTimes(1);
+    expect(create).not.toHaveBeenCalled();
+
+    // Estimator is NOT skipped: a plain pending skeleton, never the saved food's
+    // synthetic resolved row (which would show its 200-kcal nutrition at once).
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+    expect(textContent(tree)).not.toContain("200");
+
+    // Reconcile the create — still a single pending row, still no injected item.
+    await act(async () => {
+      resolveCreate(event({ id: "server-img-saved", raw_text: "Greek yogurt", status: "pending" }));
+    });
+    expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+    expect(textContent(tree)).not.toContain("200");
   });
 });

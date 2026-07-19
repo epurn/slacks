@@ -199,7 +199,19 @@ export function useTodaySubmit({
 
       // Immediate acknowledgement: the pending row appears and the composer
       // clears (text here, thumbnails in the caller) before the round-trip.
-      submitBridge.insertOptimistic(optimistic);
+      //
+      // Unlike the saved-food "Add" path, an image submit NEVER injects a
+      // synthetic resolved saved-food item — a photo is resolved server-side by
+      // the estimator, so it is never an estimator-skip (the submit-routing
+      // contract in useTodayData: "images take precedence over an in-flight
+      // saved-food chip hydration"). We insert a plain pending row and drop any
+      // in-flight saved-food selection so a stale chip can't mislabel this
+      // photo submission. Deliberately NOT reusing submitBridge.insertOptimistic
+      // (which reads selectedSavedFoodRef and injects the synthetic item) and
+      // NOT recording this row in pendingSavedFoodById — so the failure rollback
+      // below removes the pending row without resurrecting a saved-food chip.
+      setEvents((prev) => sortByNewest([optimistic, ...prev]));
+      setSelectedSavedFood(null);
       setText("");
       setSubmitting(true);
       setSubmitError(null);
@@ -231,6 +243,8 @@ export function useTodaySubmit({
       generateKey,
       now,
       submitBridge,
+      setEvents,
+      setSelectedSavedFood,
       setText,
       setSubmitting,
       setSubmitError,
