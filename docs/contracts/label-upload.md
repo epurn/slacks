@@ -35,6 +35,16 @@ the FTY-061 `label_pipeline`, and the FTY-030 `LogEventDTO`.
 
 ## Version
 
+3 (FTY-390): a **transient (retryable) vision-provider failure no longer resolves to
+terminal `failed`.** The in-request seam retries a transiently-failed extraction a
+bounded number of times with a short backoff, capped by an overall in-request deadline;
+when that budget is exhausted the request returns a **retryable `503`** with **nothing
+persisted** (no event, `derived_food_items`, `evidence_sources`, or `log_attachments`
+row, regardless of `save`). This is a pre-v1 clean-break on the transient-failure
+outcome only — terminal `failed` stays reserved for genuinely-not-a-label / invalid
+input, matching FTY-370. The wire shape, validation, retention, and FTY-196
+confirmation gate are unchanged. See **Outputs** and **Errors** below.
+
 2 (FTY-306, contract only): the **label exact-upgrade** entry point
 (`food-resolution.md`, **Exact Evidence Upgrade Routing — FTY-306**) reuses this
 boundary's wire shape, fail-closed image validation, and retention semantics to
@@ -64,11 +74,20 @@ this product" case.
 A `LogEventDTO` (FTY-030) at status `201 Created`. Because extraction is
 synchronous, the returned event is already at its **post-extraction** status:
 `completed` (legible panel), `needs_clarification` (unreadable / unresolvable), or
-`failed` (not a label / invalid image, **or a transient provider error**). The
-in-request seam runs a single attempt with no scheduler to honor a retry, so a
-transient (retryable) vision-provider failure resolves to terminal `failed`
-rather than a dead-end `processing`; the client retries by uploading again. The
-event's `raw_text` is a fixed,
+`failed` (not a label / invalid image). A **transient** (retryable) vision-provider
+failure is **not** a `201` outcome (FTY-390): the in-request seam retries a
+transiently-failed extraction a bounded number of times with a short backoff, capped by
+an overall in-request deadline (the endpoint stays synchronous — a label extraction is a
+single vision call). If that budget is exhausted the request returns a **retryable
+`503`** (see **Errors**) with **nothing persisted** — no log event,
+`derived_food_items`, `evidence_sources`, or `log_attachments` row, regardless of
+`save` — so the client, which still holds the image locally, can retry without a
+dead-end `processing` state or a `failed` timeline entry. A retry after a `503`
+therefore creates at most one event on eventual success. This mirrors the FTY-309 label
+exact-upgrade sibling route, which already returns a retryable `503` on vision-provider
+failure; the raw image is still never enqueued, written to disk, or logged on any
+attempt or on exhaustion. Terminal `failed` stays reserved for genuinely-not-a-label /
+invalid-image input (FTY-370). The event's `raw_text` is a fixed,
 content-free marker (`"Nutrition label photo"`) — a label carries no
 natural-language text; the food facts come from the extracted panel and are
 persisted by the FTY-061 pipeline (a `derived_food_items` row + a `user_label`
@@ -127,6 +146,7 @@ token is `401`.
 | Body is not an allowed image type / bytes mismatch the type | `415` | generic upload-failed |
 | Missing / invalid bearer token | `401` | "Your session has expired…" |
 | `{user_id}` not owned by the caller (or unknown) | `404` | generic upload-failed |
+| Transient vision-provider failure exhausted the in-request retry budget (FTY-390) | `503` | generic upload-failed (retryable; nothing persisted, the client retries) |
 | Any other non-2xx | as returned | "We couldn't upload the label (status …)." |
 
 The client additionally fails closed **before** the network call on an oversize or
