@@ -179,6 +179,14 @@ class ProcessResult:
     re-queue and left ``None`` for a standard transient retry (the caller then uses its
     own :func:`retry_countdown` schedule), and is always ``None`` when ``should_retry`` is
     ``False``.
+
+    ``transient_exhausted`` is set only on the **synchronous label** path (FTY-390):
+    a transient (retryable) vision-provider failure that ran out of the in-request
+    attempt budget did **not** land terminal ``failed`` — the event is left
+    non-terminal and this flag tells the in-request caller to roll back and return a
+    retryable ``503`` with nothing persisted (``label-upload.md``). It is always
+    ``False`` for the asynchronous worker, whose transient exhaustion is routed by the
+    FTY-372 never-fail degrade/still-working split instead.
     """
 
     job_status: EstimationJobStatus
@@ -187,6 +195,7 @@ class ProcessResult:
     attempts: int
     should_retry: bool
     retry_countdown_seconds: int | None = None
+    transient_exhausted: bool = False
 
 
 def _get_or_create_job(
@@ -578,6 +587,7 @@ def process_estimation(
     label_upload: LabelInput | None = None,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     degrade_producer: DegradeProducer | None = None,
+    synchronous_label: bool = False,
 ) -> ProcessResult:
     """Run one estimation attempt for ``log_event_id``, idempotently.
 
@@ -590,6 +600,12 @@ def process_estimation(
     read by the v2 vision provider rather than the text parsed), and after
     extraction the raw image is retained only on an explicit save (FTY-077),
     discarded by default.
+
+    ``synchronous_label`` marks the in-request label-upload seam (FTY-390): a
+    transient (retryable) provider failure that exhausts ``max_attempts`` is **not**
+    committed as terminal ``failed`` but surfaced via
+    :attr:`ProcessResult.transient_exhausted`, so the route rolls back and returns a
+    retryable ``503``. It is ``False`` (and irrelevant) for the asynchronous worker.
     """
 
     if pipeline is None:
@@ -702,10 +718,12 @@ def process_estimation(
         result,
         context,
         degrade_producer=degrade_producer,
-        # The synchronous label path (a ``label_upload``, no retry scheduler) keeps the
-        # older terminal-``failed`` behaviour on infra exhaustion; the async NL worker
-        # applies the FTY-372 never-fail routing.
+        # The async NL worker applies the FTY-372 never-fail degrade/still-working
+        # routing on infra exhaustion; the synchronous label path opts out of that
+        # (no scheduler) and instead surfaces a transient exhaustion for the route to
+        # turn into a retryable ``503`` (FTY-390).
         allow_infra_never_fail=label_upload is None,
+        synchronous_label=synchronous_label,
     )
 
     if label_upload is not None:
@@ -743,6 +761,7 @@ def _finalize(
     *,
     degrade_producer: DegradeProducer | None = None,
     allow_infra_never_fail: bool = True,
+    synchronous_label: bool = False,
 ) -> ProcessResult:
     """Apply the pipeline outcome to the run, job, and event, and commit.
 
@@ -761,10 +780,17 @@ def _finalize(
     ``allow_infra_never_fail`` gates the FTY-372 never-fail infra routing. It is
     ``True`` for the asynchronous NL food/exercise worker (a per-run ceiling breach or a
     transient-exhaustion degrades to a rough estimate or stays still-working). It is
-    ``False`` for the **synchronous label upload** path (``max_attempts=1``, no scheduler
-    to honour a retry): there a still-working ``processing`` state would be a dead end the
-    client polls forever, so an infra exhaustion stays terminal ``failed`` and the client
-    re-uploads (``label-upload.md``).
+    ``False`` for the **synchronous label upload** path (no async scheduler): a
+    still-working ``processing`` state would be a dead end the client polls forever.
+
+    ``synchronous_label`` (FTY-390) then routes that path's transient exhaustion: rather
+    than the old terminal ``failed`` (the infrastructure-rejects-good-faith-input sin on
+    the label-photo path), a transient (retryable) exhaustion leaves the event
+    non-terminal and is surfaced via :attr:`ProcessResult.transient_exhausted`, so the
+    in-request route rolls back and returns a retryable ``503`` with nothing persisted
+    (``label-upload.md``). Terminal ``failed`` stays reserved for genuinely-not-a-label
+    input and the fail-closed validation gates (FTY-370). A label-path per-run budget
+    breach — not a transient error — still lands terminal ``failed`` here.
     """
 
     outcome = result.outcome
@@ -806,24 +832,69 @@ def _finalize(
         transition_event(session, event, LogEventStatus.PARTIALLY_RESOLVED)
         return _result(job, event, run, should_retry=False)
 
-    # Failed. Route by failure class (FTY-372 never-fail semantics):
-    #
-    # - an **infrastructure** failure — a per-run ceiling breach (FTY-363) or a transient
-    #   failure that exhausted the attempt-level bound — never lands terminal ``failed``:
-    #   it degrades to a rough estimate when the run interpreted anything, else keeps the
-    #   event in the honest still-working ``processing`` state;
-    # - a transient failure with attempts remaining takes a standard bounded retry;
-    # - a deterministic, non-retryable, non-budget failure (``empty_input`` / the narrowed
-    #   ``unparseable_input`` / a fail-closed validation gate) is terminal ``failed``;
-    # - the synchronous label path (``allow_infra_never_fail`` False) keeps the older
-    #   terminal-``failed`` behaviour on infra exhaustion (no scheduler to retry).
-    infra_exhaustion = is_run_budget_breach(result.error) or (
-        result.retryable and job.attempts >= job.max_attempts
+    # Failed: routed by failure class in a dedicated helper (keeps this dispatcher small).
+    return _finalize_failed(
+        session,
+        job,
+        event,
+        run,
+        result,
+        context,
+        degrade_producer=degrade_producer,
+        allow_infra_never_fail=allow_infra_never_fail,
+        synchronous_label=synchronous_label,
     )
+
+
+def _finalize_failed(
+    session: Session,
+    job: EstimationJob,
+    event: LogEvent,
+    run: EstimationRun,
+    result: PipelineResult,
+    context: EstimationContext,
+    *,
+    degrade_producer: DegradeProducer | None,
+    allow_infra_never_fail: bool,
+    synchronous_label: bool,
+) -> ProcessResult:
+    """Route a ``FAILED`` pipeline outcome by failure class (FTY-372 + FTY-390).
+
+    - on the **async worker** an infrastructure failure — a per-run ceiling breach
+      (FTY-363) or a transient failure that exhausted the attempt-level bound — never
+      lands terminal ``failed``: it degrades to a rough estimate when the run interpreted
+      anything, else keeps the event in the honest still-working ``processing`` state;
+    - on the **synchronous label** path a transient exhaustion likewise never lands
+      terminal ``failed`` (FTY-390): the event is left non-terminal and the exhaustion is
+      surfaced (``transient_exhausted``) so the in-request route rolls back and returns a
+      retryable ``503`` with nothing persisted (``label-upload.md``);
+    - a transient failure with attempts remaining takes a standard bounded retry;
+    - a deterministic, non-retryable, non-budget failure (``empty_input`` / the narrowed
+      ``unparseable_input`` / a fail-closed validation gate, or a label-path per-run
+      budget breach) is terminal ``failed``.
+    """
+
+    transient_exhausted = result.retryable and job.attempts >= job.max_attempts
+    infra_exhaustion = is_run_budget_breach(result.error) or transient_exhausted
     if allow_infra_never_fail and infra_exhaustion:
         return _degrade_or_still_working(
             session, job, event, run, result, context, degrade_producer=degrade_producer
         )
+
+    if synchronous_label and transient_exhausted:
+        # The synchronous label upload ran out of its bounded in-request retry budget on a
+        # transient (retryable) vision-provider error. Keep the event non-terminal (a failed
+        # retry outcome persists no derived data — the step failed closed) and surface the
+        # exhaustion; the route discards this event and returns a retryable ``503`` so the
+        # client, which still holds the image locally, can retry without a dead ``failed``
+        # entry (FTY-390). Terminal ``failed`` stays reserved for genuinely-not-a-label
+        # input (FTY-370).
+        run.status = EstimationRunStatus.FAILED
+        run.error = result.error
+        job.status = EstimationJobStatus.RUNNING
+        session.add_all([run, job])
+        session.commit()
+        return _result(job, event, run, should_retry=False, transient_exhausted=True)
 
     if result.retryable and job.attempts < job.max_attempts:
         # Retries remain: keep the job ``running`` and the event ``processing``.
@@ -835,8 +906,8 @@ def _finalize(
         return _result(job, event, run, should_retry=True)
 
     # Deterministic non-food/empty input (or a fail-closed validation gate, or a label-path
-    # infra exhaustion): terminal ``failed`` with nothing persisted. Purge transient images
-    # atomically with the write.
+    # per-run budget breach): terminal ``failed`` with nothing persisted. Purge transient
+    # images atomically with the write.
     run.status = EstimationRunStatus.FAILED
     run.error = result.error
     job.status = EstimationJobStatus.FAILED
@@ -1018,6 +1089,7 @@ def _result(
     *,
     should_retry: bool,
     retry_countdown_seconds: int | None = None,
+    transient_exhausted: bool = False,
 ) -> ProcessResult:
     """Build a :class:`ProcessResult` snapshot from the post-commit state."""
 
@@ -1028,4 +1100,5 @@ def _result(
         attempts=job.attempts,
         should_retry=should_retry,
         retry_countdown_seconds=retry_countdown_seconds,
+        transient_exhausted=transient_exhausted,
     )
