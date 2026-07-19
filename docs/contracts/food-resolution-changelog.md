@@ -291,45 +291,6 @@ pipeline expected. No schema/migration/serving-math change in this story; the
 estimator work is the **downstream FTY-280 follow-up** and the FTY-278/FTY-275
 baseline ships until then. See **User-Stated Resolution (FTY-279)** below.
 
-1 (FTY-044). The source system id `usda_fdc` is recorded on run evidence and on each
-cached product / evidence row.
-
-2 (FTY-060) adds the **Open Food Facts barcode source** *above* USDA generic in the
-source hierarchy (a confident packaged-product match is preferred over a generic
-estimate for the same input), without changing the FTY-044 USDA path or its math. The
-source system id `open_food_facts` (source type `product_database`) is recorded on run
-evidence and on each cached product / evidence row it produces. See **Barcode Source
-(Open Food Facts)** below.
-
-3 (FTY-078) extends the shared `hardened_fetch` policy with an **official-source page
-fetch** (`fetch_text` → inert text) and its egress configuration, without changing the
-FTY-044 USDA path or the FTY-060 OFF path. This is the SSRF / egress prerequisite for
-official-source resolution (FTY-062); it ships no search adapter or resolution pipeline
-of its own. See **Official-Source Fetch Boundary (FTY-078)** below.
-
-4 (FTY-062) adds the **official-source resolution step** (`official_step.py`): a
-last-resort pipeline step that costs named restaurant / manufacturer / packaged
-products USDA and OFF cannot resolve, orchestrating the FTY-079 search adapter and the
-FTY-078 hardened fetch, and otherwise falling through to a **model-prior** estimate
-with an explicit source status. It adds the additive `evidence_sources.assumptions`
-column (`0012` migration) and an additive `brand` field on the parse candidate; it
-does not change the FTY-044 USDA, FTY-060 OFF, or FTY-061 label paths. See
-**Official-Source Resolution (FTY-062)** below.
-
-6 (FTY-167) **sharpened the generic-food clarification boundary** and widened the count
-vocabulary. If USDA/OFF could not cost a generic (unbranded) food, the resolver no
-longer always clarified:
-a **detail-rich** generic candidate (identity plus a usable amount — a count, a numeric
-range, or a measured quantity) is deferred to the official-source step and estimated
-from the **model prior** with an explicit `source_type = model_prior` status, exactly
-like the FTY-062 branded fallback but **skipping the official web search** (a generic
-food has no brand page to find). Under that historical boundary, only a generic food
-with **no usable amount** ("some crackers") still routed to `needs_clarification`; FTY-298
-supersedes that as the default and lets `strict` retain it. The serving math's count
-vocabulary also gains common serving/portion nouns (`slice`, `sandwich`, `handful`,
-`ring`, `finger`, …). No schema, migration, or serving-math change beyond the count
-vocabulary; the USDA/OFF/label/official paths and their plausibility gate are unchanged.
-
 9 (FTY-278, contract only) **makes any remaining amount clarification
 item-scoped** instead of whole-entry-terminal, routing a mixed log to the new
 first-class **`partially_resolved`** event status. Today (v8 and earlier) the food
@@ -388,6 +349,20 @@ like an official page, recorded as `source_type = reference_source` with
 also fails, with per-tier reasons in `assumptions`. See
 `evidence-retrieval.md` (**Reference-Source Fallback — FTY-166**).
 
+6 (FTY-167) **sharpened the generic-food clarification boundary** and widened the count
+vocabulary. If USDA/OFF could not cost a generic (unbranded) food, the resolver no
+longer always clarified:
+a **detail-rich** generic candidate (identity plus a usable amount — a count, a numeric
+range, or a measured quantity) is deferred to the official-source step and estimated
+from the **model prior** with an explicit `source_type = model_prior` status, exactly
+like the FTY-062 branded fallback but **skipping the official web search** (a generic
+food has no brand page to find). Under that historical boundary, only a generic food
+with **no usable amount** ("some crackers") still routed to `needs_clarification`; FTY-298
+supersedes that as the default and lets `strict` retain it. The serving math's count
+vocabulary also gains common serving/portion nouns (`slice`, `sandwich`, `handful`,
+`ring`, `finger`, …). No schema, migration, or serving-math change beyond the count
+vocabulary; the USDA/OFF/label/official paths and their plausibility gate are unchanged.
+
 5 (FTY-093) adds **item re-match** — a *list-alternatives* + *re-resolve-to-chosen-source*
 capability over an existing `derived_food_items` row. It adds `FdcClient.list_matches`
 (the USDA list-candidates path, surfacing every energy-bearing match rather than the
@@ -398,3 +373,28 @@ split, and the hardened-fetch / `sanitize_query` boundaries unchanged. Re-resolv
 any prior `user_edit` so the item reads un-edited) — **no migration, no new table or
 column**. The contract lives in `evidence-retrieval.md` (**Item Re-match — FTY-093**);
 the re-snapshot-not-`user_edit` distinction is documented there and in `corrections.md`.
+
+4 (FTY-062) adds the **official-source resolution step** (`official_step.py`): a
+last-resort pipeline step that costs named restaurant / manufacturer / packaged
+products USDA and OFF cannot resolve, orchestrating the FTY-079 search adapter and the
+FTY-078 hardened fetch, and otherwise falling through to a **model-prior** estimate
+with an explicit source status. It adds the additive `evidence_sources.assumptions`
+column (`0012` migration) and an additive `brand` field on the parse candidate; it
+does not change the FTY-044 USDA, FTY-060 OFF, or FTY-061 label paths. See
+**Official-Source Resolution (FTY-062)** below.
+
+3 (FTY-078) extends the shared `hardened_fetch` policy with an **official-source page
+fetch** (`fetch_text` → inert text) and its egress configuration, without changing the
+FTY-044 USDA path or the FTY-060 OFF path. This is the SSRF / egress prerequisite for
+official-source resolution (FTY-062); it ships no search adapter or resolution pipeline
+of its own. See **Official-Source Fetch Boundary (FTY-078)** below.
+
+2 (FTY-060) adds the **Open Food Facts barcode source** *above* USDA generic in the
+source hierarchy (a confident packaged-product match is preferred over a generic
+estimate for the same input), without changing the FTY-044 USDA path or its math. The
+source system id `open_food_facts` (source type `product_database`) is recorded on run
+evidence and on each cached product / evidence row it produces. See **Barcode Source
+(Open Food Facts)** below.
+
+1 (FTY-044). The source system id `usda_fdc` is recorded on run evidence and on each
+cached product / evidence row.
