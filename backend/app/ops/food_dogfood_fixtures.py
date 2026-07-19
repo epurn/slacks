@@ -62,6 +62,14 @@ class FixtureSpec:
     #: a derived item, and every matched item must cost inside its band, so the
     #: total band cannot be satisfied by an implausible split.
     expected_items: tuple[ItemBand, ...] = ()
+    #: Never-fail invariant (FTY-370/FTY-371/FTY-372). When set, the fixture only
+    #: has to reach a terminal **non-**``failed`` estimate — a rough degraded
+    #: ``completed`` or a ``partially_resolved`` both pass, but terminal ``failed``
+    #: (a deadline/budget/transient breach surfaced as a failed entry) does not.
+    #: The strict "a supplied count/amount must ``complete``" check stays the
+    #: default (``False``); this is for the informal/homemade/consumable phrases
+    #: whose contract is "estimated, never rejected", not exact resolution.
+    never_fail: bool = False
 
 
 _FIXTURES_PATH = Path(__file__).with_name("food_dogfood_fixtures.json")
@@ -120,6 +128,7 @@ def _fixture_from_dict(entry: Mapping[str, object]) -> FixtureSpec:
         ),
         forbid_substrings=_str_list(entry.get("forbid_substrings")),
         expected_items=_item_bands(entry.get("expected_items")),
+        never_fail=bool(entry.get("never_fail", False)),
     )
 
 
