@@ -55,6 +55,7 @@ Use contracts for:
 | [estimation-jobs.md](estimation-jobs.md) | Async estimation engine that turns pending log events into resolved food and exercise items |
 | [estimator-policy.md](estimator-policy.md) | Shared estimator clarification modes, last-resort ask policy, and rough-provenance requirements |
 | [evidence-retrieval.md](evidence-retrieval.md) | Source-backed estimation contracts defining the evidence hierarchy and lookup rules |
+| [exact-evidence-upgrade.md](exact-evidence-upgrade.md) | The correction sheet's `Make it exact` lever: barcode/label proposal read shape, exact-vs-fallback quality, and in-place source-replacement apply semantics |
 | [exercise-burn.md](exercise-burn.md) | Deterministic MET-based exercise burn calculation |
 | [food-resolution.md](food-resolution.md) | Deterministic generic-food resolution step using USDA and external sources |
 | [food-suggestions.md](food-suggestions.md) | Read-only contextual quick-add food suggestions ranked by deterministic time-aware frecency |
