@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.db import create_session_factory
 from app.enums import DerivedItemStatus, EstimationJobStatus, LogEventStatus
+from app.estimator.degrade import DegradeProducer, degraded_assumption
 from app.estimator.fdc import FDC_SOURCE, ProductFacts
 from app.estimator.food_resolvers import FoodResolver
 from app.estimator.food_serving import NutritionFacts
@@ -752,21 +753,27 @@ class _BudgetBreachStep:
             self._provider.structured_completion("scoped-reestimate", _Echo)
 
 
-def test_scoped_reestimate_run_budget_breach_fails_closed(
+def test_scoped_reestimate_run_budget_breach_degrades_component_preserves_sibling(
     client: TestClient, session: Session
 ) -> None:
-    """A per-run ceiling breach on the scoped path fails the whole run closed (FTY-363).
+    """A per-run ceiling breach on the scoped path degrades the answered component (FTY-372).
 
-    The reviewer's blocker: unlike a deterministic per-component failure (which reopens an
-    answerable question and keeps the event ``partially_resolved``), a ``RunBudgetExceeded``
-    during an answer-triggered re-estimate must terminate the run immediately —
-    ``processing → failed``, non-retryable, no extra attempt — not become a reopened
-    question.
+    FTY-363 shipped this as a terminal ``processing → failed``; FTY-372 replaces that with
+    the never-fail routing: the breached scoped re-estimate degrades the answered component
+    to a rough, budget-free estimate in place, the whole event completes, and the committed
+    ``resolved`` sibling is preserved untouched (never lost or double-counted). The run still
+    stops at the ceiling (bounded, no unbounded work) and the degrade makes **no** further
+    provider call.
     """
 
-    user_id, event_id, _resolved, _unresolved = _run_mixed_first_pass(
-        client, session, "fty363-scoped-budget@example.com"
+    user_id, event_id, resolved, unresolved = _run_mixed_first_pass(
+        client, session, "fty372-scoped-budget@example.com"
     )
+    sibling_before = {
+        "calories": resolved.calories,
+        "grams": resolved.grams,
+        "protein_g": resolved.protein_g,
+    }
     question = _questions(session, event_id)[0]
     current_user = session.get(User, user_id)
     assert current_user is not None
@@ -782,36 +789,64 @@ def test_scoped_reestimate_run_budget_breach_fails_closed(
         deadline_seconds=10_000.0,
     )
     scoped_pipeline = Pipeline([_BudgetBreachStep(budgeted)])
+    # Budget-free degrade producer: its provider must never be called (zero extra calls).
+    degrade_provider = FakeProvider()
 
     result = process_estimation(
-        session, log_event_id=event_id, user_id=user_id, pipeline=scoped_pipeline
+        session,
+        log_event_id=event_id,
+        user_id=user_id,
+        pipeline=scoped_pipeline,
+        degrade_producer=DegradeProducer(provider=degrade_provider),
     )
 
-    # Terminal, non-retryable, and bounded — the run stopped at the budget, not looped.
-    # This is the re-estimate attempt (the first pass was attempt 1); no further attempt is
-    # burned re-running an input that would hit the same bound.
-    assert result.event_status is LogEventStatus.FAILED
-    assert result.job_status is EstimationJobStatus.FAILED
+    # Never ``failed``: the whole event completes with the component degraded. The run still
+    # stopped at the budget (bounded, one call), and the degrade added zero provider calls.
+    assert result.event_status is LogEventStatus.COMPLETED
+    assert result.job_status is EstimationJobStatus.SUCCEEDED
     assert result.should_retry is False
     assert result.attempts == 2
     assert budgeted.calls_made == 1
+    assert degrade_provider.prompts == []  # budget-free degrade makes no provider call
+
+    # The sibling is byte-identical — never re-costed or double-counted.
+    chicken_after = session.get(DerivedFoodItem, resolved.id)
+    assert chicken_after is not None
+    assert chicken_after.status == DerivedItemStatus.RESOLVED
+    assert chicken_after.calories == sibling_before["calories"]
+    assert chicken_after.grams == sibling_before["grams"]
+    assert chicken_after.protein_g == sibling_before["protein_g"]
+    assert len(_foods(session, event_id)) == 2  # no duplicate row
+
+    # The answered component is now a rough, honestly-labelled degraded estimate.
+    milk_after = session.get(DerivedFoodItem, unresolved.id)
+    assert milk_after is not None
+    assert milk_after.status == DerivedItemStatus.RESOLVED
+    assert milk_after.calories is not None and milk_after.calories > 0
+    milk_evidence = next(
+        e for e in _evidence(session, event_id) if e.derived_food_item_id == unresolved.id
+    )
+    assert degraded_assumption(PROVIDER_CALL_BUDGET_EXCEEDED) in (milk_evidence.assumptions or [])
 
     # The recorded reason is the fixed content-free budget label, never the diary phrase.
     run = _latest_run(session, event_id)
-    assert run.error == PROVIDER_CALL_BUDGET_EXCEEDED
     assert "grilled chicken 150g and a glass of milk" not in repr((run.trace, run.error))
 
-    # No question was reopened: the run failed rather than becoming a fresh answerable ask.
+    # No open question survives: the completed event surfaces no answerable ask.
     open_questions = log_event_service.list_clarification_questions(
         session, user_id, current_user, event_id
     )
     assert open_questions == []
 
-    # A redelivery is an idempotent no-op — the terminal job burns no second attempt.
+    # A redelivery is an idempotent no-op — the terminal (succeeded) job burns no attempt.
     again = process_estimation(
-        session, log_event_id=event_id, user_id=user_id, pipeline=scoped_pipeline
+        session,
+        log_event_id=event_id,
+        user_id=user_id,
+        pipeline=scoped_pipeline,
+        degrade_producer=DegradeProducer(provider=FakeProvider()),
     )
-    assert again.job_status is EstimationJobStatus.FAILED
+    assert again.job_status is EstimationJobStatus.SUCCEEDED
     assert again.run_id is None
     assert again.attempts == 2
 

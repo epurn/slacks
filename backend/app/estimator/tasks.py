@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.db import create_db_engine, create_session_factory
 from app.estimator.processing import (
-    DEFAULT_MAX_ATTEMPTS,
+    DEFAULT_MAX_INFRA_RETRY_ATTEMPTS,
     process_estimation,
     retry_countdown,
 )
@@ -27,9 +27,11 @@ from app.worker import celery_app
 
 logger = logging.getLogger(__name__)
 
-#: Celery retry bound mirrors the processing core's attempt bound: the first try
-#: plus ``DEFAULT_MAX_ATTEMPTS - 1`` retries.
-MAX_RETRIES = DEFAULT_MAX_ATTEMPTS - 1
+#: Celery retry bound. Sized to the processing core's **extended** infra-retry ceiling
+#: (FTY-372) so the honest still-working / will-retry re-queues (bounded, long-backoff)
+#: are not cut short by Celery before the core's own ceiling stops them. The core remains
+#: the sole governor of whether a retry is due — this is only an upper safety bound.
+MAX_RETRIES = DEFAULT_MAX_INFRA_RETRY_ATTEMPTS - 1
 
 _session_factory: sessionmaker[Session] | None = None
 
@@ -76,7 +78,14 @@ def process_log_event_task(self: object, log_event_id: str, user_id: str) -> str
         )
 
     if result.should_retry:
-        countdown = retry_countdown(self.request.retries)  # type: ignore[attr-defined]
+        # The core owns the retry cadence: it reports the long infra backoff for a
+        # still-working re-queue (FTY-372) and leaves the countdown unset for a standard
+        # transient retry, where the task's own exponential schedule applies.
+        countdown = (
+            result.retry_countdown_seconds
+            if result.retry_countdown_seconds is not None
+            else retry_countdown(self.request.retries)  # type: ignore[attr-defined]
+        )
         logger.info(
             "estimation attempt failed; retrying",
             extra={

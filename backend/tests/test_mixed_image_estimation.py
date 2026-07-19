@@ -752,16 +752,32 @@ def test_completed_purges_transient_and_keeps_saved_images(session: Session, use
     assert [row.transient for row in remaining] == [False]
 
 
+class _InterpretThenBreachStep:
+    """Interpret one food candidate, then breach the per-run ceiling (FTY-372 degrade)."""
+
+    name = "interpret_then_breach"
+
+    def run(self, context: EstimationContext) -> None:
+        context.food_candidates.append(CandidateDraft(name="granola bar", quantity_text="2 bars"))
+        raise StepFailed(WALL_CLOCK_DEADLINE_EXCEEDED)
+
+
 @pytest.mark.parametrize(
     "error",
     [
         pytest.param(StepFailed("unparseable_input"), id="deterministic-step-failure"),
-        pytest.param(StepFailed(WALL_CLOCK_DEADLINE_EXCEEDED), id="run-budget-ceiling"),
+        pytest.param(StepFailed("empty_input"), id="empty-input"),
     ],
 )
 def test_terminal_failed_paths_purge_transient_images(
     session: Session, user: User, error: Exception
 ) -> None:
+    """A deterministic non-food terminal ``failed`` purges the transient images (FTY-376).
+
+    Only the deterministic classes stay terminal ``failed`` after FTY-372; an infra
+    exhaustion is no longer terminal, so it is excluded here (see the still-working test).
+    """
+
     event = _seed_image_event(session, user)
 
     result = process_estimation(
@@ -776,7 +792,32 @@ def test_terminal_failed_paths_purge_transient_images(
     assert _attachments_for(session, event.id) == []
 
 
-def test_retry_exhaustion_purges_transient_images_at_terminal(session: Session, user: User) -> None:
+def test_budget_breach_with_candidates_degrades_completes_and_purges(
+    session: Session, user: User
+) -> None:
+    """A ceiling breach with an interpreted candidate degrades to ``completed`` — an
+    event-terminal write, so the transient images are purged (FTY-372/FTY-376)."""
+
+    event = _seed_image_event(session, user)
+
+    result = process_estimation(
+        session,
+        log_event_id=event.id,
+        user_id=user.id,
+        pipeline=Pipeline([_InterpretThenBreachStep()]),
+    )
+
+    assert result.event_status is LogEventStatus.COMPLETED
+    assert _attachments_for(session, event.id) == []  # event-terminal degrade purges
+
+
+def test_infra_exhaustion_with_nothing_interpreted_retains_transient_images(
+    session: Session, user: User
+) -> None:
+    """An infra exhaustion with nothing interpreted stays still-working ``processing``
+    (never terminal ``failed``), so the transient images are **retained** — the
+    still-working auto-retry must be able to reload them (FTY-372/FTY-376)."""
+
     event = _seed_image_event(session, user)
     pipeline = Pipeline([_FailStep(StepError("transient"))])
 
@@ -786,11 +827,14 @@ def test_retry_exhaustion_purges_transient_images_at_terminal(session: Session, 
     assert first.should_retry is True
     assert len(_attachments_for(session, event.id)) == 1  # retained mid-retry
 
+    # The attempt that reaches the bound does not fail (nothing interpreted → still-working);
+    # the event stays ``processing`` and the images are retained for the scheduled retry.
     second = process_estimation(
         session, log_event_id=event.id, user_id=user.id, pipeline=pipeline, max_attempts=2
     )
-    assert second.event_status is LogEventStatus.FAILED
-    assert _attachments_for(session, event.id) == []
+    assert second.event_status is LogEventStatus.PROCESSING
+    assert second.should_retry is True
+    assert len(_attachments_for(session, event.id)) == 1
 
 
 def test_needs_clarification_retains_transient_images_for_the_answer(

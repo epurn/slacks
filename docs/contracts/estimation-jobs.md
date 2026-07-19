@@ -265,11 +265,14 @@ of failing:
   `processing` status, no new status — with the job non-terminal (`running`) and
   a **bounded, long-backoff auto-retry** scheduled beyond the attempt-level
   bound. The still-working retry ceiling and backoff schedule are **documented
-  tunables living next to the FTY-363/retry constants**
-  (`backend/app/estimator/run_budget.py`); their values are the FTY-372
+  tunables living next to the attempt-level retry constants**
+  (`DEFAULT_MAX_INFRA_RETRY_ATTEMPTS`, `INFRA_RETRY_BACKOFF_BASE_SECONDS`,
+  `INFRA_RETRY_BACKOFF_MAX_SECONDS` beside `DEFAULT_MAX_ATTEMPTS` in
+  `backend/app/estimator/processing.py`); their values are the FTY-372
   implementers' documented judgement. Exhausting that ceiling stops further
   auto-retries but still never lands `failed` — the event remains honestly
-  `processing`, and a later delivery/attempt may still complete it.
+  `processing` in a deferred still-working state that the user's manual retry
+  re-opens.
 
 Invariants, identical to the existing terminal writes:
 
@@ -498,12 +501,13 @@ surface (`docs/security/data-retention.md`, "Estimation runs").
   the first-pass worker path and the answer-triggered **scoped re-estimate** — a
   breach there degrades the open component the same way while the
   already-`resolved` siblings stay preserved untouched, rather than failing the
-  event. Defaults — including the FTY-370 still-working retry ceiling and
-  long-backoff schedule for the nothing-interpreted case — live next to the
-  retry constants (`backend/app/estimator/run_budget.py`) and may be tuned like
-  them (the hard ceiling *values* are unchanged by FTY-370). The attempt-level
-  retry bound, backoff schedule, and per-call rate-limit retry above are
-  unchanged.
+  event. The FTY-363 hard-ceiling *values* (`DEFAULT_MAX_PROVIDER_CALLS`,
+  `DEFAULT_RUN_DEADLINE_SECONDS`) live in `backend/app/estimator/run_budget.py`
+  and are unchanged by FTY-370/FTY-372; the still-working retry ceiling and
+  long-backoff schedule for the nothing-interpreted case live beside the
+  attempt-level retry constants in `backend/app/estimator/processing.py` and may
+  be tuned like them. The attempt-level retry bound, backoff schedule, and
+  per-call rate-limit retry above are unchanged.
 - These values are conservative documented defaults and may be tuned (story
   planning notes).
 
