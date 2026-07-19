@@ -53,10 +53,14 @@ export function useReduceMotion(): boolean {
 /**
  * The raw Reduce Motion state: `null` while the async read is in flight, then the
  * live boolean. Callers that must not pick a motion branch before the setting is
- * known (e.g. the resolve fade, which plays exactly once) read the nullable form;
- * most callers use {@link useReduceMotion}, which coalesces `null` to "on".
+ * known (e.g. the resolve fade and the Trends chart draw-in, which each play
+ * exactly once) read the nullable form; most callers use {@link useReduceMotion},
+ * which coalesces `null` to "on".
+ *
+ * This is the single source of the nullable read — consumers import it rather
+ * than re-implementing the subscribe/reject-to-`true` logic (FTY-391).
  */
-function useReduceMotionState(): boolean | null {
+export function useReduceMotionState(): boolean | null {
   const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
 
   useEffect(() => {

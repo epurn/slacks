@@ -26,7 +26,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  AccessibilityInfo,
   Animated,
   Easing,
   Pressable,
@@ -40,7 +39,7 @@ import type { WeightEntryDTO } from "@/api/weightEntries";
 import type { UnitsPreference } from "@/state/profile";
 import { formatHumanDate, kgToDisplay, weightUnitLabel } from "@/state/weightEntries";
 import { useTheme, typeScale } from "@/theme";
-import { reducedMotionDuration } from "@/theme/motion";
+import { reducedMotionDuration, useReduceMotionState } from "@/theme/motion";
 import { ThemedNumber } from "@/components/ui";
 
 const CHART_H = 180;
@@ -224,42 +223,6 @@ interface CanvasColors {
   readonly accent: string;
 }
 
-/**
- * Nullable Reduce Motion read: `null` while the async read is in flight, then
- * the live boolean. Local to the chart because the draw-in plays exactly once
- * per data-settle, so it must wait for the setting to be known before choosing
- * reveal-vs-instant — the coalesced `useReduceMotion()` would mark the reveal
- * played (statically) whenever data settles faster than the accessibility
- * read, which the hermetic E2E fetch routinely does. theme/motion.ts holds the
- * same nullable form privately and is FTY-379's boundary (not edited here).
- */
-function useReduceMotionRead(): boolean | null {
-  const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-    AccessibilityInfo.isReduceMotionEnabled().then(
-      (enabled) => {
-        if (mounted) setReduceMotion(enabled);
-      },
-      () => {
-        if (mounted) setReduceMotion(true);
-      },
-    );
-    const subscription = AccessibilityInfo.addEventListener(
-      "reduceMotionChanged",
-      (enabled) => setReduceMotion(enabled),
-    );
-    return () => {
-      mounted = false;
-      // Defensive: a stubbed AccessibilityInfo may not return a subscription.
-      subscription?.remove?.();
-    };
-  }, []);
-
-  return reduceMotion;
-}
-
 interface DrawInRender {
   /** Opacity for the SVG canvas wrapper (static 0/1 or the animated ramp). */
   canvasOpacity: number | Animated.AnimatedInterpolation<number>;
@@ -285,7 +248,7 @@ interface DrawInRender {
  * effect body.
  */
 function useChartDrawIn(lineLength: number): DrawInRender {
-  const reduceMotion = useReduceMotionRead();
+  const reduceMotion = useReduceMotionState();
   // Lazy state so the Animated.Value is created once and stable across renders.
   const [progress] = useState(() => new Animated.Value(0));
   // The reveal/fade ran to completion — resting render from here on.

@@ -6,6 +6,7 @@ import {
   reducedMotionDuration,
   usePulse,
   useReduceMotion,
+  useReduceMotionState,
   useResolveFade,
 } from "./motion";
 import {
@@ -110,6 +111,14 @@ function PulseHost() {
   return React.createElement(View, { testID: "probe", probe: pulse } as never);
 }
 
+function StateHost() {
+  const reduceMotion = useReduceMotionState();
+  return React.createElement(View, {
+    testID: "probe",
+    probe: reduceMotion,
+  } as never);
+}
+
 function mount(element: React.ReactElement) {
   let tree: ReturnType<typeof create> | null = null;
   act(() => {
@@ -155,6 +164,41 @@ describe("useReduceMotion", () => {
     expect(probe<boolean>(tree)).toBe(true);
     read.emitChange(false);
     expect(probe<boolean>(tree)).toBe(false);
+  });
+});
+
+// ─── useReduceMotionState — the exported nullable read (FTY-391) ──────────────
+// The single source consumed by useResolveFade and EWMATrendChart's draw-in:
+// `null` while in flight, the live boolean once settled, `true` on reject.
+
+describe("useReduceMotionState", () => {
+  it("is null while the read is in flight, then the live boolean once it settles", async () => {
+    const read = stubReduceMotionRead();
+    const tree = mount(React.createElement(StateHost));
+
+    // In flight — the caller must not pick a motion branch yet.
+    expect(probe<boolean | null>(tree)).toBe(null);
+
+    await read.resolve(false);
+    expect(probe<boolean | null>(tree)).toBe(false);
+
+    // A mid-session toggle is honoured via the live subscription.
+    read.emitChange(true);
+    expect(probe<boolean | null>(tree)).toBe(true);
+  });
+
+  it("falls back to true (reduced) when the read rejects", async () => {
+    jest
+      .spyOn(AccessibilityInfo, "isReduceMotionEnabled")
+      .mockReturnValue(Promise.reject(new Error("read failed")));
+    jest
+      .spyOn(AccessibilityInfo, "addEventListener")
+      .mockReturnValue({ remove: jest.fn() } as never);
+
+    const tree = mount(React.createElement(StateHost));
+    await act(async () => {});
+
+    expect(probe<boolean | null>(tree)).toBe(true);
   });
 });
 
