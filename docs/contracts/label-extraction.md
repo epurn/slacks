@@ -169,7 +169,7 @@ panel facts: serving 40 g, 200 kcal / 10 P / 20 C / 8 F per serving
 | Not a nutrition label (unusable input) | `StepFailed` (`unusable_label`) | nothing | `processing → failed` |
 | Invalid/mistyped image bytes | `StepFailed` (`invalid_label_image`) | nothing | `processing → failed` |
 | Schema-invalid reply | `StepFailed` (`schema_validation_failed`) | nothing | `processing → failed` |
-| Transient provider failure | `StepError` (retryable) | rough estimate on degrade (`food-resolution.md` v22) | retries within bound, then **degrades** (FTY-370, `estimation-jobs.md` v7): `processing → completed` / `partially_resolved` with ≥1 interpreted candidate, else honest still-working `processing`; never terminal `failed` |
+| Transient provider failure | `StepError` (retryable) | rough estimate on degrade (`food-resolution.md` v23) | retries within bound, then **degrades** (FTY-370, `estimation-jobs.md` v7): `processing → completed` / `partially_resolved` with ≥1 interpreted candidate, else honest still-working `processing`; never terminal `failed` |
 
 ## Authorization
 
