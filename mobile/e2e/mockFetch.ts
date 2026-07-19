@@ -69,6 +69,13 @@ import {
   E2E_BARCODE_SUMMARY,
 } from './barcodeFixtures';
 import {
+  E2E_IMAGE_RAW_TEXT,
+  E2E_IMAGE_PENDING_EVENT,
+  E2E_IMAGE_EVENT,
+  E2E_IMAGE_ENTRY,
+  E2E_IMAGE_SUMMARY,
+} from './imageSubmitFixtures';
+import {
   E2E_PARTIAL_RAW_TEXT,
   E2E_PARTIAL_EVENT,
   E2E_PARTIAL_CLARIFICATION,
@@ -170,6 +177,12 @@ export function createE2EMockFetch(): typeof fetch {
   // clarify "coffee" or any other phase machine.
   let partialStage: 0 | 1 = 0;
   let partialAnswered = false;
+  // FTY-383 unified text+image flow: 0 before the mixed log, 1 once the
+  // multipart POST creates it (pending). A refresh GET then serves the completed
+  // event whose by-date feed carries the image-derived resolved item, and the
+  // day summary counts it. Keyed on its own raw_text so it never collides with
+  // any other machine.
+  let imageStage: 0 | 1 = 0;
   // How phase 2 was reached — decides which day-list GET serves (see above).
   let resolvedVia: 'answer' | 'resubmit' | null = null;
   // FTY-183 correction flow: set once the saved food is submitted so GET
@@ -189,6 +202,26 @@ export function createE2EMockFetch(): typeof fetch {
     } catch {
       return undefined;
     }
+  };
+
+  // Read raw_text out of a multipart (text+image) create's JSON `payload` part
+  // (FTY-383). React Native's FormData stores appended parts on `_parts` as
+  // `[name, value]` pairs; the payload part is the JSON string field.
+  const multipartRawTextOf = (init?: RequestInit): string | undefined => {
+    const body = init?.body as unknown;
+    if (!body || typeof body !== 'object') return undefined;
+    const parts = (body as { _parts?: [string, unknown][] })._parts;
+    if (!Array.isArray(parts)) return undefined;
+    for (const [name, value] of parts) {
+      if (name === 'payload' && typeof value === 'string') {
+        try {
+          return (JSON.parse(value) as { raw_text?: string }).raw_text;
+        } catch {
+          return undefined;
+        }
+      }
+    }
+    return undefined;
   };
 
   const json = (body: unknown, status = 200): Response =>
@@ -261,6 +294,7 @@ export function createE2EMockFetch(): typeof fetch {
     // real items, so resolve.yaml can assert both resolved rows on-device.
     // Matched before `/log-events` because the URL suffix is more specific.
     if (pathEnd.endsWith('/log-events/by-date')) {
+      if (imageStage === 1) return json([E2E_IMAGE_ENTRY]);
       if (failedStage === 1) return json([{ event: E2E_FAILED_EVENT, items: [] }]);
       if (failedStage === 2)
         return json([{ event: E2E_FAILED_RETRY_EVENT, items: [] }]);
@@ -308,6 +342,15 @@ export function createE2EMockFetch(): typeof fetch {
     // GET returns the state-appropriate event list.
     if (pathEnd.endsWith('/log-events')) {
       if (method === 'POST') {
+        // FTY-383 unified text+image submission: the multipart create's payload
+        // part carries the typed text; it returns the pending event so the
+        // skeleton shows in place, then a refresh GET resolves it with the
+        // image-derived item. Checked first because its body is FormData (not a
+        // JSON string), so the JSON `rawTextOf` reads below never match it.
+        if (multipartRawTextOf(init) === E2E_IMAGE_RAW_TEXT) {
+          imageStage = 1;
+          return json(E2E_IMAGE_PENDING_EVENT, 201);
+        }
         // FTY-176 failed-parse flow: gibberish text fails first, then a Retry
         // produces a fresh pending attempt. Keyed on raw_text so it never
         // collides with the clarify flow's "coffee" phase machine.
@@ -386,6 +429,9 @@ export function createE2EMockFetch(): typeof fetch {
         resolvedVia = 'resubmit';
         return json(E2E_RESOLVED_EVENT, 201);
       }
+      // FTY-383 image flow: list the completed entry after the refresh so a
+      // poll keeps the reconciled row (its item rides the by-date feed above).
+      if (imageStage === 1) return json([E2E_IMAGE_EVENT]);
       // The failed-parse flow's GET reflects its own stage so a poll never drops
       // the reconciled failed / retry-pending row.
       if (failedStage === 1) return json([E2E_FAILED_EVENT]);
@@ -502,6 +548,7 @@ export function createE2EMockFetch(): typeof fetch {
     // crosses its calorie target and beat 3 arms; the correction flow keeps the
     // pre-edit 140 kcal (its beat rides the PATCH, not the day total).
     if (pathEnd.endsWith('/daily-summary')) {
+      if (imageStage === 1) return json(E2E_IMAGE_SUMMARY);
       if (resolveStage === 1) return json(E2E_RESOLVE_SUMMARY);
       if (targetStage === 1) return json(E2E_TARGET_SUMMARY);
       if (correctionStage === 1) return json(E2E_CORRECTION_SUMMARY);

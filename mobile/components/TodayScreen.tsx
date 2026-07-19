@@ -26,6 +26,7 @@ import {
 import {
   answerClarification as answerClarificationApi,
   createLogEvent as createLogEventApi,
+  createLogEventWithImages as createLogEventWithImagesApi,
   deleteLogEvent as deleteLogEventApi,
   getLogEventClarification as getLogEventClarificationApi,
   listTodayLogEvents as listTodayLogEventsApi,
@@ -50,6 +51,7 @@ import { Timeline } from "@/components/today/Timeline";
 import { SignInRequired } from "@/components/today/SignInRequired";
 import { TodayComposer } from "@/components/today/TodayComposer";
 import { TodaySheetHost } from "@/components/today/TodaySheetHost";
+import { type ComposerImagePickers } from "@/components/today/useComposerImages";
 import { useTodayData } from "@/components/today/useTodayData";
 import { VisualReviewSettleOverlay } from "@/e2e/visualReview";
 import { generateIdempotencyKey, type OutboxStore } from "@/state/outbox";
@@ -87,6 +89,7 @@ export function TodayScreen({
   load = listTodayLogEventsApi,
   loadEntries = listTodayLogEventEntriesApi,
   create = createLogEventApi,
+  createWithImages = createLogEventWithImagesApi,
   deleteEvent = deleteLogEventApi,
   getClarification = getLogEventClarificationApi,
   answerClarification = answerClarificationApi,
@@ -108,6 +111,7 @@ export function TodayScreen({
   retryIntervalMs,
   generateKey = generateIdempotencyKey,
   now = () => new Date().toISOString(),
+  composerImagePickers,
   onPressProfile,
 }: {
   session?: Session;
@@ -121,6 +125,8 @@ export function TodayScreen({
    */
   loadEntries?: typeof listTodayLogEventEntriesApi;
   create?: typeof createLogEventApi;
+  /** Injectable multipart (text+image) create for the composer attach flow (FTY-383). */
+  createWithImages?: typeof createLogEventWithImagesApi;
   /** Injectable soft-void (delete) client for swipe-to-delete (FTY-322). */
   deleteEvent?: typeof deleteLogEventApi;
   /** Injectable clarification-question read for the clarify sheet (FTY-153). */
@@ -166,6 +172,8 @@ export function TodayScreen({
   generateKey?: () => string;
   /** Capture-timestamp source — injectable for deterministic tests. */
   now?: () => string;
+  /** Injectable composer image pickers (FTY-383) — tests/E2E override the OS picker. */
+  composerImagePickers?: Partial<ComposerImagePickers>;
   /** Called when the user presses the gear / profile icon in the header. */
   onPressProfile?: () => void;
 } = {}) {
@@ -202,6 +210,11 @@ export function TodayScreen({
     submitError,
     reachability,
     queuedCount,
+    composerImages,
+    attachComposerImage,
+    removeComposerImage,
+    composerAttachError,
+    attachDisabled,
     setSelectedSavedFood,
     suggestions,
     handleSelectSuggestion,
@@ -227,6 +240,7 @@ export function TodayScreen({
     load,
     loadEntries,
     create,
+    createWithImages,
     deleteEvent,
     getClarification,
     answerClarification,
@@ -241,6 +255,7 @@ export function TodayScreen({
     retryIntervalMs,
     generateKey,
     now,
+    composerImagePickers,
   });
 
   // Pull-to-refresh (FTY-185): the standard iOS `RefreshControl` idiom replaces
@@ -268,7 +283,8 @@ export function TodayScreen({
     return <SignInRequired insetTop={insets.top + 24} />;
   }
 
-  const canSubmit = text.trim() !== "" && !submitting;
+  // At least one surface (FTY-374): typed text OR an attached photo enables Add.
+  const canSubmit = (text.trim() !== "" || composerImages.length > 0) && !submitting;
 
   return (
     <>
@@ -387,6 +403,11 @@ export function TodayScreen({
           onCaptureLabel={() => setLabelCaptureOpen(true)}
           onSubmit={() => void handleSubmit()}
           submitError={submitError}
+          images={composerImages}
+          onAttach={() => void attachComposerImage()}
+          onRemoveImage={removeComposerImage}
+          attachDisabled={attachDisabled}
+          attachError={composerAttachError}
         />
 
         {/* Macro tier in its pre-FTY-178 spot beneath the composer; the hero

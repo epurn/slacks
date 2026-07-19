@@ -13,13 +13,16 @@ import { TypeaheadSuggestionBar } from "@/components/TypeaheadSuggestionBar";
 import { type ApiSession } from "@/state/session";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
 
+import { ComposerThumbnails } from "./ComposerThumbnails";
+import { type ComposerImage } from "./useComposerImages";
 import { MAX_RAW_TEXT_LENGTH } from "./helpers";
 
 /**
- * Today's natural-language composer: the multiline text field, the barcode /
- * label-capture / add actions, the saved-food typeahead bar, and the inline
- * submit-error alert. A pure view block — the screen shell owns the compose
- * state and hands it the value + callbacks.
+ * Today's natural-language composer: the multiline text field, the attach /
+ * barcode / label-capture / add actions, the attached-image thumbnails, the
+ * saved-food typeahead bar, and the inline submit-error alert. A pure view
+ * block — the screen shell owns the compose state and hands it the value +
+ * callbacks.
  */
 export function TodayComposer({
   inputRef,
@@ -34,6 +37,11 @@ export function TodayComposer({
   onCaptureLabel,
   onSubmit,
   submitError,
+  images,
+  onAttach,
+  onRemoveImage,
+  attachDisabled,
+  attachError,
 }: {
   inputRef: React.RefObject<TextInput | null>;
   text: string;
@@ -47,11 +55,26 @@ export function TodayComposer({
   onCaptureLabel: () => void;
   onSubmit: () => void;
   submitError: string | null;
+  /** Attached images staged for a unified text+image submission (FTY-383). */
+  images: readonly ComposerImage[];
+  /** Open the native photo-library / camera chooser to attach a photo. */
+  onAttach: () => void;
+  /** Remove the attached image at the given index. */
+  onRemoveImage: (index: number) => void;
+  /** Attach is unavailable (offline — image submits are online-only). */
+  attachDisabled: boolean;
+  /** Calm, content-free attach error (limit / type / permission). */
+  attachError: string | null;
 }) {
   const { colors } = useTheme();
 
+  // Attach is disabled while a submit is in flight, when signed out, or when
+  // offline (image submissions are online-only — text logging still works).
+  const attachOff = submitting || !apiSession || attachDisabled;
+
   return (
     <>
+      <ComposerThumbnails images={images} onRemove={onRemoveImage} />
       <View style={styles.composer}>
         <TextInput
           ref={inputRef}
@@ -66,6 +89,20 @@ export function TodayComposer({
           style={[styles.input, { backgroundColor: colors.surfaceRaised, color: colors.text }]}
         />
         <View style={styles.composerActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Attach photo"
+            accessibilityHint="Adds a photo from your library or camera to this log"
+            accessibilityState={{ disabled: attachOff }}
+            disabled={attachOff}
+            onPress={onAttach}
+            style={[
+              styles.scanButton,
+              { backgroundColor: colors.controlBackground, opacity: attachOff ? 0.4 : 1 },
+            ]}
+          >
+            <AppIcon name="photo.badge.plus" size={20} color={colors.text} />
+          </Pressable>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Scan barcode"
@@ -119,6 +156,11 @@ export function TodayComposer({
         onSelect={onSelectSavedFood}
         search={searchSavedFoods}
       />
+      {attachError ? (
+        <Text style={[styles.error, { color: colors.textSecondary }]} accessibilityRole="alert">
+          {attachError}
+        </Text>
+      ) : null}
       {submitError ? (
         <Text style={[styles.error, { color: colors.coral }]} accessibilityRole="alert">
           {submitError}

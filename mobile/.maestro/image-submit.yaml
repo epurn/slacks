@@ -1,0 +1,97 @@
+# FTY-383: Today composer attaches images to a text log submission.
+#
+# The composer gains an attach affordance (photo library / camera) so a user can
+# type free text AND attach a photo, then submit both as one multipart create
+# (docs/contracts/log-event-images.md). This flow proves that path end-to-end on
+# the real Today screen: type "2 of these bars", tap Attach photo, see a
+# thumbnail appear in place, tap Add, watch the entry appear as a pending
+# skeleton row (no navigation, no layout jump), then a pull-to-refresh resolves
+# it to the image-derived item ("Protein bar", 2 bars, 380 kcal) and the hero
+# counts it.
+#
+# Hermetic: in E2E mode the attach chooser returns a bundled fixture image
+# instead of the OS photo picker (Maestro cannot drive the out-of-process
+# picker), and the mock fetch routes the multipart POST keyed on the typed text
+# (e2e/imageSubmitFixtures.ts). No live backend, no real camera.
+#
+# If the attach affordance were not mounted/reachable, the thumbnail would never
+# appear and the "Attached photo 1" assertion would go red; if the multipart
+# submit were not wired, the pending row / resolved item would never appear.
+#
+# Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
+# directory-level Maestro runs launch the installed app under test reliably.
+appId: com.slacks
+---
+# Step 1: Launch in E2E mode on the empty, zero-intake day.
+- launchApp:
+    clearState: false
+
+# Step 2: Reach Today in its ready, empty-day state.
+- extendedWaitUntil:
+    visible:
+      id: today-screen
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-ready
+    timeout: 15000
+
+# Step 3: Empty composer — the attach affordance is mounted and reachable
+#         alongside the existing scan/label/add actions.
+- assertVisible:
+    text: "Attach photo"
+- takeScreenshot: fty383-empty-composer
+
+# Step 4: Type the free text that accompanies the photo, then dismiss the
+#         keyboard so the composer actions aren't hidden behind it (iOS).
+- tapOn:
+    text: "Log food or exercise.*"
+- inputText: "2 of these bars"
+- hideKeyboard
+
+# Step 5: Attach a photo. In E2E mode this returns the hermetic fixture image
+#         straight away (no OS chooser), so a thumbnail with a remove control
+#         appears in the composer, in place.
+- tapOn:
+    text: "Attach photo"
+- extendedWaitUntil:
+    visible:
+      text: "Attached photo 1"
+    timeout: 10000
+- assertVisible:
+    text: "Remove photo 1"
+- takeScreenshot: fty383-composer-with-thumbnail
+
+# Step 6: Submit text + image together. The entry appears immediately as a
+#         pending skeleton row — no navigation away, the composer clears.
+- hideKeyboard
+- tapOn:
+    text: "Add entry"
+- extendedWaitUntil:
+    visible:
+      id: today-timeline-with-entries
+    timeout: 10000
+- assertVisible:
+    text: "Waiting to estimate"
+- takeScreenshot: fty383-post-submit-pending
+
+# Step 7: The composer cleared — the typed text is gone and no thumbnail remains.
+- assertNotVisible:
+    text: "Attached photo 1"
+
+# Step 8: Pull to refresh so the entry resolves with the image-derived result.
+- swipe:
+    start: 50%, 35%
+    end: 50%, 90%
+    duration: 800
+
+# Step 9: Load-bearing assertion — the mixed entry resolves using both surfaces:
+#         "Protein bar", 2 bars scaled from the label facts, 380 kcal, and the
+#         day counts it.
+- extendedWaitUntil:
+    visible:
+      text: ".*Protein bar.*"
+    timeout: 10000
+- assertVisible:
+    text: ".*380 kcal.*"
+- takeScreenshot: fty383-resolved
