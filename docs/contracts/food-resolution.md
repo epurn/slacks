@@ -39,7 +39,7 @@ estimator / contracts / backend-core / security-privacy lane:
 
 ## Version
 
-24 (FTY-388): FDC candidate ranking demotes an **unstated part of a food**. A
+25 (FTY-388): FDC candidate ranking demotes an **unstated part of a food**. A
 row naming `white` / `yolk` / `shell` — a part whose calorie identity differs
 sharply from the whole food (an egg white is ~55 kcal/100g against a whole egg's
 ~143) — that the query did **not** itself state now ranks **behind** any
@@ -57,7 +57,7 @@ unstated preparation form) and joins `is_fdc_description_rank_stable`, so a
 compatible whole-food row on read, with no operator `DELETE`. A bounded documented
 tunable; no schema, DTO, or endpoint change.
 
-23 (FTY-369): the Open Food Facts `product_database` source gains a **name-search**
+24 (FTY-369): the Open Food Facts `product_database` source gains a **name-search**
 path for barcode-less **branded** products. A branded candidate USDA/OFF-by-barcode
 cannot resolve now consults OFF **by name** (`off.py` `OffClient.search_by_name` +
 `OffNameResolver` in `food_resolvers.py`, wired into `official_step.py`) before the
@@ -76,7 +76,7 @@ no schema, DTO, or endpoint change. Reuses the hardened OFF transport, schema
 validation, plausibility gate, and serving math — a new query kind, not a new fetch
 capability.
 
-22 (FTY-370, contract only): pins the **budget/transience-degraded rough
+23 (FTY-370, contract only): pins the **budget/transience-degraded rough
 estimate** — a candidate a run could not resolve before breaching the FTY-363
 per-run ceiling (`run_wall_clock_deadline_exceeded` /
 `run_provider_call_budget_exceeded`) or exhausting bounded transient retries
@@ -88,7 +88,7 @@ able to run **without further provider budget**. No schema, migration,
 serving-math, or source-hierarchy change; FTY-371/FTY-372 implement. See
 **Budget/transience-degraded rough estimates (FTY-370)**.
 
-21 (FTY-368): composed-dish portions respect stated structure, and a
+22 (FTY-368): composed-dish portions respect stated structure, and a
 **resolved-value plausibility gate** bounds final dish totals. The FTY-254
 common-portion table now declines any **composed/assembled dish** (closed
 vocabulary — sandwich, wrap, burger, taco, …; snack idioms like `cracker
@@ -106,6 +106,24 @@ official/reference/model-prior tiers, and the refit item carries the
 never presented as a cleanly-scaled trusted row. The terminal model-prior tier
 stays ungated — the honest rough last resort, never a terminal failure. No
 schema, DTO, or endpoint change.
+
+21 (FTY-309): implements the **label** half of the exact-evidence upgrade propose
+routing below. `POST .../exact-upgrade/label?save={bool}` validates the raw label
+image bytes (the `label-upload.md` wire shape) as **data** fail-closed — size /
+content-type allowlist / magic number, `413` / `415` **before any model call** —
+then runs the existing schema-validated label extraction (`label-extraction.md`):
+a confident read yields an `exact` `user_label` proposal (through the FTY-307
+signed-`proposal_ref` foundation), an unreadable/not-a-label/unusable read a
+clearly-labelled identity `fallback` through the existing reference-source →
+model-prior tiers (`failure_reason` in the fixed `label_unreadable` / `not_a_label`
+/ `no_usable_facts` set), else a `none` read. Loading and eligibility use the same
+owner-scoped item loader as the barcode route (`not_upgradeable` `422` for an
+already source-backed **or owned exercise** item). `save=true` writes exactly
+**one** user-owned `log_attachments` row on the item's **owning log event**;
+`save=false` and every `none`/provider-outage outcome retain nothing. A
+vision-provider **error** surfaces a retryable `503`, never a disguised miss, and
+propose never mutates the item — apply (FTY-307) does. No schema, migration, or
+estimator change.
 
 20 (FTY-308): implements the **barcode** half of the exact-evidence upgrade propose
 routing below. `POST .../exact-upgrade/barcode` resolves the typed/scanned barcode
@@ -514,7 +532,7 @@ energy-bearing result (FTY-254, `fdc_ranking.py` — head-noun identity match, n
 unstated density-changing form, stated added ingredients present; preferred by
 fewest unstated part-of-food tokens (FTY-388 — `white`/`yolk`/`shell`), then
 fewest unstated demoted forms, then query-token coverage, then relevance order —
-see **Version 24**, **Version 15**), maps it to canonical per-100g facts, and
+see **Version 25**, **Version 15**), maps it to canonical per-100g facts, and
 caches it as a `products` row. Rejecting every result is a **miss**, not a wrong-food match —
 but since FTY-326 the gate is a bounding pre-filter, not the final row-acceptance
 authority: the bounded rejected energy-bearing rows are first recorded on the
