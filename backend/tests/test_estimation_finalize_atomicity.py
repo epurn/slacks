@@ -41,7 +41,9 @@ from app.enums import (
     LogEventStatus,
 )
 from app.estimator import processing
+from app.estimator.degrade import DegradeProducer, degraded_assumption
 from app.estimator.pipeline import (
+    CandidateDraft,
     ClarificationDraft,
     EstimationContext,
     PipelineOutcome,
@@ -49,8 +51,11 @@ from app.estimator.pipeline import (
     ResolvedFoodItem,
 )
 from app.estimator.processing import _finalize
+from app.estimator.run_budget import WALL_CLOCK_DEADLINE_EXCEEDED
+from app.llm.providers.fake import FakeProvider
 from app.models.derived import ClarificationQuestion, DerivedFoodItem
 from app.models.estimation import EstimationJob, EstimationRun
+from app.models.food_sources import EvidenceSource
 from app.models.log_events import LogEvent
 from app.services.log_events import IllegalTransition, transition_event
 
@@ -261,12 +266,13 @@ def test_failed_terminal_finalize_commits_once_and_persists_no_rows(
     client: TestClient, session: Session
 ) -> None:
     user_id, event_id = _seed_event(client, "atomic-failed@example.com")
-    # attempts == max_attempts so a retryable failure is nonetheless terminal.
-    job, event, run = _prep_processing_state(session, user_id, event_id, attempts=3, max_attempts=3)
+    job, event, run = _prep_processing_state(session, user_id, event_id)
     context = _context(event_id, user_id)
 
     calls = _commit_spy(session)
-    result = PipelineResult(PipelineOutcome.FAILED, "boom", retryable=True)
+    # A deterministic, non-retryable non-food failure (``unparseable_input``) is the only
+    # terminal-``failed`` class after FTY-372; an infra failure never lands here.
+    result = PipelineResult(PipelineOutcome.FAILED, "unparseable_input", retryable=False)
     out = _finalize(session, job, event, run, result, context)
 
     assert len(calls) == 1
@@ -276,7 +282,7 @@ def test_failed_terminal_finalize_commits_once_and_persists_no_rows(
     assert _get_job(session, job.id).status == EstimationJobStatus.FAILED
     failed_run = _get_run(session, run.id)
     assert failed_run.status == EstimationRunStatus.FAILED
-    assert failed_run.error == "boom"
+    assert failed_run.error == "unparseable_input"
     # A failed outcome persists no derived data.
     assert _resolved_food_rows(session, event_id) == []
 
@@ -320,6 +326,77 @@ def test_illegal_transition_on_completed_commits_nothing(
         )
         assert _get_job(verify, job.id).status == EstimationJobStatus.RUNNING
         assert _get_run(verify, run.id).status == EstimationRunStatus.RUNNING
+
+
+def _budget_free_producer() -> DegradeProducer:
+    """A degrade producer whose provider is never called in budget-free mode."""
+
+    return DegradeProducer(provider=FakeProvider())
+
+
+def test_degrade_finalize_commits_once_and_persists_rough_atomically(
+    client: TestClient, session: Session
+) -> None:
+    """An infra breach with an interpreted candidate degrades to ``completed`` — the
+    rough row, its evidence, the run/job status, and the transition commit atomically."""
+
+    user_id, event_id = _seed_event(client, "atomic-degrade@example.com")
+    job, event, run = _prep_processing_state(session, user_id, event_id)
+    context = _context(event_id, user_id)
+    context.food_candidates.append(
+        CandidateDraft(name="banh mi", quantity_text="1 sandwich", unit=None, amount=1.0)
+    )
+
+    calls = _commit_spy(session)
+    result = PipelineResult(PipelineOutcome.FAILED, WALL_CLOCK_DEADLINE_EXCEEDED, retryable=False)
+    out = _finalize(
+        session, job, event, run, result, context, degrade_producer=_budget_free_producer()
+    )
+
+    # Exactly one commit — the transition's — flushed the whole terminal state.
+    assert len(calls) == 1
+    assert out.event_status is LogEventStatus.COMPLETED
+    assert out.should_retry is False
+
+    # Rows, evidence, run/job status, and event status are durable together after it.
+    assert _get_event(session, event_id).status == LogEventStatus.COMPLETED
+    assert _get_job(session, job.id).status == EstimationJobStatus.SUCCEEDED
+    degraded_run = _get_run(session, run.id)
+    assert degraded_run.status == EstimationRunStatus.COMPLETED
+    assert degraded_run.error is None  # a completed degrade is not a failure
+    foods = _resolved_food_rows(session, event_id)
+    assert len(foods) == 1
+    assert foods[0].name == "banh mi"
+    evidence = list(
+        session.scalars(select(EvidenceSource).where(EvidenceSource.log_event_id == event_id))
+    )
+    assert len(evidence) == 1
+    assert degraded_assumption(WALL_CLOCK_DEADLINE_EXCEEDED) in (evidence[0].assumptions or [])
+
+
+def test_still_working_finalize_commits_once_and_transitions_nothing(
+    client: TestClient, session: Session
+) -> None:
+    """An infra breach with nothing interpreted keeps the event ``processing`` (honest
+    still-working) in a single commit, transitioning nothing — never terminal ``failed``."""
+
+    user_id, event_id = _seed_event(client, "atomic-stillworking@example.com")
+    job, event, run = _prep_processing_state(session, user_id, event_id, attempts=3, max_attempts=3)
+    context = _context(event_id, user_id)  # nothing interpreted
+
+    calls = _commit_spy(session)
+    result = PipelineResult(PipelineOutcome.FAILED, WALL_CLOCK_DEADLINE_EXCEEDED, retryable=False)
+    out = _finalize(session, job, event, run, result, context)
+
+    assert len(calls) == 1
+    assert out.should_retry is True
+    assert out.event_status is LogEventStatus.PROCESSING
+    assert _get_event(session, event_id).status == LogEventStatus.PROCESSING
+    assert _get_job(session, job.id).status == EstimationJobStatus.RUNNING
+    still_working_run = _get_run(session, run.id)
+    assert still_working_run.status == EstimationRunStatus.FAILED
+    assert still_working_run.error == WALL_CLOCK_DEADLINE_EXCEEDED
+    assert _resolved_food_rows(session, event_id) == []
 
 
 def test_retry_branch_commits_once_and_transitions_nothing(

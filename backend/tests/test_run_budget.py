@@ -9,9 +9,11 @@ an unbounded number of sequential provider calls or running unbounded wall-clock
   fails closed the same way, with a sanitized content-free reason;
 - an in-budget run is unchanged — it completes, and the wrapped provider's recorded
   identity is preserved;
-- through the worker the terminal maps ``processing → failed`` immediately (no extra
-  attempt burned), and the default (``pipeline=None``) worker path wraps its built
-  provider in the budgeted provider (wired and reachable).
+- the *pipeline* still returns ``FAILED`` non-retryably on a breach (the ceiling is
+  unchanged), but through the **worker** a breach with nothing interpreted no longer
+  lands terminal ``failed``: it stays in the honest still-working ``processing`` state
+  (FTY-372 never-fail), bounded exactly at the budget; the default (``pipeline=None``)
+  worker path wraps its built provider in the budgeted provider (wired and reachable).
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -38,6 +41,7 @@ from app.estimator.run_budget import (
 )
 from app.llm.base import Provider
 from app.llm.providers.fake import FakeProvider
+from app.models.estimation import EstimationRun
 
 RAW_TEXT = "4 toppables brand crackers with 1tbsp dill pickle hummus"
 
@@ -171,28 +175,34 @@ def _seed_event(client: TestClient, email: str) -> tuple[uuid.UUID, uuid.UUID]:
     return user_id, uuid.UUID(created.json()["id"])
 
 
-def test_worker_maps_ceiling_breach_to_failed_without_burning_attempts(
+def test_worker_ceiling_breach_with_nothing_interpreted_stays_still_working(
     client: TestClient, session: Session
 ) -> None:
+    """A ceiling breach with nothing interpreted stays still-working, bounded (FTY-372).
+
+    The ceiling still stops the run at the budget (runaway/DoS guard, unchanged), but the
+    worker no longer maps the breach to terminal ``failed``: with nothing interpreted the
+    event stays ``processing`` (honest still-working) with a scheduled long-backoff retry.
+    """
+
     user_id, event_id = _seed_event(client, "ceiling@example.com")
     budgeted = BudgetedProvider(_fake(count=50), max_provider_calls=3, deadline_seconds=10_000.0)
     pipeline = Pipeline([_LoopStep(budgeted, calls=20)])
 
     result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
 
-    # Deterministic terminal: processing → failed immediately, exactly one attempt.
-    assert result.job_status is EstimationJobStatus.FAILED
-    assert result.event_status is LogEventStatus.FAILED
-    assert result.should_retry is False
-    assert result.attempts == 1
+    # Never terminal ``failed``: the event stays still-working ``processing``.
+    assert result.job_status is EstimationJobStatus.RUNNING
+    assert result.event_status is LogEventStatus.PROCESSING
+    assert result.should_retry is True
+    assert result.retry_countdown_seconds is not None and result.retry_countdown_seconds >= 300
+    # The ceiling still bounded the run exactly at the budget — no unbounded loop.
     assert budgeted.calls_made == 3
 
-    # A redelivery is an idempotent no-op — the terminal job is not reprocessed, so no
-    # second attempt is burned on the same input.
-    again = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
-    assert again.job_status is EstimationJobStatus.FAILED
-    assert again.run_id is None
-    assert again.attempts == 1
+    # The recorded reason is the fixed content-free budget label, never the raw entry.
+    run = session.scalars(select(EstimationRun).where(EstimationRun.log_event_id == event_id)).one()
+    assert run.error == PROVIDER_CALL_BUDGET_EXCEEDED
+    assert RAW_TEXT not in repr((run.trace, run.error))
 
 
 def test_default_worker_path_wraps_provider_in_run_budget(

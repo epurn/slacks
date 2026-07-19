@@ -30,10 +30,12 @@ from app.estimator.pipeline import (
     NeedsClarification,
     Pipeline,
     StepError,
+    StepFailed,
     StubCalculateStep,
     StubParseStep,
 )
 from app.estimator.processing import (
+    DEFAULT_MAX_INFRA_RETRY_ATTEMPTS,
     EstimationEventNotFound,
     process_estimation,
 )
@@ -55,6 +57,15 @@ class _FailStep:
 
     def run(self, context: EstimationContext) -> None:
         raise StepError("transient_failure")
+
+
+class _UnparseableStep:
+    name = "unparseable"
+
+    def run(self, context: EstimationContext) -> None:
+        # A deterministic non-food classification — the only terminal-``failed`` class
+        # after FTY-372 (an infra failure never lands ``failed``).
+        raise StepFailed("unparseable_input")
 
 
 class _ClarifyStep:
@@ -145,11 +156,18 @@ def test_redelivery_is_idempotent(client: TestClient, session: Session) -> None:
     assert len(jobs) == 1
 
 
-def test_failing_step_retries_to_bound_then_fails(client: TestClient, session: Session) -> None:
+def test_transient_exhaustion_with_nothing_interpreted_stays_still_working(
+    client: TestClient, session: Session
+) -> None:
+    """A transient failure that exhausts the bound with **nothing interpreted** never
+    lands ``failed`` (FTY-372): the event stays ``processing`` (honest still-working)
+    with a bounded, long-backoff auto-retry, well past the standard attempt bound."""
+
     user_id, event_id = _seed_event(client, "retry@example.com")
+    # No parse step runs, so nothing is interpreted; every attempt fails transiently.
     failing = Pipeline([_FailStep()])
 
-    # First two attempts fail transiently and ask for a retry; the event stays
+    # First two attempts fail transiently and ask for a standard retry; the event stays
     # ``processing`` and the job stays ``running``.
     for attempt in (1, 2):
         result = process_estimation(
@@ -158,22 +176,61 @@ def test_failing_step_retries_to_bound_then_fails(client: TestClient, session: S
         assert result.should_retry is True
         assert result.attempts == attempt
         assert result.job_status is EstimationJobStatus.RUNNING
+        # A standard transient retry leaves the countdown to the task's own schedule.
+        assert result.retry_countdown_seconds is None
         event = session.get(LogEvent, event_id)
         assert event is not None and event.status == LogEventStatus.PROCESSING
 
-    # The third attempt exhausts the bound: job and event become ``failed``.
-    final = process_estimation(
+    # The third attempt reaches the standard bound but does NOT fail: with nothing
+    # interpreted the event stays still-working ``processing`` with a scheduled
+    # long-backoff auto-retry.
+    bound = process_estimation(
         session, log_event_id=event_id, user_id=user_id, pipeline=failing, max_attempts=3
     )
-    assert final.should_retry is False
-    assert final.attempts == 3
-    assert final.job_status is EstimationJobStatus.FAILED
-    assert final.event_status is LogEventStatus.FAILED
+    assert bound.should_retry is True
+    assert bound.attempts == 3
+    assert bound.job_status is EstimationJobStatus.RUNNING
+    assert bound.event_status is LogEventStatus.PROCESSING
+    # The still-working retry uses the long infra backoff (minutes), not the standard one.
+    assert bound.retry_countdown_seconds is not None
+    assert bound.retry_countdown_seconds >= 300
 
+    # It keeps re-queuing (never ``failed``) until the extended infra ceiling, then stays
+    # deferred still-working — still ``processing``, no auto-retry — and never terminal.
+    result = bound
+    while result.should_retry:
+        result = process_estimation(
+            session, log_event_id=event_id, user_id=user_id, pipeline=failing, max_attempts=3
+        )
+    assert result.attempts == DEFAULT_MAX_INFRA_RETRY_ATTEMPTS
+    assert result.event_status is LogEventStatus.PROCESSING
+    assert result.job_status is EstimationJobStatus.RUNNING
+
+    event = session.get(LogEvent, event_id)
+    assert event is not None and event.status == LogEventStatus.PROCESSING
     runs = _runs_for(session, event_id)
-    assert len(runs) == 3
     assert all(run.status == EstimationRunStatus.FAILED for run in runs)
     assert all(run.error == "transient_failure" for run in runs)
+
+
+def test_unparseable_input_is_terminal_failed(client: TestClient, session: Session) -> None:
+    """A deterministic non-food classification still lands terminal ``failed`` (FTY-372
+    preserves the ``empty_input`` / narrowed ``unparseable_input`` terminal class)."""
+
+    user_id, event_id = _seed_event(client, "unparseable@example.com")
+
+    result = process_estimation(
+        session, log_event_id=event_id, user_id=user_id, pipeline=Pipeline([_UnparseableStep()])
+    )
+
+    assert result.should_retry is False
+    assert result.job_status is EstimationJobStatus.FAILED
+    assert result.event_status is LogEventStatus.FAILED
+
+    runs = _runs_for(session, event_id)
+    assert len(runs) == 1
+    assert runs[0].status == EstimationRunStatus.FAILED
+    assert runs[0].error == "unparseable_input"
 
 
 def test_needs_clarification_is_terminal(client: TestClient, session: Session) -> None:

@@ -20,10 +20,17 @@ Contracts implemented here:
 - **Ownership.** The event is loaded scoped to the job's ``user_id``; a mismatch
   (or missing event) fails closed with :class:`EstimationEventNotFound` rather
   than processing another user's data.
-- **Bounded retries.** Each attempt increments ``attempts``. A retryable failure
-  with attempts remaining leaves the job ``running`` and asks the caller to
-  retry; once ``attempts`` reaches ``max_attempts`` the job and event become
-  ``failed``. ``needs_clarification`` is terminal and never retried.
+- **Bounded retries + never-fail infra semantics (FTY-372).** Each attempt
+  increments ``attempts``. A retryable failure with attempts remaining leaves the
+  job ``running`` and asks the caller to retry. An *infrastructure* failure — a
+  per-run ceiling breach (FTY-363) or a transient failure that exhausted the
+  attempt bound — never lands terminal ``failed``: with ≥1 interpreted candidate
+  the worker commits a rough, budget-free estimate and lands ``completed``; with
+  nothing interpreted the event stays ``processing`` (honest still-working) with a
+  bounded, long-backoff auto-retry. Terminal ``failed`` is reserved for
+  deterministic non-food/empty input (``empty_input`` / the narrowed
+  ``unparseable_input``) and the fail-closed validation gates.
+  ``needs_clarification`` is terminal and never retried.
 - **Image-bearing events (FTY-376).** At claim time the worker loads the event's
   image attachments by event id (``event_images.py`` — the ids-only payload never
   carries image data) and attaches them to the context as vision evidence when
@@ -56,6 +63,7 @@ from app.enums import (
     LogEventStatus,
 )
 from app.estimator.decision_trace import MAX_TRACE_ENTRIES
+from app.estimator.degrade import PROVIDER_TRANSIENT_EXHAUSTED, DegradeProducer
 from app.estimator.event_images import EventImageLoad, load_event_images
 from app.estimator.label_step import LabelInput
 from app.estimator.persist import (
@@ -68,6 +76,7 @@ from app.estimator.persist import (
 )
 from app.estimator.pipeline import (
     AnsweredClarification,
+    CandidateDraft,
     ClarificationDraft,
     EstimationContext,
     Pipeline,
@@ -102,6 +111,26 @@ RETRY_BACKOFF_BASE_SECONDS = 10
 #: Cap on a single retry delay so backoff cannot grow unbounded.
 RETRY_BACKOFF_MAX_SECONDS = 600
 
+#: Extended attempt ceiling for the honest **still-working / will-retry** state (FTY-372).
+#: When an *infrastructure* failure — a per-run ceiling breach (FTY-363) or a transient
+#: failure that exhausted the attempt-level bound above — leaves the run with **nothing
+#: interpreted**, the event stays ``processing`` (never terminal ``failed``) and the job
+#: is re-queued with a bounded, long-backoff auto-retry up to this ceiling. It is generous
+#: enough to ride out a temporary provider/infra outage yet **bounded**, so a
+#: permanently-broken provider cannot drive unbounded re-enqueues (the security-baseline
+#: runaway/DoS guard). Beyond it the event **stays** in this deferred still-working state —
+#: the user's existing manual retry re-opens it — and still never becomes ``failed``. A
+#: documented tunable, like :data:`DEFAULT_MAX_ATTEMPTS`.
+DEFAULT_MAX_INFRA_RETRY_ATTEMPTS = 8
+
+#: Long-backoff base (seconds) between still-working infra re-queues — far longer than the
+#: transient :data:`RETRY_BACKOFF_BASE_SECONDS`: a pure-infra breach will not clear in
+#: seconds, so the still-working retry waits minutes between attempts.
+INFRA_RETRY_BACKOFF_BASE_SECONDS = 300
+
+#: Cap on a single still-working retry delay (one hour) so the long backoff stays bounded.
+INFRA_RETRY_BACKOFF_MAX_SECONDS = 3600
+
 
 class EstimationEventNotFound(Exception):
     """Raised when the job's log event does not exist for the owning user.
@@ -123,13 +152,33 @@ def retry_countdown(retries_so_far: int) -> int:
     return min(delay, RETRY_BACKOFF_MAX_SECONDS)
 
 
+def infra_retry_countdown(retries_so_far: int) -> int:
+    """Return the long backoff (seconds) before the next still-working infra retry.
+
+    Exponential on the number of retries already performed, from
+    :data:`INFRA_RETRY_BACKOFF_BASE_SECONDS` and capped at
+    :data:`INFRA_RETRY_BACKOFF_MAX_SECONDS`: 5m, 10m, 20m, …, ≤ 1h. Deliberately far
+    slower than :func:`retry_countdown` — a pure-infrastructure breach will not clear in
+    seconds, so the still-working retry paces itself over minutes (FTY-372).
+    """
+
+    delay = INFRA_RETRY_BACKOFF_BASE_SECONDS * (1 << max(retries_so_far, 0))
+    return min(delay, INFRA_RETRY_BACKOFF_MAX_SECONDS)
+
+
 @dataclass(frozen=True)
 class ProcessResult:
     """The outcome of one :func:`process_estimation` attempt.
 
     ``should_retry`` is ``True`` only when this attempt failed transiently and
-    attempts remain; the caller (the Celery task) is responsible for scheduling
-    the retry. ``run_id`` is ``None`` for an idempotent no-op (terminal job).
+    attempts remain, or when an infra failure with nothing interpreted left the event
+    in the honest still-working state (FTY-372); the caller (the Celery task) is
+    responsible for scheduling the retry. ``run_id`` is ``None`` for an idempotent no-op
+    (terminal job). ``retry_countdown_seconds`` is the worker-computed backoff to use
+    before the next retry: it is set to the long infra backoff for a still-working
+    re-queue and left ``None`` for a standard transient retry (the caller then uses its
+    own :func:`retry_countdown` schedule), and is always ``None`` when ``should_retry`` is
+    ``False``.
     """
 
     job_status: EstimationJobStatus
@@ -137,6 +186,7 @@ class ProcessResult:
     run_id: uuid.UUID | None
     attempts: int
     should_retry: bool
+    retry_countdown_seconds: int | None = None
 
 
 def _get_or_create_job(
@@ -324,6 +374,23 @@ def _scoped_failure_question(component: DerivedFoodItem) -> ClarificationDraft:
     )
 
 
+def _component_candidate(component: DerivedFoodItem) -> CandidateDraft:
+    """Rebuild the parsed candidate shape from an open component's own row (FTY-372).
+
+    A scoped re-estimate degrade re-costs the answered component from its bounded,
+    schema-validated parse fields (already the ``derived_food_items`` columns the user
+    sees, never raw diary text), so the budget-free degrade producer can produce a rough
+    estimate for exactly that component without re-parsing the whole entry.
+    """
+
+    return CandidateDraft(
+        name=component.name,
+        quantity_text=component.quantity_text or "",
+        unit=component.unit,
+        amount=component.amount,
+    )
+
+
 def _apply_scoped_component_outcome(
     session: Session,
     run: EstimationRun,
@@ -388,6 +455,7 @@ def _finalize_scoped_reestimate(
     *,
     user_id: uuid.UUID,
     images: EventImageLoad,
+    degrade_producer: DegradeProducer | None = None,
 ) -> ProcessResult:
     """Re-cost only the answered open component(s), preserving every resolved sibling.
 
@@ -420,18 +488,24 @@ def _finalize_scoped_reestimate(
         )
         result = _run_pipeline(pipeline, context)
         if result.outcome is PipelineOutcome.FAILED and is_run_budget_breach(result.error):
-            # A per-run ceiling breach (FTY-363) is a run-level, non-retryable failure, not a
-            # per-component one: terminate the whole run immediately (``processing → failed``,
-            # no extra attempt) not reopen a component question below. Roll back this round.
-            session.rollback()
-            run.status = EstimationRunStatus.FAILED
-            run.error = result.error
-            job.status = EstimationJobStatus.FAILED
-            session.add_all([run, job])
-            # Event-terminal: purge transient images atomically with the write.
-            purge_transient_for_event(session, event.id)
-            transition_event(session, event, LogEventStatus.FAILED)
-            return _result(job, event, run, should_retry=False)
+            # FTY-372 never-fail: a per-run ceiling breach (FTY-363) must not fail the whole
+            # event. Degrade **this** answered component to a rough, budget-free estimate in
+            # place (no additional provider call); every already-``resolved`` sibling — never
+            # re-costed here — stays preserved and is never double-counted. We do **not** roll
+            # back: earlier components applied in this loop are kept, and the component row is
+            # advanced directly, so partial in-flight context state from the breached run does
+            # not reach persistence.
+            degraded = (degrade_producer or _default_degrade_producer()).degrade_food_candidate(
+                context,
+                _component_candidate(component),
+                reason=_degrade_reason(result.error),
+                index=None,
+                budget_free=True,
+            )
+            apply_scoped_resolution(session, run, component, degraded)
+            context.record_decision("scoped_reestimate", "outcome", outcome="component_degraded")
+            contexts.append(context)
+            continue
         if (
             result.outcome is PipelineOutcome.FAILED
             and result.retryable
@@ -503,6 +577,7 @@ def process_estimation(
     pipeline: Pipeline | None = None,
     label_upload: LabelInput | None = None,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    degrade_producer: DegradeProducer | None = None,
 ) -> ProcessResult:
     """Run one estimation attempt for ``log_event_id``, idempotently.
 
@@ -593,7 +668,15 @@ def process_estimation(
     prior_food = _load_event_food_items(session, log_event_id)
     if label_upload is None and prior_food:
         return _finalize_scoped_reestimate(
-            session, pipeline, job, event, run, prior_food, user_id=user_id, images=image_load
+            session,
+            pipeline,
+            job,
+            event,
+            run,
+            prior_food,
+            user_id=user_id,
+            images=image_load,
+            degrade_producer=degrade_producer,
         )
 
     context = EstimationContext(
@@ -611,7 +694,19 @@ def process_estimation(
     # Persist the sanitized run metadata regardless of outcome.
     _record_run_metadata(run, context)
 
-    process_result = _finalize(session, job, event, run, result, context)
+    process_result = _finalize(
+        session,
+        job,
+        event,
+        run,
+        result,
+        context,
+        degrade_producer=degrade_producer,
+        # The synchronous label path (a ``label_upload``, no retry scheduler) keeps the
+        # older terminal-``failed`` behaviour on infra exhaustion; the async NL worker
+        # applies the FTY-372 never-fail routing.
+        allow_infra_never_fail=label_upload is None,
+    )
 
     if label_upload is not None:
         _retain_label_image(session, user_id, log_event_id, label_upload, result.outcome)
@@ -645,6 +740,9 @@ def _finalize(
     run: EstimationRun,
     result: PipelineResult,
     context: EstimationContext,
+    *,
+    degrade_producer: DegradeProducer | None = None,
+    allow_infra_never_fail: bool = True,
 ) -> ProcessResult:
     """Apply the pipeline outcome to the run, job, and event, and commit.
 
@@ -659,6 +757,14 @@ def _finalize(
     the legal-transition table before that commit runs, so an illegal transition
     fails closed with nothing persisted. A failed (retry) outcome persists no
     derived data — the step failed closed — and commits once directly.
+
+    ``allow_infra_never_fail`` gates the FTY-372 never-fail infra routing. It is
+    ``True`` for the asynchronous NL food/exercise worker (a per-run ceiling breach or a
+    transient-exhaustion degrades to a rough estimate or stays still-working). It is
+    ``False`` for the **synchronous label upload** path (``max_attempts=1``, no scheduler
+    to honour a retry): there a still-working ``processing`` state would be a dead end the
+    client polls forever, so an infra exhaustion stays terminal ``failed`` and the client
+    re-uploads (``label-upload.md``).
     """
 
     outcome = result.outcome
@@ -700,29 +806,218 @@ def _finalize(
         transition_event(session, event, LogEventStatus.PARTIALLY_RESOLVED)
         return _result(job, event, run, should_retry=False)
 
-    # Failed. A deterministic (non-retryable) failure or an exhausted retry bound
-    # is terminal; otherwise the worker reports a retry is due.
+    # Failed. Route by failure class (FTY-372 never-fail semantics):
+    #
+    # - an **infrastructure** failure — a per-run ceiling breach (FTY-363) or a transient
+    #   failure that exhausted the attempt-level bound — never lands terminal ``failed``:
+    #   it degrades to a rough estimate when the run interpreted anything, else keeps the
+    #   event in the honest still-working ``processing`` state;
+    # - a transient failure with attempts remaining takes a standard bounded retry;
+    # - a deterministic, non-retryable, non-budget failure (``empty_input`` / the narrowed
+    #   ``unparseable_input`` / a fail-closed validation gate) is terminal ``failed``;
+    # - the synchronous label path (``allow_infra_never_fail`` False) keeps the older
+    #   terminal-``failed`` behaviour on infra exhaustion (no scheduler to retry).
+    infra_exhaustion = is_run_budget_breach(result.error) or (
+        result.retryable and job.attempts >= job.max_attempts
+    )
+    if allow_infra_never_fail and infra_exhaustion:
+        return _degrade_or_still_working(
+            session, job, event, run, result, context, degrade_producer=degrade_producer
+        )
+
+    if result.retryable and job.attempts < job.max_attempts:
+        # Retries remain: keep the job ``running`` and the event ``processing``.
+        run.status = EstimationRunStatus.FAILED
+        run.error = result.error
+        job.status = EstimationJobStatus.RUNNING
+        session.add_all([run, job])
+        session.commit()
+        return _result(job, event, run, should_retry=True)
+
+    # Deterministic non-food/empty input (or a fail-closed validation gate, or a label-path
+    # infra exhaustion): terminal ``failed`` with nothing persisted. Purge transient images
+    # atomically with the write.
     run.status = EstimationRunStatus.FAILED
     run.error = result.error
-    terminal = not result.retryable or job.attempts >= job.max_attempts
-    if terminal:
-        job.status = EstimationJobStatus.FAILED
-        session.add_all([run, job])
-        # Event-terminal (every failed flavour: deterministic, retry-exhausted,
-        # run-budget breach): purge transient images atomically with the write.
-        purge_transient_for_event(session, event.id)
-        transition_event(session, event, LogEventStatus.FAILED)
-        return _result(job, event, run, should_retry=False)
+    job.status = EstimationJobStatus.FAILED
+    session.add_all([run, job])
+    purge_transient_for_event(session, event.id)
+    transition_event(session, event, LogEventStatus.FAILED)
+    return _result(job, event, run, should_retry=False)
 
-    # Retries remain: keep the job ``running`` and the event ``processing``.
+
+def _degrade_or_still_working(
+    session: Session,
+    job: EstimationJob,
+    event: LogEvent,
+    run: EstimationRun,
+    result: PipelineResult,
+    context: EstimationContext,
+    *,
+    degrade_producer: DegradeProducer | None,
+) -> ProcessResult:
+    """Route an infra-exhausted run to a rough degrade or the honest still-working state.
+
+    The never-fail split (FTY-370/FTY-372): when the run interpreted ≥1 candidate the
+    worker commits a rough, budget-free estimate and lands ``completed``; when it
+    interpreted nothing the event stays ``processing`` with a bounded, long-backoff
+    auto-retry. Neither branch ever lands terminal ``failed`` for the infra reason.
+    """
+
+    if _has_interpreted_candidates(context):
+        return _degrade_and_complete(
+            session, job, event, run, context, _degrade_reason(result.error), degrade_producer
+        )
+    return _still_working(session, job, event, run, result)
+
+
+def _has_interpreted_candidates(context: EstimationContext) -> bool:
+    """Whether the run interpreted ≥1 food/exercise candidate before the infra failure.
+
+    The degrade-vs-still-working discriminator (FTY-372): a parsed food/exercise candidate
+    (or an item the earlier tiers already costed) means the user described something the
+    worker can commit a rough estimate for; nothing interpreted (e.g. the breach fired
+    during parse) means there is nothing to estimate, so the event stays still-working.
+    """
+
+    return bool(
+        context.food_candidates
+        or context.exercise_candidates
+        or context.resolved_food_items
+        or context.resolved_exercise_items
+    )
+
+
+def _degrade_reason(error: str | None) -> str:
+    """The content-free degrade label for an infra failure ``error`` (FTY-372).
+
+    A per-run ceiling breach carries its own fixed :data:`RUN_BUDGET_REASONS` label
+    verbatim; anything else reaching this path is a transient-exhaustion, recorded under
+    the fixed ``provider_transient_error`` label. Either way the degrade producer only
+    ever sees a closed, content-free reason — never a raw transient ``StepError`` message.
+    """
+
+    if error is not None and is_run_budget_breach(error):
+        return error
+    return PROVIDER_TRANSIENT_EXHAUSTED
+
+
+def _degrade_and_complete(
+    session: Session,
+    job: EstimationJob,
+    event: LogEvent,
+    run: EstimationRun,
+    context: EstimationContext,
+    reason: str,
+    degrade_producer: DegradeProducer | None,
+) -> ProcessResult:
+    """Commit a rough, budget-free estimate for every interpreted food candidate.
+
+    Uniform worker safety net (FTY-372): a residual hard breach terminated the run
+    mid-flight, so rather than reconcile a partial mix, every interpreted food candidate
+    is re-cast as one rough, honestly-labelled ``resolved`` row via the FTY-371 degrade
+    producer in **budget-free** mode (``budget_free=True`` — **no** additional provider
+    call). Exercise items were costed deterministically without provider budget, so they
+    are preserved untouched. The degraded rows, the run/job status writes, and the
+    ``processing → completed`` transition commit **atomically** in the single
+    :func:`transition_event` commit, exactly like the completed path.
+    """
+
+    producer = degrade_producer or _default_degrade_producer()
+    food_candidates = list(context.food_candidates)
+    # Discard any partial food resolution and its leftover buckets: every interpreted
+    # food candidate becomes exactly one degraded ``resolved`` row, so nothing is dropped
+    # or double-represented.
+    context.resolved_food_items = []
+    context.pending_official_candidates = []
+    context.unresolved_food_candidates = []
+    context.item_scoped_clarifications = []
+    context.clarification_questions = []
+    for index, candidate in enumerate(food_candidates):
+        context.resolved_food_items.append(
+            producer.degrade_food_candidate(
+                context, candidate, reason=reason, index=index, budget_free=True
+            )
+        )
+
+    # Re-copy the sanitized metadata: the degrade appended its own trace/assumptions after
+    # ``process_estimation`` first recorded the (pre-degrade) run metadata.
+    _record_run_metadata(run, context)
+    _persist_candidates(session, run, context)
+    run.status = EstimationRunStatus.COMPLETED
+    # A degrade lands ``completed``, not failed — no ``error`` on the run.
+    run.error = None
+    job.status = EstimationJobStatus.SUCCEEDED
+    session.add_all([run, job])
+    # Event-terminal: purge transient images atomically with the completion.
+    purge_transient_for_event(session, event.id)
+    transition_event(session, event, LogEventStatus.COMPLETED)
+    return _result(job, event, run, should_retry=False)
+
+
+def _still_working(
+    session: Session,
+    job: EstimationJob,
+    event: LogEvent,
+    run: EstimationRun,
+    result: PipelineResult,
+) -> ProcessResult:
+    """Keep the event in the honest still-working / will-retry state (FTY-372).
+
+    The run attempt failed for infrastructure reasons **with nothing interpreted**, so
+    there is nothing to estimate — but the entry the user typed in good faith must not
+    come back ``failed``. The event stays ``processing`` and the job stays ``running``
+    (non-terminal, exactly like the retries-remain branch), re-queued with a bounded,
+    long-backoff auto-retry up to :data:`DEFAULT_MAX_INFRA_RETRY_ATTEMPTS`. Once even that
+    extended budget is exhausted the event **stays** in this deferred still-working state
+    (``should_retry`` False, still ``processing``) — the user's manual retry re-opens it —
+    and never becomes terminal ``failed``. ``run.error`` carries the content-free failure
+    label only.
+    """
+
+    run.status = EstimationRunStatus.FAILED
+    run.error = result.error
     job.status = EstimationJobStatus.RUNNING
     session.add_all([run, job])
     session.commit()
-    return _result(job, event, run, should_retry=True)
+    if job.attempts < DEFAULT_MAX_INFRA_RETRY_ATTEMPTS:
+        return _result(
+            job,
+            event,
+            run,
+            should_retry=True,
+            retry_countdown_seconds=infra_retry_countdown(job.attempts),
+        )
+    return _result(job, event, run, should_retry=False)
+
+
+def _default_degrade_producer() -> DegradeProducer:
+    """Build the worker's default budget-free degrade producer (FTY-372).
+
+    Used only on the rare residual hard-exhaustion path when no producer was injected.
+    Budget-free degradation makes **no** provider call, so the bare provider held here is
+    never invoked; it is constructed the same cheap, network-free way the worker pipeline
+    builds its provider. The estimate-first rough-fallback config mirrors the pipeline's.
+    """
+
+    from app.llm import build_provider, load_llm_settings  # noqa: PLC0415 — lazy: heavy import
+    from app.settings import load_settings  # noqa: PLC0415 — lazy: only the degrade path
+
+    app_settings = load_settings()
+    return DegradeProducer(
+        provider=build_provider(load_llm_settings()),
+        clarify_mode=app_settings.estimator_clarify_mode,
+        model_prior_confidence_floor=app_settings.estimator_model_prior_confidence_floor,
+    )
 
 
 def _result(
-    job: EstimationJob, event: LogEvent, run: EstimationRun, *, should_retry: bool
+    job: EstimationJob,
+    event: LogEvent,
+    run: EstimationRun,
+    *,
+    should_retry: bool,
+    retry_countdown_seconds: int | None = None,
 ) -> ProcessResult:
     """Build a :class:`ProcessResult` snapshot from the post-commit state."""
 
@@ -732,4 +1027,5 @@ def _result(
         run_id=run.id,
         attempts=job.attempts,
         should_retry=should_retry,
+        retry_countdown_seconds=retry_countdown_seconds,
     )

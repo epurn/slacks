@@ -298,7 +298,7 @@ The privacy boundary is exact and must not be weakened by the interpretation loo
   FTY-376 estimator story.
 - **FTY-348 (contract only; no code or migration in this story).** This page is a
   **relocation and de-duplication** of the FTY-324 interpretation/session text that
-  previously lived in `parse-candidates.md` (v9), `food-resolution.md` (v16),
+  previously lived in `parse-candidates.md` (v9), `food-resolution-changelog.md` (v16),
   `evidence-retrieval.md` (v6), and `estimator-policy.md` (v3). Those pages now link
   here for the global session/hypothesis semantics and keep their page-local
   responsibilities. No normative clause changes: hypothesis revision,

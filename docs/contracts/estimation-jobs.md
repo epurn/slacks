@@ -45,7 +45,7 @@ is never terminal `failed`**. A per-run ceiling breach (FTY-363:
 interpreted food/exercise candidate the worker commits a rough,
 honestly-labelled estimate (`processing → completed`, or
 `processing → partially_resolved` when an open item-scoped question remains —
-`food-resolution.md` v23 owns the degraded provenance); with nothing
+`food-resolution-changelog.md` v23 owns the degraded provenance); with nothing
 interpreted the event stays in an honest still-working `processing` state with
 bounded, long-backoff auto-retry. The degrade write shares the terminal writes'
 atomicity/idempotency/sanitization invariants. Implemented downstream by
@@ -92,7 +92,7 @@ model. No schema change (`trace` is already JSON). See
 3 (FTY-278, contract only): the answer-triggered re-estimate under **item-scoped
 partial resolution**. The new first-class `partially_resolved` event status
 (`log-events.md` v6) carries committed `resolved` derived items (the costable
-siblings of a mixed log — `food-resolution.md` v9); answering an **item-scoped**
+siblings of a mixed log — `food-resolution-changelog.md` v9); answering an **item-scoped**
 question re-estimates the same event (`partially_resolved → processing`) and must
 **preserve those siblings** without re-costing, duplicating, or double-counting
 them. The v2 job/run mechanics (re-open the terminal job, cumulative attempts,
@@ -251,8 +251,8 @@ of failing:
 - **≥1 interpreted food/exercise candidate** (on the `EstimationContext` or the
   interpretation hypothesis): the worker commits a **rough, honestly-labelled
   estimate** for every interpreted-but-unresolved candidate — produced without
-  further provider budget (`food-resolution.md` v23, **Budget/transience-degraded
-  rough estimates**) — and the event lands `completed`
+  further provider budget (`food-resolution-changelog.md` v23; **Budget/transience-degraded
+  rough estimates** in `food-resolution.md`) — and the event lands `completed`
   (`processing → completed`), or `partially_resolved`
   (`processing → partially_resolved`) when the terminal write also carries an
   open item-scoped question alongside the committed siblings (the existing
@@ -265,11 +265,14 @@ of failing:
   `processing` status, no new status — with the job non-terminal (`running`) and
   a **bounded, long-backoff auto-retry** scheduled beyond the attempt-level
   bound. The still-working retry ceiling and backoff schedule are **documented
-  tunables living next to the FTY-363/retry constants**
-  (`backend/app/estimator/run_budget.py`); their values are the FTY-372
+  tunables living next to the attempt-level retry constants**
+  (`DEFAULT_MAX_INFRA_RETRY_ATTEMPTS`, `INFRA_RETRY_BACKOFF_BASE_SECONDS`,
+  `INFRA_RETRY_BACKOFF_MAX_SECONDS` beside `DEFAULT_MAX_ATTEMPTS` in
+  `backend/app/estimator/processing.py`); their values are the FTY-372
   implementers' documented judgement. Exhausting that ceiling stops further
   auto-retries but still never lands `failed` — the event remains honestly
-  `processing`, and a later delivery/attempt may still complete it.
+  `processing` in a deferred still-working state that the user's manual retry
+  re-opens.
 
 Invariants, identical to the existing terminal writes:
 
@@ -330,7 +333,7 @@ in the one transaction that persists the `clarification_answers` row:
 - **Resolved siblings preserved untouched, never double-counted (FTY-278, contract only):**
   when the event carries committed `resolved` siblings from an earlier round
   (the `partially_resolved` item-scoped partial state — `log-events.md` v6,
-  `food-resolution.md` v9),
+  `food-resolution-changelog.md` v9),
   the re-estimate re-costs **only the open (newly-answered) component** and
   **leaves the already-`resolved` siblings untouched** — it neither re-costs,
   re-creates, nor replaces them. The answered component's own row is advanced
@@ -485,7 +488,7 @@ surface (`docs/security/data-retention.md`, "Estimation runs").
   live smoke's 90s poll window) **stops all further provider work in that run
   and degrades** (FTY-370): with ≥1 interpreted candidate the run commits a
   rough, honestly-labelled estimate — produced **without further provider
-  budget** (`food-resolution.md` v23) — and terminates `processing → completed`
+  budget** (`food-resolution-changelog.md` v23) — and terminates `processing → completed`
   / `processing → partially_resolved`; with nothing interpreted the event stays
   in the honest still-working `processing` state with the bounded long-backoff
   auto-retry. A breach is **never** terminal `processing → failed`. The breach
@@ -498,12 +501,13 @@ surface (`docs/security/data-retention.md`, "Estimation runs").
   the first-pass worker path and the answer-triggered **scoped re-estimate** — a
   breach there degrades the open component the same way while the
   already-`resolved` siblings stay preserved untouched, rather than failing the
-  event. Defaults — including the FTY-370 still-working retry ceiling and
-  long-backoff schedule for the nothing-interpreted case — live next to the
-  retry constants (`backend/app/estimator/run_budget.py`) and may be tuned like
-  them (the hard ceiling *values* are unchanged by FTY-370). The attempt-level
-  retry bound, backoff schedule, and per-call rate-limit retry above are
-  unchanged.
+  event. The FTY-363 hard-ceiling *values* (`DEFAULT_MAX_PROVIDER_CALLS`,
+  `DEFAULT_RUN_DEADLINE_SECONDS`) live in `backend/app/estimator/run_budget.py`
+  and are unchanged by FTY-370/FTY-372; the still-working retry ceiling and
+  long-backoff schedule for the nothing-interpreted case live beside the
+  attempt-level retry constants in `backend/app/estimator/processing.py` and may
+  be tuned like them. The attempt-level retry bound, backoff schedule, and
+  per-call rate-limit retry above are unchanged.
 - These values are conservative documented defaults and may be tuned (story
   planning notes).
 
