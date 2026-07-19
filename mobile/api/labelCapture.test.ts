@@ -242,6 +242,77 @@ describe("uploadLabelImage", () => {
     ).rejects.toMatchObject({ name: "LabelUploadApiError", status: 413 });
   });
 
+  it("maps a 503 (retryable transient) to a reassuring, transient-framed message", async () => {
+    const { openImage } = fakeImage({ status: 503, body: null });
+
+    let caught: LabelUploadApiError | undefined;
+    try {
+      await uploadLabelImage(SESSION, "file:///label.jpg", false, openImage);
+    } catch (err) {
+      caught = err as LabelUploadApiError;
+    }
+
+    expect(caught).toBeInstanceOf(LabelUploadApiError);
+    expect(caught?.status).toBe(503);
+    expect(caught?.message).toBe(
+      "The label service is busy right now. Please try again in a moment.",
+    );
+    // Reads as temporary + retryable, not permanent/user-caused.
+    expect(caught?.message).toMatch(/try again/i);
+  });
+
+  it("the 503 message leaks no raw status code, image path, bytes, or extracted content", async () => {
+    const sensitiveUri = "file:///private/nutrition-secret.jpg";
+    const { openImage } = fakeImage({ status: 503, body: null });
+
+    let message = "";
+    try {
+      await uploadLabelImage(SESSION, sensitiveUri, false, openImage);
+    } catch (err) {
+      message = (err as LabelUploadApiError).message;
+    }
+
+    // No raw HTTP status number (no digits at all) and no "status" echo token.
+    expect(message).not.toMatch(/\d/);
+    expect(message).not.toMatch(/status/i);
+    // No image path/bytes/extracted content.
+    expect(message).not.toContain(sensitiveUri);
+    expect(message).not.toContain("private");
+    expect(message).not.toContain("nutrition-secret");
+    expect(message).not.toMatch(/byte|base64|data:/);
+  });
+
+  it("does not invoke the unauthorized handler on a 503 error", async () => {
+    const handler = jest.fn();
+    setUnauthorizedHandler(handler);
+    const { openImage } = fakeImage({ status: 503, body: null });
+
+    await expect(
+      uploadLabelImage(SESSION, "file:///label.jpg", false, openImage),
+    ).rejects.toMatchObject({ name: "LabelUploadApiError", status: 503 });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("keeps the 401/413/generic messages unchanged (503 case added no regressions)", async () => {
+    const cases: { status: number; message: string }[] = [
+      { status: 401, message: "Your session has expired. Sign in again to keep logging." },
+      { status: 413, message: "That photo is too large to upload." },
+      { status: 500, message: "We couldn’t upload the label (status 500)." },
+    ];
+
+    for (const { status, message } of cases) {
+      const { openImage } = fakeImage({ status, body: null });
+      let caught: LabelUploadApiError | undefined;
+      try {
+        await uploadLabelImage(SESSION, "file:///label.jpg", false, openImage);
+      } catch (err) {
+        caught = err as LabelUploadApiError;
+      }
+      expect(caught?.status).toBe(status);
+      expect(caught?.message).toBe(message);
+    }
+  });
+
   it("error messages do not contain image bytes, URIs, or extracted content", async () => {
     const sensitiveUri = "file:///private/nutrition-secret.jpg";
     const { openImage } = fakeImage({ status: 500, body: null });
