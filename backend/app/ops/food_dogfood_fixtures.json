@@ -20,7 +20,15 @@
     "never 'needs_clarification' — enforced by the completed-status check for every",
     "fixture (app/ops/food_dogfood_smoke.py _status_failures). FTY-369 owns its",
     "product_database provenance via forbid_source_types; the two assertions ride the",
-    "one shared row rather than duplicating the same submitted text."
+    "one shared row rather than duplicating the same submitted text.",
+    "never_fail (FTY-370/371/372/373): the informal/homemade/consumable never-fail",
+    "regression phrases (the 2026-07-16 live-repro banh-mi, the nicorette pair, and",
+    "adversarial thrown-together assemblies) only have to reach a terminal non-'failed'",
+    "estimate — a rough degraded 'completed' or a 'partially_resolved' passes, terminal",
+    "'failed' (an infra/deadline/budget breach surfaced as a failed entry) does not.",
+    "Their bands are wide rough-estimate plausibility tolerances (the coarse degrade",
+    "prior costs an unresolvable serving at ~200 kcal, so a band must span both a good",
+    "live estimate and that rough fallback), never a nutrition table the estimator reads."
   ],
   "fixtures": [
     {
@@ -114,6 +122,56 @@
       "total_kcal_high": 130.0,
       "forbid_source_types": ["model_prior", "user_text"],
       "forbid_substrings": []
+    },
+    {
+      "key": "homemade-banh-mi",
+      "raw_text": "homemade banh mi on a brioche style bun with shredded carrot, siracha mayo, cucumber, green onion and 3 ground pork meat",
+      "expected_item_count": null,
+      "total_kcal_low": 150.0,
+      "total_kcal_high": 1400.0,
+      "forbid_source_types": [],
+      "forbid_substrings": [],
+      "never_fail": true
+    },
+    {
+      "key": "nicorette-4mg-gum",
+      "raw_text": "nicorette 4mg gum",
+      "expected_item_count": null,
+      "total_kcal_low": 1.0,
+      "total_kcal_high": 260.0,
+      "forbid_source_types": [],
+      "forbid_substrings": [],
+      "never_fail": true
+    },
+    {
+      "key": "nicorette-brand-gum",
+      "raw_text": "nicorette brand gum",
+      "expected_item_count": null,
+      "total_kcal_low": 1.0,
+      "total_kcal_high": 260.0,
+      "forbid_source_types": [],
+      "forbid_substrings": [],
+      "never_fail": true
+    },
+    {
+      "key": "homemade-chicken-rice-casserole",
+      "raw_text": "a big bowl of the chicken and rice casserole i threw together last night - chicken thighs, rice, cream of mushroom, cheese and frozen peas",
+      "expected_item_count": null,
+      "total_kcal_low": 200.0,
+      "total_kcal_high": 1600.0,
+      "forbid_source_types": [],
+      "forbid_substrings": [],
+      "never_fail": true
+    },
+    {
+      "key": "thrown-together-veggie-curry",
+      "raw_text": "some leftover thrown together veggie curry i made - chickpeas, coconut milk, spinach, whatever spices, over a scoop of rice",
+      "expected_item_count": null,
+      "total_kcal_low": 150.0,
+      "total_kcal_high": 1400.0,
+      "forbid_source_types": [],
+      "forbid_substrings": [],
+      "never_fail": true
     }
   ]
 }

@@ -99,6 +99,13 @@ _NON_COMPLETED_TERMINAL: frozenset[str] = frozenset(
     {"failed", "needs_clarification", "partially_resolved"}
 )
 
+#: Terminal states that satisfy a ``never_fail`` fixture (FTY-373): a rough
+#: degraded estimate lands ``completed``; a mixed log lands ``partially_resolved``.
+#: Both are honest "estimated" outcomes. Terminal ``failed`` (infra breach
+#: surfaced as a failed entry) and ``needs_clarification`` (a reflexive question
+#: instead of an estimate) are *not* a never-fail pass.
+_NEVER_FAIL_TERMINAL_PASS: frozenset[str] = frozenset({"completed", "partially_resolved"})
+
 #: Per-item sanity ceiling. A single logged food item costing more than this is
 #: implausible for these everyday fixtures and signals a bad match/scale.
 PER_ITEM_ABSURD_KCAL = 2000.0
@@ -165,11 +172,30 @@ def _finite_positive(value: float | None) -> bool:
     return value is not None and math.isfinite(value) and value > 0
 
 
-def _status_failures(status: str) -> list[str]:
-    """Terminal-status check: a supplied count/amount must complete, never clarify."""
+def _status_failures(status: str, *, never_fail: bool) -> list[str]:
+    """Terminal-status check.
+
+    Default (strict) fixtures: a supplied count/amount must ``complete``, never
+    clarify or fail. ``never_fail`` fixtures (FTY-373) only have to reach a
+    terminal non-``failed`` estimate — a rough degraded ``completed`` or a
+    ``partially_resolved`` passes; terminal ``failed`` (an infra breach surfaced
+    as a failed entry) and a reflexive ``needs_clarification`` do not.
+    """
 
     if status == "completed":
         return []
+    if never_fail:
+        if status in _NEVER_FAIL_TERMINAL_PASS:
+            return []
+        if status == "failed":
+            return [
+                "ended in terminal 'failed' — the never-fail invariant forbids a "
+                "deadline/budget/transient breach from surfacing as a failed entry"
+            ]
+        return [
+            f"expected a terminal estimate but got '{status}' "
+            "(an informal/consumable phrase must be estimated, not clarified/failed)"
+        ]
     if status in _NON_COMPLETED_TERMINAL:
         return [
             f"expected 'completed' but got '{status}' "
@@ -266,7 +292,7 @@ def assess_fixture(spec: FixtureSpec, outcome: FixtureOutcome) -> FixtureAssessm
     """
 
     failures: list[str] = []
-    failures += _status_failures(outcome.status)
+    failures += _status_failures(outcome.status, never_fail=spec.never_fail)
     failures += _count_failures(spec, outcome.items)
     for item in outcome.items:
         failures += _item_failures(spec, item)
