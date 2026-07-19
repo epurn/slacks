@@ -196,13 +196,17 @@ export async function uploadLabelImage(
       notifyUnauthorized();
     }
     // Map documented statuses to plain, nonjudgmental messages.
-    // Never echo image bytes, file paths, or extracted content.
+    // Never echo image bytes, file paths, extracted content, or the raw status code.
+    // A 503 is the FTY-390 retryable transient outcome (nothing persisted): frame it
+    // as temporary and invite another attempt, never as a permanent/user-caused error.
     const message =
       status === 401
         ? "Your session has expired. Sign in again to keep logging."
         : status === 413
           ? "That photo is too large to upload."
-          : `We couldn’t upload the label (status ${status}).`;
+          : status === 503
+            ? "The label service is busy right now. Please try again in a moment."
+            : `We couldn’t upload the label (status ${status}).`;
     throw new LabelUploadApiError(status, message);
   }
 
