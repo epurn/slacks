@@ -2,6 +2,7 @@ import {
   LogEventApiError,
   answerClarification,
   createLogEvent,
+  createLogEventWithImages,
   deleteLogEvent,
   getLogEventClarification,
   listTodayLogEvents,
@@ -9,7 +10,9 @@ import {
   type LogEventDTO,
   type LogEventEntryDTO,
   type LogEventSession,
+  type SubmissionImage,
 } from "./logEvents";
+import { setUnauthorizedHandler } from "./client";
 
 const SESSION: LogEventSession = {
   baseUrl: "https://api.example.test",
@@ -186,6 +189,143 @@ describe("createLogEvent", () => {
     } catch (error) {
       const message = (error as LogEventApiError).message;
       expect(message).not.toContain("a very private note");
+    }
+  });
+});
+
+describe("createLogEventWithImages (FTY-383 multipart)", () => {
+  const IMAGE_A: SubmissionImage = {
+    uri: "file:///a.jpg",
+    name: "a.jpg",
+    type: "image/jpeg",
+  };
+  const IMAGE_B: SubmissionImage = {
+    uri: "file:///b.png",
+    name: "b.png",
+    type: "image/png",
+  };
+
+  // Read appended FormData parts via the standard `entries()` iterator. (The
+  // jest env's FormData stringifies the RN `{ uri, name, type }` file object, so
+  // the image parts are asserted by count/name here; the file descriptor's
+  // fields are exercised on-device by the Maestro flow.)
+  function parts(body: unknown): [string, unknown][] {
+    return [...(body as FormData).entries()] as [string, unknown][];
+  }
+  function payloadPart(body: unknown): Record<string, unknown> {
+    const entry = parts(body).find(([name]) => name === "payload");
+    return JSON.parse(entry![1] as string) as Record<string, unknown>;
+  }
+  function imageParts(body: unknown): unknown[] {
+    return parts(body)
+      .filter(([name]) => name === "image")
+      .map(([, value]) => value);
+  }
+
+  afterEach(() => {
+    setUnauthorizedHandler(null);
+  });
+
+  it("POSTs a multipart body: JSON payload part + one image part per image", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(okResponse(DTO, 201));
+
+    const result = await createLogEventWithImages(
+      SESSION,
+      "2 of these bars",
+      [IMAGE_A, IMAGE_B],
+      false,
+      "key-1",
+      fetchMock,
+    );
+
+    expect(result).toEqual(DTO);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    // Save flag rides the query string (default false).
+    expect(url).toBe(
+      "https://api.example.test/api/users/11111111-1111-1111-1111-111111111111/log-events?save=false",
+    );
+    expect(init.method).toBe("POST");
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer test-token");
+    // No JSON Content-Type — FormData sets multipart/form-data + boundary.
+    expect(headers["Content-Type"]).toBeUndefined();
+
+    expect(payloadPart(init.body)).toEqual({
+      raw_text: "2 of these bars",
+      idempotency_key: "key-1",
+    });
+    // One `image` part per attached image (repeated part name), in order.
+    expect(imageParts(init.body)).toHaveLength(2);
+  });
+
+  it("omits raw_text from the payload when the text is empty (image-only)", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(okResponse(DTO, 201));
+
+    await createLogEventWithImages(SESSION, "   ", [IMAGE_A], false, "key-2", fetchMock);
+
+    expect(payloadPart((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)).toEqual({
+      idempotency_key: "key-2",
+    });
+  });
+
+  it("sends save=true in the query string when the retention flag is set", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(okResponse(DTO, 201));
+    await createLogEventWithImages(SESSION, "bar", [IMAGE_A], true, "key-3", fetchMock);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("?save=true");
+  });
+
+  it("treats a 200 idempotent replay the same as a 201 create", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(okResponse(DTO, 200));
+    const result = await createLogEventWithImages(
+      SESSION,
+      "bar",
+      [IMAGE_A],
+      false,
+      "key-4",
+      fetchMock,
+    );
+    expect(result).toEqual(DTO);
+  });
+
+  it("maps a non-2xx status to a content-free LogEventApiError", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(errorResponse(413));
+    await expect(
+      createLogEventWithImages(SESSION, "bar", [IMAGE_A], false, "key-5", fetchMock),
+    ).rejects.toMatchObject({ name: "LogEventApiError", status: 413 });
+  });
+
+  it("clears the session (unauthorized handler) on a 401, like the JSON path", async () => {
+    const handler = jest.fn();
+    setUnauthorizedHandler(handler);
+    const fetchMock = jest.fn().mockResolvedValue(errorResponse(401));
+    await expect(
+      createLogEventWithImages(SESSION, "bar", [IMAGE_A], false, "key-6", fetchMock),
+    ).rejects.toMatchObject({ status: 401 });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates a network-layer failure (image submits are online-only, never queued)", async () => {
+    const fetchMock = jest.fn().mockRejectedValue(new TypeError("Network request failed"));
+    await expect(
+      createLogEventWithImages(SESSION, "bar", [IMAGE_A], false, "key-7", fetchMock),
+    ).rejects.toBeInstanceOf(TypeError);
+  });
+
+  it("never echoes the user's raw text into the error message", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(errorResponse(422));
+    try {
+      await createLogEventWithImages(
+        SESSION,
+        "a very private note",
+        [IMAGE_A],
+        false,
+        "key-8",
+        fetchMock,
+      );
+      throw new Error("expected createLogEventWithImages to throw");
+    } catch (error) {
+      expect((error as LogEventApiError).message).not.toContain("a very private note");
     }
   });
 });

@@ -16,6 +16,7 @@
 import {
   ApiError,
   authHeaders,
+  notifyUnauthorized,
   request,
   requestNoContent,
   userScopedUrl,
@@ -196,6 +197,96 @@ export async function createLogEvent(
     onError: logEventError,
     fetchImpl,
   });
+}
+
+/**
+ * One image part of a unified text+image submission (FTY-374). A local
+ * camera/library asset ready to stream as a multipart `image` part: its
+ * ephemeral file `uri`, a `name` for the part, and the declared image
+ * `type` (a validated content type). The bytes are never read into JS here —
+ * React Native's `FormData` streams the file from the URI natively.
+ */
+export interface SubmissionImage {
+  readonly uri: string;
+  readonly name: string;
+  readonly type: string;
+}
+
+/**
+ * Create a `pending` log event from a **unified text+image submission**
+ * (FTY-374, `docs/contracts/log-event-images.md`): free text plus 0..N images in
+ * one multipart create. The JSON `payload` part carries `raw_text` (omitted when
+ * empty — the backend stores the `"Photo log"` marker) and the `idempotency_key`;
+ * each image rides its own `image` part; the submission-level `save` retention
+ * choice travels in the query string (default `false` → the images are transient
+ * and purged at estimation-terminal).
+ *
+ * This is the multipart sibling of {@link createLogEvent}: the JSON path stays
+ * the default text-only funnel (and the FTY-104 offline outbox), while an
+ * image-bearing submit routes here. An image submission is **online-only** — it
+ * is never queued — so a network-layer failure propagates as a raw error the
+ * caller treats as unreachable, and any HTTP answer maps to a `LogEventApiError`
+ * exactly like the JSON path. The client-side size/type/count guard is a
+ * first-line check at attach time (`useComposerImages`); the backend is the
+ * authoritative boundary.
+ *
+ * Privacy: image bytes never enter JS or logs; the `Content-Type` boundary is
+ * set by `FormData`, and errors carry only the HTTP status + a fixed action —
+ * never image bytes, URIs, or `raw_text`.
+ */
+export async function createLogEventWithImages(
+  session: LogEventSession,
+  rawText: string,
+  images: readonly SubmissionImage[],
+  savePhoto: boolean,
+  idempotencyKey: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<LogEventDTO> {
+  const payload: { raw_text?: string; idempotency_key: string } = {
+    idempotency_key: idempotencyKey,
+  };
+  const trimmed = rawText.trim();
+  if (trimmed) {
+    payload.raw_text = trimmed;
+  }
+
+  const form = new FormData();
+  form.append("payload", JSON.stringify(payload));
+  for (const image of images) {
+    // React Native's FormData accepts a `{ uri, name, type }` file descriptor
+    // and streams the file bytes natively as a multipart `image` part with the
+    // declared content type — the bytes are never read into JS.
+    form.append("image", {
+      uri: image.uri,
+      name: image.name,
+      type: image.type,
+    } as unknown as Blob);
+  }
+
+  const url = `${userScopedUrl(session, "log-events")}?save=${
+    savePhoto ? "true" : "false"
+  }`;
+
+  // No explicit Content-Type: FormData sets `multipart/form-data` with its own
+  // boundary. Only the bearer token + Accept are added here.
+  const response = await fetchImpl(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${session.token}`,
+      Accept: "application/json",
+    },
+    body: form,
+  });
+
+  if (!response.ok) {
+    // This raw-body path bypasses request(), so it clears the session on a 401
+    // itself, mirroring uploadLabelImage — a dead token routes back to sign-in.
+    if (response.status === 401) {
+      notifyUnauthorized();
+    }
+    throw logEventError(response.status, "save your entry");
+  }
+  return (await response.json()) as LogEventDTO;
 }
 
 /**

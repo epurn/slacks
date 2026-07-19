@@ -1,17 +1,37 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
 import { type DerivedItem } from "@/api/derivedItems";
 import {
   createLogEvent as createLogEventApi,
+  createLogEventWithImages as createLogEventWithImagesApi,
+  LogEventApiError,
   type LogEventDTO,
 } from "@/api/logEvents";
 import { type SavedFoodDTO } from "@/api/savedFoods";
 import { type OutboxStore } from "@/state/outbox";
 import type { ApiSession } from "@/state/session";
-import { sortByNewest } from "@/state/today";
+import { OPTIMISTIC_ID_PREFIX, optimisticLogEvent, sortByNewest } from "@/state/today";
 import { useSubmitLog, type SubmitLogBridge } from "@/state/useSubmitLog";
+import { lightHaptic } from "@/utils/haptics";
 
+import { type ComposerImage } from "./useComposerImages";
 import { removeOptimisticEvent, syntheticSavedFoodItem } from "./helpers";
+
+/**
+ * The content-free marker stored for an image-only submission (no typed text),
+ * mirroring the backend's `PHOTO_LOG_EVENT_RAW_TEXT` (`log-event-images.md`). It
+ * seeds the optimistic row so a pending image-only entry reads sensibly if its
+ * raw text is ever shown; the server returns the same marker on reconcile.
+ */
+const PHOTO_LOG_RAW_TEXT = "Photo log";
+
+/** Map an image-submit failure to a calm, content-free message. */
+function imageSubmitMessage(error: unknown): string {
+  if (error instanceof LogEventApiError) return error.message;
+  // A network-layer failure: image submissions are online-only (never queued),
+  // so say so plainly rather than silently dropping the capture.
+  return "Connect to the internet to add photos to a log.";
+}
 
 /** The Today-state seams the submit-bridge writes through. */
 export type UseTodaySubmitParams = {
@@ -25,6 +45,8 @@ export type UseTodaySubmitParams = {
   >;
   /** Injectable create endpoint for tests. */
   create: typeof createLogEventApi;
+  /** Injectable multipart (text+image) create endpoint for tests (FTY-383). */
+  createWithImages: typeof createLogEventWithImagesApi;
   /** Durable offline-outbox storage (FTY-104) — injectable for tests. */
   outboxStore: OutboxStore;
   /** Reconnect-retry cadence for the outbox drain — injectable for tests. */
@@ -50,6 +72,7 @@ export function useTodaySubmit({
   setEvents,
   setItemsByEvent,
   create,
+  createWithImages,
   outboxStore,
   retryIntervalMs,
   generateKey,
@@ -149,8 +172,89 @@ export function useTodaySubmit({
     now,
   });
 
+  // Monotonic counter for image-submit optimistic ids. Distinct suffix (`img-`)
+  // so it never collides with the text machine's numeric optimistic ids, while
+  // keeping the `temp-` prefix the poll reconciler recognizes.
+  const imageOptimisticSeq = useRef(0);
+
+  // Submit the current composer text together with attached images as one
+  // unified multipart create (FTY-383). Online-only: it is never queued, so an
+  // unreachable failure restores the composer (text is restored here; the caller
+  // restores the thumbnails) and surfaces a calm message — the capture is never
+  // silently dropped. Returns whether the submit succeeded so the caller knows
+  // whether to restore the thumbnails.
+  const { text, setText, submitting, setSubmitting, setSubmitError } = submit;
+  const submitLogEntryWithImages = useCallback(
+    async (images: readonly ComposerImage[], savePhoto: boolean): Promise<boolean> => {
+      if (!apiSession || submitting || images.length === 0) return false;
+      const trimmed = text.trim();
+      const idempotencyKey = generateKey();
+      const optimisticId = `${OPTIMISTIC_ID_PREFIX}img-${imageOptimisticSeq.current++}`;
+      const optimistic = optimisticLogEvent({
+        id: optimisticId,
+        userId: apiSession.userId,
+        rawText: trimmed || PHOTO_LOG_RAW_TEXT,
+        createdAt: now(),
+      });
+
+      // Immediate acknowledgement: the pending row appears and the composer
+      // clears (text here, thumbnails in the caller) before the round-trip.
+      //
+      // Unlike the saved-food "Add" path, an image submit NEVER injects a
+      // synthetic resolved saved-food item — a photo is resolved server-side by
+      // the estimator, so it is never an estimator-skip (the submit-routing
+      // contract in useTodayData: "images take precedence over an in-flight
+      // saved-food chip hydration"). We insert a plain pending row and drop any
+      // in-flight saved-food selection so a stale chip can't mislabel this
+      // photo submission. Deliberately NOT reusing submitBridge.insertOptimistic
+      // (which reads selectedSavedFoodRef and injects the synthetic item) and
+      // NOT recording this row in pendingSavedFoodById — so the failure rollback
+      // below removes the pending row without resurrecting a saved-food chip.
+      setEvents((prev) => sortByNewest([optimistic, ...prev]));
+      setSelectedSavedFood(null);
+      setText("");
+      setSubmitting(true);
+      setSubmitError(null);
+
+      try {
+        const created = await createWithImages(
+          apiSession,
+          trimmed,
+          images,
+          savePhoto,
+          idempotencyKey,
+        );
+        submitBridge.reconcileOptimistic(optimisticId, created);
+        lightHaptic();
+        return true;
+      } catch (error) {
+        submitBridge.rollbackOptimistic(optimisticId);
+        setText(trimmed);
+        setSubmitError(imageSubmitMessage(error));
+        return false;
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [
+      apiSession,
+      submitting,
+      text,
+      generateKey,
+      now,
+      submitBridge,
+      setEvents,
+      setSelectedSavedFood,
+      setText,
+      setSubmitting,
+      setSubmitError,
+      createWithImages,
+    ],
+  );
+
   return {
     ...submit,
+    submitLogEntryWithImages,
     selectedSavedFood,
     setSelectedSavedFood,
     selectedSavedFoodRef,

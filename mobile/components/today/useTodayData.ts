@@ -13,6 +13,7 @@ import { getLabelProposal as getLabelProposalApi } from "@/api/labelProposal";
 import {
   answerClarification as answerClarificationApi,
   createLogEvent as createLogEventApi,
+  createLogEventWithImages as createLogEventWithImagesApi,
   deleteLogEvent as deleteLogEventApi,
   getLogEventClarification as getLogEventClarificationApi,
   listTodayLogEvents as listTodayLogEventsApi,
@@ -43,6 +44,7 @@ import {
   messageFor,
   type Phase,
 } from "./helpers";
+import { useComposerImages, type ComposerImagePickers } from "./useComposerImages";
 import { useCorrectionSheet } from "./useCorrectionSheet";
 import { useDeleteEvent } from "./useDeleteEvent";
 import { useQuickAddSuggestions } from "./useQuickAddSuggestions";
@@ -59,6 +61,8 @@ export type UseTodayDataParams = {
   load: typeof listTodayLogEventsApi;
   loadEntries: typeof listTodayLogEventEntriesApi;
   create: typeof createLogEventApi;
+  /** Multipart (text+image) create for the composer attach path (FTY-383). */
+  createWithImages: typeof createLogEventWithImagesApi;
   deleteEvent: typeof deleteLogEventApi;
   getClarification: typeof getLogEventClarificationApi;
   answerClarification: typeof answerClarificationApi;
@@ -75,6 +79,8 @@ export type UseTodayDataParams = {
   retryIntervalMs?: number;
   generateKey: () => string;
   now: () => string;
+  /** Injectable composer image pickers (FTY-383) — E2E/tests override the OS picker. */
+  composerImagePickers?: Partial<ComposerImagePickers>;
 };
 
 /**
@@ -91,6 +97,7 @@ export function useTodayData({
   load,
   loadEntries,
   create,
+  createWithImages,
   deleteEvent,
   getClarification,
   answerClarification,
@@ -105,6 +112,7 @@ export function useTodayData({
   retryIntervalMs,
   generateKey,
   now,
+  composerImagePickers,
 }: UseTodayDataParams) {
   const liveSession = useSession();
   const session = sessionOverride !== undefined ? sessionOverride : liveSession;
@@ -182,6 +190,7 @@ export function useTodayData({
     submitError,
     setSubmitError,
     handleSubmit: submitLogEntry,
+    submitLogEntryWithImages,
     reachability,
     offlineEntries,
     queuedCount,
@@ -193,11 +202,24 @@ export function useTodayData({
     setEvents,
     setItemsByEvent,
     create,
+    createWithImages,
     outboxStore,
     retryIntervalMs,
     generateKey,
     now,
   });
+
+  // Composer image attachments (FTY-383): the staged photos plus the native
+  // attach chooser, the client-side guard, and the calm attach error. The
+  // submit routing that sends them lives below (`handleSubmit`).
+  const {
+    images: composerImages,
+    attach: attachComposerImage,
+    removeImage: removeComposerImage,
+    clearImages: clearComposerImages,
+    setImages: setComposerImages,
+    attachError: composerAttachError,
+  } = useComposerImages(composerImagePickers);
 
   // The barcode-scanner / label-capture modals, the barcode-scan submit
   // (FTY-063), and the "type it instead" composer fallback (FTY-194) live in a
@@ -509,7 +531,7 @@ export function useTodayData({
   // Quick-add suggestion chips (FTY-341): focus-edge + post-submit fetches,
   // the deliberate prefill-on-tap, and the submit/typeahead wrappers that
   // join or supersede an in-flight saved-food hydration (FTY-053 skip path).
-  const { suggestions, refreshSuggestions, handleSelectSuggestion, handleComposerTextChange, handleSubmit, selectSavedFood } =
+  const { suggestions, refreshSuggestions, handleSelectSuggestion, handleComposerTextChange, handleSubmit: handleTextSubmit, selectSavedFood } =
     useQuickAddSuggestions({
     apiSession,
     isActive,
@@ -525,6 +547,37 @@ export function useTodayData({
   useEffect(() => {
     refreshSuggestionsRef.current = refreshSuggestions;
   });
+
+  // Submit routing (FTY-383): an image-bearing submit posts one multipart
+  // create (online-only); a text-only submit keeps the JSON path (and the
+  // offline outbox) unchanged. On the image path the thumbnails are cleared up
+  // front for immediate acknowledgement, then restored if the submit fails so
+  // the capture is never silently dropped. Images take precedence over an
+  // in-flight saved-food chip hydration — a photo submission is never an
+  // estimator-skip.
+  const handleSubmit = useCallback(async () => {
+    if (composerImages.length === 0) {
+      await handleTextSubmit();
+      return;
+    }
+    const submitted = composerImages;
+    clearComposerImages();
+    // Default to discard-by-default retention (`save=false`); there is no
+    // per-image save UI (story non-goal), so the submission-level flag is off.
+    const ok = await submitLogEntryWithImages(submitted, false);
+    if (!ok) setComposerImages(submitted);
+  }, [
+    composerImages,
+    handleTextSubmit,
+    clearComposerImages,
+    submitLogEntryWithImages,
+    setComposerImages,
+  ]);
+
+  // Attach is unavailable offline (image submissions are online-only); text
+  // logging keeps working through the outbox. `reconnecting` still allows an
+  // attach attempt — only a confirmed offline state disables it.
+  const attachDisabled = reachability === "offline";
 
   // Offline-queued captures (FTY-104, harvested onto Today in FTY-147). Each
   // renders as a dedicated, uncounted OfflineEntryRow in the timeline — never an
@@ -601,6 +654,11 @@ export function useTodayData({
     submitError,
     reachability,
     queuedCount,
+    composerImages,
+    attachComposerImage,
+    removeComposerImage,
+    composerAttachError,
+    attachDisabled,
     setSelectedSavedFood: selectSavedFood,
     suggestions,
     handleSelectSuggestion,
