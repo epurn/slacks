@@ -2040,6 +2040,7 @@
           "official_source",
           "user_label",
           "user_text",
+          "prior_correction",
           "reference_source",
           "model_prior"
         ],
