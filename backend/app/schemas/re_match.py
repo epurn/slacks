@@ -103,9 +103,45 @@ class SourceCandidateDTO(BaseModel):
     fat_g: float
 
 
+class PriorCorrectionCandidateDTO(BaseModel):
+    """A prior-correction match offered for an item (FTY-411).
+
+    The acting user's own confident correction for this item's normalized name, rendered
+    as a top-ranked "Your correction" choice above the guessed-source ``candidates``.
+    ``source_type`` is always ``prior_correction`` (drives the "Your correction"
+    provenance icon); ``source_ref`` is the opaque ``prior_correction:<content_hash>`` id
+    echoed back on re-resolve (never facts); ``basis`` is ``as_logged`` — the
+    ``calories``/macros are the corrected **total** for the item's portion, not a per-100g
+    density — and a macro the correction never supplied is honestly ``null`` (unknown),
+    never a fabricated ``0``. ``rescaled`` marks a value carried from a different-portion
+    prior via per-gram rescale.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_type: SourceType
+    source_ref: str
+    name: str
+    basis: Literal["as_logged"]
+    calories: float
+    protein_g: float | None
+    carbs_g: float | None
+    fat_g: float | None
+    rescaled: bool
+
+
 class AlternativesResponse(BaseModel):
-    """The bounded list of alternative source candidates for a food item."""
+    """The alternative source candidates for a food item.
+
+    ``candidates`` are the guessed-source (USDA today) matches, unchanged. ``prior_corrections``
+    (FTY-411) are the acting user's own confident prior corrections for the item's
+    normalized name — a bounded, top-ranked "Your correction" surface the client renders
+    **above** ``candidates`` (prior corrections outrank guessed sources, mirroring the
+    FTY-406 estimate-time precedence). Empty when the user has no matching prior
+    correction, so an item with none returns the ordinary candidate list unchanged.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     candidates: list[SourceCandidateDTO]
+    prior_corrections: list[PriorCorrectionCandidateDTO] = Field(default_factory=list)

@@ -593,10 +593,13 @@ with a user-owned `evidence_sources` row: `source_type = prior_correction`
 `basis = as_logged`, and **no** global `products` cache row (`product_id = NULL`) —
 it is per-user curated truth, not a shared source fact. The run records
 `prior_correction` in `source_refs`. The read-model source descriptor labels it
-"Your correction" so the client can render its provenance (the mobile surfacing —
-history-sourced typeahead and corrected-entry quick-add default — is deferred to
-FTY follow-ups). No new correction row is written and the correction-writing path
-(FTY-051) and `re_match` pass are unchanged; this step only **reads** the trail.
+"Your correction" so the client can render its provenance. The same per-user
+prior-correction trail is exposed as a **pickable re-match candidate + apply surface**
+by FTY-411 (see **Prior-Correction Candidate Surface + Apply (FTY-411)** below); the
+mobile consumers of that surface — the history-sourced typeahead (FTY-407) and the
+corrected-entry quick-add default (FTY-408) — remain deferred to their own lanes. No
+new correction row is written and the correction-writing path (FTY-051) and `re_match`
+pass are unchanged; this step only **reads** the trail.
 
 ### Routing
 
@@ -613,6 +616,84 @@ FTY follow-ups). No new correction row is written and the correction-writing pat
 - **No raw text.** The evidence row stores the projected facts + a content hash over
   them (mirroring `user_text`), never the raw diary phrase or item name; nothing new
   egresses.
+
+## Prior-Correction Candidate Surface + Apply (FTY-411)
+
+FTY-406 made a prior correction a resolution source at **estimate time only**. FTY-411
+exposes the *same* per-user trail as a queryable **re-match candidate** on the
+correction sheet's "Change match" boundary and gives a picked candidate a re-derivable
+**apply path** — so a user whose "black coffee" re-guessed wrong can pick "Your
+correction = 3" and have the corrected value applied, rather than re-deriving the wrong
+guess. It reuses FTY-406's resolver end-to-end (`match_prior_correction`,
+`backend/app/estimator/correction_resolution.py`), so a candidate/apply reproduces
+estimate-time resolution rather than re-implementing it. No mobile change (FTY-407/408),
+no change to estimate-time resolution logic, and no change to the USDA candidate
+provider's own behaviour.
+
+### Candidate surface (list)
+
+`POST …/derived-items/food/{item_id}/source-candidates`
+(`backend/app/routers/re_match.py`, `ReMatchCapability.list_prior_correction_candidates`)
+returns two sibling lists on the existing boundary:
+
+- `candidates` — the guessed-source (USDA today) matches, **unchanged** (same shape,
+  same code path, same bound — no regression).
+- `prior_corrections` — the acting user's own confident prior correction for the
+  **item's** normalized name, projected against the **item's own portion** with FTY-406's
+  direct-match-vs-rescale rules. Each carries `source_type = prior_correction`, a
+  `source_ref = prior_correction:<content_hash>` (the re-derivable reference the apply
+  path echoes back — never facts), the corrected `calories` and macros as an
+  `basis = as_logged` **total** (a macro the correction never supplied is `null` —
+  unknown, never a fabricated `0`), and a `rescaled` flag. **Precedence:** prior
+  corrections outrank every guessed source (mirroring the FTY-406 tier order), so the
+  client renders `prior_corrections` **above** `candidates`.
+
+The `prior_corrections` list is **bounded** by a hard cap
+(`MAX_PRIOR_CORRECTION_CANDIDATES = 1`): FTY-406's resolver collapses an item's matching
+priors to a single authoritative value (stable value / stable per-gram density; a
+conflict is ambiguous and surfaces nothing), so a well-formed surface is 0 or 1. It is
+strictly **per-user and name-normalized** — only the item owner's own rows are read; a
+cross-user or unknown item fails closed as `404`, exactly like the USDA listing. Reads
+only: no network egress, no `products` cache write.
+
+### Apply path (re-resolve)
+
+`POST …/derived-items/food/{item_id}/re-resolve` recognizes a
+`source_ref = prior_correction:<content_hash>` and takes a **dedicated apply branch**
+(`ReMatchCapability._apply_prior_correction`) *before* the `products`-cache lookup: it
+re-projects the acting user's correction for the item's own portion via FTY-406's
+resolver and requires the recomputed reference to **equal** the one the client echoed —
+a stale or foreign reference is rejected (`422 source_not_resolvable`) and nothing
+mutates (the same trust anchor as the source-cache path — the client supplies a
+reference, never facts; `ReResolveRequest` is `extra = forbid`). On success it
+reproduces FTY-406's result: the corrected as-logged values (direct match or per-gram
+rescale, recording the content-free `prior_correction_rescaled` assumption on a rescale)
+with `source_type = prior_correction` provenance and **no** `products` row
+(`product_id = NULL`), re-snapshots the `*_estimated` originals, and appends the single
+immutable `re_match` correction row that **supersedes** any prior `user_edit` — so the
+applied item reads `is_edited = false` (its honesty comes from the user's own curated
+value; `corrections.md` → `is_edited` derivation). Issues no network egress.
+
+### Routing
+
+| Condition | Result | Persisted |
+| --- | --- | --- |
+| List, confident stable prior correction (direct or rescalable) for the item's portion | one `prior_corrections` entry (bounded), above USDA `candidates` | nothing (read only) |
+| List, no matching prior / ambiguous priors / un-rescalable quantity | empty `prior_corrections`; USDA `candidates` unchanged | nothing |
+| List/apply, cross-user or unknown item | `404` (fail closed, no oracle) | nothing |
+| Apply a `prior_correction:<content_hash>` the server re-derives (equal reference) | `200` — food `resolved` (`prior_correction`, `as_logged`) + `evidence_sources` (no `products`) + one `re_match` audit row; `is_edited = false` | as above |
+| Apply a stale/foreign/un-re-derivable `prior_correction:` reference | `422 source_not_resolvable`, nothing mutated | nothing |
+
+### Security / Privacy
+
+- **Per-user reads and apply only.** `risk: medium` — both the candidate list and the
+  apply re-derive strictly from the **acting user's** own rows, name-normalized; no
+  cross-user read or apply. A foreign reference echoed at another user's item re-derives
+  from the *target owner's* (empty) trail and fails closed, so no cross-user value is
+  ever surfaced or applied.
+- **No new PII surface, no raw text.** The apply's evidence row stores the projected
+  facts + content hash (mirroring FTY-406/`user_text`), never the raw diary phrase or
+  item name; the reference is a content hash, not diary text; nothing new egresses.
 
 ## Barcode Source (Open Food Facts) — FTY-060
 

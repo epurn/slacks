@@ -49,6 +49,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.enums import CandidateType, CorrectionSource, DerivedItemStatus
+from app.estimator.correction_resolution import (
+    AS_LOGGED_BASIS,
+    PRIOR_CORRECTION_RESCALED_ASSUMPTION,
+    PRIOR_CORRECTION_SOURCE,
+    PRIOR_CORRECTION_SOURCE_TYPE,
+    PriorCorrectionMatch,
+    match_prior_correction,
+)
 from app.estimator.fdc import (
     FDC_SOURCE,
     FDC_SOURCE_TYPE,
@@ -64,6 +72,7 @@ from app.estimator.food_serving import (
     scale_facts,
 )
 from app.estimator.off import OFF_SOURCE, OFF_SOURCE_TYPE
+from app.estimator.pipeline import CandidateDraft
 from app.estimator.search import OFFICIAL_SOURCE, OFFICIAL_SOURCE_TYPE, sanitize_query
 from app.estimator.searched_reference import MODEL_PRIOR_SOURCE, MODEL_PRIOR_SOURCE_TYPE
 from app.models.corrections import Correction
@@ -80,6 +89,12 @@ PER_100G_BASIS: Final[str] = "per_100g"
 #: bounded (``SLACKS_FDC_MAX_RESULTS``); this caps the combined result so the listing
 #: stays a short, scannable set even as more candidate providers are added.
 MAX_ALTERNATIVES: Final[int] = 10
+
+#: Hard cap on prior-correction candidates surfaced per item (FTY-411). The FTY-406
+#: resolver collapses an item's matching priors to a **single** authoritative value
+#: (direct match or rescale), so a well-formed surface is 0 or 1; this cap is a
+#: defensive bound in the same spirit as :data:`MAX_ALTERNATIVES` for the USDA fan-out.
+MAX_PRIOR_CORRECTION_CANDIDATES: Final[int] = 1
 
 #: Fixed, sanitized clarification question used when the chosen source cannot cost the
 #: item's current quantity **and** the item carries no usable portion mass to fall back
@@ -244,6 +259,47 @@ class SourceCandidate:
     content_hash: str
 
 
+@dataclass(frozen=True)
+class PriorCorrectionCandidate:
+    """A prior-correction match surfaced for the re-match sheet (FTY-411).
+
+    The acting user's own confident correction for this item's normalized name, offered
+    as a top-ranked "Your correction" choice **alongside** the guessed-source
+    :class:`SourceCandidate` list. Unlike a source candidate its facts are the corrected
+    **as-logged total** for the item's own portion (never a per-100g density), a macro
+    the correction never supplied is honestly ``None`` (unknown, never a fabricated
+    ``0``), and its ``source_ref`` is re-derived from the corrections trail on apply —
+    never from the ``products`` cache. ``rescaled`` marks a value carried from a
+    different-portion prior via per-gram rescale.
+    """
+
+    source_ref: str
+    name: str
+    basis: str
+    calories: float
+    protein_g: float | None
+    carbs_g: float | None
+    fat_g: float | None
+    rescaled: bool
+
+
+def _draft_from_item(item: DerivedFoodItem) -> CandidateDraft:
+    """A parse-shaped draft of an existing item, for the prior-correction resolver.
+
+    Carries only the item's identity + portion (name, quantity phrase, unit, amount) so
+    the FTY-406 resolver keys the same per-user, name-normalized lookup and portion
+    signature it uses at estimate time — no barcode/brand/stated facts, because a
+    re-match reads remembered ground truth for the name, not fresh evidence for the entry.
+    """
+
+    return CandidateDraft(
+        name=item.name,
+        quantity_text=item.quantity_text or "",
+        unit=item.unit,
+        amount=item.amount,
+    )
+
+
 @runtime_checkable
 class CandidateProvider(Protocol):
     """A provider that lists alternative source candidates for an identity query.
@@ -377,6 +433,46 @@ class ReMatchCapability:
         self.session.commit()
         return candidates
 
+    def list_prior_correction_candidates(
+        self,
+        *,
+        owner_id: uuid.UUID,
+        current_user: User,
+        item_id: uuid.UUID,
+    ) -> list[PriorCorrectionCandidate]:
+        """List ``owner_id``'s confident prior correction for their food item (FTY-411).
+
+        Reuses the FTY-406 resolver over the item's own portion: when a confident, stable
+        prior correction direct-matches or rescales to the item's quantity it is surfaced
+        as a single top-ranked candidate carrying the corrected values and a
+        ``prior_correction:<content_hash>`` reference the apply path re-derives — never a
+        ``products`` cache row. When there is none the list is empty and the item's
+        ordinary (USDA) candidates are unaffected, so there is no regression. Strictly
+        per-user and name-normalized: only ``owner_id``'s own rows are read (a cross-user
+        or unknown item fails closed, as in :meth:`list_alternatives`); another user's
+        correction is never surfaced. Bounded by
+        :data:`MAX_PRIOR_CORRECTION_CANDIDATES`. Reads only — no network egress, no cache
+        write.
+        """
+
+        self._authorize(owner_id, current_user)
+        item = self._load_owned(item_id, owner_id)
+
+        match = match_prior_correction(self.session, owner_id, _draft_from_item(item))
+        if match is None:
+            return []
+        candidate = PriorCorrectionCandidate(
+            source_ref=match.source_ref,
+            name=item.name,
+            basis=AS_LOGGED_BASIS,
+            calories=match.calories,
+            protein_g=match.protein_g,
+            carbs_g=match.carbs_g,
+            fat_g=match.fat_g,
+            rescaled=match.rescaled,
+        )
+        return [candidate][:MAX_PRIOR_CORRECTION_CANDIDATES]
+
     def re_resolve(
         self,
         *,
@@ -407,6 +503,12 @@ class ReMatchCapability:
 
         self._authorize(owner_id, current_user)
         item = self._load_owned(item_id, owner_id)
+
+        # A prior-correction candidate (FTY-411) is re-derived from the corrections
+        # trail, not the products cache, so it takes a dedicated apply branch before the
+        # cache lookup — no source system ever mints a ``prior_correction:`` reference.
+        if source_ref.startswith(f"{PRIOR_CORRECTION_SOURCE}:"):
+            return self._apply_prior_correction(item, source_ref)
 
         product = self._lookup_cached(source_ref)
         if product is None:
@@ -446,6 +548,48 @@ class ReMatchCapability:
         self._rewrite_evidence(item, product, carried_grams=carried_grams)
         record_re_match_correction(
             self.session, item, old_calories=prior_calories, new_calories=scaled.calories
+        )
+
+        self.session.commit()
+        self.session.refresh(item)
+        return item
+
+    def _apply_prior_correction(self, item: DerivedFoodItem, source_ref: str) -> DerivedFoodItem:
+        """Apply a chosen prior-correction candidate, re-derived from the corrections trail.
+
+        The prior-correction half of the apply path (FTY-411): it re-projects the acting
+        user's confident correction for the item's own portion via the FTY-406 resolver
+        (never the ``products`` cache) and requires the recomputed
+        ``prior_correction:<content_hash>`` reference to equal the one the client echoed —
+        a stale/unknown reference is rejected (:class:`SourceNotResolvable`) and nothing
+        mutates, the same trust anchor the source-cache path uses (the client supplies a
+        reference, never facts). On success it reproduces FTY-406's estimate-time result:
+        the corrected as-logged values (direct match or per-gram rescale) with
+        :attr:`~app.enums.SourceType.PRIOR_CORRECTION` provenance and **no** ``products``
+        row, re-snapshots the ``*_estimated`` originals, and appends the ``re_match`` audit
+        row that supersedes any prior ``user_edit`` — so the item honestly reads
+        ``is_edited == false`` (its truth is the user's own curated value, not a stale
+        override). Issues no network egress.
+        """
+
+        match = match_prior_correction(self.session, item.user_id, _draft_from_item(item))
+        if match is None or match.source_ref != source_ref:
+            raise SourceNotResolvable(source_ref)
+
+        prior_calories = item.calories
+        item.status = DerivedItemStatus.RESOLVED
+        item.grams = match.grams
+        item.calories = match.calories
+        item.protein_g = match.protein_g
+        item.carbs_g = match.carbs_g
+        item.fat_g = match.fat_g
+        item.calories_estimated = match.calories
+        item.protein_g_estimated = match.protein_g
+        item.carbs_g_estimated = match.carbs_g
+        item.fat_g_estimated = match.fat_g
+        self._rewrite_prior_correction_evidence(item, match)
+        record_re_match_correction(
+            self.session, item, old_calories=prior_calories, new_calories=match.calories
         )
 
         self.session.commit()
@@ -499,6 +643,59 @@ class ReMatchCapability:
 
         return self.session.scalars(select(Product).where(Product.source_ref == source_ref)).first()
 
+    def _evidence_row(self, item: DerivedFoodItem) -> EvidenceSource:
+        """The item's most recent ``evidence_sources`` row, or a fresh attached one.
+
+        The single provenance record the re-resolve/apply paths rewrite in place, so a
+        re-matched item keeps exactly one evidence row now pointing at the new source.
+        Shared by the source-cache rewrite and the prior-correction rewrite.
+        """
+
+        evidence = self.session.scalars(
+            select(EvidenceSource)
+            .where(EvidenceSource.derived_food_item_id == item.id)
+            .order_by(EvidenceSource.created_at.desc())
+        ).first()
+        if evidence is None:
+            evidence = EvidenceSource(
+                user_id=item.user_id,
+                log_event_id=item.log_event_id,
+                derived_food_item_id=item.id,
+            )
+            self.session.add(evidence)
+        return evidence
+
+    def _rewrite_prior_correction_evidence(
+        self, item: DerivedFoodItem, match: PriorCorrectionMatch
+    ) -> None:
+        """Rewrite the item's evidence to prior-correction provenance (FTY-411).
+
+        Mirrors FTY-406's persisted prior-correction row so an applied candidate is
+        indistinguishable from an estimate-time prior-correction resolution:
+        ``source_type = prior_correction``, the ``prior_correction:<content_hash>``
+        reference, ``as_logged`` basis (the stored numbers are the corrected **total**,
+        not a per-100g density, so the read model never re-scales them), **no**
+        ``product_id`` (per-user curated truth, not a shared cache row), the content-free
+        ``prior_correction_rescaled`` assumption only when the value was rescaled to a
+        different portion, and a homogeneous single-source ``field_provenance`` of
+        ``None``. The per-100g columns hold the corrected as-logged totals, exactly as the
+        FTY-406 estimate-time step persists them.
+        """
+
+        evidence = self._evidence_row(item)
+        evidence.product_id = None
+        evidence.source_type = PRIOR_CORRECTION_SOURCE_TYPE
+        evidence.source_ref = match.source_ref
+        evidence.content_hash = match.content_hash
+        evidence.fetched_at = datetime.now(UTC)
+        evidence.basis = AS_LOGGED_BASIS
+        evidence.calories_per_100g = match.calories
+        evidence.protein_per_100g = match.protein_g
+        evidence.carbs_per_100g = match.carbs_g
+        evidence.fat_per_100g = match.fat_g
+        evidence.field_provenance = None
+        evidence.assumptions = [PRIOR_CORRECTION_RESCALED_ASSUMPTION] if match.rescaled else None
+
     def _rewrite_evidence(
         self, item: DerivedFoodItem, product: Product, *, carried_grams: bool
     ) -> None:
@@ -520,19 +717,7 @@ class ReMatchCapability:
         origin map must not survive onto the new snapshot.
         """
 
-        evidence = self.session.scalars(
-            select(EvidenceSource)
-            .where(EvidenceSource.derived_food_item_id == item.id)
-            .order_by(EvidenceSource.created_at.desc())
-        ).first()
-        if evidence is None:
-            evidence = EvidenceSource(
-                user_id=item.user_id,
-                log_event_id=item.log_event_id,
-                derived_food_item_id=item.id,
-            )
-            self.session.add(evidence)
-
+        evidence = self._evidence_row(item)
         evidence.product_id = product.id
         evidence.source_type = _source_type(product.source)
         evidence.source_ref = product.source_ref

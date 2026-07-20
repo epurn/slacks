@@ -325,6 +325,66 @@ def _content_hash(projection: _CorrectionProjection) -> str:
 
 
 @dataclass(frozen=True)
+class PriorCorrectionMatch:
+    """The value + reference a confident prior correction contributes to a candidate.
+
+    Produced by :func:`match_prior_correction` for the re-match candidate surface
+    (FTY-411): the corrected total for the queried portion (direct-matched or rescaled),
+    the ``prior_correction:<content_hash>`` reference the apply path echoes back and
+    re-derives from, and the ``rescaled`` flag driving the honest rescaled provenance.
+    Carries only the acting user's own projected numbers — never another user's rows and
+    never raw diary text. Macros stay ``None`` when the correction never supplied them
+    (unknown ≠ a fabricated ``0``).
+    """
+
+    source_ref: str
+    content_hash: str
+    calories: float
+    protein_g: float | None
+    carbs_g: float | None
+    fat_g: float | None
+    grams: float | None
+    rescaled: bool
+
+
+def prior_correction_source_ref(content_hash: str) -> str:
+    """The stable ``prior_correction:<content_hash>`` reference for a projected value."""
+
+    return f"{PRIOR_CORRECTION_SOURCE}:{content_hash}"
+
+
+def match_prior_correction(
+    session: Session, user_id: uuid.UUID, candidate: CandidateDraft
+) -> PriorCorrectionMatch | None:
+    """Project ``user_id``'s confident prior correction for ``candidate``, else ``None``.
+
+    The read half of the re-match candidate surface (FTY-411): it reuses the exact
+    FTY-406 :class:`PriorCorrectionResolver` — the same per-user, name-normalized lookup,
+    stable-value/ambiguity gate, and direct-match-vs-rescale serving math — so a surfaced
+    or applied candidate reproduces estimate-time resolution rather than a parallel
+    re-implementation. ``None`` means "no confident prior correction" (no matching name,
+    ambiguous priors, or an un-rescalable quantity), so the surface offers nothing and
+    the item's ordinary candidates are unaffected (no regression). Only ``user_id``'s own
+    rows are read — no cross-user leakage.
+    """
+
+    projection = PriorCorrectionResolver(session).resolve(user_id, candidate)
+    if projection is None:
+        return None
+    content_hash = _content_hash(projection)
+    return PriorCorrectionMatch(
+        source_ref=prior_correction_source_ref(content_hash),
+        content_hash=content_hash,
+        calories=projection.calories,
+        protein_g=projection.protein_g,
+        carbs_g=projection.carbs_g,
+        fat_g=projection.fat_g,
+        grams=projection.grams,
+        rescaled=projection.rescaled,
+    )
+
+
+@dataclass(frozen=True)
 class PriorCorrectionResolveStep:
     """Resolve candidates from the acting user's prior corrections before source lookup.
 
