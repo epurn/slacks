@@ -210,9 +210,14 @@ Where time-over-time lives.
   weight-loss benefit (daily confers no added benefit in RCTs), ~4 readings/month
   is plenty for a meaningful trend, and the documented psychological harm of
   self-weighing is tied to daily *pressure/streaks* — which is exactly why weekly
-  remains the default and nothing here rewards more-frequent weigh-ins. See the
-  *Encourage the trend, not the scale* principle (its "never daily" line predates
-  the FTY-403 opt-in menu and is reconciled by this decision).
+  remains the default and nothing here rewards more-frequent weigh-ins. This
+  honors the *Encourage the trend, not the scale* principle as reconciled by the
+  operator ruling of 2026-07-20: a user may **select** any cadence (daily →
+  monthly), but the product **never rewards** frequency — no streaks, no daily
+  push, no mechanic for weighing more often. The principle's earlier "never
+  daily" line governed app-driven *prompts/streaks*, not a user-chosen cadence;
+  the ruling lifted it for opt-in selection, and `design-philosophy.md` already
+  carries that reconciled stance.
 
   *Open: exact range options; macro-history depth.*
 
