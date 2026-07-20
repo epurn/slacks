@@ -193,8 +193,9 @@ def _stream_json_transcript(result_text: str) -> str:
         [
             json.dumps({"type": "system", "subtype": "init"}),
             json.dumps({"type": "assistant", "message": {"content": [{"type": "text"}]}}),
-            json.dumps({"type": "result", "subtype": "success", "is_error": False,
-                        "result": result_text}),
+            json.dumps(
+                {"type": "result", "subtype": "success", "is_error": False, "result": result_text}
+            ),
         ]
     )
 
@@ -262,9 +263,7 @@ def test_vision_invocation_still_disables_all_tools() -> None:
 
 def test_text_only_invocation_is_unchanged_by_vision_support() -> None:
     # The text path must stay byte-for-byte as it was (llm-provider.md).
-    invocation = _vision_provider(lambda *a, **k: _result()).build_invocation(
-        "an apple", Candidate
-    )
+    invocation = _vision_provider(lambda *a, **k: _result()).build_invocation("an apple", Candidate)
 
     assert invocation.argv[invocation.argv.index("--output-format") + 1] == "text"
     assert "--input-format" not in invocation.argv
@@ -303,10 +302,14 @@ def test_stream_json_without_a_result_event_is_a_response_error() -> None:
 
 def test_stream_json_error_message_does_not_echo_the_transcript() -> None:
     # A transcript can carry text transcribed from an untrusted label image.
-    secret = "SENSITIVE_LABEL_TEXT"
+    transcribed = "SENSITIVE_LABEL_TEXT"
     transcript = json.dumps(
-        {"type": "result", "subtype": "error_during_execution", "is_error": True,
-         "result": secret}
+        {
+            "type": "result",
+            "subtype": "error_during_execution",
+            "is_error": True,
+            "result": transcribed,
+        }
     )
 
     with pytest.raises(LLMResponseError) as excinfo:
@@ -314,7 +317,7 @@ def test_stream_json_error_message_does_not_echo_the_transcript() -> None:
             "read this", Candidate, images=[sample_image()]
         )
 
-    assert secret not in str(excinfo.value)
+    assert transcribed not in str(excinfo.value)
 
 
 # --- Tolerant JSON extraction tests (_parse_object) ---

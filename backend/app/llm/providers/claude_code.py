@@ -414,8 +414,8 @@ def _stream_json_result_text(stdout: str) -> str:
     it may carry text transcribed from an untrusted image.
     """
 
-    for line in reversed(stdout.splitlines()):
-        line = line.strip()
+    for raw_line in reversed(stdout.splitlines()):
+        line = raw_line.strip()
         if not line:
             continue
         try:
