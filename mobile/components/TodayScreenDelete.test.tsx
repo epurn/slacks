@@ -72,6 +72,25 @@ function entry(
   return { event: e, items };
 }
 
+/**
+ * A synthetic responder event shaped enough for RN's `PanResponder` wrappers to
+ * compute a gesture state (they read `nativeEvent.touchHistory` + `timestamp`).
+ * Lets a test drive a row's real pan gesture without a native touch stream.
+ */
+function panEvent(timestamp = 0): unknown {
+  const touchHistory = {
+    numberActiveTouches: 0,
+    indexOfSingleActiveTouch: 0,
+    mostRecentTimeStamp: timestamp,
+    touchBank: [] as unknown[],
+  };
+  return {
+    nativeEvent: { timestamp, touches: [], changedTouches: [], touchHistory },
+    timeStamp: timestamp,
+    touchHistory,
+  };
+}
+
 const API_SESSION = toApiSession(SESSION!);
 
 /** A completed "Greek yogurt" entry with one resolved 150-kcal item. */
@@ -457,6 +476,45 @@ describe("TodayScreen delete covers every server-backed row (FTY-322)", () => {
 
     expect(deleteEvent).toHaveBeenCalledWith(API_SESSION, "a");
     expect(textContent(tree)).not.toContain("just water");
+  });
+
+  it("yields timeline scroll while a row swipe is active, and re-enables it after (FTY-417)", async () => {
+    const { load, loadEntries } = completedWithItem();
+    const deleteEvent = jest.fn().mockResolvedValue(undefined);
+    const getDailySummary = jest.fn().mockResolvedValue(summary());
+
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        loadEntries={loadEntries}
+        deleteEvent={deleteEvent}
+        getDailySummary={getDailySummary}
+        useActive={INACTIVE}
+      />,
+    );
+    await act(async () => {});
+
+    const scrollEnabledOf = () =>
+      tree.root.find((n) => n.props.testID === "today-screen").props
+        .scrollEnabled;
+    // Default: the timeline scrolls normally.
+    expect(scrollEnabledOf()).toBe(true);
+
+    // Drive the row's real pan gesture end-to-end: granting the horizontal swipe
+    // locks the enclosing ScrollView (so it can't reclaim the pan and snap the
+    // reveal shut), and releasing it re-enables scrolling. This proves the whole
+    // SwipeableRow → context → scrollEnabled chain, not just the setter.
+    const swipeContent = tree.root.find(
+      (n) =>
+        typeof n.props.onResponderGrant === "function" &&
+        typeof n.props.onMoveShouldSetResponder === "function",
+    );
+    act(() => swipeContent.props.onResponderGrant(panEvent()));
+    expect(scrollEnabledOf()).toBe(false);
+
+    act(() => swipeContent.props.onResponderRelease(panEvent()));
+    expect(scrollEnabledOf()).toBe(true);
   });
 
   it("offers no delete on an optimistic not-yet-created row", async () => {

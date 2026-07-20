@@ -47,6 +47,7 @@ import { DailySummary } from "@/components/DailySummary";
 import { LabelCaptureScreen } from "@/components/LabelCaptureScreen";
 import { MacroTier } from "@/components/MacroTier";
 import { QuickAddChips } from "@/components/today/QuickAddChips";
+import { SwipeScrollLockContext } from "@/components/today/swipeScrollLock";
 import { Timeline } from "@/components/today/Timeline";
 import { SignInRequired } from "@/components/today/SignInRequired";
 import { TodayComposer } from "@/components/today/TodayComposer";
@@ -279,6 +280,13 @@ export function TodayScreen({
     refresh();
   }, [refresh]);
 
+  // Swipe-to-delete arbitration (FTY-417): while a row's horizontal swipe is
+  // active the row locks the timeline scroll so the enclosing `ScrollView` can't
+  // reclaim the pan and snap the delete reveal shut. `setSwipeScrollLocked` is a
+  // stable state setter, so handing it down through context never re-renders the
+  // rows — only this shell re-renders to flip `scrollEnabled`.
+  const [swipeScrollLocked, setSwipeScrollLocked] = useState(false);
+
   if (!session) {
     return <SignInRequired insetTop={insets.top + 24} />;
   }
@@ -287,7 +295,7 @@ export function TodayScreen({
   const canSubmit = (text.trim() !== "" || composerImages.length > 0) && !submitting;
 
   return (
-    <>
+    <SwipeScrollLockContext.Provider value={setSwipeScrollLocked}>
       <Modal
         visible={scannerOpen}
         animationType="slide"
@@ -343,6 +351,10 @@ export function TodayScreen({
           // shared inset so Today can't drift from the pill's real geometry.
           { paddingBottom: floatingSwitcherClearance(insets.bottom) },
         ]}
+        // Yield to an active row swipe (FTY-417): while a horizontal delete
+        // swipe owns the gesture, scrolling is disabled so it can't reclaim the
+        // pan and cancel the reveal. Re-enabled the moment the gesture ends.
+        scrollEnabled={!swipeScrollLocked}
         keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
@@ -461,7 +473,7 @@ export function TodayScreen({
         onProposalConfirmed={handleProposalConfirmed}
         confirmLabelProposal={confirmLabelProposal}
       />
-    </>
+    </SwipeScrollLockContext.Provider>
   );
 }
 
