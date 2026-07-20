@@ -67,12 +67,17 @@ appId: com.slacks
       text: ".*140 of 2,000 kcal.*"
     timeout: 10000
 
-# Step 6: Swipe the row left to reveal the destructive Delete action, then tap it.
-#         The swipe reveal is the confirmation (native convention) — no alert.
+# Step 6: A single deliberate horizontal swipe reveals the destructive Delete
+#         action and it STAYS revealed (FTY-417): the reveal must not snap shut
+#         because the enclosing timeline scroll reclaimed the gesture. Assert the
+#         Delete button is present after one swipe, then tap it — the swipe reveal
+#         is the confirmation (native convention), no alert.
 - swipe:
     from:
       id: "item-timeline-row-e2e-delete-event-00000000-0000-0000-0000-000000000000"
     direction: LEFT
+- assertVisible:
+    id: "swipe-delete-action"
 - tapOn:
     id: "swipe-delete-action"
 

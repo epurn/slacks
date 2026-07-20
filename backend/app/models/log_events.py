@@ -47,6 +47,14 @@ class LogEvent(Base):
         Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    #: Short, human-readable meal label (FTY-421), e.g. ``"Turkey sandwich"``.
+    #: **Model-generated, never user-authored** in v1: the estimator (FTY-422) is
+    #: the sole writer, so this is ``NULL`` on every existing row and on every
+    #: freshly-created event until estimation names it. It is derived user data —
+    #: a label over what the user logged — so it is treated like other event
+    #: content: returned to the owner, but kept out of logs/errors alongside
+    #: ``raw_text``.
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True, default=None)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default=LogEventStatus.PENDING)
     #: Opaque client-supplied idempotency token (FTY-096): a UUID/ULID by
     #: convention, never parsed by the server. ``NULL`` for the online/no-key and
