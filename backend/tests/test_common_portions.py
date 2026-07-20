@@ -88,6 +88,28 @@ def test_bread_slices_use_the_bread_slice_weight() -> None:
     assert portion.grams == pytest.approx(60.0)
 
 
+@pytest.mark.parametrize(
+    ("name", "amount", "grams", "food"),
+    [
+        # FTY-418: deli-meat and sliced-cheese sandwich slices, keyed by head noun.
+        ("deli turkey", 2, 56.0, "turkey"),  # 2 * 28 g
+        ("turkey", 1, 28.0, "turkey"),
+        ("ham", 3, 84.0, "ham"),
+        ("mozzarella", 1, 22.0, "mozzarella"),
+        ("cheddar", 2, 44.0, "cheddar"),
+        ("swiss cheese", 1, 22.0, "cheese"),  # head noun "cheese"
+    ],
+)
+def test_deli_meat_and_cheese_slices_use_food_aware_weights(
+    name: str, amount: int, grams: float, food: str
+) -> None:
+    portion = _resolve(name, unit="slice" if amount == 1 else "slices", amount=amount)
+
+    assert portion is not None
+    assert portion.grams == pytest.approx(grams)
+    assert portion.assumption.startswith(f"estimated_common_portion:{food} slice")
+
+
 def test_a_pat_of_butter() -> None:
     portion = _resolve("butter", unit="pat", amount=1, quantity_text="a pat")
 
