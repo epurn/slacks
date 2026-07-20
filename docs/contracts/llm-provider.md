@@ -15,6 +15,19 @@ estimator lane (`backend/app/llm/`).
 
 ## Version
 
+7 (FTY-412): **`claude_code` supports image input.** Vision was previously
+refused outright by that adapter, which made nutrition-label scanning impossible
+on every `claude_code` deployment — the label step's single vision call raised
+`LLMConfigurationError`, the step failed closed, and a photographed label always
+came back as a terminal `failed` entry the user had to re-type as text. Claude
+Code does accept images through its `stream-json` input channel, so the adapter
+now sends them that way, and `SLACKS_LLM_SUPPORTS_VISION` is threaded to the
+provider (it was previously dropped, so the gate could never be opened). This is
+a **pre-v1 clean fix**, not an additive shim: the `images` argument, the
+capability gate, the injection posture, and the text-only invocation are all
+unchanged — only the previously-impossible case now works. See
+[`claude_code`](#claude_code-subscription-no-per-token-billing) below.
+
 6 (Codex CLI subprocess provider contract added in FTY-293; OpenRouter
 structured-output routing guard added in FTY-291; keyless `openai_compatible`
 path added in FTY-089; `claude_code` subscription provider added in FTY-087;
@@ -146,8 +159,21 @@ for a Claude monthly plan pays nothing per token.
 - **Trust boundary is identical.** Claude Code output is an untrusted analyst's
   output, returned only after it validates against the caller's schema.
 - `SLACKS_LLM_TIMEOUT_SECONDS` and `SLACKS_LLM_MAX_RETRIES` apply unchanged.
+- **Images (FTY-412).** When `SLACKS_LLM_SUPPORTS_VISION=true`, `claude_code`
+  accepts the `images` argument, so nutrition-label scanning works on a
+  subscription deployment. The image is sent through Claude Code's `stream-json`
+  input channel as a base64 `image` content block, on **stdin** alongside the
+  prompt — never in `argv` (so it cannot appear in the process table) and, unlike
+  the `codex` adapter, **never written to a temporary file**, so the bytes exist
+  only in the pipe to the child process. All four media types in the shared
+  allowlist (`image/jpeg`, `image/png`, `image/webp`, `image/gif`) are supported.
+  The streaming shape is used **only** when an image is supplied; the text-only
+  invocation is byte-for-byte unchanged. Tools stay fully disabled on the image
+  path too, so text printed on an uploaded label remains data, never
+  instructions. With `SLACKS_LLM_SUPPORTS_VISION` unset or `false`, image input
+  fails fast before any call, exactly as for every other provider.
 - Operator setup, installation, and health diagnostics are out of scope here
-  (tracked separately); image input is **not** supported via `claude_code`.
+  (tracked separately).
 
 ### `codex` (first-party Codex CLI subprocess)
 

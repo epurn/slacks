@@ -91,6 +91,8 @@ Open `.env` and configure any providers you want:
     SLACKS_LLM_PROVIDER=claude_code
     # SLACKS_LLM_MODEL is optional — Claude Code uses your plan's model by default
     # No SLACKS_LLM_API_KEY — auth is your 'claude login' session (see step 7 below)
+    # Required for nutrition-label scanning (defaults to false, fails closed):
+    SLACKS_LLM_SUPPORTS_VISION=true
     ```
     See **Claude Code session setup** (step 7) to complete the one-time login.
   - **Codex CLI:** if you use Codex through ChatGPT or an enterprise access token, the `codex` provider runs estimation through the first-party Codex CLI installed in the backend image:
