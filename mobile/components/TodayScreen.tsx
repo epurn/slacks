@@ -399,6 +399,8 @@ export function TodayScreen({
             setSelectedSavedFood(food);
             setText(food.name);
           }}
+          suggestions={suggestions}
+          onSelectSuggestion={handleSelectSuggestion}
           onScan={() => setScannerOpen(true)}
           onCaptureLabel={() => setLabelCaptureOpen(true)}
           onSubmit={() => void handleSubmit()}
