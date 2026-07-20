@@ -15,7 +15,9 @@ import { useVisualReviewCore } from "@/e2e/visualReview/hooks";
 import { SessionProvider, type Session, type SessionRecord } from "@/state/session";
 import type { SessionStore } from "@/state/sessionStore";
 import { GoalDirectionProvider } from "@/state/goalDirection";
+import { UnitsPreferenceProvider } from "@/state/unitsPreference";
 import type { GoalDirection } from "@/api/goals";
+import type { UnitsPreference } from "@/state/profile";
 import type { CadenceStore, NotificationsAdapter, WeighInCadence } from "@/state/reminderScheduler";
 import {
   DATE_RANGE_OPTIONS,
@@ -462,6 +464,101 @@ describe("TrendsScreen — headline delta", () => {
     const combined = Object.assign({}, ...styles);
     expect(combined.fontVariant).toEqual(["tabular-nums"]);
     expect(combined.fontSize).toBe(typeScale.title1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Units preference (FTY-410): Trends renders weight in the selected unit system.
+// The weight series stays canonical-kg; conversion is display-only, via the
+// shared kgToDisplay/weightUnitLabel helpers (state/weightEntries.ts). 70 kg is
+// exactly 154.3 lb at the NIST factor (70 / 0.45359237 ≈ 154.32, rounded to .1).
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("TrendsScreen — units preference (FTY-410)", () => {
+  /** The headline row's Text value (e.g. "70 kg" / "154.3 lb"). */
+  function headlineValue(tree: ReactTestRenderer): string {
+    const row = tree.root.find(
+      (n) =>
+        typeof n.props.accessibilityLabel === "string" &&
+        (n.props.accessibilityLabel as string).startsWith("Current weight trend:"),
+    );
+    const valueNode = row.findAll(
+      (n) => (n.type as unknown as string) === "Text",
+    )[0]!;
+    return String(valueNode.props.value ?? valueNode.props.children);
+  }
+
+  it("renders the headline in lb with a correct kg→lb conversion for imperial", async () => {
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([makeEntry("1", 70, "2026-06-20")])}
+        getDailySummaryRange={jest.fn().mockResolvedValue([])}
+        now={() => NOW} useActive={ACTIVE}
+        unitsPreference="imperial"
+      />,
+    );
+    await act(async () => {});
+    expect(headlineValue(tree)).toBe("154.3 lb");
+    // The chart axis/summary read the same units — no stray "kg" anywhere.
+    expect(textContent(tree)).not.toContain("kg");
+    expect(textContent(tree)).toContain("lb");
+  });
+
+  it("renders the headline in kg for metric (the canonical value, unconverted)", async () => {
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([makeEntry("1", 70, "2026-06-20")])}
+        getDailySummaryRange={jest.fn().mockResolvedValue([])}
+        now={() => NOW} useActive={ACTIVE}
+        unitsPreference="metric"
+      />,
+    );
+    await act(async () => {});
+    expect(headlineValue(tree)).toBe("70 kg");
+    expect(textContent(tree)).not.toContain("lb");
+  });
+
+  it("live path: reads the imperial preference from the session-scoped provider with no prop", async () => {
+    // The real wiring gap this story closes: the live route mounts TrendsScreen
+    // without a `unitsPreference` prop, so the screen must read the provider,
+    // which the app hydrates from GET /profile. An imperial user sees lb after a
+    // cold launch, not the old always-metric default.
+    const reader = jest.fn(async (): Promise<UnitsPreference> => "imperial");
+    const tree = mount(
+      <SessionProvider store={sessionStore()}>
+        <UnitsPreferenceProvider readUnitsPreference={reader}>
+          <TrendsScreen
+            listWeightEntries={jest.fn().mockResolvedValue([makeEntry("1", 70, "2026-06-20")])}
+            getDailySummaryRange={jest.fn().mockResolvedValue([])}
+            now={() => NOW} useActive={ACTIVE}
+          />
+        </UnitsPreferenceProvider>
+      </SessionProvider>,
+    );
+    // Drain session hydration (which the provider's profile read waits on) plus
+    // the screen's own fetches; each resolves on a later tick.
+    for (let i = 0; i < 4; i++) {
+      await act(async () => {});
+    }
+    expect(reader).toHaveBeenCalledTimes(1);
+    expect(headlineValue(tree)).toBe("154.3 lb");
+  });
+
+  it("falls back to metric when no preference is known (provider default)", async () => {
+    // No prop and no provider mounted: the non-throwing context default resolves
+    // to metric, so the screen renders kg rather than crashing or guessing lb.
+    const tree = mount(
+      <TrendsScreen
+        session={SESSION}
+        listWeightEntries={jest.fn().mockResolvedValue([makeEntry("1", 70, "2026-06-20")])}
+        getDailySummaryRange={jest.fn().mockResolvedValue([])}
+        now={() => NOW} useActive={ACTIVE}
+      />,
+    );
+    await act(async () => {});
+    expect(headlineValue(tree)).toBe("70 kg");
   });
 });
 

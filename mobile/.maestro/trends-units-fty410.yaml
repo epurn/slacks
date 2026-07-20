@@ -1,0 +1,72 @@
+# FTY-410 visual evidence: the Trends screen honors the imperial/metric units
+# preference. Captures the weight headline, chart axis, and per-point values in
+# lb (imperial) and kg (metric), in light and dark, via the FTY-247 visual-review
+# deep link. The weight series is the same canonical-kg fixture for every shot —
+# only the profile's units_preference differs (trends.imperial overrides it to
+# imperial; trends.populated is the metric default) — proving conversion is
+# display-only.
+#
+# Each `assertVisible` on the unit string is the load-bearing check: an imperial
+# render that leaked kg (the bug this story fixes), or a metric render that
+# showed lb, fails here before the screenshot is taken.
+#
+# Entry point contract (e2e/visualReview/README.md):
+#   slacks://__visual-review?preset=<name>&theme=light|dark
+# Runs against the same E2E debug binary as the other flows
+# (EXPO_PUBLIC_SLACKS_E2E=true, see verify-e2e.sh).
+appId: com.slacks
+---
+- launchApp:
+    clearState: false
+
+# Imperial — light. Weight renders in lb (kg → lb conversion, display-only).
+- openLink: "slacks://__visual-review?preset=trends.imperial&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:trends.imperial"
+    timeout: 20000
+- assertVisible:
+    id: trends-screen
+- assertVisible:
+    text: ".*lb.*"
+- takeScreenshot: trends-imperial-light
+
+# Imperial — dark.
+- openLink: "slacks://__visual-review?preset=trends.imperial&theme=dark"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:trends.imperial"
+    timeout: 20000
+- assertVisible:
+    id: trends-screen
+- assertVisible:
+    text: ".*lb.*"
+- takeScreenshot: trends-imperial-dark
+
+# Metric — light. Same series, rendered in kg (the canonical value, unconverted).
+- openLink: "slacks://__visual-review?preset=trends.populated&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:trends.populated"
+    timeout: 20000
+- assertVisible:
+    id: trends-screen
+- assertVisible:
+    text: ".*kg.*"
+- takeScreenshot: trends-metric-light
+
+# Metric — dark.
+- openLink: "slacks://__visual-review?preset=trends.populated&theme=dark"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:trends.populated"
+    timeout: 20000
+- assertVisible:
+    id: trends-screen
+- assertVisible:
+    text: ".*kg.*"
+- takeScreenshot: trends-metric-dark

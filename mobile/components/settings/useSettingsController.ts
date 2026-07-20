@@ -34,6 +34,7 @@ import { getProfile, putProfile, ProfileApiError } from '@/api/profile';
 import type { ProfileDTO } from '@/api/profile';
 import type { TargetReadModel } from '@/api/dailySummary';
 import { useGoalDirectionController } from '@/state/goalDirection';
+import { useUnitsPreferenceController } from '@/state/unitsPreference';
 import {
   DEFAULT_CADENCE,
   applyReminderSettings,
@@ -121,6 +122,8 @@ export function useSettingsController({
     goalDirection: sessionGoalDirection,
     setGoalDirection: setKnownGoalDirection,
   } = useGoalDirectionController();
+  const { setUnitsPreference: setKnownUnitsPreference } =
+    useUnitsPreferenceController();
 
   // E2E-only visual-review seam (FTY-267): which sub-state, if any, this mount
   // should open at the start of a visual-review launch. Always `null` outside
@@ -588,11 +591,15 @@ export function useSettingsController({
           timezone: profile.timezone,
         } as Parameters<typeof putProfile>[1]);
         setProfile(updated);
+        // Push the newly-stored preference into the session-scoped provider so
+        // Trends (and any other consumer) reflects the change immediately on the
+        // next visit — no stale metric render, no refetch (FTY-410).
+        setKnownUnitsPreference(updated.units_preference);
       } catch {
         // Error not logged
       }
     },
-    [session, profile, putProfileFn],
+    [session, profile, putProfileFn, setKnownUnitsPreference],
   );
 
   // ── Sign out ──────────────────────────────────────────────────────────────
