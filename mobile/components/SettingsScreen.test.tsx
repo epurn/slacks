@@ -26,6 +26,11 @@ import {
 import type { TargetReadModel } from "@/api/dailySummary";
 import { GoalsApiError, type GoalTargetResponse } from "@/api/goals";
 import type { ProfileDTO } from "@/api/profile";
+import {
+  UnitsPreferenceProvider,
+  useUnitsPreference,
+} from "@/state/unitsPreference";
+import type { UnitsPreference } from "@/state/profile";
 import type { Session } from "@/state/session";
 import type { AppSettingsStore } from "@/state/appSettings";
 import type {
@@ -657,6 +662,63 @@ describe("PREFERENCES persistence", () => {
       expect.anything(),
       expect.objectContaining({ units_preference: "imperial" }),
     );
+  });
+
+  it("pushes the saved units preference into the session-scoped provider (FTY-410)", async () => {
+    // The "no stale metric render" wiring: after a successful units save,
+    // Settings updates the shared UnitsPreferenceProvider so Trends reflects the
+    // change on the next visit without a refetch. A sibling consumer stands in
+    // for Trends here.
+    const putProfileFn = jest.fn().mockResolvedValue({
+      ...PROFILE,
+      units_preference: "imperial",
+    });
+    const seen: { units: UnitsPreference | null } = { units: null };
+    function Consumer() {
+      const units = useUnitsPreference();
+      React.useEffect(() => {
+        seen.units = units;
+      });
+      return null;
+    }
+
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(
+        <SafeAreaProvider initialMetrics={SAFE_AREA_METRICS}>
+          <ThemeProvider override="light">
+            <UnitsPreferenceProvider readUnitsPreference={async () => "metric"}>
+              <SettingsScreen
+                session={SESSION}
+                getProfileFn={jest.fn().mockResolvedValue(PROFILE)}
+                getTargetFn={jest.fn().mockResolvedValue(DERIVED_TARGET)}
+                putProfileFn={putProfileFn}
+                createGoalFn={jest.fn().mockResolvedValue(GOAL_TARGET_RESPONSE)}
+                getActiveGoalFn={jest.fn().mockResolvedValue(null)}
+                setTargetOverrideFn={jest.fn().mockResolvedValue(OVERRIDDEN_CALORIE_TARGET)}
+                resetTargetOverrideFn={jest.fn().mockResolvedValue(DERIVED_TARGET)}
+                settingsStore={mockSettingsStore()}
+                cadenceStore={mockCadenceStore()}
+                notificationsAdapter={mockNotifications()}
+              />
+              <Consumer />
+            </UnitsPreferenceProvider>
+          </ThemeProvider>
+        </SafeAreaProvider>,
+      );
+    });
+    await act(async () => {});
+    expect(seen.units).toBe("metric");
+
+    await act(async () => {
+      selectSegment(tree, "Imperial");
+    });
+
+    expect(putProfileFn).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ units_preference: "imperial" }),
+    );
+    expect(seen.units).toBe("imperial");
   });
 
   it("persists appearance on-device via settingsStore.setAppearance", async () => {

@@ -22,6 +22,7 @@ import { listTodayLogEventEntries } from '@/api/logEvents';
 import { getDailySummary, getDailySummaryRange } from '@/api/dailySummary';
 import { listWeightEntries } from '@/api/weightEntries';
 import { getFoodSuggestions } from '@/api/foodSuggestions';
+import { getProfile } from '@/api/profile';
 
 const apiSession = toApiSession(E2E_SESSION);
 const to = '2026-06-29';
@@ -37,6 +38,7 @@ const IN_SCOPE = [
   'today.suggestions',
   'today.signed_out',
   'trends.populated',
+  'trends.imperial',
   'trends.empty',
   'weight.populated',
   'weight.empty',
@@ -105,6 +107,18 @@ describe('trends.populated / weight.populated ride the default populated fixture
   it('leaves the weight series populated (no override)', async () => {
     activateVisualReviewPreset('trends.populated', null);
     const mockFetch = createE2EMockFetch();
+    const entries = await listWeightEntries(apiSession, from, to, mockFetch);
+    expect(entries.length).toBeGreaterThan(1);
+  });
+});
+
+describe('trends.imperial serves an imperial profile through the real client (FTY-410)', () => {
+  it('overrides units_preference to imperial while keeping the populated series', async () => {
+    activateVisualReviewPreset('trends.imperial', null);
+    const mockFetch = createE2EMockFetch();
+    const profile = await getProfile(apiSession, mockFetch);
+    expect(profile.units_preference).toBe('imperial');
+    // The weight series is unchanged canonical kg — conversion is display-only.
     const entries = await listWeightEntries(apiSession, from, to, mockFetch);
     expect(entries.length).toBeGreaterThan(1);
   });

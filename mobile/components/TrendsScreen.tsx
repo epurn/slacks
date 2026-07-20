@@ -77,6 +77,7 @@ import { registerVisualReviewPreset, useVisualReviewCore } from "@/e2e/visualRev
 // this import has no effect outside an active visual-review session.
 import "@/components/trends/visualReviewPresets";
 import { useGoalDirection } from "@/state/goalDirection";
+import { useUnitsPreference } from "@/state/unitsPreference";
 import type { UnitsPreference } from "@/state/profile";
 import { useSession, toApiSession, type Session, type ApiSession } from "@/state/session";
 import { useScreenActive } from "@/state/useScreenActive";
@@ -138,6 +139,12 @@ registerVisualReviewPreset({
 
 interface TrendsScreenProps {
   session?: Session;
+  /**
+   * Injectable for tests; falls back to the live session-scoped value
+   * (state/unitsPreference.tsx), which the provider hydrates from the
+   * authoritative `GET /profile` read on launch and Settings refreshes on a
+   * units save. Defaults to metric until a value is known, matching the app.
+   */
   unitsPreference?: UnitsPreference;
   /**
    * Injectable for tests; falls back to the live session-scoped value
@@ -173,7 +180,7 @@ interface TrendsScreenProps {
 
 export function TrendsScreen({
   session: sessionOverride,
-  unitsPreference = "metric",
+  unitsPreference: unitsPreferenceOverride,
   goalDirection: goalDirectionOverride,
   now = () => new Date(),
   useActive = useScreenActive,
@@ -201,6 +208,15 @@ export function TrendsScreen({
   const liveGoalDirection = useGoalDirection();
   const goalDirection: GoalDirection | null =
     goalDirectionOverride ?? liveGoalDirection ?? null;
+
+  // The display units, from the session-scoped provider (state/unitsPreference.tsx):
+  // hydrated from the authoritative `GET /profile` read on launch and refreshed
+  // by Settings on a units save, so Trends renders the currently-selected unit
+  // (lb for imperial, kg for metric) with no stale-cache mismatch. Conversion is
+  // display-only; the weight series stays canonical-kg (FTY-070, FTY-410).
+  const liveUnitsPreference = useUnitsPreference();
+  const unitsPreference: UnitsPreference =
+    unitsPreferenceOverride ?? liveUnitsPreference;
 
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();

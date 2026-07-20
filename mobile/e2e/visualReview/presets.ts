@@ -23,6 +23,7 @@ import type { VisualReviewFetchContext, VisualReviewResponse } from './types';
 import type { FoodSuggestionsResponse } from '@/api/foodSuggestions';
 import {
   E2E_DAILY_SUMMARY,
+  E2E_PROFILE,
   E2E_RESOLVE_ENTRY,
   E2E_RESOLVE_EVENT,
   E2E_RESOLVE_SUMMARY,
@@ -124,6 +125,20 @@ registerVisualReviewPreset({
   name: 'trends.populated',
   route: '/trends',
   settledPath: '/trends',
+});
+
+// trends.imperial — the same populated series as trends.populated, but the
+// profile read returns units_preference: 'imperial' so Trends renders the
+// headline, chart axis, and per-point values in lb (canonical-kg series
+// converted display-only; storage is unchanged). Metric is already covered by
+// trends.populated. (FTY-410 visual evidence.)
+registerVisualReviewPreset({
+  name: 'trends.imperial',
+  route: '/trends',
+  settledPath: '/trends',
+  responses: [
+    { match: get('/profile'), body: { ...E2E_PROFILE, units_preference: 'imperial' } },
+  ],
 });
 
 // trends.empty — both the weight series and the adherence range come back empty

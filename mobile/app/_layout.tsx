@@ -27,6 +27,7 @@ import {
   GoalDirectionProvider,
   useGoalDirectionController,
 } from '@/state/goalDirection';
+import { UnitsPreferenceProvider } from '@/state/unitsPreference';
 import {
   SessionProvider,
   toApiSession,
@@ -215,7 +216,9 @@ function AuthGate() {
  * hydrates the persisted server connection on launch; `SessionProvider` hydrates
  * the persisted session; `AppearanceProvider` hydrates the Light / Dark / System
  * preference; `GoalDirectionProvider` holds the session-scoped goal direction
- * (state/goalDirection.tsx) that Settings/Onboarding set and Trends reads.
+ * (state/goalDirection.tsx) that Settings/Onboarding set and Trends reads;
+ * `UnitsPreferenceProvider` holds the session-scoped imperial/metric units
+ * preference (state/unitsPreference.tsx) that Settings sets and Trends reads.
  */
 export default function RootLayout() {
   const e2e = isE2EMode();
@@ -252,12 +255,14 @@ function NavigatorHost({ e2e }: { e2e: boolean }) {
   return (
     <SessionProvider key={revision} store={e2e ? e2eSessionStore : undefined}>
       <GoalDirectionProvider>
-        <ThemedStatusBar />
-        <AuthGate />
-        <Stack screenOptions={{ headerShown: false }} />
-        {/* Rendered after the navigator so its settled marker sits on top of the
-            screen (not occluded), where screenshot automation can find it. */}
-        <VisualReviewSettleOverlay />
+        <UnitsPreferenceProvider>
+          <ThemedStatusBar />
+          <AuthGate />
+          <Stack screenOptions={{ headerShown: false }} />
+          {/* Rendered after the navigator so its settled marker sits on top of
+              the screen (not occluded), where screenshot automation can find it. */}
+          <VisualReviewSettleOverlay />
+        </UnitsPreferenceProvider>
       </GoalDirectionProvider>
     </SessionProvider>
   );
