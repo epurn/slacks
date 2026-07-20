@@ -35,6 +35,7 @@ export const E2E_IMAGE_PENDING_EVENT: LogEventDTO = {
   id: E2E_IMAGE_EVENT_ID,
   user_id: E2E_SESSION.userId,
   raw_text: E2E_IMAGE_RAW_TEXT,
+  name: null,
   status: 'pending',
   created_at: '2026-01-01T10:00:00Z',
   updated_at: '2026-01-01T10:00:00Z',

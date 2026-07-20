@@ -8,6 +8,7 @@ function event(status: LogEventStatus): LogEventDTO {
     id: status,
     user_id: "u",
     raw_text: "x",
+    name: null,
     status,
     created_at: "2026-06-26T08:00:00Z",
     updated_at: "2026-06-26T08:00:00Z",

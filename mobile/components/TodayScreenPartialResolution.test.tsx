@@ -269,15 +269,17 @@ describe("TodayScreen partially-resolved entries (FTY-330)", () => {
       });
 
       // Poll drives the re-estimate to completion; the entry resolves in place
-      // to the full costed set (the entry-resolve beat briefly summarizes the
-      // freshly-resolved pair into one counted row — 150 + 70 = 220 kcal), and
-      // the open-question row never reappears.
+      // to the full costed set, now a two-item meal that collapses to one row
+      // (FTY-420) — the meal label (raw-phrase fallback) and the summed total
+      // (150 + 70 = 220 kcal) — and the open-question row never reappears.
       act(() => jest.advanceTimersByTime(1000));
       await act(async () => {});
 
       const content = textContent(tree);
-      expect(content).toContain("Greek yogurt");
       expect(content).toContain("220 kcal");
+      expect(
+        hasA11yLabel(tree, "greek yogurt and some hummus, 220 kcal total, 2 items"),
+      ).toBe(true);
       expect(hasA11yLabel(tree, "How much hummus?, needs a detail, uncounted")).toBe(false);
     } finally {
       jest.useRealTimers();

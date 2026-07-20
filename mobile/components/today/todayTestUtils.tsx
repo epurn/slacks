@@ -31,6 +31,7 @@ export function event(overrides: Partial<LogEventDTO>): LogEventDTO {
     id: "id",
     user_id: SESSION!.userId,
     raw_text: "two eggs and toast",
+    name: null,
     status: "pending",
     created_at: "2026-06-26T08:00:00Z",
     updated_at: "2026-06-26T08:00:00Z",
@@ -177,6 +178,23 @@ export function press(tree: ReactTestRenderer, label: string): void {
   const node = tree.root.find(
     (n) =>
       n.props.accessibilityLabel === label &&
+      typeof n.props.onPress === "function",
+  );
+  act(() => {
+    node.props.onPress();
+  });
+}
+
+/**
+ * Press the interactive node whose accessibility label starts with `prefix`.
+ * Meal breakdown rows (FTY-420) carry a rich label — `name, portion, kcal, …` —
+ * so an exact-label `press` is brittle; matching on the leading name is stable.
+ */
+export function pressByLabelPrefix(tree: ReactTestRenderer, prefix: string): void {
+  const node = tree.root.find(
+    (n) =>
+      typeof n.props.accessibilityLabel === "string" &&
+      (n.props.accessibilityLabel as string).startsWith(prefix) &&
       typeof n.props.onPress === "function",
   );
   act(() => {

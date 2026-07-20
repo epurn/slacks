@@ -48,6 +48,16 @@ export interface LogEventDTO {
   readonly id: string;
   readonly user_id: string;
   readonly raw_text: string;
+  /**
+   * The model-generated meal label (FTY-421/422): a short, human-readable name
+   * for the event (e.g. `"Turkey sandwich"`) the estimator writes for a
+   * multi-item meal. It is **never user-authored** in v1 and is `null` on every
+   * event the estimator has not named — so it is always safe to be `null`. The
+   * Today timeline reads it as the collapsed meal-row title (FTY-420) and falls
+   * back to the raw phrase when it is absent. Kept out of logs/errors alongside
+   * `raw_text` (it is derived user content).
+   */
+  readonly name: string | null;
   readonly status: LogEventStatus;
   readonly created_at: string;
   readonly updated_at: string;

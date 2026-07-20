@@ -40,16 +40,6 @@ function kcalOf(item: DerivedItem): number | null {
   return item.item_type === "food" ? item.calories : item.active_calories;
 }
 
-function totalKcal(items: readonly DerivedItem[]): number | null {
-  let total = 0;
-  for (const item of items) {
-    const kcal = kcalOf(item);
-    if (kcal === null) return null;
-    total += kcal;
-  }
-  return total;
-}
-
 type ItemTimelineRowProps =
   | {
       /** True while the event is pending/processing — no resolved item yet. */
@@ -70,12 +60,6 @@ type ItemTimelineRowProps =
   | {
       loading?: false;
       item: DerivedItem;
-      /**
-       * Additional derived items for the same log event, summarized into this
-       * one row during a fresh pending→resolved transition so the timeline does
-       * not grow from one skeleton into several item-keyed rows.
-       */
-      additionalItems?: readonly DerivedItem[];
       /** True when the parent log event is needs_clarification. */
       needsClarification?: boolean;
       /** True for an uncounted label proposal awaiting confirm (FTY-196/197). */
@@ -220,7 +204,6 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
 
   const {
     item,
-    additionalItems = [],
     needsClarification = false,
     proposal = false,
     onPress,
@@ -229,37 +212,27 @@ export function ItemTimelineRow(props: ItemTimelineRowProps) {
     accessibilityActions,
     onAccessibilityAction,
   } = props;
-  const allItems = additionalItems.length > 0
-    ? [item, ...additionalItems]
-    : [item];
-  const additionalCount = allItems.length - 1;
 
   const name = item.name;
-  const kcal = totalKcal(allItems);
+  const kcal = kcalOf(item);
   const source = item.item_type === "food" ? item.source : null;
   const is_edited = item.is_edited ?? false;
-  const displayName = additionalCount > 0 ? `${name} + ${additionalCount}` : name;
+  const displayName = name;
 
   // Both uncounted states render muted; only their tag / kcal treatment differ.
   const uncounted = needsClarification || proposal;
   const textColor = uncounted ? colors.textMuted : colors.text;
   const kcalColor = uncounted ? colors.textMuted : colors.textSecondary;
 
-  const labelName =
-    additionalCount > 0
-      ? `${name} and ${additionalCount} more ${
-          additionalCount === 1 ? "item" : "items"
-        }`
-      : name;
-  const allExercise = allItems.every((row) => row.item_type === "exercise");
+  const isExercise = item.item_type === "exercise";
   const kcalLabel = `${kcal !== null ? Math.round(kcal) : 0} kcal${
-    allExercise ? " burned" : additionalCount > 0 ? " total" : ""
+    isExercise ? " burned" : ""
   }`;
   const a11yLabel = needsClarification
-    ? `${labelName}, needs a detail, uncounted`
+    ? `${name}, needs a detail, uncounted`
     : proposal
       ? `${name}, ${kcal !== null ? Math.round(kcal) : 0} kcal, not yet counted`
-      : `${labelName}, ${kcalLabel}`;
+      : `${name}, ${kcalLabel}`;
 
   const a11yHint = needsClarification
     ? "Tap to add the missing detail"

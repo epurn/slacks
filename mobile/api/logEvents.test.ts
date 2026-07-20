@@ -24,6 +24,7 @@ const DTO: LogEventDTO = {
   id: "33333333-3333-3333-3333-333333333333",
   user_id: SESSION.userId,
   raw_text: "two eggs and toast",
+  name: null,
   status: "pending",
   created_at: "2026-06-26T08:00:00Z",
   updated_at: "2026-06-26T08:00:00Z",
@@ -384,6 +385,7 @@ describe("answerClarification", () => {
   const PROCESSING: LogEventDTO = {
     ...DTO,
     raw_text: "crackers and peanut butter",
+    name: null,
     status: "processing",
   };
 

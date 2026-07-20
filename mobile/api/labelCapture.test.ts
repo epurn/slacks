@@ -53,6 +53,7 @@ const EVENT_DTO: LogEventDTO = {
   id: "label-event-1",
   user_id: SESSION.userId,
   raw_text: "nutrition label photo",
+  name: null,
   status: "pending",
   created_at: "2026-06-27T10:00:00Z",
   updated_at: "2026-06-27T10:00:00Z",

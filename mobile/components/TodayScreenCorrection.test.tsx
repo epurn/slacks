@@ -17,6 +17,7 @@ import {
   inputValue,
   mount,
   press,
+  pressByLabelPrefix,
   textContent,
   typeInto,
 } from "./today/todayTestUtils";
@@ -132,8 +133,10 @@ describe("TodayScreen correction sheet wiring", () => {
     );
     await act(async () => {});
 
-    // Tap the second row, then exercise a lever; the edit targets that item's id.
-    press(tree, "Banana, 105 kcal");
+    // A two-item meal collapses to one row (FTY-420); expand it, then tap the
+    // second breakdown row and exercise a lever — the edit targets that item's id.
+    press(tree, "Two snacks, 200 kcal total, 2 items");
+    pressByLabelPrefix(tree, "Banana,");
     await act(async () => {
       press(tree, "Increase amount");
     });
