@@ -56,6 +56,7 @@ from app.estimator.run_budget import (
     PROVIDER_CALL_BUDGET_EXCEEDED,
     WALL_CLOCK_DEADLINE_EXCEEDED,
     BudgetedProvider,
+    is_run_budget_breach,
 )
 from app.estimator.search import (
     OFFICIAL_SOURCE_TYPE,
@@ -608,6 +609,112 @@ def test_in_budget_meal_is_unchanged_by_the_reshaped_headroom() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# FTY-430: within-candidate soft-budget abandonment. FTY-425's between-candidate
+# fall-forward re-checks the soft budget only at the TOP of each candidate loop; a
+# candidate that begins resolving just under the soft deadline issues several evidence
+# calls (official → OFF → reference → model-prior) with no intervening soft check, so it
+# can cross the HARD ceiling MID-cascade — ``BudgetedProvider`` raises ``RunBudgetExceeded``
+# and the worker flattens the WHOLE run to the deterministic coarse prior (budget-free).
+# These drive the REAL step + budgeted provider + degrade producer on the injected
+# call-count clock (no real sleeping); a *branded* candidate walks official + reference +
+# model-prior = three provider calls, so the soft crossing can land at a tier boundary
+# strictly BETWEEN two of the candidate's own calls — the residual this story closes.
+# --------------------------------------------------------------------------- #
+
+
+def _branded_pending(n: int) -> list[CandidateDraft]:
+    """Branded candidates whose resolution costs THREE provider calls each (official miss
+    → reference miss → model prior), so the soft point can trip at a tier boundary strictly
+    between the candidate's own calls rather than only between candidates."""
+
+    return [
+        CandidateDraft(
+            name=f"cracker {i}", brand="acme", quantity_text="30 g", unit="g", amount=30.0
+        )
+        for i in range(n)
+    ]
+
+
+def _multi_call_branded_step(budgeted: BudgetedProvider) -> OfficialSourceResolveStep:
+    """The real step wired so a *branded* candidate walks official (rank 2) AND reference
+    (rank 5) before model-prior — three provider calls. The official tier is reachable only
+    with a non-empty allowlist, so ``fetch_settings`` names one (the stub fetcher ignores it,
+    but ``is_available`` needs it) — where ``_multi_call_step`` leaves official unavailable."""
+
+    return OfficialSourceResolveStep(
+        provider=budgeted,
+        search_provider=_EnabledMissSearchProvider(),
+        fetch_settings=OfficialFetchSettings(allowed_hosts=frozenset({"example.test"})),
+        reference_fetch_settings=ReferenceFetchSettings(),
+        fetch_fn=_page_fetch,
+        reference_fetch_fn=_page_fetch,
+    )
+
+
+def test_within_candidate_soft_crossing_abandons_to_model_prior_not_budget_free() -> None:
+    """AC (b): one branded candidate crosses the soft deadline BETWEEN its own provider
+    calls — the official-tier miss (call 1) lands past the soft point — and abandons to the
+    model-prior degrade with real, non-null macros inside the hard ceiling, instead of
+    charging the next evidence call past the hard ceiling and raising into the worker
+    budget-free path. Pre-fix this candidate hard-breached at its model-prior call."""
+
+    fake = _RoutingProvider(calories=250.0)
+    # 40 s/call, default soft 30 s / hard 75 s: the official miss (call 1) leaves elapsed at
+    # 40 s — past soft, well under hard — so the NEXT tier boundary abandons to a *primary*
+    # model-prior degrade (headroom remains for its one call).
+    budgeted = _budgeted_default(fake, per_call=40.0, soft_deadline=None)
+    step = _multi_call_branded_step(budgeted)
+    context = _context()
+    context.pending_official_candidates = _branded_pending(1)
+
+    result = Pipeline([step]).run(context)
+
+    # COMPLETED with NO run-budget breach ⇒ the worker never reaches ``_degrade_and_complete``
+    # (which fires only when the pipeline result *is* a run-budget breach), so the run is not
+    # flattened to the deterministic coarse prior.
+    assert result.outcome is PipelineOutcome.COMPLETED
+    assert not is_run_budget_breach(result.error)
+    (item,) = context.resolved_food_items
+    assert _outcome_of(item) == "model_prior"  # a real model-prior degrade, not budget_free
+    assert item.source_type == MODEL_PRIOR_SOURCE_TYPE
+    assert item.calories_per_100g == pytest.approx(250.0)  # the real rough estimate
+    assert item.protein_g is not None and item.protein_g > 0  # never a silent null
+    assert _degraded_labels(item) == ["degraded:run_wall_clock_deadline_exceeded"]
+    # Inside the hard ceiling: official miss + one primary model-prior degrade call = 2 calls,
+    # none charged past 75 s (reference tier abandoned before its call).
+    assert budgeted.calls_made == 2
+
+
+def test_within_candidate_runaway_still_degrades_budget_free_at_hard_ceiling() -> None:
+    """AC (c): the runaway / DoS guard is preserved. A candidate so slow that even the
+    model-prior degrade's own call cannot fit under the hard ceiling still abandons — to the
+    budget-free deterministic prior (coarse but real macros), per candidate — never raising
+    into the whole-run budget-free path, and the run terminates inside the 90 s poll window."""
+
+    fake = _RoutingProvider(calories=250.0)
+    # 80 s/call: the single reference miss alone lands elapsed past the 75 s hard ceiling, so
+    # at the model-prior boundary the degrade producer has zero headroom for its own call.
+    budgeted = _budgeted_default(fake, per_call=80.0, soft_deadline=None)
+    step = _multi_call_step(budgeted)
+    context = _context()
+    context.pending_official_candidates = _generic_pending(1)  # reference-only: one evidence call
+
+    result = Pipeline([step]).run(context)
+
+    assert result.outcome is PipelineOutcome.COMPLETED
+    assert not is_run_budget_breach(result.error)
+    (item,) = context.resolved_food_items
+    assert _outcome_of(item) == "budget_free"  # the narrowed last-ditch deterministic prior
+    assert item.calories_per_100g == pytest.approx(200.0)  # coarse prior
+    assert item.protein_g is not None and item.protein_g > 0  # still macros (FTY-418)
+    assert _degraded_labels(item) == ["degraded:run_wall_clock_deadline_exceeded"]
+    # The hard ceiling still bounded the work: only the reference miss was charged (the degrade
+    # made no call), so the run terminates well inside the 90 s poll window.
+    assert budgeted.calls_made == 1
+    assert budgeted._clock() - budgeted._started_at < 90.0
+
+
+# --------------------------------------------------------------------------- #
 # End-to-end persistence: the degraded row is committed against the real datastore.
 # --------------------------------------------------------------------------- #
 
@@ -722,3 +829,79 @@ def test_soft_degraded_candidate_persists_as_a_resolved_rough_row(
     # No raw diary phrase leaks into the run trace/assumptions/source refs (sanitized).
     run_blob = repr(result)
     assert "lentil stew and barley soup" not in run_blob
+
+
+def test_within_candidate_abandon_persists_a_model_prior_row_not_a_run_flatten(
+    client: TestClient, session: Session
+) -> None:
+    """FTY-430 AC (b), end-to-end against the real datastore: a single candidate that crosses
+    the soft budget BETWEEN its reference-tier call and its model-prior call abandons to the
+    *primary* model-prior degrade — a committed ``resolved`` row with the real rough estimate
+    (``estimated from model prior``), not the deterministic coarse prior a whole-run worker
+    budget-free flatten would emit. Pre-fix the mid-candidate hard breach routed the whole run
+    to ``_degrade_and_complete(budget_free=True)``; post-fix the run completes normally."""
+
+    user_id, event_id = _seed_event(client, "within-candidate-e2e@example.com", "veggie stew")
+    parse_provider = FakeProvider(
+        responses=[
+            {
+                "disposition": "parsed",
+                "confidence": 0.95,
+                "items": [
+                    {
+                        "type": "food",
+                        "name": "veggie stew",
+                        "quantity_text": "150g",
+                        "unit": "g",
+                        "amount": 150,
+                    }
+                ],
+            }
+        ]
+        * SELF_CONSISTENCY_FIRST_WINDOW
+    )
+    # The reference tier misses (routing provider) so the one candidate walks reference →
+    # model-prior; at 40 s/call the reference miss (call 1) crosses the 30 s soft point while
+    # the 75 s hard ceiling still has headroom for the degrade's own model-prior call.
+    budgeted = _budgeted_default(
+        _RoutingProvider(calories=250.0), per_call=40.0, soft_deadline=None
+    )
+    pipeline = Pipeline(
+        [
+            ParseStep(parse_provider),
+            FoodResolveStep(FoodResolver(session=session, source=_MissingFoodSource())),
+            _multi_call_step(budgeted),
+        ]
+    )
+
+    result = process_estimation(session, log_event_id=event_id, user_id=user_id, pipeline=pipeline)
+
+    # Completed normally — the run was never routed to the worker budget-free flatten.
+    assert result.job_status is EstimationJobStatus.SUCCEEDED
+    assert result.event_status is LogEventStatus.COMPLETED
+
+    foods = list(
+        session.scalars(select(DerivedFoodItem).where(DerivedFoodItem.log_event_id == event_id))
+    )
+    (food,) = foods
+    assert food.status == DerivedItemStatus.RESOLVED
+    assert food.calories is not None and food.calories > 0  # real, non-null macros
+    assert food.protein_g is not None and food.protein_g > 0
+    # The real model-prior rough estimate: 150 g × 250 kcal/100g = 375 kcal — NOT the coarse
+    # deterministic prior (150 g × 200 kcal/100g = 300 kcal) a whole-run budget-free flatten
+    # would have written.
+    assert food.calories == pytest.approx(375.0)
+    coarse_calories = 150.0 / 100.0 * COARSE_ENERGY_DENSITY_KCAL_PER_100G
+    assert food.calories != pytest.approx(coarse_calories)
+
+    (evidence,) = list(
+        session.scalars(select(EvidenceSource).where(EvidenceSource.log_event_id == event_id))
+    )
+    assert evidence.source_type == MODEL_PRIOR_SOURCE_TYPE
+    assert evidence.assumptions is not None
+    # The *primary* (model-prior) degrade label proves the candidate abandoned to a bounded
+    # model-prior call, not the provider-free deterministic prior of the worker flatten.
+    assert "estimated from model prior" in evidence.assumptions
+    assert "degraded:run_wall_clock_deadline_exceeded" in evidence.assumptions
+    # No raw diary phrase leaks into the sanitized run trace/assumptions/source refs.
+    assert "veggie stew" not in repr(result)
