@@ -124,6 +124,10 @@ class LogEventDTO(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
     raw_text: str
+    #: Short, model-generated meal label (FTY-421), e.g. ``"Turkey sandwich"``.
+    #: Always present in the response shape and ``null`` until the estimator
+    #: (FTY-422) names the event — nothing populates it in this story.
+    name: str | None = None
     status: LogEventStatus
     created_at: datetime
     updated_at: datetime

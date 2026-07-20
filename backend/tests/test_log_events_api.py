@@ -55,12 +55,14 @@ def _seed_event_at(
     *,
     raw_text: str = "seed event",
     status: LogEventStatus = LogEventStatus.PENDING,
+    name: str | None = None,
 ) -> uuid.UUID:
     """Insert a pending log event stamped at a fixed ``created_at`` and return its id.
 
     The create API never lets a client set ``created_at``, so bucketing tests seed
     the timestamp directly to place an event at a precise instant near a local-day
-    boundary.
+    boundary. ``name`` (FTY-421) is the model-generated meal label the estimator
+    writes; tests seed it directly to prove it round-trips through the reads.
     """
 
     factory = create_session_factory(db_engine)
@@ -70,6 +72,7 @@ def _seed_event_at(
             raw_text=raw_text,
             status=status,
             created_at=created_at,
+            name=name,
         )
         session.add(event)
         session.commit()
@@ -191,6 +194,9 @@ def test_create_returns_pending_event(client: TestClient) -> None:
     # Surrounding whitespace is trimmed before storage.
     assert body["raw_text"] == "two eggs and toast"
     assert uuid.UUID(body["id"])
+    # FTY-421: the meal label is present in the DTO but null until the estimator
+    # (FTY-422) names the event — nothing populates it on create.
+    assert body["name"] is None
 
 
 def test_list_today_returns_only_requested_day(client: TestClient) -> None:
@@ -249,6 +255,41 @@ def test_get_by_id_returns_owned_event(client: TestClient) -> None:
     assert resp.status_code == 200
     assert resp.json()["id"] == event_id
     assert resp.json()["raw_text"] == "grilled chicken salad"
+    # FTY-421: unnamed until the estimator writes the label.
+    assert resp.json()["name"] is None
+
+
+def test_event_name_round_trips_through_get_and_by_date(
+    client: TestClient, db_engine: Engine
+) -> None:
+    """A model-set ``name`` (FTY-421) surfaces on get-by-id and the by-date read.
+
+    The estimator (FTY-422) is the writer; here we seed the label directly to
+    prove the field the DTO exposes carries a set value all the way through both
+    read paths, not just ``null``.
+    """
+
+    user_id, auth = _register(client, "meal-label@example.com")
+    event_id = _seed_event_at(
+        db_engine,
+        user_id,
+        datetime(2026, 6, 20, 12, 0, tzinfo=UTC),
+        raw_text="turkey sandwich on rye",
+        status=LogEventStatus.COMPLETED,
+        name="Turkey sandwich",
+    )
+
+    got = client.get(f"/api/users/{user_id}/log-events/{event_id}", headers={"Authorization": auth})
+    assert got.status_code == 200
+    assert got.json()["name"] == "Turkey sandwich"
+
+    by_date = client.get(
+        f"/api/users/{user_id}/log-events/by-date",
+        headers={"Authorization": auth},
+        params={"day": "2026-06-20"},
+    )
+    assert by_date.status_code == 200
+    assert by_date.json()[0]["event"]["name"] == "Turkey sandwich"
 
 
 def test_get_unknown_id_is_not_found(client: TestClient) -> None:
@@ -545,6 +586,8 @@ def test_entries_by_date_returns_events_with_today_item_read_model(
     assert body[0]["event"]["raw_text"] == "rice and a walk"
     assert body[0]["event"]["status"] == "completed"
     assert body[0]["event"]["created_at"] == "2026-06-20T12:00:00Z"
+    # FTY-421: the event DTO carries the meal label; null when unnamed.
+    assert body[0]["event"]["name"] is None
 
     food, exercise = body[0]["items"]
     assert food["item_type"] == "food"
