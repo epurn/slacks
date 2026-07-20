@@ -6,6 +6,8 @@ real process or touch a live Claude Code install.
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import subprocess
 from unittest.mock import MagicMock, patch
@@ -43,6 +45,18 @@ def _provider(runner: object, *, model: str = "", max_retries: int = 0) -> Claud
         model=model,
         timeout_seconds=5.0,
         max_retries=max_retries,
+        binary="claude",
+        runner=runner,  # type: ignore[arg-type]
+    )
+
+
+def _vision_provider(runner: object) -> ClaudeCodeProvider:
+    """A provider whose configured session is declared vision-capable (FTY-412)."""
+
+    return ClaudeCodeProvider(
+        timeout_seconds=5.0,
+        max_retries=0,
+        supports_vision=True,
         binary="claude",
         runner=runner,  # type: ignore[arg-type]
     )
@@ -169,9 +183,25 @@ def test_schema_invalid_json_is_rejected_by_base_class() -> None:
         _provider(runner).structured_completion("an apple", Candidate)
 
 
-def test_image_input_fails_fast() -> None:
-    # Vision via claude_code is a non-goal: it must fail, not silently drop the
-    # image. Bypass the base-class vision gate by reaching _complete directly.
+# --- Image input (FTY-412) ---
+
+
+def _stream_json_transcript(result_text: str) -> str:
+    """A minimal stream-json NDJSON transcript ending in a success result event."""
+
+    return "\n".join(
+        [
+            json.dumps({"type": "system", "subtype": "init"}),
+            json.dumps({"type": "assistant", "message": {"content": [{"type": "text"}]}}),
+            json.dumps({"type": "result", "subtype": "success", "is_error": False,
+                        "result": result_text}),
+        ]
+    )
+
+
+def test_image_input_fails_fast_when_model_is_not_vision_capable() -> None:
+    # Not declared vision-capable: fail closed rather than silently dropping the
+    # image. Bypass the base-class gate by reaching _complete directly.
     provider = _provider(lambda *a, **k: _result())
 
     with pytest.raises(LLMConfigurationError):
@@ -181,6 +211,110 @@ def test_image_input_fails_fast() -> None:
             images=[sample_image()],
             timeout_seconds=5.0,
         )
+
+
+def test_vision_call_sends_the_image_and_returns_a_validated_object() -> None:
+    """A vision-capable session reads an image through the stream-json channel.
+
+    This is the FTY-412 regression: label scanning was impossible on every
+    ``claude_code`` deployment because the adapter refused image input outright,
+    so the label step's one vision call always failed closed.
+    """
+
+    captured: dict[str, Invocation] = {}
+
+    def runner(invocation: Invocation, *, timeout_seconds: float) -> ClaudeCodeResult:
+        captured["invocation"] = invocation
+        return _result(stdout=_stream_json_transcript('{"name": "apple", "calories": 95}'))
+
+    provider = _vision_provider(runner)
+    result = provider.structured_completion("read this", Candidate, images=[sample_image()])
+
+    assert result == Candidate(name="apple", calories=95)
+
+    invocation = captured["invocation"]
+    # Images can only be supplied through the streaming channel.
+    assert "--input-format" in invocation.argv
+    assert "stream-json" in invocation.argv
+    # The image travels on stdin as a base64 block — never in argv, never a file.
+    message = json.loads(invocation.stdin)
+    content = message["message"]["content"]
+    assert content[0]["type"] == "text"
+    image_block = content[1]
+    assert image_block["type"] == "image"
+    assert image_block["source"]["media_type"] == "image/jpeg"
+    assert base64.b64decode(image_block["source"]["data"]) == sample_image().data
+
+
+def test_vision_invocation_still_disables_all_tools() -> None:
+    # The streaming channel must not weaken the injection posture: text printed
+    # on an uploaded label is data, and no tool may act on it.
+    invocation = _vision_provider(lambda *a, **k: _result()).build_invocation(
+        "read this", Candidate, images=[sample_image()]
+    )
+    argv = invocation.argv
+
+    assert argv[argv.index("--allowed-tools") + 1] == ""
+    assert argv[argv.index("--mcp-config") + 1] == '{"mcpServers":{}}'
+    assert "--strict-mcp-config" in argv
+    assert argv[argv.index("--permission-mode") + 1] == "default"
+
+
+def test_text_only_invocation_is_unchanged_by_vision_support() -> None:
+    # The text path must stay byte-for-byte as it was (llm-provider.md).
+    invocation = _vision_provider(lambda *a, **k: _result()).build_invocation(
+        "an apple", Candidate
+    )
+
+    assert invocation.argv[invocation.argv.index("--output-format") + 1] == "text"
+    assert "--input-format" not in invocation.argv
+    assert invocation.stdin.startswith("an apple")
+
+
+def test_image_bytes_never_appear_in_argv() -> None:
+    invocation = _vision_provider(lambda *a, **k: _result()).build_invocation(
+        SENSITIVE_PROMPT, Candidate, images=[sample_image()]
+    )
+
+    encoded = base64.b64encode(sample_image().data).decode("ascii")
+    assert all(encoded not in arg for arg in invocation.argv)
+    assert all(SENSITIVE_PROMPT not in arg for arg in invocation.argv)
+
+
+def test_stream_json_error_result_is_a_response_error() -> None:
+    transcript = json.dumps(
+        {"type": "result", "subtype": "error_during_execution", "is_error": True}
+    )
+
+    with pytest.raises(LLMResponseError):
+        _vision_provider(lambda *a, **k: _result(stdout=transcript)).structured_completion(
+            "read this", Candidate, images=[sample_image()]
+        )
+
+
+def test_stream_json_without_a_result_event_is_a_response_error() -> None:
+    transcript = json.dumps({"type": "system", "subtype": "init"})
+
+    with pytest.raises(LLMResponseError):
+        _vision_provider(lambda *a, **k: _result(stdout=transcript)).structured_completion(
+            "read this", Candidate, images=[sample_image()]
+        )
+
+
+def test_stream_json_error_message_does_not_echo_the_transcript() -> None:
+    # A transcript can carry text transcribed from an untrusted label image.
+    secret = "SENSITIVE_LABEL_TEXT"
+    transcript = json.dumps(
+        {"type": "result", "subtype": "error_during_execution", "is_error": True,
+         "result": secret}
+    )
+
+    with pytest.raises(LLMResponseError) as excinfo:
+        _vision_provider(lambda *a, **k: _result(stdout=transcript)).structured_completion(
+            "read this", Candidate, images=[sample_image()]
+        )
+
+    assert secret not in str(excinfo.value)
 
 
 # --- Tolerant JSON extraction tests (_parse_object) ---
