@@ -19,6 +19,17 @@ estimator / contracts / backend-core / security-privacy lane (same owners as
 
 ## Version
 
+31 (FTY-414, contract only): the **Prior-Correction Resolution (FTY-406)** and
+**Prior-Correction Candidate Surface + Apply (FTY-411)** sections (with their
+subsections, including the FTY-407 **Mobile surfacing** subsection) were
+**extracted verbatim** from `food-resolution.md` into a new sibling page,
+[food-resolution-prior-correction.md](food-resolution-prior-correction.md),
+leaving a forwarding pointer behind under each original heading and re-pointing the
+in-page `prior_correction` source-tier citation at the new page. Structure-only
+relocation of one settled source tier — no wording, precedence, scoping,
+status/provenance, field, routing-rule, example, schema, DTO, endpoint, or
+behaviour change.
+
 30 (FTY-407): **the correction sheet surfaces prior corrections as match candidates.**
 The mobile consumer of version 29's surface, added as **Mobile surfacing (FTY-407)**
 under the FTY-411 section; the two stale "mobile change deferred / no mobile change"
