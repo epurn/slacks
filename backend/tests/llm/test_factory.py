@@ -91,6 +91,32 @@ def test_claude_code_model_is_passed_through() -> None:
     assert provider.model == "claude-sonnet-4-5"
 
 
+def test_claude_code_receives_the_vision_capability() -> None:
+    """``supports_vision`` must reach the claude_code adapter (FTY-412).
+
+    It was previously dropped here, so an operator who set
+    ``SLACKS_LLM_SUPPORTS_VISION=true`` still got a vision-blind provider and
+    every nutrition-label scan failed closed.
+    """
+
+    settings = LLMSettings(provider="claude_code", supports_vision=True)
+
+    provider = build_provider(settings)
+
+    assert isinstance(provider, ClaudeCodeProvider)
+    # Reaching through to the base-class gate: with the flag dropped, an image
+    # would be refused before any call.
+    assert provider._supports_vision is True
+
+
+def test_claude_code_is_vision_blind_by_default() -> None:
+    # Fails closed unless the operator declares the session vision-capable.
+    provider = build_provider(LLMSettings(provider="claude_code"))
+
+    assert isinstance(provider, ClaudeCodeProvider)
+    assert provider._supports_vision is False
+
+
 def test_codex_selected_without_key() -> None:
     settings = LLMSettings(provider="codex")
 
