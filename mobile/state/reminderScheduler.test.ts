@@ -74,31 +74,51 @@ function mockNotifications(): NotificationsAdapter & {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("CADENCE_OPTIONS", () => {
-  it("includes weekly, biweekly, monthly, off", () => {
+  it("offers the full seven-cadence set (FTY-403)", () => {
     const values = CADENCE_OPTIONS.map((o) => o.value);
-    expect(values).toContain("weekly");
-    expect(values).toContain("biweekly");
-    expect(values).toContain("monthly");
-    expect(values).toContain("off");
+    expect(values).toEqual([
+      "daily",
+      "every-other-day",
+      "twice-weekly",
+      "weekly",
+      "biweekly",
+      "monthly",
+      "off",
+    ]);
   });
 
-  it("Weekly has 7 days, biweekly 14, monthly 30, off null", () => {
+  it("is ordered most → least frequent with Off last", () => {
+    // Everything but "off" has a numeric interval; those intervals ascend.
+    const intervals = CADENCE_OPTIONS.filter((o) => o.days !== null).map(
+      (o) => o.days as number,
+    );
+    const ascending = [...intervals].sort((a, b) => a - b);
+    expect(intervals).toEqual(ascending);
+    expect(CADENCE_OPTIONS[CADENCE_OPTIONS.length - 1]!.value).toBe("off");
+  });
+
+  it("maps each cadence to its interval in days (sub-weekly incl.)", () => {
     const map = Object.fromEntries(CADENCE_OPTIONS.map((o) => [o.value, o.days]));
+    expect(map.daily).toBe(1);
+    expect(map["every-other-day"]).toBe(2);
+    expect(map["twice-weekly"]).toBe(3);
     expect(map.weekly).toBe(7);
     expect(map.biweekly).toBe(14);
     expect(map.monthly).toBe(30);
     expect(map.off).toBeNull();
   });
 
-  it("uses short display labels that fit equal-width segments (FTY-347)", () => {
-    // Labels are cosmetic; short forms avoid ellipsis on the narrowest phone.
+  it("uses clear, honest, full labels the menu can show untruncated (FTY-403)", () => {
+    // The menu lists each option full-width, so labels are the honest names —
+    // biweekly is the unambiguous "Every 2 weeks", not the old "Biweekly".
     const map = Object.fromEntries(CADENCE_OPTIONS.map((o) => [o.value, o.label]));
+    expect(map.daily).toBe("Daily");
+    expect(map["every-other-day"]).toBe("Every other day");
+    expect(map["twice-weekly"]).toBe("Twice a week");
     expect(map.weekly).toBe("Weekly");
-    expect(map.biweekly).toBe("Biweekly");
+    expect(map.biweekly).toBe("Every 2 weeks");
     expect(map.monthly).toBe("Monthly");
     expect(map.off).toBe("Off");
-    // The overflowing long form is gone.
-    expect(CADENCE_OPTIONS.map((o) => o.label)).not.toContain("Every 2 weeks");
   });
 });
 
@@ -109,6 +129,11 @@ describe("DEFAULT_CADENCE", () => {
 });
 
 describe("cadenceIntervalDays", () => {
+  it("returns 1 for daily", () => expect(cadenceIntervalDays("daily")).toBe(1));
+  it("returns 2 for every-other-day", () =>
+    expect(cadenceIntervalDays("every-other-day")).toBe(2));
+  it("returns 3 for twice-weekly", () =>
+    expect(cadenceIntervalDays("twice-weekly")).toBe(3));
   it("returns 7 for weekly", () => expect(cadenceIntervalDays("weekly")).toBe(7));
   it("returns 14 for biweekly", () => expect(cadenceIntervalDays("biweekly")).toBe(14));
   it("returns 30 for monthly", () => expect(cadenceIntervalDays("monthly")).toBe(30));
@@ -126,6 +151,30 @@ describe("computeNextDueDate", () => {
 
   it("returns null when lastWeighInDate is null", () => {
     expect(computeNextDueDate(null, "weekly")).toBeNull();
+  });
+
+  it("schedules a daily reminder at last + 1 day", () => {
+    const due = computeNextDueDate("2026-06-20", "daily");
+    expect(due!.getMonth()).toBe(5); // June
+    expect(due!.getDate()).toBe(21);
+  });
+
+  it("schedules an every-other-day reminder at last + 2 days", () => {
+    const due = computeNextDueDate("2026-06-20", "every-other-day");
+    expect(due!.getDate()).toBe(22);
+  });
+
+  it("schedules a twice-weekly reminder at last + 3 days", () => {
+    const due = computeNextDueDate("2026-06-20", "twice-weekly");
+    expect(due!.getDate()).toBe(23);
+  });
+
+  it("fires the sub-weekly cadences at 09:00 too", () => {
+    for (const cadence of ["daily", "every-other-day", "twice-weekly"] as const) {
+      const due = computeNextDueDate("2026-06-20", cadence);
+      expect(due!.getHours()).toBe(9);
+      expect(due!.getMinutes()).toBe(0);
+    }
   });
 
   it("schedules weekly reminder at last + 7 days", () => {
@@ -181,6 +230,29 @@ describe("applyReminderSettings", () => {
     expect(notif.scheduledDates).toHaveLength(1);
     expect(notif.scheduledDates[0]!.getDate()).toBe(15);
   });
+
+  // Acceptance: selecting each cadence persists it and schedules the next
+  // reminder at that cadence's interval — the sub-weekly ones included (FTY-403).
+  it.each([
+    ["daily", 1, 21],
+    ["every-other-day", 2, 22],
+    ["twice-weekly", 3, 23],
+    ["weekly", 7, 27],
+    ["biweekly", 14, 4], // June 20 + 14 = July 4
+    ["monthly", 30, 20], // June 20 + 30 = July 20
+  ] as const)(
+    "persists %s and schedules a single reminder %d days out",
+    async (cadence, _days, expectedDate) => {
+      const store = mockStore("weekly", "2026-06-20");
+      const notif = mockNotifications();
+
+      await applyReminderSettings(cadence, "2026-06-20", store, notif);
+
+      expect(store._cadence).toBe(cadence);
+      expect(notif.scheduledDates).toHaveLength(1);
+      expect(notif.scheduledDates[0]!.getDate()).toBe(expectedDate);
+    },
+  );
 
   it("schedules exactly one notification for monthly cadence", async () => {
     const store = mockStore("monthly", "2026-06-01");

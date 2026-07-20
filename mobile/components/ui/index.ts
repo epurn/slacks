@@ -14,3 +14,5 @@ export { FloatingSwitcher, floatingSwitcherClearance } from './FloatingSwitcher'
 export type { FloatingSwitcherSegment } from './FloatingSwitcher';
 export { SegmentedControl } from './SegmentedControl';
 export type { SegmentedControlOption } from './SegmentedControl';
+export { MenuPicker } from './MenuPicker';
+export type { MenuPickerOption } from './MenuPicker';

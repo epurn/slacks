@@ -1,18 +1,23 @@
 /**
- * Weigh-in reminder scheduling for FTY-101.
+ * Weigh-in reminder scheduling for FTY-101 (option set widened in FTY-403).
  *
- * Cadence: Weekly · Biweekly · Monthly · Off. Default: Weekly.
+ * Cadence, most → least frequent: Daily · Every other day · Twice a week ·
+ * Weekly · Every 2 weeks · Monthly · Off. Default: Weekly.
  *
- * The display labels are kept short and equal-length-ish so the four segments
- * fit the native equal-width `UISegmentedControl` without ellipsis on the
- * narrowest supported phone (FTY-347). "Biweekly" sits between Weekly and
- * Monthly, which disambiguates it as *every two weeks*. Only the `label` is
- * cosmetic — `value` and `days` are the contract surface and never change.
+ * FTY-403 replaced the 4-segment `UISegmentedControl` with a native
+ * menu/picker (`MenuPicker`), so labels no longer have to be short and
+ * equal-width to dodge segment truncation (FTY-347): the menu lists each option
+ * on its own full-width row. That frees the biweekly label to be the clearer
+ * "Every 2 weeks" instead of the ambiguous "Biweekly", and lets the frequent
+ * cadences carry their honest names. Only the `label` is cosmetic — `value` and
+ * `days` are the contract surface the scheduler and persistence speak.
  *
  * The reminder is due-only: exactly one notification fires at
- * `last_weigh_in + cadence_interval`. It is never a daily or repeating
- * notification. Logging a weight or changing the cadence reschedules forward.
- * "Off" cancels any pending reminder.
+ * `last_weigh_in + cadence_interval`, and it is never a *repeating* system
+ * notification. A sub-weekly cadence (daily / every-other-day / twice-weekly)
+ * still schedules only that single due-shot, re-armed after each weigh-in — not
+ * an OS repeat trigger. Logging a weight or changing the cadence reschedules
+ * forward. "Off" cancels any pending reminder.
  *
  * The scheduling logic is split from the notification platform code via
  * injectable adapters (NotificationsAdapter, CadenceStore) so it is fully
@@ -23,7 +28,14 @@
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type WeighInCadence = "weekly" | "biweekly" | "monthly" | "off";
+export type WeighInCadence =
+  | "daily"
+  | "every-other-day"
+  | "twice-weekly"
+  | "weekly"
+  | "biweekly"
+  | "monthly"
+  | "off";
 
 export interface CadenceOption {
   readonly label: string;
@@ -32,9 +44,16 @@ export interface CadenceOption {
   readonly days: number | null;
 }
 
+// Ordered most → least frequent, "Off" last (the ordinal order the menu shows).
+// The three sub-weekly cadences carry whole-day intervals so the single
+// due-shot lands cleanly at 09:00 (see computeNextDueDate). "Twice a week" maps
+// to a 3-day interval — the closest whole-day spacing to two nudges a week.
 export const CADENCE_OPTIONS: readonly CadenceOption[] = [
+  { label: "Daily", value: "daily", days: 1 },
+  { label: "Every other day", value: "every-other-day", days: 2 },
+  { label: "Twice a week", value: "twice-weekly", days: 3 },
   { label: "Weekly", value: "weekly", days: 7 },
-  { label: "Biweekly", value: "biweekly", days: 14 },
+  { label: "Every 2 weeks", value: "biweekly", days: 14 },
   { label: "Monthly", value: "monthly", days: 30 },
   { label: "Off", value: "off", days: null },
 ];
