@@ -37,8 +37,8 @@ from app.enums import (
     LogEventStatus,
     SourceType,
 )
+from app.estimator.prior_correction_candidates import MAX_PRIOR_CORRECTION_CANDIDATES
 from app.estimator.re_match import (
-    MAX_PRIOR_CORRECTION_CANDIDATES,
     ItemForbidden,
     ReMatchCapability,
     SourceNotResolvable,
