@@ -37,6 +37,7 @@ export const E2E_PARTIAL_EVENT: LogEventDTO = {
   id: E2E_PARTIAL_EVENT_ID,
   user_id: E2E_SESSION.userId,
   raw_text: 'greek yogurt and some hummus',
+  name: null,
   status: 'partially_resolved',
   created_at: E2E_RESOLVED_EVENT_INSTANT,
   updated_at: E2E_RESOLVED_EVENT_INSTANT,

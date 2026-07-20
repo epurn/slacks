@@ -10,6 +10,7 @@ function baseEvent(overrides: Partial<LogEventDTO> = {}): LogEventDTO {
     id: "evt-1",
     user_id: "user-1",
     raw_text: "milk",
+    name: null,
     status: "needs_clarification",
     created_at: "2026-01-01T10:00:00Z",
     updated_at: "2026-01-01T10:00:00Z",

@@ -37,6 +37,7 @@ function serverEvent(id: string): LogEventDTO {
     id,
     user_id: USER_A,
     raw_text: "two eggs",
+    name: null,
     status: "pending",
     created_at: "2026-06-28T08:00:00Z",
     updated_at: "2026-06-28T08:00:00Z",
