@@ -28,9 +28,11 @@ import {
   isSyntheticSavedFoodItem,
   itemTimelineExtraRowTestID,
   itemTimelineRowTestID,
+  mealDisplayName,
   pendingQuestionRowTestID,
   questionPlaceholderItem,
 } from "./helpers";
+import { MealEntryRow } from "./MealEntryRow";
 import { type QuestionsByEvent } from "./usePartialClarifications";
 
 /**
@@ -241,13 +243,46 @@ export function ClusterView({
           const items = itemsByEvent[event.id] ?? [];
 
           // Completed items are item-forward: proposed rows reopen confirm,
-          // resolved rows open correction. Fresh multi-item resolves briefly
-          // summarize extras until the marker clears.
+          // resolved rows open correction. A multi-item meal collapses to one
+          // expandable meal row (FTY-420); a single item is its own value row.
           if (event.status === "completed" && items.length > 0) {
             // Beat 1 — only genuine pending→resolved counted rows animate.
             const animateResolve = resolveAnimIds.has(event.id);
             const rowTestID = itemTimelineRowTestID(event.id);
             const firstItem = items[0];
+
+            // FTY-420: a meal logged as one phrase groups under one log event
+            // and renders as a single collapsed row — the event's
+            // model-generated name (FTY-421/422) and the summed total — that
+            // expands on tap into the per-item breakdown, each item editable
+            // through the existing correction flow. It resolves in place from
+            // the pending skeleton (same event-keyed testID, animate-fade).
+            if (items.length > 1) {
+              return (
+                <MaybeSwipeable
+                  key={event.id}
+                  event={event}
+                  deleteLabel={`Delete ${mealDisplayName(event)}`}
+                  onDeleteEvent={onDeleteEvent}
+                  readOnly={readOnly}
+                >
+                  {(a11y) => (
+                    <MealEntryRow
+                      event={event}
+                      items={items}
+                      animateResolve={animateResolve}
+                      onOpenItem={onOpenItem}
+                      onOpenProposal={onOpenProposal}
+                      readOnly={readOnly}
+                      testID={rowTestID}
+                      {...a11y}
+                    />
+                  )}
+                </MaybeSwipeable>
+              );
+            }
+
+            // Single resolved/proposed item: the item-forward value row.
             const deleteLabel = firstItem
               ? `Delete ${firstItem.name}`
               : "Delete entry";
@@ -260,73 +295,34 @@ export function ClusterView({
                 readOnly={readOnly}
               >
                 {(a11y) => {
-                  if (animateResolve && items.length > 1) {
-                    if (!firstItem) return null;
-                    return firstItem.item_type === "food" &&
-                      firstItem.status === "proposed" ? (
-                      <ItemTimelineRow
-                        item={firstItem}
-                        proposal
-                        onPress={
-                          onOpenProposal ? () => onOpenProposal(firstItem) : undefined
-                        }
-                        readOnly={readOnly}
-                        testID={rowTestID}
-                        {...a11y}
-                      />
-                    ) : (
-                      <ItemTimelineRow
-                        item={firstItem}
-                        additionalItems={items.slice(1)}
-                        needsClarification={false}
-                        onPress={
-                          onOpenItem
-                            ? () => onOpenItem(firstItem, event.raw_text)
-                            : undefined
-                        }
-                        readOnly={readOnly}
-                        animateResolve
-                        testID={rowTestID}
-                        {...a11y}
-                      />
-                    );
-                  }
-                  return items.map((item, index) => {
-                    const key = index === 0 ? event.id : item.id;
-                    const testID =
-                      index === 0
-                        ? rowTestID
-                        : itemTimelineExtraRowTestID(event.id, item.id);
-                    return item.item_type === "food" &&
-                      item.status === "proposed" ? (
-                      <ItemTimelineRow
-                        key={key}
-                        item={item}
-                        proposal
-                        onPress={
-                          onOpenProposal ? () => onOpenProposal(item) : undefined
-                        }
-                        readOnly={readOnly}
-                        testID={testID}
-                        {...a11y}
-                      />
-                    ) : (
-                      <ItemTimelineRow
-                        key={key}
-                        item={item}
-                        needsClarification={false}
-                        onPress={
-                          onOpenItem
-                            ? () => onOpenItem(item, event.raw_text)
-                            : undefined
-                        }
-                        readOnly={readOnly}
-                        animateResolve={animateResolve}
-                        testID={testID}
-                        {...a11y}
-                      />
-                    );
-                  });
+                  if (!firstItem) return null;
+                  return firstItem.item_type === "food" &&
+                    firstItem.status === "proposed" ? (
+                    <ItemTimelineRow
+                      item={firstItem}
+                      proposal
+                      onPress={
+                        onOpenProposal ? () => onOpenProposal(firstItem) : undefined
+                      }
+                      readOnly={readOnly}
+                      testID={rowTestID}
+                      {...a11y}
+                    />
+                  ) : (
+                    <ItemTimelineRow
+                      item={firstItem}
+                      needsClarification={false}
+                      onPress={
+                        onOpenItem
+                          ? () => onOpenItem(firstItem, event.raw_text)
+                          : undefined
+                      }
+                      readOnly={readOnly}
+                      animateResolve={animateResolve}
+                      testID={rowTestID}
+                      {...a11y}
+                    />
+                  );
                 }}
               </MaybeSwipeable>
             );

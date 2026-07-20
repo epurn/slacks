@@ -1,0 +1,67 @@
+# FTY-420: composite meal entry — one collapsed row, tap to expand the breakdown.
+#
+# Opens the `today.meal` visual-review preset (a multi-item meal event carrying a
+# model-generated name, seeded through the shared visual-review registry — see
+# e2e/visualReview/presets.ts) and captures the two states the story requires,
+# in light and dark:
+#   1. the COLLAPSED single meal row — "Turkey sandwich" + the summed total, one
+#      row instead of N loose item rows; then
+#   2. the EXPANDED per-item breakdown — reached by a real tap on the rendered
+#      meal row (the expand is plain local state, not a seam), showing each food,
+#      its portion, and its calories/macros, every item editable.
+#
+# The `visual-review-settled:today.meal` marker is the load-bearing assertion:
+# it only appears after navigation, data load, and theme have settled, so a
+# data-starved or wrong-screen launch fails here rather than going green on the
+# always-mounted shell. Each screenshot captures the settled frame.
+#
+# Runs on the same E2E debug binary as the other flows (EXPO_PUBLIC_SLACKS_E2E=
+# true, see verify-e2e.sh); it adds no fixtures of its own.
+#
+# Bundle ID: Expo prebuild reads this from app.json. Keep this literal so
+# directory-level Maestro runs launch the installed app under test reliably.
+appId: com.slacks
+---
+- launchApp:
+    clearState: false
+
+# ─── Light ──────────────────────────────────────────────────────────────────
+- openLink: "slacks://__visual-review?preset=today.meal&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.meal"
+    timeout: 20000
+- assertVisible:
+    id: today-screen
+# Collapsed: one meal row with the model-generated name + summed total.
+# iOS folds the row's child Text into the Pressable's accessibilityLabel, so the
+# meal row is exposed as ".*Turkey sandwich, N kcal total, N items.*" — match the
+# folded label, not the bare glyph.
+- assertVisible:
+    text: ".*Turkey sandwich.*"
+- takeScreenshot: today-meal-collapsed-light
+# Expand the breakdown by tapping the meal row.
+- tapOn:
+    text: ".*Turkey sandwich,.*"
+- assertVisible:
+    text: ".*Sub bun,.*"
+- takeScreenshot: today-meal-expanded-light
+
+# ─── Dark ───────────────────────────────────────────────────────────────────
+- openLink: "slacks://__visual-review?preset=today.meal&theme=dark"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.meal"
+    timeout: 20000
+- assertVisible:
+    id: today-screen
+- assertVisible:
+    text: ".*Turkey sandwich.*"
+- takeScreenshot: today-meal-collapsed-dark
+- tapOn:
+    text: ".*Turkey sandwich,.*"
+- assertVisible:
+    text: ".*Sub bun,.*"
+- takeScreenshot: today-meal-expanded-dark

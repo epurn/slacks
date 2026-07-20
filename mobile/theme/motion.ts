@@ -88,6 +88,67 @@ export function useReduceMotionState(): boolean | null {
 }
 
 /**
+ * Animated rotation for a disclosure chevron that toggles a collapsed group
+ * open/closed (FTY-420 meal row). Returns an interpolated transform string —
+ * `0deg` collapsed, `90deg` expanded — that springs with the default motion, and
+ * snaps instantly under Reduce Motion. Held in state so the driving value is
+ * stable across renders.
+ */
+export function useDisclosureRotation(
+  expanded: boolean,
+): Animated.AnimatedInterpolation<string> {
+  const reduceMotion = useReduceMotion();
+  const [progress] = useState(() => new Animated.Value(expanded ? 1 : 0));
+
+  useEffect(() => {
+    if (reduceMotion) {
+      progress.setValue(expanded ? 1 : 0);
+      return;
+    }
+    Animated.spring(progress, {
+      ...defaultSpring,
+      toValue: expanded ? 1 : 0,
+    }).start();
+  }, [expanded, reduceMotion, progress]);
+
+  return progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '90deg'],
+  });
+}
+
+/**
+ * Fade a just-revealed group of content in calmly (FTY-420 meal breakdown).
+ * Returns an animated `opacity` that eases from 0→1 with `gentleSpring` each
+ * time `visible` becomes true (a simple timing fade under Reduce Motion), so the
+ * breakdown settles in rather than popping. Unlike {@link useResolveFade} it
+ * replays on every open, since the breakdown mounts fresh each expansion.
+ */
+export function useDisclosureReveal(visible: boolean): Animated.Value {
+  const reduceMotion = useReduceMotion();
+  const [opacity] = useState(() => new Animated.Value(visible ? 1 : 0));
+
+  useEffect(() => {
+    if (!visible) {
+      opacity.setValue(0);
+      return;
+    }
+    opacity.setValue(0);
+    if (reduceMotion) {
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: reducedMotionDuration,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      Animated.spring(opacity, { ...gentleSpring, toValue: 1 }).start();
+    }
+  }, [visible, reduceMotion, opacity]);
+
+  return opacity;
+}
+
+/**
  * A one-shot "gentle pulse" beat (target reached, correction saved). Returns an
  * animated `scale`/`opacity` pair to spread onto the pulsing view and a `pulse()`
  * trigger. Normally a short spring scale bump (`defaultSpring`); under Reduce

@@ -62,6 +62,47 @@ export function pendingQuestionRowTestID(
   return `pending-question-row-${eventId}-${questionId}`;
 }
 
+/** Max characters of the raw phrase shown when a meal row falls back to it. */
+const MEAL_RAW_TEXT_FALLBACK_MAX = 60;
+
+/**
+ * The collapsed meal-row title (FTY-420). Prefers the model-generated meal name
+ * (FTY-421/422); when it is null or blank — an older entry, or the estimator
+ * produced no sensible name — it falls back to a trimmed, length-capped form of
+ * the raw phrase, and finally to a generic label. So a grouped meal row always
+ * shows something legible, never a blank title.
+ */
+export function mealDisplayName(event: LogEventDTO): string {
+  const name = event.name?.trim();
+  if (name) return name;
+  const raw = event.raw_text.trim();
+  if (raw) {
+    return raw.length > MEAL_RAW_TEXT_FALLBACK_MAX
+      ? `${raw.slice(0, MEAL_RAW_TEXT_FALLBACK_MAX - 1).trimEnd()}…`
+      : raw;
+  }
+  return "Meal";
+}
+
+/**
+ * Sum a meal's derived-item energy for the collapsed meal-row total (FTY-420):
+ * a food item contributes its `calories`, an exercise item its `active_calories`
+ * (mirroring `ItemTimelineRow`'s multi-item summary). Returns `null` when any
+ * item's value is still missing so the row shows an honest em dash rather than a
+ * wrong partial sum. The total is the exact sum of the breakdown rows, so it
+ * stays consistent after a per-item edit re-costs one row.
+ */
+export function sumItemKcal(items: readonly DerivedItem[]): number | null {
+  let total = 0;
+  for (const item of items) {
+    const kcal =
+      item.item_type === "food" ? item.calories : item.active_calories;
+    if (kcal === null) return null;
+    total += kcal;
+  }
+  return total;
+}
+
 /** Map an API/network failure to a plain, nonjudgmental message. */
 export function messageFor(
   error: unknown,

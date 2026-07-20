@@ -28,6 +28,7 @@ function dto(overrides: Partial<LogEventDTO> = {}): LogEventDTO {
     id: "server-1",
     user_id: USER,
     raw_text: "two eggs",
+    name: null,
     status: "pending",
     created_at: "2026-06-28T08:00:01Z",
     updated_at: "2026-06-28T08:00:01Z",

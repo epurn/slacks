@@ -20,7 +20,10 @@
 
 import { registerVisualReviewPreset } from './registry';
 import type { VisualReviewFetchContext, VisualReviewResponse } from './types';
+import type { DailySummaryDTO } from '@/api/dailySummary';
+import type { DerivedFoodItemDTO } from '@/api/derivedItems';
 import type { FoodSuggestionsResponse } from '@/api/foodSuggestions';
+import type { LogEventDTO, LogEventEntryDTO } from '@/api/logEvents';
 import {
   E2E_DAILY_SUMMARY,
   E2E_PROFILE,
@@ -28,6 +31,7 @@ import {
   E2E_RESOLVE_EVENT,
   E2E_RESOLVE_SUMMARY,
   E2E_SAVED_FOOD,
+  E2E_SESSION,
 } from '../fixtures';
 
 // Quick-add suggestions (FTY-341) the `today.suggestions` preset seeds. Server
@@ -70,6 +74,97 @@ registerVisualReviewPreset({
     { match: get('/log-events/by-date'), body: [E2E_RESOLVE_ENTRY] },
     { match: get('/log-events'), body: [E2E_RESOLVE_EVENT] },
     { match: get('/daily-summary'), body: E2E_RESOLVE_SUMMARY },
+  ],
+});
+
+// today.meal — FTY-420: a composite meal logged as one phrase, resolved to a
+// multi-item event carrying a model-generated `name`. Today renders it as ONE
+// collapsed row ("Turkey sandwich" + the summed total); tapping it expands the
+// per-item breakdown (each food, its portion, its calories/macros), every item
+// editable. Distinct fixtures so the shot shows a real meal name and a coherent
+// breakdown, independent of the shared resolve flow.
+const E2E_MEAL_EVENT_ID = 'e2e-meal-event-00000000-0000-0000-0000-000000000000';
+
+function mealFoodItem(
+  suffix: string,
+  name: string,
+  quantityText: string,
+  calories: number,
+  proteinG: number,
+  carbsG: number,
+  fatG: number,
+  source: DerivedFoodItemDTO['source'],
+): DerivedFoodItemDTO {
+  return {
+    item_type: 'food',
+    id: `e2e-meal-item-${suffix}-00000000-0000-0000-0000-000000000000`,
+    user_id: E2E_SESSION.userId,
+    log_event_id: E2E_MEAL_EVENT_ID,
+    name,
+    quantity_text: quantityText,
+    unit: null,
+    amount: 1,
+    status: 'resolved',
+    grams: null,
+    calories,
+    protein_g: proteinG,
+    carbs_g: carbsG,
+    fat_g: fatG,
+    calories_estimated: calories,
+    protein_g_estimated: proteinG,
+    carbs_g_estimated: carbsG,
+    fat_g_estimated: fatG,
+    created_at: '2026-01-01T12:30:00Z',
+    updated_at: '2026-01-01T12:30:00Z',
+    source,
+    is_edited: false,
+  };
+}
+
+const E2E_MEAL_EVENT: LogEventDTO = {
+  id: E2E_MEAL_EVENT_ID,
+  user_id: E2E_SESSION.userId,
+  raw_text: 'turkey sandwich on a sub bun with lettuce',
+  name: 'Turkey sandwich',
+  status: 'completed',
+  created_at: '2026-01-01T12:30:00Z',
+  updated_at: '2026-01-01T12:30:00Z',
+};
+
+const E2E_MEAL_ENTRY: LogEventEntryDTO = {
+  event: E2E_MEAL_EVENT,
+  items: [
+    mealFoodItem('1', 'Turkey breast', '3 oz', 90, 19, 0, 1, {
+      source_type: 'trusted_nutrition_database',
+      label: 'USDA',
+      ref: 'usda_fdc:171506',
+    }),
+    mealFoodItem('2', 'Sub bun', 'half', 150, 5, 30, 2, {
+      source_type: 'trusted_nutrition_database',
+      label: 'USDA',
+      ref: 'usda_fdc:172750',
+    }),
+    mealFoodItem('3', 'Lettuce', '2 leaves', 3, 0, 1, 0, {
+      source_type: 'model_prior',
+      label: 'Rough estimate',
+      ref: 'model_prior:lettuce',
+    }),
+  ],
+};
+
+const E2E_MEAL_SUMMARY: DailySummaryDTO = {
+  ...E2E_RESOLVE_SUMMARY,
+  intake: { calories: 243, protein_g: 24, carbs_g: 31, fat_g: 3 },
+};
+
+registerVisualReviewPreset({
+  name: 'today.meal',
+  route: '/',
+  settledPath: '/',
+  responses: [
+    { match: get('/log-events/by-date'), body: [E2E_MEAL_ENTRY] },
+    { match: get('/log-events'), body: [E2E_MEAL_EVENT] },
+    { match: get('/daily-summary'), body: E2E_MEAL_SUMMARY },
   ],
 });
 
