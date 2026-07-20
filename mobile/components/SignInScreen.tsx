@@ -194,12 +194,14 @@ export function SignInScreen({
           {isSignIn ? "Welcome back" : "Create your account"}
         </ThemedText>
 
+        {/*
+          The subtitle carries no `accessibilityLabel` (FTY-416): RN already
+          exposes a `Text`'s children as its accessible label, so an explicit
+          one would only be a second source of truth that can drift from — and,
+          on iOS, replace — the visible copy in the accessibility tree.
+        */}
         {host !== null ? (
-          <ThemedText
-            variant="textSecondary"
-            style={styles.subtitle}
-            accessibilityLabel={`${isSignIn ? "Signing in" : "Creating an account"} on ${host}`}
-          >
+          <ThemedText variant="textSecondary" style={styles.subtitle}>
             {`${isSignIn ? "Signing in to" : "Creating an account on"} ${host}`}
           </ThemedText>
         ) : null}
