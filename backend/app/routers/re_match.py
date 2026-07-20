@@ -40,6 +40,7 @@ from app.estimator.re_match import (
     AlternativesUnavailable,
     ItemForbidden,
     ItemNotFound,
+    PriorCorrectionCandidate,
     ReMatchNeedsClarification,
     SourceCandidate,
     SourceNotResolvable,
@@ -49,6 +50,7 @@ from app.schemas.corrections import DerivedFoodItemDTO
 from app.schemas.re_match import (
     AlternativesResponse,
     ListAlternativesRequest,
+    PriorCorrectionCandidateDTO,
     ReResolveRequest,
     SourceCandidateDTO,
 )
@@ -88,17 +90,24 @@ def list_source_candidates(
 ) -> AlternativesResponse:
     """List alternative source candidates for the caller's own food item.
 
-    Runs the existing resolution providers in list-candidates mode over the item's
-    identity (or the sanitized ``query`` override) and returns a bounded list of
-    energy-bearing matches. Cross-user or unknown items — and items whose parent
-    log event is voided (FTY-321) — fail closed as ``404``; a transient or unusable
-    candidate-source failure returns ``503`` (retryable) rather than a misleading
-    empty list.
+    Returns two surfaces (FTY-411): the caller's own confident **prior corrections** for
+    the item's normalized name (a bounded, top-ranked "Your correction" list re-derived
+    from the corrections trail), plus the guessed-source ``candidates`` — the existing
+    resolution providers run in list-candidates mode over the item's identity (or the
+    sanitized ``query`` override), a bounded list of energy-bearing matches. Cross-user or
+    unknown items — and items whose parent log event is voided (FTY-321) — fail closed as
+    ``404``; a transient or unusable candidate-source failure returns ``503`` (retryable)
+    rather than a misleading empty list.
     """
 
     _refuse_voided_parent(session, item_id, user_id)
     capability = build_re_match_capability(session)
     try:
+        prior_corrections = capability.list_prior_correction_candidates(
+            owner_id=user_id,
+            current_user=current_user,
+            item_id=item_id,
+        )
         candidates = capability.list_alternatives(
             owner_id=user_id,
             current_user=current_user,
@@ -113,7 +122,10 @@ def list_source_candidates(
             detail={"error": "alternatives_unavailable"},
         ) from exc
 
-    return AlternativesResponse(candidates=[_candidate_dto(candidate) for candidate in candidates])
+    return AlternativesResponse(
+        candidates=[_candidate_dto(candidate) for candidate in candidates],
+        prior_corrections=[_prior_correction_dto(candidate) for candidate in prior_corrections],
+    )
 
 
 @router.post(
@@ -131,11 +143,13 @@ def re_resolve_item(
 
     Recomputes calories/macros from the chosen source at the item's current portion,
     rewrites its provenance to the new source, and re-snapshots the estimated
-    originals — the item is **not** marked edited. The response carries the new
-    per-item ``source`` descriptor (FTY-092). Cross-user or unknown items — and items
-    whose parent log event is voided (FTY-321) — fail closed as ``404``; a reference
-    the server cannot re-derive, or a re-match the new source cannot cost, returns
-    ``422`` with a clear error shape.
+    originals — the item is **not** marked edited. A ``prior_correction:<content_hash>``
+    reference (FTY-411) is re-derived from the acting user's corrections trail rather than
+    the ``products`` cache, reproducing FTY-406's corrected values + ``prior_correction``
+    provenance. The response carries the new per-item ``source`` descriptor (FTY-092).
+    Cross-user or unknown items — and items whose parent log event is voided (FTY-321) —
+    fail closed as ``404``; a reference the server cannot re-derive, or a re-match the new
+    source cannot cost, returns ``422`` with a clear error shape.
     """
 
     _refuse_voided_parent(session, item_id, user_id)
@@ -175,4 +189,20 @@ def _candidate_dto(candidate: SourceCandidate) -> SourceCandidateDTO:
         protein_g=candidate.facts.protein_g,
         carbs_g=candidate.facts.carbs_g,
         fat_g=candidate.facts.fat_g,
+    )
+
+
+def _prior_correction_dto(candidate: PriorCorrectionCandidate) -> PriorCorrectionCandidateDTO:
+    """Map an estimator :class:`PriorCorrectionCandidate` to its boundary DTO (FTY-411)."""
+
+    return PriorCorrectionCandidateDTO(
+        source_type=SourceType.PRIOR_CORRECTION,
+        source_ref=candidate.source_ref,
+        name=candidate.name,
+        basis=candidate.basis,  # type: ignore[arg-type]  # capability emits the as_logged literal
+        calories=candidate.calories,
+        protein_g=candidate.protein_g,
+        carbs_g=candidate.carbs_g,
+        fat_g=candidate.fat_g,
+        rescaled=candidate.rescaled,
     )

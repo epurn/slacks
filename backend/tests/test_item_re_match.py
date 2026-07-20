@@ -872,7 +872,8 @@ def test_list_alternatives_api_empty_when_source_disabled(
     )
 
     assert resp.status_code == 200
-    assert resp.json() == {"candidates": []}
+    # No FDC key and no prior correction for this user → both surfaces are empty.
+    assert resp.json() == {"candidates": [], "prior_corrections": []}
 
 
 def test_list_alternatives_api_503_when_source_fails(

@@ -19,6 +19,27 @@ estimator / contracts / backend-core / security-privacy lane (same owners as
 
 ## Version
 
+29 (FTY-411): **prior corrections become a pickable candidate + apply surface.** The
+per-user prior-correction trail FTY-406 made authoritative at estimate time is now
+exposed on the "Change match" boundary and given a re-derivable apply path (new section
+**Prior-Correction Candidate Surface + Apply (FTY-411)**). The
+`POST …/source-candidates` response gains a `prior_corrections` sibling list
+(`PriorCorrectionCandidateDTO`) alongside the unchanged USDA `candidates` — each entry
+carries the corrected `as_logged` values (macros honestly `null` when unknown) and a
+`source_ref = prior_correction:<content_hash>`, is bounded
+(`MAX_PRIOR_CORRECTION_CANDIDATES = 1`), per-user, and ranks above the guessed sources.
+`POST …/re-resolve` recognizes a `prior_correction:` reference and applies it via a
+dedicated branch (`ReMatchCapability._apply_prior_correction`) that re-derives from the
+corrections trail (never the `products` cache) using FTY-406's resolver
+(`match_prior_correction`), reproducing the direct-match-vs-rescale result with
+`prior_correction` provenance, no `products` row, and one superseding `re_match` audit
+row (`is_edited = false`); a stale/foreign reference fails closed (`422
+source_not_resolvable`), a cross-user/unknown item `404`. Reuses FTY-406's resolution
+logic unchanged — no change to estimate-time resolution or the USDA candidate provider.
+Owner adds `backend/app/estimator/re_match.py`, `backend/app/routers/re_match.py`,
+`backend/app/schemas/re_match.py`. Covered by
+`backend/tests/test_prior_correction_candidates.py`.
+
 28 (FTY-409, contract only): the **Barcode Source (Open Food Facts) — FTY-060**
 section (its intro and Owner, the FTY-369 name-search sub-section, the `OffSettings` /
 `SLACKS_OFF_` config, source lookup/mapping/caching, routing, and diagnostics) was

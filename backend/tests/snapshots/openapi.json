@@ -27,13 +27,20 @@
       },
       "AlternativesResponse": {
         "additionalProperties": false,
-        "description": "The bounded list of alternative source candidates for a food item.",
+        "description": "The alternative source candidates for a food item.\n\n``candidates`` are the guessed-source (USDA today) matches, unchanged. ``prior_corrections``\n(FTY-411) are the acting user's own confident prior corrections for the item's\nnormalized name \u2014 a bounded, top-ranked \"Your correction\" surface the client renders\n**above** ``candidates`` (prior corrections outrank guessed sources, mirroring the\nFTY-406 estimate-time precedence). Empty when the user has no matching prior\ncorrection, so an item with none returns the ordinary candidate list unchanged.",
         "properties": {
           "candidates": {
             "items": {
               "$ref": "#/components/schemas/SourceCandidateDTO"
             },
             "title": "Candidates",
+            "type": "array"
+          },
+          "prior_corrections": {
+            "items": {
+              "$ref": "#/components/schemas/PriorCorrectionCandidateDTO"
+            },
+            "title": "Prior Corrections",
             "type": "array"
           }
         },
@@ -1477,6 +1484,82 @@
         ],
         "title": "PacePreset",
         "type": "string"
+      },
+      "PriorCorrectionCandidateDTO": {
+        "additionalProperties": false,
+        "description": "A prior-correction match offered for an item (FTY-411).\n\nThe acting user's own confident correction for this item's normalized name, rendered\nas a top-ranked \"Your correction\" choice above the guessed-source ``candidates``.\n``source_type`` is always ``prior_correction`` (drives the \"Your correction\"\nprovenance icon); ``source_ref`` is the opaque ``prior_correction:<content_hash>`` id\nechoed back on re-resolve (never facts); ``basis`` is ``as_logged`` \u2014 the\n``calories``/macros are the corrected **total** for the item's portion, not a per-100g\ndensity \u2014 and a macro the correction never supplied is honestly ``null`` (unknown),\nnever a fabricated ``0``. ``rescaled`` marks a value carried from a different-portion\nprior via per-gram rescale.",
+        "properties": {
+          "basis": {
+            "const": "as_logged",
+            "title": "Basis",
+            "type": "string"
+          },
+          "calories": {
+            "title": "Calories",
+            "type": "number"
+          },
+          "carbs_g": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carbs G"
+          },
+          "fat_g": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fat G"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "protein_g": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protein G"
+          },
+          "rescaled": {
+            "title": "Rescaled",
+            "type": "boolean"
+          },
+          "source_ref": {
+            "title": "Source Ref",
+            "type": "string"
+          },
+          "source_type": {
+            "$ref": "#/components/schemas/SourceType"
+          }
+        },
+        "required": [
+          "source_type",
+          "source_ref",
+          "name",
+          "basis",
+          "calories",
+          "protein_g",
+          "carbs_g",
+          "fat_g",
+          "rescaled"
+        ],
+        "title": "PriorCorrectionCandidateDTO",
+        "type": "object"
       },
       "ProfileDTO": {
         "description": "Response body for the profile read/write API.\n\nBuilt directly from the :class:`~app.models.identity.UserProfile` ORM row.",
@@ -2973,7 +3056,7 @@
     },
     "/api/users/{user_id}/derived-items/food/{item_id}/re-resolve": {
       "post": {
-        "description": "Re-resolve the caller's own food item to a chosen candidate reference.\n\nRecomputes calories/macros from the chosen source at the item's current portion,\nrewrites its provenance to the new source, and re-snapshots the estimated\noriginals \u2014 the item is **not** marked edited. The response carries the new\nper-item ``source`` descriptor (FTY-092). Cross-user or unknown items \u2014 and items\nwhose parent log event is voided (FTY-321) \u2014 fail closed as ``404``; a reference\nthe server cannot re-derive, or a re-match the new source cannot cost, returns\n``422`` with a clear error shape.",
+        "description": "Re-resolve the caller's own food item to a chosen candidate reference.\n\nRecomputes calories/macros from the chosen source at the item's current portion,\nrewrites its provenance to the new source, and re-snapshots the estimated\noriginals \u2014 the item is **not** marked edited. A ``prior_correction:<content_hash>``\nreference (FTY-411) is re-derived from the acting user's corrections trail rather than\nthe ``products`` cache, reproducing FTY-406's corrected values + ``prior_correction``\nprovenance. The response carries the new per-item ``source`` descriptor (FTY-092).\nCross-user or unknown items \u2014 and items whose parent log event is voided (FTY-321) \u2014\nfail closed as ``404``; a reference the server cannot re-derive, or a re-match the new\nsource cannot cost, returns ``422`` with a clear error shape.",
         "operationId": "re_resolve_item_api_users__user_id__derived_items_food__item_id__re_resolve_post",
         "parameters": [
           {
@@ -3053,7 +3136,7 @@
     },
     "/api/users/{user_id}/derived-items/food/{item_id}/source-candidates": {
       "post": {
-        "description": "List alternative source candidates for the caller's own food item.\n\nRuns the existing resolution providers in list-candidates mode over the item's\nidentity (or the sanitized ``query`` override) and returns a bounded list of\nenergy-bearing matches. Cross-user or unknown items \u2014 and items whose parent\nlog event is voided (FTY-321) \u2014 fail closed as ``404``; a transient or unusable\ncandidate-source failure returns ``503`` (retryable) rather than a misleading\nempty list.",
+        "description": "List alternative source candidates for the caller's own food item.\n\nReturns two surfaces (FTY-411): the caller's own confident **prior corrections** for\nthe item's normalized name (a bounded, top-ranked \"Your correction\" list re-derived\nfrom the corrections trail), plus the guessed-source ``candidates`` \u2014 the existing\nresolution providers run in list-candidates mode over the item's identity (or the\nsanitized ``query`` override), a bounded list of energy-bearing matches. Cross-user or\nunknown items \u2014 and items whose parent log event is voided (FTY-321) \u2014 fail closed as\n``404``; a transient or unusable candidate-source failure returns ``503`` (retryable)\nrather than a misleading empty list.",
         "operationId": "list_source_candidates_api_users__user_id__derived_items_food__item_id__source_candidates_post",
         "parameters": [
           {
