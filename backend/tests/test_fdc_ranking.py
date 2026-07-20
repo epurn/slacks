@@ -44,6 +44,11 @@ _PICKLES_ROW = "Pickles, cucumber, dill or kosher dill"
         ("banana", "Snacks, banana chips"),
         ("banana", "Babyfood, fruit, bananas with tapioca, strained"),
         ("banana", "Babyfoods, fruit, bananas with tapioca, strained"),
+        # Extracted-fat "oil" form the query did not state (FTY-418): a plain
+        # "mustard" must not cost as mustard oil (884 kcal/100g of pure fat).
+        ("mustard", "Oil, mustard"),
+        ("peanut", "Oil, peanut, salad or cooking"),
+        ("coconut", "Oil, coconut"),
         # Stating one form opts into that form only, never a different one:
         # chips are not the dehydrated/powder form, condensed is not dry.
         ("banana chips", "Bananas, dehydrated, or banana powder"),
@@ -87,6 +92,10 @@ def test_incompatible_descriptions_are_rejected(query: str, description: str) ->
         ("peanuts", "Peanuts, all types, dry-roasted, with salt"),
         ("dry roasted peanuts", "Peanuts, all types, dry-roasted, with salt"),
         ("dry roasted peanuts", "Peanuts, all types, raw"),
+        # A query that states the oil keeps the oil row (FTY-418), exactly like
+        # every other stated density-changing form.
+        ("mustard oil", "Oil, mustard"),
+        ("olive oil", "Oil, olive, extra virgin"),
         # Demoted forms stay *eligible* (preference-ordered, not rejected).
         ("tuna", "Fish, tuna, light, canned in water, drained solids"),
         # Nothing to verify: an empty description cannot be proven foreign.
@@ -246,6 +255,37 @@ def test_lookup_skips_dehydrated_banana_for_a_plain_banana_query() -> None:
     assert facts is not None
     assert facts.source_ref == "usda_fdc:9040"
     assert facts.facts.calories == pytest.approx(89.0)
+
+
+#: Public USDA figures: "Oil, mustard" 884 kcal/100g (pure fat); "Mustard,
+#: prepared, yellow" ~60 kcal/100g. FTY-418 wrong-variant regression fixture.
+_MUSTARD_RESPONSE: dict[str, Any] = {
+    "foods": [
+        _fdc_food(172337, "Oil, mustard", 884.0, protein=0.0, carbs=0.0, fat=100.0),
+        _fdc_food(172234, "Mustard, prepared, yellow", 60.0, protein=3.7, carbs=5.3, fat=3.4),
+    ]
+}
+
+
+def test_lookup_skips_mustard_oil_for_a_plain_mustard_query() -> None:
+    # FTY-418: a bare "mustard" landed on "Oil, mustard" (884 kcal/100g), so 15 g
+    # costed at 132.6 kcal — ~13x real prepared mustard. The oil form is now
+    # rejected, so the compatible prepared-mustard row backs the resolution.
+    facts = _client(_MUSTARD_RESPONSE).lookup("mustard")
+
+    assert facts is not None
+    assert facts.source_ref == "usda_fdc:172234"
+    assert facts.facts.calories == pytest.approx(60.0)
+    # The macros come with it — never the oil row's 0 protein / 0 carbs.
+    assert facts.facts.protein_g == pytest.approx(3.7)
+
+
+def test_lookup_keeps_mustard_oil_when_the_query_states_the_oil() -> None:
+    facts = _client(_MUSTARD_RESPONSE).lookup("mustard oil")
+
+    assert facts is not None
+    assert facts.source_ref == "usda_fdc:172337"
+    assert facts.facts.calories == pytest.approx(884.0)
 
 
 def test_lookup_skips_plural_babyfoods_banana_for_a_plain_banana_query() -> None:
