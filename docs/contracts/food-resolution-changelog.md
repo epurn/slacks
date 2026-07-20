@@ -19,6 +19,19 @@ estimator / contracts / backend-core / security-privacy lane (same owners as
 
 ## Version
 
+35 (FTY-428, contract only): the **User-Stated Resolution (FTY-279)** section (with
+all its subsections — the intro, `### Direct resolution from a stated total`, the
+`### Per-unit calorie anchors and the quantity modifier (FTY-419)`, the `### The
+no-second-follow-up rule (clarification boundary)`, the `### Worked example
+(the Sobeys wrap)`, and `### Security / Privacy`) was **extracted verbatim** from
+`food-resolution.md` into a new sibling page,
+[food-resolution-user-stated.md](food-resolution-user-stated.md), leaving a forwarding
+pointer behind under the original `##` heading and re-pointing the sibling-contract
+citations (`estimate-first-routing.md`, `evidence-retrieval.md`, this changelog) at
+the new page. Structure-only relocation of one settled `user_text` source-tier block —
+no wording, field, routing-rule, ordering, code-fence, example, schema, DTO, endpoint,
+or behaviour change.
+
 34 (FTY-419): a stated calorie figure is trusted as a **per-unit anchor** that the
 item's count/fraction quantity modifier scales, not an unconditional as-logged total.
 `user_text_step._anchor_quantity` reads the candidate's `amount` (defaulting to 1)
@@ -438,7 +451,7 @@ implausible** stated facts — not for a detail that merely was not the field th
 pipeline expected. No schema/migration/serving-math change in this story; the
 estimator work is the **downstream FTY-280 follow-up** and the FTY-278/FTY-275
 baseline ships until then. See **User-Stated Resolution (FTY-279)** in
-[food-resolution.md](food-resolution.md).
+[food-resolution-user-stated.md](food-resolution-user-stated.md).
 
 9 (FTY-278, contract only) **makes any remaining amount clarification
 item-scoped** instead of whole-entry-terminal, routing a mixed log to the new

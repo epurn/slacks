@@ -62,6 +62,7 @@ Use contracts for:
 | [food-resolution-changelog.md](food-resolution-changelog.md) | Reverse-chronological version history (change log) for `food-resolution.md` |
 | [food-resolution-official-source.md](food-resolution-official-source.md) | Official-source / reference / model-prior resolution tiers of `food-resolution.md` (FTY-078 fetch boundary, FTY-062 official-source resolution, reference tier, model-prior/degrade, count-serving, snippet fallback, brand routing) |
 | [food-resolution-prior-correction.md](food-resolution-prior-correction.md) | Prior-correction source tier of `food-resolution.md` (estimate-time resolution FTY-406, candidate surface + apply FTY-411, mobile surfacing FTY-407) |
+| [food-resolution-user-stated.md](food-resolution-user-stated.md) | User-stated (`user_text`-tier) resolution step of `food-resolution.md` (FTY-279 direct resolution from a stated nutrition fact, no-second-follow-up rule, worked example, security/privacy) |
 | [food-suggestions.md](food-suggestions.md) | Read-only contextual quick-add food suggestions ranked by deterministic time-aware frecency |
 | [goals-target-reveal.md](goals-target-reveal.md) | Goal direction input and target-calculation step turning user goals into calorie targets |
 | [identity-and-profile.md](identity-and-profile.md) | User identity, profile data model, and minimal local-mode profile defaults |
