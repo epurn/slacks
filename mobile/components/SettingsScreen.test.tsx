@@ -13,7 +13,7 @@
  */
 
 import React from "react";
-import { AccessibilityInfo, ScrollView } from "react-native";
+import { AccessibilityInfo, ActionSheetIOS, ScrollView } from "react-native";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -77,6 +77,15 @@ jest.mock("@/state/session", () => {
 jest
   .spyOn(AccessibilityInfo, "isReduceMotionEnabled")
   .mockResolvedValue(true);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The weigh-in cadence control is the native menu/picker (FTY-403): tapping its
+// row presents ActionSheetIOS. Capture the presented options + selection
+// callback so the tests can drive a real cadence choice through the menu.
+// ─────────────────────────────────────────────────────────────────────────────
+const showActionSheet = jest
+  .spyOn(ActionSheetIOS, "showActionSheetWithOptions")
+  .mockImplementation(() => {});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fixtures
@@ -291,6 +300,44 @@ function segmentValues(tree: ReactTestRenderer, testID: string): string[] {
     (n) => n.props.testID === testID && Array.isArray(n.props.values),
   )[0];
   return control ? (control.props.values as string[]) : [];
+}
+
+/**
+ * Open the native cadence menu (MenuPicker → ActionSheetIOS) and return the
+ * options it presented plus a picker that fires the native selection callback.
+ * The trailing "Cancel" entry the sheet appends is stripped from `options`.
+ */
+function openCadenceMenu(tree: ReactTestRenderer): {
+  options: string[];
+  pick: (label: string) => Promise<void>;
+} {
+  const trigger = tree.root.findAll(
+    (n) =>
+      n.props.testID === "cadence-menu-picker" &&
+      typeof n.props.onPress === "function",
+  )[0];
+  if (!trigger) throw new Error("No cadence menu trigger found");
+  showActionSheet.mockClear();
+  act(() => {
+    trigger.props.onPress();
+  });
+  const call = showActionSheet.mock.calls.at(-1);
+  if (!call) throw new Error("Tapping the cadence row did not present a menu");
+  const [config, callback] = call as [
+    { options: string[]; cancelButtonIndex?: number },
+    (index: number) => void,
+  ];
+  const optionLabels = config.options.filter((_, i) => i !== config.cancelButtonIndex);
+  return {
+    options: optionLabels,
+    pick: async (label: string) => {
+      const idx = config.options.indexOf(label);
+      if (idx < 0) throw new Error(`Cadence menu has no "${label}" option`);
+      await act(async () => {
+        callback(idx);
+      });
+    },
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -683,33 +730,36 @@ describe("PREFERENCES persistence", () => {
     expect(onAppearanceChange).toHaveBeenCalledWith("dark");
   });
 
-  it("renders the four short cadence labels that fit the equal-width segments (FTY-347)", async () => {
+  it("offers all seven cadences, full-label and untruncated, in the native menu (FTY-403)", async () => {
     const tree = renderSettings({});
     await act(async () => {});
 
-    // Short, ellipsis-free labels for the native equal-width UISegmentedControl.
-    expect(segmentValues(tree, "cadence-segmented-control")).toEqual([
+    // The native menu lists each cadence full-width — honest labels, no
+    // ellipsis, ordered most → least frequent with Off last.
+    const { options } = openCadenceMenu(tree);
+    expect(options).toEqual([
+      "Daily",
+      "Every other day",
+      "Twice a week",
       "Weekly",
-      "Biweekly",
+      "Every 2 weeks",
       "Monthly",
       "Off",
     ]);
-    // The long form that overflowed the segment is gone.
-    expect(segmentValues(tree, "cadence-segmented-control")).not.toContain(
-      "Every 2 weeks",
-    );
   });
 
-  it("persists cadence on-device via cadenceStore.setCadence", async () => {
+  it("persists each chosen cadence on-device via cadenceStore.setCadence", async () => {
     const cadenceStore = mockCadenceStore("weekly");
     const tree = renderSettings({ cadenceStore });
     await act(async () => {});
 
-    await act(async () => {
-      selectSegment(tree, "Biweekly");
-    });
+    // The clearer "Every 2 weeks" label maps back to the biweekly contract value.
+    await openCadenceMenu(tree).pick("Every 2 weeks");
+    expect(cadenceStore.setCadence).toHaveBeenLastCalledWith("biweekly");
 
-    expect(cadenceStore.setCadence).toHaveBeenCalledWith("biweekly");
+    // A newly-added frequent cadence persists on its own contract value too.
+    await openCadenceMenu(tree).pick("Twice a week");
+    expect(cadenceStore.setCadence).toHaveBeenLastCalledWith("twice-weekly");
   });
 
   it("cancels all reminders when cadence is set to Off", async () => {
@@ -718,30 +768,25 @@ describe("PREFERENCES persistence", () => {
     const tree = renderSettings({ notificationsAdapter, cadenceStore });
     await act(async () => {});
 
-    await act(async () => {
-      selectSegment(tree, "Off");
-    });
+    await openCadenceMenu(tree).pick("Off");
 
     expect(notificationsAdapter.cancelAll).toHaveBeenCalled();
   });
 
-  it("does NOT schedule a daily reminder (off schedule fires days out)", async () => {
-    // The scheduler guarantees no daily notifications — covered by
-    // reminderScheduler.test.ts; this test verifies the settings screen
-    // delegates cadence changes through the scheduler, not raw scheduling.
+  it("delegates cadence changes through the scheduler (no raw scheduling)", async () => {
+    // The never-repeating / due-only guarantee lives in reminderScheduler; this
+    // test verifies the settings screen routes menu choices through it. With no
+    // last weigh-in date, applyReminderSettings returns before touching the
+    // notification adapter — even for a frequent cadence.
     const notifications = mockNotifications();
     const cadenceStore = mockCadenceStore("weekly");
     const tree = renderSettings({ notificationsAdapter: notifications, cadenceStore });
     await act(async () => {});
 
-    // Changing to biweekly should call cancelAll before scheduling (if any)
-    await act(async () => {
-      selectSegment(tree, "Biweekly");
-    });
+    await openCadenceMenu(tree).pick("Every 2 weeks");
 
-    // cancelAll is NOT called — applyReminderSettings returns early when there is no lastWeighInDate
+    // No lastWeighInDate (null) → the scheduler schedules nothing and cancels nothing.
     expect(notifications.cancelAll).not.toHaveBeenCalled();
-    // scheduleAt is NOT called because there is no lastWeighInDate (null → no schedule)
     expect(notifications.scheduleAt).not.toHaveBeenCalled();
   });
 });

@@ -196,15 +196,23 @@ Where time-over-time lives.
 - **Weight logging: from the Trends weight card.** A "+ log weight" opens a small
   numeric entry sheet (defaults to today, seeded with the last value). Weight logging
   is deliberately **not** on the status-first Today screen and not buried in Profile.
-- **Weigh-in cadence: default weekly, user-adjustable** (Weekly · Every 2 weeks ·
-  Monthly · Off). Slacks must **not** encourage scale-watching: the reminder is
-  low-frequency and fires only when a reading is actually due — never daily, no
-  streaks — and the UI leads with the smoothed trend, de-emphasizing any single day's
-  number. This is evidence-based: weekly weighing captures the full weight-loss
-  benefit (daily confers no added benefit in RCTs), ~4 readings/month is plenty for a
-  meaningful trend, and the psychological harm of self-weighing is daily-specific and
-  concentrated in at-risk groups. See the *Encourage the trend, not the scale*
-  principle.
+- **Weigh-in cadence: default weekly, user-adjustable** via a native menu/picker
+  (FTY-403): Daily · Every other day · Twice a week · Weekly · Every 2 weeks ·
+  Monthly · Off, ordered most→least frequent with Off last. Slacks must **not**
+  *gamify* scale-watching: **weekly stays the default**, the UI leads with the
+  smoothed trend (de-emphasizing any single day's number), and there are **no
+  streaks, leaderboards, or rewards for weighing more often**. The reminder is
+  always a single **due-only** shot — it fires once when a reading is due, never a
+  repeating or nagging notification — so even a Daily cadence is one re-armed
+  reminder, not a daily push. The finer sub-weekly cadences (down to daily) are
+  offered as **explicit opt-in user control**, not an app-driven nudge. The
+  healthy default is still evidence-based: weekly weighing captures the full
+  weight-loss benefit (daily confers no added benefit in RCTs), ~4 readings/month
+  is plenty for a meaningful trend, and the documented psychological harm of
+  self-weighing is tied to daily *pressure/streaks* — which is exactly why weekly
+  remains the default and nothing here rewards more-frequent weigh-ins. See the
+  *Encourage the trend, not the scale* principle (its "never daily" line predates
+  the FTY-403 opt-in menu and is reconciled by this decision).
 
   *Open: exact range options; macro-history depth.*
 
