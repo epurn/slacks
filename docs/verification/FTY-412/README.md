@@ -57,7 +57,7 @@ illegible while still recognisably a nutrition label.
 | `label-preview-light.png` / `label-preview-dark.png` | The picked label staged for upload, with the discard-by-default "Save this photo" toggle **off** (FTY-077 unchanged). |
 | `confirm-sheet-light.png` / `confirm-sheet-dark.png` | The FTY-196/197 confirm sheet after a real scan: **230 kcal · P 5g C 31g F 9g**, `Label scan` provenance, `Not yet counted`. Matches the label exactly. |
 | `counted-light.png` / `counted-dark.png` | After "Looks right": hero **230 / 1,628 kcal · 14%**, macros **P 5/131g · C 31/128g · F 9/66g**, and the timeline row counted. The user never re-typed anything. |
-| `unreadable-light.png` / `unreadable-dark.png` | The illegible label scanned in-app: an honest **"Add a detail ›"** row that visibly invites follow-up — not a silently-wrong entry, not a terminal `failed`. Day totals stay at 230, unaffected. |
+| `unreadable-light.png` / `unreadable-dark.png` | The illegible label scanned in-app: an honest **"Add a detail ›"** row that visibly invites follow-up — not a silently-wrong entry, not a terminal `failed`. Day totals stay at 230, unaffected. Note the row itself reads `? Nutrition label photo` with a `—` value; the explicit couldn't-read-this-label copy (`UNREADABLE_LABEL_QUESTION`, `backend/app/estimator/label_step.py:91`) lives in the clarify sheet behind the tap, not on the row. That row/sheet split is pre-existing and unchanged by this PR; the honest-failure route is covered end-to-end by `backend/tests/test_label_resolution.py:190`. |
 
 ## How it was produced
 
