@@ -47,7 +47,7 @@ implementation lives in `backend/app/estimator/` (`fdc.py`,
 Facts adapter (`off.py`, `product_database` tier) is implemented in
 FTY-060 behind these same boundaries; it serves both **barcode** lookups and,
 since FTY-369, **name search** for barcode-less branded products; see
-`food-resolution.md` (**Barcode Source**). The user-provided nutrition-label adapter (`label_step.py`,
+`food-resolution-barcode-source.md` (**Barcode Source**). The user-provided nutrition-label adapter (`label_step.py`,
 `user_label` tier — rank 1) is implemented in FTY-061; see `label-extraction.md`.
 The official-source **search** adapter (`search.py`, the `official_source` tier's
 search half) is implemented in FTY-079 behind the **Search Request / Response

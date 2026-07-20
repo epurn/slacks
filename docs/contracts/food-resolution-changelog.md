@@ -19,6 +19,16 @@ estimator / contracts / backend-core / security-privacy lane (same owners as
 
 ## Version
 
+28 (FTY-409, contract only): the **Barcode Source (Open Food Facts) — FTY-060**
+section (its intro and Owner, the FTY-369 name-search sub-section, the `OffSettings` /
+`SLACKS_OFF_` config, source lookup/mapping/caching, routing, and diagnostics) was
+**extracted verbatim** from `food-resolution.md` into a new sibling page,
+[food-resolution-barcode-source.md](food-resolution-barcode-source.md), leaving a
+forwarding pointer behind under the same heading and re-pointing sibling contract
+citations (`exact-evidence-upgrade.md`, `evidence-retrieval.md`) at the new page.
+Structure-only relocation of one settled source tier — no wording, env-var,
+routing-rule, ordering, example, schema, DTO, endpoint, or behaviour change.
+
 27 (FTY-406): **corrections become a resolution source at estimate time.** A new
 prior-correction tier (`backend/app/estimator/correction_resolution.py`,
 `PriorCorrectionResolveStep`) reads the previously write-only `corrections` audit
@@ -420,7 +430,9 @@ source hierarchy (a confident packaged-product match is preferred over a generic
 estimate for the same input), without changing the FTY-044 USDA path or its math. The
 source system id `open_food_facts` (source type `product_database`) is recorded on run
 evidence and on each cached product / evidence row it produces. See **Barcode Source
-(Open Food Facts)** below.
+(Open Food Facts)** in
+[food-resolution-barcode-source.md](food-resolution-barcode-source.md) (extracted by
+FTY-409).
 
 1 (FTY-044). The source system id `usda_fdc` is recorded on run evidence and on each
 cached product / evidence row.
