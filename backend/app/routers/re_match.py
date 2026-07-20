@@ -36,11 +36,11 @@ from sqlalchemy.orm import Session
 from app.db import get_session
 from app.deps import CurrentUser
 from app.enums import CandidateType, SourceType
+from app.estimator.prior_correction_candidates import PriorCorrectionCandidate
 from app.estimator.re_match import (
     AlternativesUnavailable,
     ItemForbidden,
     ItemNotFound,
-    PriorCorrectionCandidate,
     ReMatchNeedsClarification,
     SourceCandidate,
     SourceNotResolvable,
