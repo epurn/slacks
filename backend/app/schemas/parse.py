@@ -22,6 +22,7 @@ this is executed — it is data the step validates, classifies, and stores.
 
 from __future__ import annotations
 
+import re
 from enum import StrEnum
 from typing import Annotated
 
@@ -30,8 +31,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.enums import CandidateType
 
 #: Schema version recorded on the estimation run for reproducibility. Bump when
-#: the candidate shape changes so old runs remain interpretable.
-PARSE_SCHEMA_VERSION = "parse/v2"
+#: the candidate shape changes so old runs remain interpretable. Bumped to
+#: ``parse/v3`` for the additive event-level ``event_name`` output (FTY-422).
+PARSE_SCHEMA_VERSION = "parse/v3"
 
 #: Upper bounds that cap an adversarial or runaway model reply. Generous enough
 #: for real logs ("eggs, toast, coffee, a run") yet small enough that a malicious
@@ -47,6 +49,36 @@ MAX_OPTIONS = 5
 MAX_OPTION_LEN = 80
 MAX_REASON_LEN = 120
 MAX_BARCODE_LEN = 14
+
+#: Upper bound on the model-generated event-level meal name (FTY-422). A few words
+#: ("Turkey sandwich") — not the raw phrase — so a tight cap keeps it a label. The
+#: value is truncated to this length rather than rejected: a cosmetic label must
+#: never fail an otherwise-valid extraction.
+MAX_EVENT_NAME_LEN = 80
+
+#: C0/C1 control characters stripped from the model-produced meal name before it is
+#: persisted (defence in depth over the schema shape — the name is untrusted output
+#: shown back to the owner).
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def sanitize_event_name(value: object) -> str | None:
+    """Bound and clean a model-produced meal name for persistence (FTY-422).
+
+    The name is untrusted model output persisted to ``log_events.name`` and shown
+    back to the owner, so it is stripped of control characters, whitespace-collapsed,
+    length-bounded to :data:`MAX_EVENT_NAME_LEN`, and reduced to ``None`` when blank.
+    A non-string reply is dropped to ``None`` rather than failing the parse: the label
+    is cosmetic, so an odd value must never reject an otherwise-valid extraction.
+    """
+
+    if not isinstance(value, str):
+        return None
+    cleaned = " ".join(_CONTROL_CHARS_RE.sub(" ", value).split())
+    if not cleaned:
+        return None
+    return cleaned[:MAX_EVENT_NAME_LEN].rstrip() or None
+
 
 #: Fail-closed abuse caps on the user-stated nutrition facts (FTY-279/FTY-280). A
 #: stated value above these — or negative / non-finite — makes the reply
@@ -174,6 +206,20 @@ class ParseResult(BaseModel):
     clarification_questions: list[ClarificationQuestion] = Field(
         default_factory=list, max_length=MAX_QUESTIONS
     )
+    #: A short, human-readable meal name the model generates for the whole event
+    #: (FTY-422): e.g. "Turkey sandwich" for a multi-ingredient sandwich entry — a
+    #: few words summarizing the log, not the raw phrase and not one item's name.
+    #: Untrusted model output: :func:`sanitize_event_name` bounds and cleans it before
+    #: the estimator persists it to ``log_events.name`` (``log-events.md`` FTY-421).
+    #: ``None``/blank when the model offered no sensible name; the estimator also
+    #: leaves it ``None`` for an exercise-only or empty/failed event rather than
+    #: inventing a label. Stored as data, never interpreted as an instruction.
+    event_name: str | None = Field(default=None)
     #: Short, sanitized label set when ``disposition`` is ``unparseable`` — never
     #: echoed raw user text; used only for the run's failure reason.
     reason: str | None = Field(default=None, max_length=MAX_REASON_LEN)
+
+    @field_validator("event_name", mode="before")
+    @classmethod
+    def _sanitize_event_name(cls, value: object) -> str | None:
+        return sanitize_event_name(value)

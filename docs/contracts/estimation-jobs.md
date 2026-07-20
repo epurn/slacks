@@ -35,6 +35,22 @@ estimator / backend-core / contracts lane:
 
 ## Version
 
+8 (FTY-422): the estimator gains an **event-level meal name** output. When a run
+interprets a food-bearing event it derives a short, model-generated meal name
+(e.g. `"Turkey sandwich"`) from the interpretation hypothesis and persists it to
+the nullable `log_events.name` field (`log-events.md` v11, FTY-421) on the same
+terminal completing transition that writes the derived items — atomically, in the
+single `transition_event` commit. The name is untrusted model output: it is
+bounded and sanitized (control-character-stripped, whitespace-collapsed, length-
+capped) at the parse trust boundary before it is written, and — being derived user
+content — it is **never** copied into the run `trace`/`error` or logs (kept out
+alongside `raw_text`). An **exercise-only**, empty, or failed event leaves `name`
+`null` rather than fabricating a meal label; an answer-triggered scoped
+re-estimate re-costs only the open component and never overwrites the name set on
+the earlier round. No schema change to `estimation_jobs` / `estimation_runs` and no
+job-payload change — the only new output is the event-name field defined by
+`log-events.md`. See [Event-level meal name](#event-level-meal-name-fty-422).
+
 7 (FTY-370, contract only; no schema change, no new status): **never-fail
 failure semantics**. Terminal `processing → failed` is reserved for
 deterministic **non-food/empty input** (`empty_input`, and the narrowed
@@ -235,6 +251,40 @@ clarification resolve. FTY-278 adds no run/job status: whether the event lands
 `needs_clarification` (nothing costed) or `partially_resolved` (costable siblings
 committed) is decided at the **event** transition, and the resolve re-opens the
 `needs_clarification` job identically in either case.
+
+### Event-level meal name (FTY-422)
+
+Alongside the derived items, a completing run persists an **event-level meal
+name** — a short, model-generated label for the whole entry — to the nullable
+`log_events.name` field (defined by `log-events.md` v11, FTY-421; the estimator is
+its sole writer in v1). The Today timeline (FTY-420) renders it for the collapsed
+single-row meal.
+
+- **Generation.** The parse/interpretation step derives the name from the model's
+  understanding of the whole event (`ParseResult.event_name` on the interpretation
+  hypothesis), not by concatenating item names or echoing the raw phrase. A revised
+  hypothesis (re-interpretation) carries a revised name. The model is instructed to
+  produce a few-word dish label (e.g. "half a 300 calorie sub bun with turkey,
+  mozzarella and mustard" → "Turkey sandwich").
+- **When it is set.** The name is written on a terminal **completing** transition —
+  `processing → completed` (including the FTY-370 degraded-but-completing path) and
+  `processing → partially_resolved` — in the **same transaction** as the derived
+  items, via the single `transition_event` commit. A `needs_clarification` outcome
+  (nothing committed) and a `failed` outcome write no name.
+- **Degenerate cases, honestly.** A single-food event names to a sensible short
+  label (the model's, or the single food's own name as a fallback). An
+  **exercise-only**, empty, or failed event — or any event where the model offered
+  no sensible name — leaves `name` `null`; the estimator never invents a label that
+  misrepresents the entry (`null` is an acceptable, honest output).
+- **Re-estimate.** An answer-triggered **scoped** re-estimate re-costs only the open
+  component from its own identity and does **not** overwrite the name persisted on
+  the earlier (`partially_resolved`) round; an event-level re-estimate re-runs the
+  full pipeline and re-derives the name.
+- **Security / privacy.** The name is untrusted model output derived from untrusted
+  user input: it is bounded and sanitized (control-character-stripped, whitespace-
+  collapsed, length-capped) at the parse trust boundary before persistence, and —
+  being derived user content — it is **never** copied into `estimation_runs`
+  `trace`/`error` or logs, exactly like `raw_text` (security baseline).
 
 ### Never-fail degrade semantics (FTY-370)
 

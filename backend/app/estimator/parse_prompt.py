@@ -118,6 +118,13 @@ homemade, compositional, or borderline-consumable description, estimate or ask a
 clarifying question; never reject it as unparseable.
 - Set confidence in [0, 1] reflecting how sure you are of the extraction. A \
 confident estimate of a typical portion warrants a genuinely high confidence.
+- Set event_name to a short, natural meal name (a few words) summarizing the \
+whole entry as a dish or meal — for example "half a 300 calorie sub bun with \
+turkey, mozzarella and mustard" → "Turkey sandwich"; "eggs, toast and coffee" \
+→ "Eggs and toast". It is a human-readable label, NOT the raw phrase and NOT a \
+copy of one item's name. Leave event_name null when the entry is exercise only, \
+or when no sensible short name fits — never invent a name that misrepresents \
+what was logged.
 
 <log_entry>
 {raw_text}
@@ -179,6 +186,7 @@ entry does not describe.
 the item it describes.
 - Resolve every stated portion to a concrete amount and unit, and infer the \
 typical portion when the structure implies one.
+- Update event_name to match your revised interpretation of the whole entry.
 """
 
 #: Appended to the re-interpretation block with the session's current working
