@@ -202,6 +202,84 @@ def test_unstated_part_row_is_never_rank_stable() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Identity-shifting-modifier demotion (FTY-424): an unstated leaf/green/seed or
+# cabbage-family sense never outranks a plain compatible row, but a query stating
+# the modifier keeps it, and a category-led row is never rejected.
+# ---------------------------------------------------------------------------
+
+#: The reported live set for bare "mustard": the everyday condiment plus three
+#: identity-shifting senses, all naming the head noun "mustard".
+_MUSTARD_PREPARED_ROW = "Mustard, prepared, yellow"
+_CABBAGE_MUSTARD_ROW = "Cabbage, mustard, salted"
+_MUSTARD_GREENS_ROW = "Mustard greens, raw"
+_MUSTARD_SEED_ROW = "Mustard seed, yellow"
+
+
+@pytest.mark.parametrize(
+    "description",
+    [_MUSTARD_PREPARED_ROW, _CABBAGE_MUSTARD_ROW, _MUSTARD_GREENS_ROW, _MUSTARD_SEED_ROW],
+)
+def test_identity_shifting_rows_stay_gate_compatible(description: str) -> None:
+    # The demotion is a preference-order signal, not a rejection: every row still
+    # passes the head-noun compatibility gate ("mustard" is present in all four),
+    # so the reported tie is genuinely between eligible rows.
+    assert is_fdc_description_compatible("mustard", description) is True
+
+
+@pytest.mark.parametrize(
+    "description",
+    [_CABBAGE_MUSTARD_ROW, _MUSTARD_GREENS_ROW, _MUSTARD_SEED_ROW],
+)
+def test_unstated_identity_shift_ranks_below_the_prepared_row(description: str) -> None:
+    prepared = fdc_preference_key("mustard", _MUSTARD_PREPARED_ROW)
+    shifted = fdc_preference_key("mustard", description)
+    assert prepared < shifted
+    # The everyday condiment carries no unstated identity modifier at all.
+    assert prepared[0] == 0
+    assert shifted[0] >= 1
+
+
+@pytest.mark.parametrize(
+    ("query", "description"),
+    [
+        ("mustard greens", _MUSTARD_GREENS_ROW),  # plural-safe: greens ↔ green
+        ("mustard green", _MUSTARD_GREENS_ROW),
+        ("mustard seed", _MUSTARD_SEED_ROW),
+        ("mustard seeds", _MUSTARD_SEED_ROW),
+    ],
+)
+def test_stated_identity_modifier_is_not_demoted(query: str, description: str) -> None:
+    # A query that names the modifier is exempt through the same variant rule the
+    # part-of-food check uses: the identity term contributes no demotion.
+    assert fdc_preference_key(query, description)[0] == 0
+
+
+@pytest.mark.parametrize(
+    ("query", "description"),
+    [
+        ("salmon", "Fish, salmon, Atlantic, farmed, cooked"),
+        ("mozzarella", "Cheese, mozzarella, whole milk"),
+    ],
+)
+def test_leading_category_rows_are_not_identity_demoted(query: str, description: str) -> None:
+    # The fix is a modifier vocabulary, NOT a head-noun-position gate: a
+    # category-led description names no identity-shifting modifier, so it stays
+    # compatible and un-demoted (its identity term is zero).
+    assert is_fdc_description_compatible(query, description) is True
+    assert fdc_preference_key(query, description)[0] == 0
+
+
+def test_identity_shifting_row_is_never_rank_stable() -> None:
+    # A greens/seed/cabbage cache row for a bare "mustard" query is compatible but
+    # NOT rank-stable, so it re-fetches to the prepared row (self-heal like FTY-388).
+    assert is_fdc_description_rank_stable("mustard", _MUSTARD_GREENS_ROW) is False
+    assert is_fdc_description_rank_stable("mustard", _MUSTARD_SEED_ROW) is False
+    assert is_fdc_description_rank_stable("mustard", _CABBAGE_MUSTARD_ROW) is False
+    # A query that states the modifier keeps its row rank-stable.
+    assert is_fdc_description_rank_stable("mustard greens", _MUSTARD_GREENS_ROW) is True
+
+
+# ---------------------------------------------------------------------------
 # Client-level ranking with fake FDC result lists
 # ---------------------------------------------------------------------------
 
@@ -286,6 +364,69 @@ def test_lookup_keeps_mustard_oil_when_the_query_states_the_oil() -> None:
     assert facts is not None
     assert facts.source_ref == "usda_fdc:172337"
     assert facts.facts.calories == pytest.approx(884.0)
+
+
+#: The full reported live candidate set for bare "mustard" (FTY-424): the
+#: prepared condiment plus the cabbage-family, greens, and seed senses — all
+#: passing the head-noun gate, so the compatibility gate alone cannot separate
+#: them. Public USDA per-100g figures: prepared ~60, cabbage-mustard ~28, greens
+#: ~27, seed ~508 kcal. FTY-418's oil row is not in this post-oil-fix set.
+_MUSTARD_IDENTITY_RESPONSE: dict[str, Any] = {
+    "foods": [
+        _fdc_food(169891, _CABBAGE_MUSTARD_ROW, 28.0, protein=2.5, carbs=5.0, fat=0.4),
+        _fdc_food(11270, _MUSTARD_GREENS_ROW, 27.0, protein=2.9, carbs=4.7, fat=0.4),
+        _fdc_food(172232, _MUSTARD_SEED_ROW, 508.0, protein=26.1, carbs=28.1, fat=36.2),
+        _fdc_food(172234, _MUSTARD_PREPARED_ROW, 60.0, protein=3.7, carbs=5.3, fat=3.4),
+    ]
+}
+
+
+def test_lookup_selects_prepared_mustard_over_identity_shifting_rows() -> None:
+    # FTY-424: after the oil form is gone (FTY-418), a bare "mustard" landed on
+    # "Cabbage, mustard, salted" (usda_fdc:169891) — sane calories but the wrong
+    # identity (a leafy-green pickle). All four rows pass the head-noun gate; the
+    # identity-shifting-modifier demotion lands the prepared condiment row.
+    facts = _client(_MUSTARD_IDENTITY_RESPONSE).lookup("mustard")
+
+    assert facts is not None
+    assert facts.source_ref == "usda_fdc:172234"
+    assert facts.facts.calories == pytest.approx(60.0)
+    assert facts.facts.protein_g == pytest.approx(3.7)
+
+
+def test_lookup_keeps_mustard_greens_when_the_query_states_the_modifier() -> None:
+    facts = _client(_MUSTARD_IDENTITY_RESPONSE).lookup("mustard greens")
+
+    assert facts is not None
+    assert facts.source_ref == "usda_fdc:11270"
+    assert facts.facts.calories == pytest.approx(27.0)
+
+
+def test_lookup_keeps_mustard_seed_when_the_query_states_the_modifier() -> None:
+    facts = _client(_MUSTARD_IDENTITY_RESPONSE).lookup("mustard seed")
+
+    assert facts is not None
+    assert facts.source_ref == "usda_fdc:172232"
+    assert facts.facts.calories == pytest.approx(508.0)
+
+
+def test_lookup_leaves_leading_category_rows_unaffected_by_the_modifier_vocab() -> None:
+    # The explicit unsafe alternative (a leading-category gate) is off the table:
+    # a category-led description still resolves for its bare head-noun query.
+    salmon = {
+        "foods": [_fdc_food(175168, "Fish, salmon, Atlantic, farmed, cooked", 206.0)],
+    }
+    mozzarella = {
+        "foods": [_fdc_food(1026, "Cheese, mozzarella, whole milk", 300.0)],
+    }
+
+    salmon_facts = _client(salmon).lookup("salmon")
+    mozzarella_facts = _client(mozzarella).lookup("mozzarella")
+
+    assert salmon_facts is not None
+    assert salmon_facts.source_ref == "usda_fdc:175168"
+    assert mozzarella_facts is not None
+    assert mozzarella_facts.source_ref == "usda_fdc:1026"
 
 
 def test_lookup_skips_plural_babyfoods_banana_for_a_plain_banana_query() -> None:

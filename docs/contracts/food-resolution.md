@@ -171,9 +171,15 @@ unstated density-changing form — the dehydrated/dried/powder/flour/concentrate
 family plus the extracted-**`oil`** form (FTY-418): a plain "mustard" rejects
 "Oil, mustard" (884 kcal/100g of pure fat) unless the query itself states the oil —
 stated added ingredients present; preferred by
-fewest unstated part-of-food tokens (FTY-388 — `white`/`yolk`/`shell`), then
+fewest unstated **identity-modifier** tokens — a part-of-food (FTY-388 —
+`white`/`yolk`/`shell`) or an identity-shifting leaf/green/seed/cabbage sense
+(FTY-424 — `greens`/`green`/`leaf`/`leaves`/`seed`/`seeds`/`spinach`/`cabbage`:
+bare "mustard" prefers the prepared/condiment row over "Mustard greens", "Cabbage,
+mustard", or "Mustard seed", while "mustard greens" keeps the greens row via the
+stated-token exemption; this is a demotion, **not** a head-noun-position gate, so
+category-led rows like "Fish, salmon" / "Cheese, mozzarella" are unaffected), then
 fewest unstated demoted forms, then query-token coverage, then relevance order —
-see **Version 25**, **Version 15**), maps it to canonical per-100g facts, and
+see **Version 35**, **Version 25**, **Version 15**), maps it to canonical per-100g facts, and
 caches it as a `products` row. Rejecting every result is a **miss**, not a wrong-food match —
 but since FTY-326 the gate is a bounding pre-filter, not the final row-acceptance
 authority: the bounded rejected energy-bearing rows are first recorded on the
