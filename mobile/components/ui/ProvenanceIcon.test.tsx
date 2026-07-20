@@ -47,6 +47,7 @@ const SOURCE_LABELS: Record<ItemSourceDTO['source_type'], string> = {
   user_label: 'Label scan',
   user_text: 'You logged',
   reference_source: 'reference.example.com',
+  prior_correction: 'Your correction',
   model_prior: 'Rough estimate',
 };
 
@@ -189,6 +190,16 @@ describe('provenancePresentation()', () => {
     expect(result.icon).not.toBe('camera');
     expect(result.icon).not.toBe('pencil');
     expect(result.accessibilityLabel).toBe('Source: You logged');
+  });
+
+  // FTY-407: an item re-resolved to the user's own prior correction (FTY-411)
+  // comes back with is_edited=false, so it must carry its own presentation
+  // rather than degrading to the unknown-source fallback.
+  it("maps prior_correction to a 'Source: Your correction' label, not unknown", () => {
+    const result = provenancePresentation(sourceOf('prior_correction'));
+    expect(result.icon).toBe('pencil');
+    expect(result.accessibilityLabel).toBe('Source: Your correction');
+    expect(result.icon).not.toBe('questionmark.circle');
   });
 
   it('is_edited takes precedence over the source type', () => {

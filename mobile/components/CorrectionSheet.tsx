@@ -295,7 +295,8 @@ export function CorrectionSheet({
   // every real open and dead in release builds.
   const markerModeSettled =
     mode === "change-match"
-      ? !sheet.candidatesLoading && sheet.candidates.length > 0
+      ? !sheet.candidatesLoading &&
+        (sheet.candidates.length > 0 || sheet.priorCorrections.length > 0)
       : mode === "override"
         ? sheet.overrideDraft.trim() !== ""
         : mode === "make-exact"
@@ -478,6 +479,7 @@ export function CorrectionSheet({
                     query={sheet.matchQuery}
                     onQueryChange={sheet.handleCandidateSearch}
                     candidates={sheet.candidates}
+                    priorCorrections={sheet.priorCorrections}
                     loading={sheet.candidatesLoading}
                     error={sheet.candidatesError}
                     reResolving={sheet.reResolving}

@@ -16,6 +16,7 @@ import {
   CorrectionsApiError,
   listSourceCandidates,
   reResolveItem,
+  type PriorCorrectionCandidate,
   type SourceCandidate,
 } from "@/api/corrections";
 
@@ -36,6 +37,22 @@ const CANDIDATE: SourceCandidate = {
   protein_g: 10,
   carbs_g: 17,
   fat_g: 9,
+};
+
+/**
+ * The acting user's own prior correction for this item's name (FTY-411): an
+ * `as_logged` **total** for the item's own portion, not a per-100g density.
+ */
+const PRIOR_CORRECTION: PriorCorrectionCandidate = {
+  source_type: "prior_correction",
+  source_ref: "prior_correction:abc123",
+  name: "Black coffee",
+  basis: "as_logged",
+  calories: 3,
+  protein_g: 0,
+  carbs_g: 0,
+  fat_g: null,
+  rescaled: false,
 };
 
 function okResponse(body: unknown, status = 200): Response {
@@ -77,7 +94,7 @@ describe("listSourceCandidates", () => {
       fetchMock as unknown as typeof fetch,
     );
 
-    expect(result).toEqual([CANDIDATE]);
+    expect(result).toEqual({ candidates: [CANDIDATE], priorCorrections: [] });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(
       `https://api.example.test/api/users/${SESSION.userId}/derived-items/food/${ITEM_ID}/source-candidates`,
@@ -87,6 +104,78 @@ describe("listSourceCandidates", () => {
     expect(headers.Authorization).toBe("Bearer test-token");
     expect(headers["Content-Type"]).toBe("application/json");
     expect(JSON.parse(init.body as string)).toEqual({});
+  });
+
+  // FTY-407: the prior-correction candidate surface (FTY-411). The client reads
+  // the `prior_corrections` sibling list the same call already returns — no
+  // second request, no new endpoint.
+  it("surfaces the user's own prior correction alongside the guessed candidates", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(
+      okResponse({
+        candidates: [CANDIDATE],
+        prior_corrections: [PRIOR_CORRECTION],
+      }),
+    );
+
+    const result = await listSourceCandidates(
+      SESSION,
+      ITEM_ID,
+      undefined,
+      fetchMock as unknown as typeof fetch,
+    );
+
+    expect(result.priorCorrections).toEqual([PRIOR_CORRECTION]);
+    // The guessed-source list is untouched by the new sibling list.
+    expect(result.candidates).toEqual([CANDIDATE]);
+  });
+
+  it("preserves an unknown macro as null rather than a fabricated zero", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(
+      okResponse({
+        candidates: [],
+        prior_corrections: [{ ...PRIOR_CORRECTION, fat_g: null }],
+      }),
+    );
+
+    const result = await listSourceCandidates(
+      SESSION,
+      ITEM_ID,
+      undefined,
+      fetchMock as unknown as typeof fetch,
+    );
+
+    expect(result.priorCorrections[0]?.fat_g).toBeNull();
+  });
+
+  it("falls through to an empty prior-correction list when there is no matching history", async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(okResponse({ candidates: [CANDIDATE], prior_corrections: [] }));
+
+    const result = await listSourceCandidates(
+      SESSION,
+      ITEM_ID,
+      undefined,
+      fetchMock as unknown as typeof fetch,
+    );
+
+    expect(result.priorCorrections).toEqual([]);
+    expect(result.candidates).toEqual([CANDIDATE]);
+  });
+
+  it("treats an omitted prior_corrections field as no matching history", async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(okResponse({ candidates: [CANDIDATE] }));
+
+    const result = await listSourceCandidates(
+      SESSION,
+      ITEM_ID,
+      undefined,
+      fetchMock as unknown as typeof fetch,
+    );
+
+    expect(result.priorCorrections).toEqual([]);
   });
 
   it("POSTs the query override as the only body field", async () => {

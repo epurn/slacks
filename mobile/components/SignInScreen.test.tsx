@@ -269,6 +269,31 @@ describe("server-scoped auth", () => {
     expect(texts(tree)).toContain("Signing in to home.example.net");
   });
 
+  /**
+   * FTY-416: the subtitle used to carry an `accessibilityLabel` reading
+   * "Signing in on <host>" while rendering "Signing in to <host>". An RN `Text`
+   * with an explicit label is exposed to iOS by that label alone, so the
+   * visible copy was announced wrong AND unaddressable in the a11y tree.
+   * Guard both modes: whatever the subtitle renders is what it announces.
+   */
+  it.each([
+    ["signin" as const, "Signing in to home.example.net"],
+    ["create" as const, "Creating an account on home.example.net"],
+  ])("announces the subtitle it renders in %s mode", async (mode, visible) => {
+    const tree = await mount({ connection: SERVER, initialMode: mode });
+
+    expect(texts(tree)).toContain(visible);
+
+    // Every node rendering the subtitle string must announce that same string —
+    // either implicitly (no label) or by an identical explicit one.
+    const nodes = tree.root.findAll((n) => n.props.children === visible);
+    expect(nodes.length).toBeGreaterThan(0);
+    for (const node of nodes) {
+      const label = node.props.accessibilityLabel as string | undefined;
+      expect(label ?? visible).toBe(visible);
+    }
+  });
+
   it("signs in against the connected base URL and routes onward", async () => {
     const auth = authClient();
     const onAuthenticated = jest.fn();

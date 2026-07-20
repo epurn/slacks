@@ -23,7 +23,12 @@ import {
   type ClarificationData,
   type CorrectionSheetBaseProps,
 } from "./CorrectionSheet";
-import { CorrectionsApiError, type SourceCandidate } from "@/api/corrections";
+import {
+  CorrectionsApiError,
+  type PriorCorrectionCandidate,
+  type SourceCandidate,
+  type SourceCandidates,
+} from "@/api/corrections";
 import {
   DerivedItemApiError,
   type DerivedFoodItemDTO,
@@ -32,6 +37,7 @@ import {
 import { SavedFoodApiError, type SavedFoodDTO } from "@/api/savedFoods";
 import type { ApiSession } from "@/state/session";
 import { cleanupReactTestRenderers, trackReactTestRenderer } from "@/testUtils/reactTestRenderer";
+import { sourceCandidates } from "@/testUtils/correctionCandidates";
 import { mockReduceMotion } from "@/testUtils/reduceMotion";
 import { correctionSavedHaptic } from "@/theme/haptics";
 
@@ -139,6 +145,29 @@ function candidate(overrides: Partial<SourceCandidate> = {}): SourceCandidate {
   };
 }
 
+/**
+ * FTY-407: the acting user's own prior correction for this item's name. Its
+ * facts are the corrected **total** for the item's own portion
+ * (`basis: "as_logged"`), and `fat_g` is `null` — a macro the correction never
+ * supplied stays honestly unknown rather than a fabricated 0.
+ */
+function priorCorrection(
+  overrides: Partial<PriorCorrectionCandidate> = {},
+): PriorCorrectionCandidate {
+  return {
+    source_type: "prior_correction",
+    source_ref: "prior_correction:abc123",
+    name: "Black coffee",
+    basis: "as_logged",
+    calories: 3,
+    protein_g: 0,
+    carbs_g: 0,
+    fat_g: null,
+    rescaled: false,
+    ...overrides,
+  };
+}
+
 function savedFoodResult(): SavedFoodDTO {
   return {
     id: "saved-1",
@@ -228,7 +257,7 @@ function defaultProps(overrides: Partial<CorrectionSheetBaseProps> = {}) {
     onClose: jest.fn(),
     session: SESSION,
     editItem: jest.fn(),
-    listCandidates: jest.fn().mockResolvedValue([]),
+    listCandidates: jest.fn().mockResolvedValue(sourceCandidates()),
     reResolve: jest.fn(),
     saveFood: jest.fn(),
     ...overrides,
@@ -378,10 +407,12 @@ describe("change-match flow", () => {
   });
 
   it("loads candidates and shows them when Change match is tapped", async () => {
-    const listCandidates = jest.fn().mockResolvedValue([
-      candidate({ name: "Turkey breast, roasted" }),
-      candidate({ name: "Turkey breast, raw", source_ref: "usda_fdc:888" }),
-    ]);
+    const listCandidates = jest.fn().mockResolvedValue(
+      sourceCandidates([
+        candidate({ name: "Turkey breast, roasted" }),
+        candidate({ name: "Turkey breast, raw", source_ref: "usda_fdc:888" }),
+      ]),
+    );
     const tree = mount(<CorrectionSheet {...defaultProps({ listCandidates })} />);
     await pressAsync(tree, "Change match");
     expect(listCandidates).toHaveBeenCalledWith(SESSION, "food-1", undefined);
@@ -391,7 +422,7 @@ describe("change-match flow", () => {
   it("debounces keystrokes into a single search request for the final query", async () => {
     jest.useFakeTimers();
     try {
-      const listCandidates = jest.fn().mockResolvedValue([]);
+      const listCandidates = jest.fn().mockResolvedValue(sourceCandidates());
       const tree = mount(<CorrectionSheet {...defaultProps({ listCandidates })} />);
       await pressAsync(tree, "Change match"); // immediate initial load
       listCandidates.mockClear();
@@ -415,17 +446,19 @@ describe("change-match flow", () => {
   it("ignores a stale earlier response that resolves after a newer query", async () => {
     jest.useFakeTimers();
     try {
-      const listCandidates = jest.fn().mockResolvedValue([]);
+      const listCandidates = jest.fn().mockResolvedValue(sourceCandidates());
       const tree = mount(<CorrectionSheet {...defaultProps({ listCandidates })} />);
       await pressAsync(tree, "Change match"); // initial load resolves []
 
       // The first typed query ("a") hangs; the second ("ab") resolves immediately.
-      let resolveStale: ((v: readonly SourceCandidate[]) => void) | undefined;
+      let resolveStale: ((v: SourceCandidates) => void) | undefined;
       listCandidates.mockImplementationOnce(
         () => new Promise((resolve) => { resolveStale = resolve; }),
       );
       listCandidates.mockImplementationOnce(() =>
-        Promise.resolve([candidate({ name: "Fresh match", source_ref: "usda_fdc:fresh" })]),
+        Promise.resolve(
+          sourceCandidates([candidate({ name: "Fresh match", source_ref: "usda_fdc:fresh" })]),
+        ),
       );
 
       typeInto(tree, "Search for a food", "a");
@@ -437,7 +470,9 @@ describe("change-match flow", () => {
 
       // The slower "a" response lands last; the ordering guard must discard it.
       await act(async () => {
-        resolveStale?.([candidate({ name: "Stale match", source_ref: "usda_fdc:stale" })]);
+        resolveStale?.(
+          sourceCandidates([candidate({ name: "Stale match", source_ref: "usda_fdc:stale" })]),
+        );
       });
       expect(allText(tree)).toContain("Fresh match");
       expect(allText(tree)).not.toContain("Stale match");
@@ -448,7 +483,7 @@ describe("change-match flow", () => {
 
   it("calls reResolve with the chosen source_ref", async () => {
     const c = candidate({ source_ref: "usda_fdc:999" });
-    const listCandidates = jest.fn().mockResolvedValue([c]);
+    const listCandidates = jest.fn().mockResolvedValue(sourceCandidates([c]));
     const updatedFood = food({ source: { source_type: "trusted_nutrition_database", label: "USDA", ref: "usda_fdc:999" } });
     const reResolve = jest.fn().mockResolvedValue(updatedFood);
     const onItemChange = jest.fn();
@@ -465,7 +500,7 @@ describe("change-match flow", () => {
 
   it("returns to normal mode and shows updated provenance after a successful re-resolve", async () => {
     const c = candidate();
-    const listCandidates = jest.fn().mockResolvedValue([c]);
+    const listCandidates = jest.fn().mockResolvedValue(sourceCandidates([c]));
     const reResolve = jest.fn().mockResolvedValue(food({ name: "Turkey breast, roasted" }));
 
     const tree = mount(<CorrectionSheet {...defaultProps({ listCandidates, reResolve })} />);
@@ -479,7 +514,7 @@ describe("change-match flow", () => {
 
   it("shows a retryable error when re-resolve fails", async () => {
     const c = candidate();
-    const listCandidates = jest.fn().mockResolvedValue([c]);
+    const listCandidates = jest.fn().mockResolvedValue(sourceCandidates([c]));
     // The FTY-366 per-flow copy the real client maps for a re-resolve 422.
     const reResolve = jest.fn().mockRejectedValue(
       new CorrectionsApiError(
@@ -496,6 +531,111 @@ describe("change-match flow", () => {
     expect(hasA11yLabel(tree, "Cancel change match")).toBe(true);
   });
 
+  // ─── FTY-407: prior corrections as match candidates ─────────────────────────
+  //
+  // The operator's dogfood case: a food the user has already hand-corrected
+  // ("black coffee") is re-guessed wrong on the next log. Their own corrected
+  // value is offered as a top-ranked candidate, and picking it applies through
+  // the same FTY-411 re-resolve path.
+
+  it("surfaces the user's prior correction as a pickable candidate above the guessed matches", async () => {
+    const listCandidates = jest
+      .fn()
+      .mockResolvedValue(sourceCandidates([candidate()], [priorCorrection()]));
+    const tree = mount(<CorrectionSheet {...defaultProps({ listCandidates })} />);
+    await pressAsync(tree, "Change match");
+
+    const text = allText(tree);
+    expect(text).toContain("Your corrections");
+    // The corrected total for this portion, with its provenance — never the
+    // guessed source's "/ 100g" density copy.
+    expect(text).toContain("3 kcal · Your correction");
+    expect(hasA11yLabel(tree, "Select Black coffee, your correction, 3 kcal")).toBe(true);
+    // The guessed match is still offered, under its own header.
+    expect(text).toContain("Other matches");
+    expect(hasA11yLabel(tree, "Select Turkey breast, roasted, 135 kcal per 100g")).toBe(true);
+  });
+
+  it("applies the corrected values when the prior correction is picked", async () => {
+    const corrected = food({
+      name: "Black coffee",
+      calories: 3,
+      source: {
+        source_type: "prior_correction",
+        label: "Your correction",
+        ref: "prior_correction:abc123",
+      },
+    });
+    const listCandidates = jest
+      .fn()
+      .mockResolvedValue(sourceCandidates([candidate()], [priorCorrection()]));
+    const reResolve = jest.fn().mockResolvedValue(corrected);
+    const onItemChange = jest.fn();
+
+    const tree = mount(
+      <CorrectionSheet {...defaultProps({ listCandidates, reResolve, onItemChange })} />,
+    );
+    await pressAsync(tree, "Change match");
+    await pressAsync(tree, "Select Black coffee, your correction, 3 kcal");
+
+    // Applied through FTY-411's apply path — the opaque prior_correction ref,
+    // never client-supplied nutrition values.
+    expect(reResolve).toHaveBeenCalledWith(SESSION, "food-1", "prior_correction:abc123");
+    expect(onItemChange).toHaveBeenCalledWith(corrected);
+    // The flow completes: back to the normal sheet, showing the corrected value
+    // with its "Your correction" provenance.
+    expect(hasA11yLabel(tree, "Change match")).toBe(true);
+    expect(hasA11yLabel(tree, "Cancel change match")).toBe(false);
+    expect(allText(tree)).toContain("Your correction");
+  });
+
+  it("renders a rescaled prior correction as adjusted for this amount", async () => {
+    const listCandidates = jest
+      .fn()
+      .mockResolvedValue(
+        sourceCandidates([], [priorCorrection({ calories: 6, rescaled: true })]),
+      );
+    const tree = mount(<CorrectionSheet {...defaultProps({ listCandidates })} />);
+    await pressAsync(tree, "Change match");
+
+    expect(allText(tree)).toContain("6 kcal · Your correction, adjusted for this amount");
+    expect(
+      hasA11yLabel(
+        tree,
+        "Select Black coffee, your correction, 6 kcal, adjusted for this amount",
+      ),
+    ).toBe(true);
+  });
+
+  it("offers a prior correction even when no guessed candidate matches", async () => {
+    const listCandidates = jest
+      .fn()
+      .mockResolvedValue(sourceCandidates([], [priorCorrection()]));
+    const tree = mount(<CorrectionSheet {...defaultProps({ listCandidates })} />);
+    await pressAsync(tree, "Change match");
+
+    // Not the empty state — the user's own history is a usable match.
+    expect(allText(tree)).not.toContain("No alternatives available");
+    expect(hasA11yLabel(tree, "Select Black coffee, your correction, 3 kcal")).toBe(true);
+    // With nothing to separate it from, the guessed-source header is absent.
+    expect(allText(tree)).not.toContain("Other matches");
+  });
+
+  it("leaves the candidate list unchanged when there is no matching history", async () => {
+    const listCandidates = jest
+      .fn()
+      .mockResolvedValue(sourceCandidates([candidate()], []));
+    const tree = mount(<CorrectionSheet {...defaultProps({ listCandidates })} />);
+    await pressAsync(tree, "Change match");
+
+    const text = allText(tree);
+    // No history ⇒ no section headers at all, exactly as before FTY-407.
+    expect(text).not.toContain("Your corrections");
+    expect(text).not.toContain("Other matches");
+    expect(text).not.toContain("Your correction");
+    expect(hasA11yLabel(tree, "Select Turkey breast, roasted, 135 kcal per 100g")).toBe(true);
+  });
+
   it("shows an error when the candidates source is unavailable (503)", async () => {
     const listCandidates = jest.fn().mockRejectedValue(
       new CorrectionsApiError(503, "Alternatives are temporarily unavailable. Try again in a moment."),
@@ -506,14 +646,14 @@ describe("change-match flow", () => {
   });
 
   it("shows empty state when no candidates exist", async () => {
-    const listCandidates = jest.fn().mockResolvedValue([]);
+    const listCandidates = jest.fn().mockResolvedValue(sourceCandidates());
     const tree = mount(<CorrectionSheet {...defaultProps({ listCandidates })} />);
     await pressAsync(tree, "Change match");
     expect(allText(tree)).toContain("No alternatives available");
   });
 
   it("opening Change match grows to large detent (expanded)", async () => {
-    const listCandidates = jest.fn().mockResolvedValue([]);
+    const listCandidates = jest.fn().mockResolvedValue(sourceCandidates());
     const tree = mount(<CorrectionSheet {...defaultProps({ listCandidates })} />);
     await pressAsync(tree, "Change match");
     // In large mode the sheetLarge style is applied (maxHeight 90%) — verify
@@ -850,7 +990,7 @@ describe("save as food", () => {
   });
 
   it("does not show Save as food in change-match or override mode", async () => {
-    const listCandidates = jest.fn().mockResolvedValue([]);
+    const listCandidates = jest.fn().mockResolvedValue(sourceCandidates());
     const tree = mount(
       <CorrectionSheet {...defaultProps({ listCandidates })} logPhrase="turkey" />,
     );
@@ -898,9 +1038,9 @@ describe("accessibility", () => {
   });
 
   it("candidate rows have accessible labels with name and kcal", async () => {
-    const listCandidates = jest.fn().mockResolvedValue([
-      candidate({ name: "Turkey breast, roasted", calories: 135 }),
-    ]);
+    const listCandidates = jest.fn().mockResolvedValue(
+      sourceCandidates([candidate({ name: "Turkey breast, roasted", calories: 135 })]),
+    );
     const tree = mount(<CorrectionSheet {...defaultProps({ listCandidates })} />);
     await pressAsync(tree, "Change match");
     expect(hasA11yLabel(tree, "Select Turkey breast, roasted, 135 kcal per 100g")).toBe(true);
@@ -985,7 +1125,7 @@ describe("beat 2 — correction saved haptic", () => {
 
   it("fires once when a re-resolve (change match) commits successfully", async () => {
     const reResolve = jest.fn().mockResolvedValue(food({ calories: 180 }));
-    const listCandidates = jest.fn().mockResolvedValue([candidate()]);
+    const listCandidates = jest.fn().mockResolvedValue(sourceCandidates([candidate()]));
     const tree = mount(
       <CorrectionSheet {...defaultProps({ reResolve, listCandidates })} />,
     );

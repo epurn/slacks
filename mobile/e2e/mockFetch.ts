@@ -610,6 +610,12 @@ export function createE2EMockFetch(): typeof fetch {
     // /derived-items/food/{id}/source-candidates — the Change-match panel's
     // alternative-source list (FTY-093). Returns one candidate the correction
     // flow re-resolves to. Matched before the generic derived-items paths.
+    //
+    // No `prior_corrections` here on purpose (FTY-407): this is the shared
+    // default every correction preset sees, and "no matching history" is the
+    // default state. The `correction.prior_correction` preset seeds its own
+    // response with one (see components/correction/visualReviewSeam.ts), so the
+    // history surface is reachable without changing what any other preset renders.
     if (pathEnd.endsWith('/source-candidates')) {
       return json({ candidates: [E2E_SOURCE_CANDIDATE] });
     }

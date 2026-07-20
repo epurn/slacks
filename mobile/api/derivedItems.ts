@@ -50,7 +50,9 @@ export interface ItemSourceDTO {
    * `reference_source` is a public nutrition reference page (FTY-166), between
    * an official page and a rough estimate; `user_text` (FTY-279) is a
    * user-stated calorie/macro fact extracted from the log entry text; `model_prior`
-   * signals the "≈ rough estimate · make it exact" treatment.
+   * signals the "≈ rough estimate · make it exact" treatment; `prior_correction`
+   * (FTY-406/411) is the user's own earlier hand-correction of this food, replayed
+   * as the authoritative value (labelled "Your correction").
    */
   readonly source_type:
     | "trusted_nutrition_database"
@@ -59,6 +61,7 @@ export interface ItemSourceDTO {
     | "user_label"
     | "user_text"
     | "reference_source"
+    | "prior_correction"
     | "model_prior";
   /** Display-ready label (e.g. "USDA", "Open Food Facts", "Label scan", "Rough estimate"). */
   readonly label: string;

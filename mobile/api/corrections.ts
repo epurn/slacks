@@ -51,6 +51,61 @@ export interface SourceCandidate {
   readonly fat_g: number;
 }
 
+/**
+ * The acting user's own confident prior correction for this item's normalized
+ * name, offered as a top-ranked "Your correction" match candidate (FTY-407,
+ * consuming the FTY-411 `prior_corrections` surface).
+ *
+ * Unlike a guessed {@link SourceCandidate}, the facts are the corrected **total**
+ * for the item's own portion (`basis === "as_logged"`), not a per-basis density —
+ * so a preview shows the whole-portion kcal, never "per 100g". A macro the
+ * correction never supplied is honestly `null` (unknown), never a fabricated `0`.
+ * `rescaled` marks a value carried from a different-portion prior via per-gram
+ * rescale. Picking one applies through the same `reResolveItem` path — its
+ * `source_ref` (`prior_correction:<hash>`) is the re-derivable handle.
+ */
+export interface PriorCorrectionCandidate {
+  /** Always `prior_correction` — drives the "Your correction" provenance. */
+  readonly source_type: "prior_correction";
+  /** Opaque `prior_correction:<hash>` reference the re-resolve operation accepts. */
+  readonly source_ref: string;
+  /** Display name for the corrected food entry. */
+  readonly name: string;
+  /** Always `as_logged` — the facts are the corrected total for the item's portion. */
+  readonly basis: "as_logged";
+  /** Corrected energy total for the item's portion (kcal). */
+  readonly calories: number;
+  /** Corrected protein total (g), or `null` when the correction never supplied it. */
+  readonly protein_g: number | null;
+  /** Corrected carbohydrate total (g), or `null` when never supplied. */
+  readonly carbs_g: number | null;
+  /** Corrected fat total (g), or `null` when never supplied. */
+  readonly fat_g: number | null;
+  /** True when the value was carried from a different-portion prior by per-gram rescale. */
+  readonly rescaled: boolean;
+}
+
+/**
+ * A candidate the correction sheet can apply via {@link reResolveItem} — either a
+ * guessed source match or the user's own prior correction. Both carry the
+ * `source_ref` handle re-resolve accepts; that is all the apply path needs.
+ * `PriorCorrectionCandidate.source_type` is the literal `"prior_correction"`, so
+ * a caller that ever needs to tell the two apart can narrow on that discriminant.
+ */
+export type PickableCandidate = SourceCandidate | PriorCorrectionCandidate;
+
+/**
+ * The correction sheet's "Change match" candidates: the guessed-source matches
+ * (`candidates`, USDA today) and, ranked above them, the acting user's own
+ * confident prior corrections for this item's normalized name
+ * (`priorCorrections`, FTY-411). `priorCorrections` is empty when the user has no
+ * matching history, so an item with none renders exactly as before (no regression).
+ */
+export interface SourceCandidates {
+  readonly candidates: readonly SourceCandidate[];
+  readonly priorCorrections: readonly PriorCorrectionCandidate[];
+}
+
 /** Raised when a corrections API call returns a non-2xx status. */
 export class CorrectionsApiError extends ApiError {
   constructor(status: number, message: string) {
@@ -125,9 +180,12 @@ export async function listSourceCandidates(
   itemId: string,
   query?: string,
   fetchImpl: typeof fetch = fetch,
-): Promise<readonly SourceCandidate[]> {
+): Promise<SourceCandidates> {
   const body = query ? JSON.stringify({ query }) : "{}";
-  const data = await request<{ candidates: SourceCandidate[] }>(
+  const data = await request<{
+    candidates: SourceCandidate[];
+    prior_corrections?: PriorCorrectionCandidate[];
+  }>(
     userScopedUrl(
       session,
       `derived-items/food/${encodeURIComponent(itemId)}/source-candidates`,
@@ -141,7 +199,12 @@ export async function listSourceCandidates(
       fetchImpl,
     },
   );
-  return data.candidates;
+  // `prior_corrections` is a defaulted list server-side (FTY-411); an older
+  // server that omits it degrades cleanly to "no prior corrections".
+  return {
+    candidates: data.candidates,
+    priorCorrections: data.prior_corrections ?? [],
+  };
 }
 
 /**

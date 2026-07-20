@@ -799,7 +799,7 @@ describe('FTY-183 correction flow: stateful mock endpoints', () => {
 
   it('Change-match lists the USDA candidate for the item', async () => {
     const mockFetch = createE2EMockFetch();
-    const candidates = await listSourceCandidates(
+    const { candidates } = await listSourceCandidates(
       apiSession,
       E2E_SAVED_FOOD_ITEM_ID,
       undefined,
@@ -808,6 +808,21 @@ describe('FTY-183 correction flow: stateful mock endpoints', () => {
     expect(candidates).toHaveLength(1);
     expect(candidates[0]?.source_ref).toBe(E2E_SOURCE_CANDIDATE.source_ref);
     expect(candidates[0]?.name).toBe(E2E_SOURCE_CANDIDATE.name);
+  });
+
+  it('the shared mock offers no prior corrections — that is the default state', async () => {
+    // FTY-407: the history surface is seeded by the `correction.prior_correction`
+    // preset alone (components/correction/visualReviewSeam.ts). The shared mock
+    // stays on the no-history path so every other correction preset renders the
+    // change-match panel exactly as it did before this story.
+    const mockFetch = createE2EMockFetch();
+    const { priorCorrections } = await listSourceCandidates(
+      apiSession,
+      E2E_SAVED_FOOD_ITEM_ID,
+      undefined,
+      mockFetch,
+    );
+    expect(priorCorrections).toEqual([]);
   });
 
   it('re-resolve commits the same item with new provenance and recomputed calories', async () => {

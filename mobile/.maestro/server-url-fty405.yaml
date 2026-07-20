@@ -126,12 +126,11 @@ appId: com.slacks
 - tapOn: "Switch server and sign out"
 # The sign-in screen names the connected host — seeing the NEW one here is the
 # proof that the session was dropped and the app is now targeting the new base
-# URL, not still bound to the old server. Matched on the subtitle's accessibility
-# LABEL ("Signing in on <host>"); its visible glyph text ("Signing in to <host>")
-# is not addressable, because an RN Text with an explicit accessibilityLabel is
-# exposed to iOS by that label alone.
+# URL, not still bound to the old server. Matched on the subtitle's visible copy
+# — since FTY-416 dropped its divergent accessibilityLabel, the rendered text is
+# what reaches the accessibility tree.
 - extendedWaitUntil:
-    visible: "Signing in on newserver.example.com"
+    visible: "Signing in to newserver.example.com"
     timeout: 15000
 - takeScreenshot: fty405-server-signin-dark
 
@@ -160,6 +159,6 @@ appId: com.slacks
 - takeScreenshot: fty405-server-confirm-light
 - tapOn: "Switch server and sign out"
 - extendedWaitUntil:
-    visible: "Signing in on newserver.example.com"
+    visible: "Signing in to newserver.example.com"
     timeout: 15000
 - takeScreenshot: fty405-server-signin-light

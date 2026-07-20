@@ -31,6 +31,7 @@ import {
 } from "@/api/derivedItems";
 import type { ApiSession } from "@/state/session";
 import { cleanupReactTestRenderers, trackReactTestRenderer } from "@/testUtils/reactTestRenderer";
+import { sourceCandidates } from "@/testUtils/correctionCandidates";
 import { mockReduceMotion } from "@/testUtils/reduceMotion";
 import { correctionSavedHaptic } from "@/theme/haptics";
 
@@ -216,7 +217,7 @@ function defaultProps(overrides: Partial<CorrectionSheetBaseProps> = {}) {
     session: SESSION,
     editItem: jest.fn(),
     renameItem: jest.fn(),
-    listCandidates: jest.fn().mockResolvedValue([]),
+    listCandidates: jest.fn().mockResolvedValue(sourceCandidates()),
     reResolve: jest.fn(),
     saveFood: jest.fn(),
     ...overrides,

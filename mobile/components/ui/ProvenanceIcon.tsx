@@ -40,6 +40,11 @@ export function provenancePresentation(
       return { icon: 'camera', accessibilityLabel: `Source: ${source.label}` };
     case 'user_text':
       return { icon: 'text.bubble', accessibilityLabel: `Source: ${source.label}` };
+    case 'prior_correction':
+      // The user's own earlier hand-correction, replayed as authoritative
+      // (FTY-406/411). Labelled "Your correction"; the pencil echoes the direct
+      // is_edited provenance since the value is the user's, not a re-guess.
+      return { icon: 'pencil', accessibilityLabel: `Source: ${source.label}` };
     case 'official_source':
       return { icon: 'globe', accessibilityLabel: `Source: ${source.label}` };
     case 'reference_source':

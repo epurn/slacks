@@ -20,7 +20,10 @@ import type {
 import type { DerivedFoodItemDTO } from '@/api/derivedItems';
 import type { WeightEntryDTO } from '@/api/weightEntries';
 import type { SavedFoodDTO } from '@/api/savedFoods';
-import type { SourceCandidate } from '@/api/corrections';
+import type {
+  PriorCorrectionCandidate,
+  SourceCandidate,
+} from '@/api/corrections';
 
 export const E2E_SERVER_URL = 'http://localhost:8000';
 
@@ -498,6 +501,28 @@ export const E2E_SOURCE_CANDIDATE: SourceCandidate = {
 };
 
 /**
+ * The user's own prior correction the Change-match panel ranks above the guessed
+ * sources (FTY-407, from the FTY-411 `prior_corrections` surface). Keyed on the
+ * correction preset's "Oatmeal" entry: the user hand-corrected this food before,
+ * so re-teaching it is a one-tap pick instead of accepting the 140 kcal re-guess.
+ *
+ * `basis` is `as_logged` — 105 kcal is the corrected **total** for the item's own
+ * 1-cup portion, not a per-100g density — and `fat_g` is `null` to exercise the
+ * honest-unknown macro (the correction never supplied it; never a fabricated 0).
+ */
+export const E2E_PRIOR_CORRECTION_CANDIDATE: PriorCorrectionCandidate = {
+  source_type: 'prior_correction',
+  source_ref: 'prior_correction:e2e0ffee',
+  name: 'Oatmeal',
+  basis: 'as_logged',
+  calories: 105,
+  protein_g: 4,
+  carbs_g: 20,
+  fat_g: null,
+  rescaled: false,
+};
+
+/**
  * The item after re-resolving to the USDA candidate: the **same** id and
  * log_event_id (so it reconciles back onto the same row — no duplicate), an
  * honest new provenance label ("USDA"), and server-recomputed values at the
@@ -766,6 +791,32 @@ export const E2E_CORRECTION_ITEM: DerivedFoodItemDTO = {
 export const E2E_CORRECTION_ENTRY: LogEventEntryDTO = {
   event: E2E_CORRECTION_EVENT,
   items: [E2E_CORRECTION_ITEM],
+};
+
+/**
+ * The correction-preset item after picking the prior correction above: the
+ * **same** id and log_event_id (it reconciles onto the same timeline row — no
+ * duplicate), the user's own corrected 105 kcal replacing the 140 kcal guess,
+ * and "Your correction" provenance.
+ *
+ * `is_edited` is false by design (FTY-411): the applied item's honesty comes
+ * from its `prior_correction` source, not from an edit badge — the server
+ * records a `re_match` correction that supersedes the original `user_edit`.
+ */
+export const E2E_PRIOR_CORRECTION_APPLIED_ITEM: DerivedFoodItemDTO = {
+  ...E2E_CORRECTION_ITEM,
+  name: E2E_PRIOR_CORRECTION_CANDIDATE.name,
+  calories: E2E_PRIOR_CORRECTION_CANDIDATE.calories,
+  protein_g: E2E_PRIOR_CORRECTION_CANDIDATE.protein_g,
+  carbs_g: E2E_PRIOR_CORRECTION_CANDIDATE.carbs_g,
+  fat_g: E2E_PRIOR_CORRECTION_CANDIDATE.fat_g,
+  source: {
+    source_type: 'prior_correction',
+    label: 'Your correction',
+    ref: E2E_PRIOR_CORRECTION_CANDIDATE.source_ref,
+  },
+  is_edited: false,
+  updated_at: '2026-01-01T12:05:00Z',
 };
 
 /** Daily summary reflecting the correction flow's pre-edit oatmeal entry. */
