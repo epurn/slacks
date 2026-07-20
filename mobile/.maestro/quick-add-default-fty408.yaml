@@ -1,0 +1,55 @@
+# FTY-408 visual-review flow: the quick-add default for a previously-corrected
+# food. Reuses the shared visual-review seam (FTY-247): the `today.suggestions`
+# preset seeds /food-suggestions with a history-only "Black coffee" candidate —
+# exactly the shape a food the user has corrected before takes (a completed
+# history row, no saved_food_id). Typing its name surfaces it as the "From your
+# log" quick-add default below the composer, in light and dark.
+#
+# The default bar is a pure function of the composer text + the seeded
+# suggestions, so this flow types the name and screenshots the settled frame; no
+# extra marker is needed beyond the preset's own settled marker.
+#
+# Bundle ID matches app.json so a directory-level Maestro run launches the app
+# under test reliably.
+appId: com.slacks
+---
+- launchApp:
+    clearState: false
+
+# ── Light ──────────────────────────────────────────────────────────────────
+- openLink: "slacks://__visual-review?preset=today.suggestions&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.suggestions"
+    timeout: 20000
+- assertVisible:
+    id: today-screen
+- tapOn:
+    id: today-composer-input
+- inputText: "black coffee"
+- extendedWaitUntil:
+    visible:
+      id: quick-add-default
+    timeout: 10000
+- assertVisible: "From your log"
+- takeScreenshot: fty408-quick-add-default-light
+
+# ── Dark ───────────────────────────────────────────────────────────────────
+- openLink: "slacks://__visual-review?preset=today.suggestions&theme=dark"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:today.suggestions"
+    timeout: 20000
+- assertVisible:
+    id: today-screen
+- tapOn:
+    id: today-composer-input
+- inputText: "black coffee"
+- extendedWaitUntil:
+    visible:
+      id: quick-add-default
+    timeout: 10000
+- assertVisible: "From your log"
+- takeScreenshot: fty408-quick-add-default-dark

@@ -6,6 +6,7 @@ import {
   View,
 } from "react-native";
 
+import { type FoodSuggestionDTO } from "@/api/foodSuggestions";
 import { type SavedFoodDTO } from "@/api/savedFoods";
 import { searchSavedFoods as searchSavedFoodsApi } from "@/api/savedFoods";
 import { AppIcon } from "@/components/ui";
@@ -14,6 +15,7 @@ import { type ApiSession } from "@/state/session";
 import { useTheme, spacing, typeScale, radius } from "@/theme";
 
 import { ComposerThumbnails } from "./ComposerThumbnails";
+import { QuickAddDefaultBar } from "./QuickAddDefaultBar";
 import { type ComposerImage } from "./useComposerImages";
 import { MAX_RAW_TEXT_LENGTH } from "./helpers";
 
@@ -33,6 +35,8 @@ export function TodayComposer({
   apiSession,
   searchSavedFoods,
   onSelectSavedFood,
+  suggestions,
+  onSelectSuggestion,
   onScan,
   onCaptureLabel,
   onSubmit,
@@ -51,6 +55,10 @@ export function TodayComposer({
   apiSession: ApiSession | null;
   searchSavedFoods: typeof searchSavedFoodsApi;
   onSelectSavedFood: (food: SavedFoodDTO) => void;
+  /** The user's own quick-add suggestions (FTY-340), for the typed default. */
+  suggestions: readonly FoodSuggestionDTO[];
+  /** Prefill + focus the composer with a matched prior food (FTY-408). */
+  onSelectSuggestion: (suggestion: FoodSuggestionDTO) => void;
   onScan: () => void;
   onCaptureLabel: () => void;
   onSubmit: () => void;
@@ -78,6 +86,7 @@ export function TodayComposer({
       <View style={styles.composer}>
         <TextInput
           ref={inputRef}
+          testID="today-composer-input"
           accessibilityLabel="Log food or exercise"
           placeholder="Add food or exercise…"
           placeholderTextColor={colors.textMuted}
@@ -155,6 +164,11 @@ export function TodayComposer({
         session={apiSession}
         onSelect={onSelectSavedFood}
         search={searchSavedFoods}
+      />
+      <QuickAddDefaultBar
+        query={text}
+        suggestions={suggestions}
+        onSelect={onSelectSuggestion}
       />
       {attachError ? (
         <Text style={[styles.error, { color: colors.textSecondary }]} accessibilityRole="alert">
