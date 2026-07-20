@@ -234,6 +234,7 @@ def test_value_override_appends_single_user_edit_row_without_touching_amount(
         ),
         # Unparsable ref URL falls back to the generic per-tier label.
         (SourceType.REFERENCE_SOURCE, "reference_source:not a url", "Reference source"),
+        (SourceType.PRIOR_CORRECTION, "prior_correction:deadbeef", "Your correction"),
         (SourceType.MODEL_PRIOR, "model_prior", "Rough estimate"),
     ],
 )

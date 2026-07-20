@@ -19,6 +19,32 @@ estimator / contracts / backend-core / security-privacy lane (same owners as
 
 ## Version
 
+27 (FTY-406): **corrections become a resolution source at estimate time.** A new
+prior-correction tier (`backend/app/estimator/correction_resolution.py`,
+`PriorCorrectionResolveStep`) reads the previously write-only `corrections` audit
+trail: before the guessed source tiers run, a candidate whose normalized name matches
+a food the acting user has already **hand-corrected** (a `user_edit` on `calories`,
+parent event not voided) resolves from that corrected value instead of being
+re-guessed — so the operator's "black coffee" (148.8 → `re_match` 4.8 → hand-edit 3,
+every time) now resolves to 3. The tier runs after the rank-1 current-entry steps
+(`user_text` / image-label facts) and before the USDA/OFF food step, claiming each
+resolved candidate; it skips a barcode candidate. Precedence: **above** every guessed
+source (`usda_fdc` / `open_food_facts`-by-name / `official_source` / `reference_source`
+/ `model_prior`), **below** the current entry's own explicit evidence (`user_text` /
+`user_label` / barcode). Lookup is **per-user and name-normalized** (the shared
+`normalize_text` saved-food rule — no cross-user reads); it is authoritative only on a
+**stable** prior value (conflicting priors fall through), matches the portion directly
+or **rescales** a mass-bearing prior per-gram to a different quantity (recording the
+content-free `prior_correction_rescaled` assumption), and otherwise falls through so an
+item with no usable prior correction resolves exactly as today. Persisted as an
+ordinary `resolved` row + `evidence_sources` (new `SourceType.PRIOR_CORRECTION`,
+`source_ref = prior_correction:<hash>`, `basis = as_logged`, **no** `products` row);
+read-model label "Your correction". The correction-writing path (FTY-051) and the
+`re_match` pass are unchanged — this tier only **reads**. Mobile surfacing
+(history-sourced typeahead, corrected-entry quick-add default) is deferred to
+follow-ups. No migration. See **Prior-Correction Resolution (FTY-406)** in
+`food-resolution.md`.
+
 26 (FTY-397, contract only): the reverse-chronological Version log was **extracted
 verbatim** from `food-resolution.md` into this page (`food-resolution-changelog.md`),
 leaving a forwarding `## Version` pointer behind and re-pointing sibling contract
