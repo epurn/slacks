@@ -127,7 +127,13 @@ Set in `.env`:
 SLACKS_LLM_PROVIDER=claude_code
 # SLACKS_LLM_MODEL is optional — Claude Code picks the model from your plan
 # No SLACKS_LLM_API_KEY — auth is the operator's 'claude login' session
+SLACKS_LLM_SUPPORTS_VISION=true   # required for nutrition-label scanning
 ```
+
+`SLACKS_LLM_SUPPORTS_VISION` defaults to `false` and fails closed: with it unset,
+image input is rejected before any provider call, so nutrition-label scanning
+never produces a reading (FTY-412). Set it to `true` unless you have a reason to
+keep the deployment text-only.
 
 Then complete the **one-time Claude Code login** (see below).
 
@@ -163,7 +169,9 @@ Claude Code session. The session is written into the `claude-config` Docker volu
 and shared between `api` and `worker`, so it survives restarts without re-login.
 
 **Prerequisites:** the stack must be running (`docker compose up -d`) and
-`SLACKS_LLM_PROVIDER=claude_code` must be set in `.env`.
+`SLACKS_LLM_PROVIDER=claude_code` must be set in `.env`. Set
+`SLACKS_LLM_SUPPORTS_VISION=true` as well if you want nutrition-label scanning —
+it defaults to `false` and image input fails closed without it.
 
 ```sh
 # Run the login flow in the api container (interactive — needs a terminal):

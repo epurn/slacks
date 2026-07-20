@@ -9,9 +9,25 @@ homemade API client.
 
 Security-critical: the invocation runs with **every Claude Code tool disabled**
 (no bash, no file read/edit, no web/fetch) and no MCP servers, so a
-prompt-injection hidden in untrusted food-log text cannot trigger tool use, file
-access, or code execution on the host. The only network the invocation performs
-is Claude Code's own model call.
+prompt-injection hidden in untrusted food-log text — or printed on an uploaded
+nutrition label — cannot trigger tool use, file access, or code execution on the
+host. The only network the invocation performs is Claude Code's own model call.
+
+**Image input (FTY-412).** Vision was previously refused outright here, which
+made nutrition-label scanning impossible on every ``claude_code`` deployment: the
+label step's one vision call raised ``LLMConfigurationError``, the step failed
+closed, and the user's photographed label always came back as a terminal
+``failed`` entry they had to re-type as text. Claude Code does accept images —
+through its ``stream-json`` input channel, as a base64 ``image`` content block —
+so the adapter now sends them that way when the configured model is declared
+vision-capable (``SLACKS_LLM_SUPPORTS_VISION=true``).
+
+The image travels on **stdin**, exactly like the prompt: it is never placed in
+``argv`` (so it cannot appear in the process table) and, unlike the Codex
+adapter's temporary-file approach, it is never written to disk — the bytes live
+only in the pipe to the child process. The text-only invocation is deliberately
+left byte-for-byte unchanged (``--output-format text``); the streaming shape is
+used only when an image is actually supplied.
 
 Like every other adapter, ``_complete`` returns the raw ``dict`` for the base
 class to validate against the caller's Pydantic schema; it never validates or
@@ -20,6 +36,7 @@ logs the prompt, the model output, or any credential.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -209,28 +226,53 @@ class ClaudeCodeProvider(Provider):
         model: str = "",
         timeout_seconds: float,
         max_retries: int,
+        supports_vision: bool = False,
         binary: str = DEFAULT_BINARY,
         runner: ClaudeCodeRunner = run_claude_code,
     ) -> None:
-        # ``supports_vision`` is intentionally not threaded through: image input
-        # via claude_code is an explicit non-goal, so the base class rejects
-        # images before they ever reach this adapter (fail fast, never dropped).
-        super().__init__(timeout_seconds=timeout_seconds, max_retries=max_retries, model=model)
+        # ``supports_vision`` gates image input exactly as it does for every other
+        # adapter (FTY-412): declared vision-capable, images are sent through the
+        # stream-json channel; otherwise the base class rejects them before any
+        # call, so an image is never silently dropped.
+        super().__init__(
+            timeout_seconds=timeout_seconds,
+            max_retries=max_retries,
+            supports_vision=supports_vision,
+            model=model,
+        )
         self._binary = binary
         self._runner = runner
 
-    def build_invocation(self, prompt: str, schema: type[BaseModel]) -> Invocation:
+    def build_invocation(
+        self,
+        prompt: str,
+        schema: type[BaseModel],
+        *,
+        images: Sequence[ImageInput] | None = None,
+    ) -> Invocation:
         """Construct the headless, all-tools-disabled invocation for ``prompt``.
 
+        With no ``images`` this is the unchanged text invocation
+        (``--output-format text``, prompt on stdin). With images it switches to
+        the ``stream-json`` input/output channel, the only way Claude Code accepts
+        image content, and the prompt plus base64 image blocks travel as a single
+        user message on stdin.
+
         Exposed for tests to assert that the invocation enables no tools and
-        never carries the prompt in ``argv``.
+        never carries the prompt or image bytes in ``argv``.
         """
 
         argv: list[str] = [
             self._binary,
             "--print",  # headless: print the result and exit, no interactive loop
             "--output-format",
-            "text",  # stdout is the model's text (our schema-constrained JSON)
+            # Images can only be supplied through the streaming JSON channel, and
+            # Claude Code requires the output format to match it (and --verbose).
+            *(
+                ["stream-json", "--input-format", "stream-json", "--verbose"]
+                if images
+                else ["text"]  # stdout is the model's text (our schema-constrained JSON)
+            ),
             # Disable every tool: an empty allow-list permits nothing, and each
             # built-in is named in the deny-list so the intent is auditable. With
             # no tools there is no bash/file/web capability — a prompt-injection
@@ -254,7 +296,7 @@ class ClaudeCodeProvider(Provider):
             # Optional: Claude Code defaults to the session/plan model when empty.
             argv += ["--model", self.model]
 
-        return Invocation(argv=tuple(argv), stdin=_build_stdin(prompt, schema))
+        return Invocation(argv=tuple(argv), stdin=_build_stdin(prompt, schema, images))
 
     def _complete(
         self,
@@ -264,14 +306,15 @@ class ClaudeCodeProvider(Provider):
         images: Sequence[ImageInput] | None,
         timeout_seconds: float,
     ) -> dict[str, Any]:
-        if images:
-            # Vision via claude_code is an explicit non-goal: fail fast rather
-            # than silently dropping the image. (The base class already blocks
-            # images unless a model is declared vision-capable; this is the
-            # belt-and-suspenders guard for that case.)
-            raise LLMConfigurationError("provider 'claude_code' does not support image input")
+        if images and not self._supports_vision:
+            # Belt-and-suspenders for the base class's gate: never silently drop
+            # an image when the configured model was not declared vision-capable.
+            raise LLMConfigurationError(
+                "image input requires a vision-capable configured model "
+                "(set SLACKS_LLM_SUPPORTS_VISION=true for a vision model)"
+            )
 
-        invocation = self.build_invocation(prompt, schema)
+        invocation = self.build_invocation(prompt, schema, images=images)
         try:
             result = self._runner(invocation, timeout_seconds=timeout_seconds)
         except FileNotFoundError:
@@ -304,15 +347,16 @@ class ClaudeCodeProvider(Provider):
             # deterministically. Never echo stderr (it may carry untrusted input).
             raise LLMResponseError("claude code exited with an error")
 
-        return _parse_object(result.stdout)
+        # A vision call streams NDJSON events; the model's text is the final
+        # result event's payload. A text call prints that text directly.
+        stdout = _stream_json_result_text(result.stdout) if images else result.stdout
+        return _parse_object(stdout)
 
 
-def _build_stdin(prompt: str, schema: type[BaseModel]) -> str:
-    """Build the stdin payload: the prompt plus a schema-constrained JSON instruction.
+def _instructed_prompt(prompt: str, schema: type[BaseModel]) -> str:
+    """The prompt plus the schema-constrained JSON instruction both channels share.
 
     The schema is the same artifact every provider uses (``json_schema_for``).
-    The prompt is untrusted and is fed on stdin (never argv), and nothing here is
-    logged.
     """
 
     schema_json = json.dumps(json_schema_for(schema), separators=(",", ":"))
@@ -322,6 +366,73 @@ def _build_stdin(prompt: str, schema: type[BaseModel]) -> str:
         "markdown, no code fences. The object must conform exactly to this JSON "
         f"Schema:\n{schema_json}"
     )
+
+
+def _build_stdin(
+    prompt: str, schema: type[BaseModel], images: Sequence[ImageInput] | None = None
+) -> str:
+    """Build the stdin payload for the text or the image (stream-json) channel.
+
+    Text-only output is unchanged: the instructed prompt as plain text. With
+    images it becomes one ``stream-json`` user message whose content is the
+    instructed prompt followed by a base64 ``image`` block per image — the shape
+    Claude Code accepts image input in (FTY-412).
+
+    The prompt and the image bytes are untrusted and are fed on stdin (never
+    argv, never a temp file), and nothing here is logged.
+    """
+
+    instructed = _instructed_prompt(prompt, schema)
+    if not images:
+        return instructed
+
+    content: list[dict[str, Any]] = [{"type": "text", "text": instructed}]
+    content += [
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": image.media_type,
+                "data": base64.b64encode(image.data).decode("ascii"),
+            },
+        }
+        for image in images
+    ]
+    message = {"type": "user", "message": {"role": "user", "content": content}}
+    # A single NDJSON line: one user turn, then the stream closes and Claude Code
+    # answers it (headless --print exits after the turn).
+    return json.dumps(message, separators=(",", ":")) + "\n"
+
+
+def _stream_json_result_text(stdout: str) -> str:
+    """Extract the model's final text from a ``stream-json`` NDJSON transcript.
+
+    The transcript interleaves ``system`` / ``assistant`` / ``rate_limit_event``
+    events; the terminal ``result`` event carries the completed reply. Anything
+    else — no result event, an error result, or unparseable NDJSON — is an
+    unusable reply (:class:`LLMResponseError`). The transcript is never echoed:
+    it may carry text transcribed from an untrusted image.
+    """
+
+    for raw_line in reversed(stdout.splitlines()):
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            event: Any = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict) or event.get("type") != "result":
+            continue
+        if event.get("is_error") or event.get("subtype") != "success":
+            # The run completed but reported failure (e.g. a refused turn).
+            raise LLMResponseError("claude code reported an unsuccessful result")
+        text = event.get("result")
+        if not isinstance(text, str):
+            raise LLMResponseError("claude code returned no result text")
+        return text
+
+    raise LLMResponseError("claude code returned no result event")
 
 
 def _looks_like_auth_failure(result: ClaudeCodeResult) -> bool:

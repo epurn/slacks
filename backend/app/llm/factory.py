@@ -41,6 +41,9 @@ def build_provider(settings: LLMSettings) -> Provider:
             model=settings.model,  # may be empty — Claude Code uses its session default
             timeout_seconds=settings.timeout_seconds,
             max_retries=settings.max_retries,
+            # Threaded so a vision-capable session can read nutrition labels
+            # (FTY-412); without it every label scan failed closed.
+            supports_vision=settings.supports_vision,
         )
 
     # Codex also authenticates through its local CLI state by default and accepts
