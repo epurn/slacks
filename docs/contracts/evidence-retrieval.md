@@ -193,7 +193,7 @@ through the identity sanitizer where it derives from the quantity phrase, and
 passed through the same `sanitize_query` chokepoint; the set is deduplicated and
 hard-capped, never open-ended. Evidence candidates for a **branded** item must also
 pass a deterministic brand/product-compatibility check before they may back the
-item (see `food-resolution.md` **Brand-aware packaged-product routing**). The
+item (see `food-resolution-official-source.md` **Brand-aware packaged-product routing**). The
 search request/response shapes, status vocabulary, and fetch boundaries are
 unchanged.
 
@@ -963,7 +963,7 @@ applicable) while a named/branded item USDA misses does.
   product / restaurant / manufacturer item. The first concrete implementation marks
   this with an additive optional `brand` field on the parse candidate
   (`parse-candidates.md`): a candidate with a brand is official-source-eligible, a
-  generic food is not. See `food-resolution.md` (**Official-Source Resolution**).
+  generic food is not. See `food-resolution-official-source.md` (**Official-Source Resolution**).
 - **Fallback Rule, concretely.** When the search lookup reports `disabled` /
   `unavailable` / `rate_limited` / `failed` / `partial`, or no fetched page yields a
   schema-valid fact set, the named item falls through to a `model_prior` evidence
@@ -1419,7 +1419,7 @@ retained so references naming this section still resolve.
   extraction/estimate schema, and the nullable `evidence_sources.assumptions` column
   (`0012` migration). It does not redefine the hierarchy, the status vocabulary, or the
   fallback rule; it fixes the pipeline ordering (official source last before
-  model-prior). See `food-resolution.md` (**Official-Source Resolution**).
+  model-prior). See `food-resolution-official-source.md` (**Official-Source Resolution**).
 - FTY-166 adds the **`reference_source`** tier (a deliberate pre-v1 breaking
   change to the resolution order): the source-system id `reference_source` joins
   the stable vocabulary, model prior moves to rank 6, and a new

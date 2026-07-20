@@ -60,6 +60,7 @@ Use contracts for:
 | [food-resolution.md](food-resolution.md) | Deterministic generic-food resolution step using USDA and external sources |
 | [food-resolution-barcode-source.md](food-resolution-barcode-source.md) | Barcode / Open Food Facts source tier of `food-resolution.md` (barcode + FTY-369 name-search lookup, mapping, caching, routing, diagnostics) |
 | [food-resolution-changelog.md](food-resolution-changelog.md) | Reverse-chronological version history (change log) for `food-resolution.md` |
+| [food-resolution-official-source.md](food-resolution-official-source.md) | Official-source / reference / model-prior resolution tiers of `food-resolution.md` (FTY-078 fetch boundary, FTY-062 official-source resolution, reference tier, model-prior/degrade, count-serving, snippet fallback, brand routing) |
 | [food-resolution-prior-correction.md](food-resolution-prior-correction.md) | Prior-correction source tier of `food-resolution.md` (estimate-time resolution FTY-406, candidate surface + apply FTY-411, mobile surfacing FTY-407) |
 | [food-suggestions.md](food-suggestions.md) | Read-only contextual quick-add food suggestions ranked by deterministic time-aware frecency |
 | [goals-target-reveal.md](goals-target-reveal.md) | Goal direction input and target-calculation step turning user goals into calorie targets |

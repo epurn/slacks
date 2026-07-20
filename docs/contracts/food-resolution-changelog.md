@@ -19,6 +19,21 @@ estimator / contracts / backend-core / security-privacy lane (same owners as
 
 ## Version
 
+33 (FTY-426, contract only): the **Official-Source Fetch Boundary (FTY-078)** and
+**Official-Source Resolution (FTY-062)** sections (with all their subsections — the
+`OfficialFetchSettings` config, SSRF/egress policy, egress diagnostics; the
+`brand`-candidate trigger, orchestration, the FTY-166 reference-source tier, the
+model-prior / default-serving fallback, the FTY-370/FTY-418 budget/transience degrade
+prior, the FTY-252 count-serving evidence, the FTY-314 snippet fallback, the FTY-253
+brand-aware routing, the routing table, security/privacy, and examples) were
+**extracted verbatim** from `food-resolution.md` into a new sibling page,
+[food-resolution-official-source.md](food-resolution-official-source.md), leaving a
+forwarding pointer behind under each original `##` heading and re-pointing the
+sibling-contract citations (`evidence-retrieval.md`, `estimate-first-routing.md`,
+`parse-candidates.md`) and the in-page FTY-370 migration citation at the new page.
+Structure-only relocation of one settled source-tier block — no wording, env-var,
+routing-rule, ordering, table, example, schema, DTO, endpoint, or behaviour change.
+
 32 (FTY-418): loosely-described everyday foods resolve to real per-food nutrition
 with food-aware portions. Three normative changes: (1) the FDC/common-food
 density-changing **form gate** (`fdc_ranking.REJECTED_FORM_TOKENS`) now rejects the
