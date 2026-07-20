@@ -43,6 +43,7 @@ from app.estimator.decision_trace import (
 )
 
 if TYPE_CHECKING:
+    from app.estimator.correction_resolution import PriorCorrectionResolveStep
     from app.estimator.event_images import EventImage
     from app.estimator.food_resolvers import BarcodeResolver, FoodResolver
     from app.estimator.image_facts_step import ImageFactsResolveStep
@@ -652,6 +653,7 @@ def default_pipeline(
     official_step: OfficialSourceResolveStep | None = None,
     user_text_step: UserTextResolveStep | None = None,
     image_facts_step: ImageFactsResolveStep | None = None,
+    prior_correction_step: PriorCorrectionResolveStep | None = None,
 ) -> Pipeline:
     """Build the v1 estimation pipeline: NL parse, exercise calc, food resolution.
 
@@ -697,6 +699,15 @@ def default_pipeline(
     # no-op when the event carries no images.
     if image_facts_step is not None:
         steps.append(image_facts_step)
+    # The prior-correction tier (FTY-406) runs after the rank-1 user-provided steps
+    # and before the food step: a candidate whose normalized name matches a food the
+    # user has already hand-corrected resolves from that curated value instead of a
+    # re-guessed source match. Its curated ground truth outranks every guessed source
+    # but sits below the current entry's own explicit evidence (``user_text`` /
+    # image-label / barcode). Wired only alongside the food step (it claims from the
+    # same food-candidate pool and produces the same resolved-item shape).
+    if food_resolver is not None and prior_correction_step is not None:
+        steps.append(prior_correction_step)
     if food_resolver is not None:
         steps.append(
             FoodResolveStep(

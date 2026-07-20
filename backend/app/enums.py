@@ -307,6 +307,15 @@ class SourceType(StrEnum):
     #: rank 1 — distinct from ``user_label`` (scanned) so a client can tell a typed
     #: number from a scanned one.
     USER_TEXT = "user_text"
+    #: A value the user has **already corrected** for this same food, replayed at
+    #: estimate time (FTY-406). When a user has hand-edited a food to a value they
+    #: trust ("black coffee = 3"), a later estimate for the same normalized name
+    #: resolves from that prior correction instead of re-guessing a source match.
+    #: It is the user's own curated ground truth, so it outranks every guessed
+    #: source (USDA / OFF-by-name / official / reference / model-prior) but sits
+    #: below the current entry's explicit evidence (``user_text`` / ``user_label`` /
+    #: barcode).
+    PRIOR_CORRECTION = "prior_correction"
     REFERENCE_SOURCE = "reference_source"
     MODEL_PRIOR = "model_prior"
 
