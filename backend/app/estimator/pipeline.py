@@ -416,6 +416,14 @@ class EstimationContext:
     #: accumulated evidence. In-memory only — never persisted, never copied into
     #: ``trace`` or any run field (it holds raw user text).
     interpretation_session: InterpretationSession | None = None
+    #: The model-generated, sanitized short meal name for the whole event (FTY-422),
+    #: derived by the parse step from the interpretation hypothesis. The worker writes
+    #: it to ``log_events.name`` on a terminal completing transition. ``None`` for an
+    #: exercise-only, empty, or failed event, or when the model offered no sensible
+    #: name — an honest null, never a fabricated label. It is derived user content (a
+    #: label over the log), so — unlike the sanitized run metadata below — it is
+    #: **never** copied into ``trace``/``error``, kept out of logs alongside ``raw_text``.
+    event_name: str | None = None
     provider: str | None = None
     model: str | None = None
     schema_version: str | None = None

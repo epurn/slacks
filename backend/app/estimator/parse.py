@@ -81,6 +81,7 @@ from app.schemas.parse import (
     ParsedCandidate,
     ParseDisposition,
     ParseResult,
+    sanitize_event_name,
 )
 
 __all__ = [
@@ -324,6 +325,28 @@ class ParseStep:
                 context.food_candidates.append(draft)
             else:
                 context.exercise_candidates.append(draft)
+
+        _set_event_name(context, session.result)
+
+
+def _set_event_name(context: EstimationContext, result: ParseResult) -> None:
+    """Derive the event-level meal name for a food-bearing entry (FTY-422).
+
+    The name is the model's short label for the whole event, carried on the
+    interpretation hypothesis (``result.event_name``, already sanitized/bounded by the
+    schema). It is set only when the entry has food: an **exercise-only** event leaves
+    ``name`` ``null`` rather than fabricating a meal label (the field is a *meal* name).
+    When the model offered no name and the entry is a single plain food, the food's own
+    name is a sensible, honest fallback (the item name, not the raw phrase); otherwise
+    ``name`` stays ``null`` — an honest null over an invented multi-item label.
+    """
+
+    if not context.food_candidates:
+        return
+    name = result.event_name
+    if name is None and len(context.food_candidates) == 1 and not context.exercise_candidates:
+        name = sanitize_event_name(context.food_candidates[0].name)
+    context.event_name = name
 
 
 def _conservative_result_or_raise(

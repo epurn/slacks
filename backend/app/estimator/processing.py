@@ -283,6 +283,21 @@ def _record_run_metadata(run: EstimationRun, context: EstimationContext) -> None
     run.trace = list(context.trace)
 
 
+def _apply_event_name(event: LogEvent, context: EstimationContext) -> None:
+    """Persist the model-generated meal name onto the event (FTY-422).
+
+    Written on a terminal completing transition (``completed`` / ``partially_resolved``),
+    atomically with the derived items through the single ``transition_event`` commit — the
+    same terminal write that persists the items. Only a **non-null** name is written, so an
+    exercise-only/empty event keeps ``name`` ``null`` and an answer-triggered re-estimate
+    never clobbers an earlier round's good name with a null. The value was already
+    sanitized/bounded at the parse trust boundary (``sanitize_event_name``).
+    """
+
+    if context.event_name:
+        event.name = context.event_name
+
+
 def _load_event_food_items(session: Session, log_event_id: uuid.UUID) -> list[DerivedFoodItem]:
     """Return every ``derived_food_items`` row already committed for the event.
 
@@ -797,6 +812,7 @@ def _finalize(
 
     if outcome is PipelineOutcome.COMPLETED:
         _persist_candidates(session, run, context)
+        _apply_event_name(event, context)
         run.status = EstimationRunStatus.COMPLETED
         job.status = EstimationJobStatus.SUCCEEDED
         session.add_all([run, job])
@@ -826,6 +842,7 @@ def _finalize(
         # v3); only the *event* transition differs from the whole-event case.
         _persist_candidates(session, run, context)
         _persist_item_scoped_clarifications(session, run, context)
+        _apply_event_name(event, context)
         run.status = EstimationRunStatus.NEEDS_CLARIFICATION
         job.status = EstimationJobStatus.NEEDS_CLARIFICATION
         session.add_all([run, job])
@@ -1015,6 +1032,9 @@ def _degrade_and_complete(
     # ``process_estimation`` first recorded the (pre-degrade) run metadata.
     _record_run_metadata(run, context)
     _persist_candidates(session, run, context)
+    # The meal name (FTY-422) is derived by the parse step before the infra breach, so
+    # a degraded-but-completing event is still named from what was interpreted.
+    _apply_event_name(event, context)
     run.status = EstimationRunStatus.COMPLETED
     # A degrade lands ``completed``, not failed — no ``error`` on the run.
     run.error = None

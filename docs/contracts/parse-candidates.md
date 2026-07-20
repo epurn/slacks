@@ -37,6 +37,16 @@ estimator / contracts / backend-core lane:
 
 ## Version
 
+15 (FTY-422): the `ParseResult` schema gains an optional, bounded `event_name`
+field — a short model-generated meal name for the whole event — and the recorded
+schema version string bumps `parse/v2 → parse/v3`. Additive and
+backward-compatible: a reply that omits it validates unchanged (default `null`),
+the value is sanitized/bounded (`sanitize_event_name`) as untrusted output, and it
+adds **no** persistence column of its own (the estimator writes the non-null name
+to the existing `log_events.name`, FTY-421). The `parse_prompt.py` instruction to
+produce it is additive; no persistence, routing, sampling, or policy change. See
+`estimation-jobs.md` (event-level meal name output).
+
 14 (FTY-385, contract only): relocates the `### Calibrated clarify decision` and
 `### Deterministic plausibility gate` sections — with their trailing gate-outcome,
 question-quality, atomicity, and item-scoped partial clarification (FTY-278) rules —
@@ -187,6 +197,7 @@ object — smuggled keys are rejected, not ignored):
 | `confidence` | float `[0, 1]` | The verbalized component of the calibrated clarify decision (see Outputs / Routing) — never gated alone. |
 | `items` | `ParsedCandidate[]` (≤ 32) | Extracted candidates. |
 | `clarification_questions` | `ClarificationQuestion[]` (≤ 8) | Present on the ambiguous path; each question carries its quick-pick options. |
+| `event_name` | string \| null (≤ 80) | Short model-generated meal name for the whole event (FTY-422) — a few words summarizing the entry as a dish, never the raw phrase and never a copy of one item's `name`. Sanitized/bounded (`sanitize_event_name`); `null` when the model offered none. The estimator persists a non-null name to `log_events.name` (`estimation-jobs.md`, `log-events.md` FTY-421). |
 | `reason` | string \| null (≤ 120) | Short label when `unparseable`. |
 
 `ParsedCandidate`: `type` (`food` \| `exercise`), `name` (1–200 chars),
@@ -231,6 +242,18 @@ for deterministic questions without meaningful quick-pick choices. The schema
 enforces the hard count/length caps; FTY-172's parse producer adds a stricter
 quality gate for provider output, rejecting missing, generic, or under-optioned
 clarification questions before persistence.
+
+`event_name` (additive, FTY-422) is a short model-generated **meal name for the
+whole event** — a few words naming the entry as a dish (`"Turkey sandwich"`),
+never the raw diary phrase and never a copy of one item's `name`. It is untrusted
+model output: the `event_name` validator runs `sanitize_event_name` before the
+value is trusted (strip control characters, collapse whitespace, truncate to 80,
+blank / non-string → `null`), so a cosmetic label can never fail an
+otherwise-valid extraction. The model leaves it `null` when no sensible short name
+fits; the estimator additionally leaves it `null` for an exercise-only or
+empty/failed event and falls back to the single food's own name for a one-item
+food entry, then persists a non-null name to `log_events.name` (`estimation-jobs.md`,
+`log-events.md` FTY-421). Stored as data, never interpreted as an instruction.
 
 String length and list count bounds cap an adversarial or runaway reply.
 
@@ -639,3 +662,13 @@ event.raw_text = "stuff"
 - **FTY-370 (contract only; no code, no migration).** Narrows terminal
   `unparseable_input` to unanimous genuinely-non-food input; no `ParseResult`,
   persistence, sampling, or policy change. FTY-371 implements (`estimation-jobs.md` v7).
+- **FTY-422 (additive schema field + prompt).** The `ParseResult` schema gains the
+  optional, bounded `event_name` field and the recorded schema version string bumps
+  `parse/v2 → parse/v3`; the parse prompt gains an instruction to produce it.
+  Additive and backward-compatible: a reply that omits it validates unchanged
+  (default `null`), the value is sanitized/bounded untrusted output
+  (`sanitize_event_name`), and it adds **no** persistence column of its own — the
+  estimator persists the non-null name to the existing `log_events.name` (FTY-421)
+  on the terminal completing transition, leaving it `null` for an
+  exercise-only/empty/failed event. No routing, sampling, policy, or other
+  persistence change. See `estimation-jobs.md` (event-level meal name output).
