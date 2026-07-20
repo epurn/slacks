@@ -15,7 +15,8 @@ parse contract stays focused on the `ParsedCandidate` shape, validation, and
 persistence. It carries **no normative change**: the FTY-167 / FTY-275 / FTY-279 /
 FTY-298 / FTY-362 rules are moved verbatim in meaning. It interprets the shared
 mode semantics owned by [estimator-policy.md](estimator-policy.md) and feeds the
-resolution boundaries owned by [food-resolution.md](food-resolution.md)
+resolution boundaries owned by
+[food-resolution-user-stated.md](food-resolution-user-stated.md)
 (**User-Stated Resolution**) and
 [food-resolution-official-source.md](food-resolution-official-source.md)
 (**Official-Source Resolution**).
@@ -62,8 +63,8 @@ checks each extracted item against the active shared clarification policy
   (FTY-279 — a `stated_calories` total or a `stated_*` macro the user wrote). Each
   means the user *stated* a usable detail, so a generic source-miss defers to estimation
   (or, for a stated nutrition fact, resolves directly from that `user_text` evidence)
-  rather than re-asking — see `food-resolution.md` (**User-Stated Resolution (FTY-279)**
-  no-second-follow-up rule) and `food-resolution-official-source.md`
+  rather than re-asking — see `food-resolution-user-stated.md` (**User-Stated
+  Resolution (FTY-279)** no-second-follow-up rule) and `food-resolution-official-source.md`
   (**Official-Source Resolution**, v8). Under the default
   `estimate_first` policy a bare recognizable identity with **no** stated portion and no
   stated nutrition fact (`milk`, `some crackers`) still attempts a rough estimate; under

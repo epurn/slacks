@@ -570,7 +570,7 @@ until they pass deterministic checks:
 - a self-contradictory, implausible, or adversarial claim **fails closed** — it
   routes to clarification rather than committing a number the user could not have
   meant. Supplying a usable stated fact is never itself a reason to re-ask (see
-  `food-resolution.md`, **User-Stated Resolution (FTY-279)** (its no-second-follow-up rule)).
+  `food-resolution-user-stated.md`, **User-Stated Resolution (FTY-279)** (its no-second-follow-up rule)).
 
 ### Security / untrusted input
 
