@@ -127,6 +127,23 @@ FetchOfficial = Callable[[str, OfficialFetchSettings], str]
 FetchReference = Callable[[str, ReferenceFetchSettings], str]
 
 
+class _SoftBudgetAbandon(Exception):
+    """Internal signal: the run crossed the soft budget mid-candidate (FTY-430).
+
+    Raised at a within-candidate tier boundary — before the next evidence-tier provider
+    call — so :meth:`OfficialSourceResolveStep.run` abandons the exact-resolution cascade
+    for *this* candidate and falls forward to the model-prior degrade producer, exactly the
+    between-candidate fall-forward shape, instead of charging another call past the hard
+    ceiling and raising :class:`~app.estimator.run_budget.RunBudgetExceeded` (which flattens
+    the *whole* run to the deterministic coarse prior). It never escapes this module:
+    :meth:`run` is the sole catcher. ``reason`` is the content-free soft-crossing label.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 @dataclass(frozen=True)
 class OfficialSourceResolveStep:
     """Resolve USDA/OFF-unresolved food candidates from web evidence, tier by tier.
@@ -174,6 +191,12 @@ class OfficialSourceResolveStep:
         # resolution crosses the soft budget, stop resolving exactly and switch every
         # remaining candidate to the rough degrade producer, landing a completed /
         # partially_resolved outcome inside the hard ceiling instead of breaching it.
+        # FTY-430 extends the fall-forward *within* a candidate: the per-candidate gate
+        # below re-checks only between candidates, but ``_resolve`` also consults the soft
+        # budget at each of its own tier boundaries and raises :class:`_SoftBudgetAbandon`
+        # the moment the soft point trips mid-cascade — so a candidate that began resolving
+        # just under the soft deadline abandons to the same degrade producer instead of
+        # charging another evidence call past the *hard* ceiling and flattening the whole run.
         degrade_reason: str | None = None
         for candidate in pending:
             if degrade_reason is None:
@@ -185,6 +208,17 @@ class OfficialSourceResolveStep:
                 continue
             try:
                 item = self._resolve(context, candidate)
+            except _SoftBudgetAbandon as abandon:
+                # FTY-430: the soft budget was crossed between this candidate's own provider
+                # calls. Fall forward to the model-prior degrade for it (real macros when the
+                # hard ceiling still has headroom, else the budget-free coarse prior) and mark
+                # the run degraded so every remaining candidate takes the between-candidate
+                # path above — never charging a call past the hard ceiling.
+                degrade_reason = abandon.reason
+                context.resolved_food_items.append(
+                    self._degrade(context, candidate, abandon.reason)
+                )
+                continue
             except NeedsClarification as exc:
                 # FTY-329: a component the web-evidence/model-prior tiers cannot cost is
                 # collected as its own item-scoped outcome rather than aborting the
@@ -227,6 +261,21 @@ class OfficialSourceResolveStep:
 
         provider = self.provider
         return provider.soft_budget_reason() if isinstance(provider, BudgetedProvider) else None
+
+    def _abandon_if_soft_crossed(self) -> None:
+        """Abandon this candidate to the degrade producer if the soft budget is crossed.
+
+        The FTY-430 within-candidate check, consulted at each tier boundary before the next
+        evidence-tier provider call: once the soft point has tripped mid-cascade, raise
+        :class:`_SoftBudgetAbandon` so :meth:`run` falls this candidate forward to the
+        model-prior degrade rather than issuing a call that could breach the hard ceiling.
+        A composition test with a bare (non-budgeted) provider never crosses (``None``), so
+        its exact-resolution path is byte-identical — the check only ever *reduces* work.
+        """
+
+        reason = self._soft_degrade_reason()
+        if reason is not None:
+            raise _SoftBudgetAbandon(reason)
 
     def _has_provider_headroom(self) -> bool:
         """Whether the degrade producer's primary mode may still spend a provider call."""
@@ -271,6 +320,9 @@ class OfficialSourceResolveStep:
             and allow_requery
             and _evidence_dead_end_recorded(context, ledger_start=ledger_start)
         ):
+            # FTY-430: the bounded re-interpretation spends its own provider call — abandon
+            # to the degrade before it if the evidence tiers already crossed the soft budget.
+            self._abandon_if_soft_crossed()
             revised = reinterpret_food_candidate(
                 context,
                 candidate,
@@ -281,6 +333,11 @@ class OfficialSourceResolveStep:
             if revised is not None:
                 return self._resolve(context, revised, allow_requery=False)
         if item is None:
+            # FTY-430: the model-prior fallback is one more provider call. If the evidence
+            # tiers pushed the run past the soft budget, abandon to the *degrade* producer
+            # (real macros within the hard ceiling, else the budget-free coarse prior)
+            # instead of charging the exact model-prior call toward the hard breach.
+            self._abandon_if_soft_crossed()
             item = _model_prior(
                 context,
                 candidate,
@@ -341,6 +398,9 @@ class OfficialSourceResolveStep:
             )
             item = None
         if item is None:
+            # FTY-430: tier boundary — if the official tier just pushed the run past the soft
+            # budget, abandon to the degrade before spending the next (OFF-name) evidence tier.
+            self._abandon_if_soft_crossed()
             # FTY-369: the branded product_database tier (rank 3) — OFF by name —
             # consults between official source (rank 2) and reference (rank 5), so a
             # trivially findable branded packaged product lands as product_database
@@ -498,6 +558,11 @@ class OfficialSourceResolveStep:
 
         candidate = current_food_candidate(context, candidate, candidate_index)
         for variant_index, query in enumerate(queries):
+            # FTY-430: the tier loop — each identity variant issues a search-result
+            # extraction provider call. Consult the soft budget before every one so a
+            # multi-variant tier abandons to the degrade the moment it crosses the soft
+            # point mid-tier, never walking the remaining variants toward the hard breach.
+            self._abandon_if_soft_crossed()
             note = decision_recorder(
                 self.name,
                 context,
