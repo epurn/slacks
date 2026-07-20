@@ -22,6 +22,7 @@
  * row primitive is its own focused module under `components/correction/`.
  */
 
+import { useEffect, useRef, useState } from "react";
 import {
   Animated,
   Pressable,
@@ -29,6 +30,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type LayoutChangeEvent,
 } from "react-native";
 
 import {
@@ -56,6 +58,7 @@ import {
   type ExactEvidenceCaptureInjectables,
 } from "@/components/correction/ExactEvidencePanel";
 import { isExactUpgradeEligible } from "@/components/correction/helpers";
+import { useKeyboardInset } from "@/components/correction/useKeyboardInset";
 import { OverridePanel } from "@/components/correction/OverridePanel";
 import { ProvenanceBlock } from "@/components/correction/ProvenanceBlock";
 import { RenamePanel } from "@/components/correction/RenamePanel";
@@ -210,6 +213,42 @@ export function CorrectionSheet({
   });
   const { item, mode, expanded } = sheet;
 
+  // FTY-404: keyboard-avoidance. A focused correction field (the change-match
+  // search, the override/rename/clarify inputs) raises the software keyboard,
+  // which would otherwise cover the Save action and the match/typeahead list at
+  // the bottom of the sheet. We pad the scrollable content by the *real*
+  // keyboard height (the platform inset — never a fixed magic offset) so every
+  // control can scroll clear of the keyboard, and — for the panels whose commit
+  // action sits at the bottom of the content (override, clarify) — scroll that
+  // action above the keyboard as it rises so Save stays visible without a manual
+  // drag. The change-match search keeps its natural position (field on top, the
+  // match list scrolling in the space above the keyboard); rename's editor sits
+  // at the top of the sheet and is never covered.
+  const keyboardInset = useKeyboardInset();
+  const scrollRef = useRef<ScrollView>(null);
+  // Offset of the change-match panel within the scroll content, captured on
+  // layout so we can bring the search field to the top of the space above the
+  // keyboard (field stays put, results fill downward and scroll).
+  const [matchPanelY, setMatchPanelY] = useState<number | null>(null);
+  const onMatchPanelLayout = (e: LayoutChangeEvent) => {
+    setMatchPanelY(e.nativeEvent.layout.y);
+  };
+  useEffect(() => {
+    if (keyboardInset <= 0) return;
+    const frame = requestAnimationFrame(() => {
+      if (mode === "override" || mode === "clarify") {
+        // These panels' commit action sits at the bottom of the content, so
+        // pull the end above the keyboard — Save stays visible.
+        scrollRef.current?.scrollToEnd({ animated: true });
+      } else if (mode === "change-match" && matchPanelY != null) {
+        // Bring the search field to the top of the space above the keyboard so
+        // the match list is visible and scrollable while typing.
+        scrollRef.current?.scrollTo({ y: matchPanelY, animated: true });
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [keyboardInset, mode, matchPanelY]);
+
   // ─── Derived display values ────────────────────────────────────────────────
   const food = item.item_type === "food" ? (item as DerivedFoodItemDTO) : null;
   const source = food?.source ?? null;
@@ -319,9 +358,17 @@ export function CorrectionSheet({
         </View>
 
         <ScrollView
+          ref={scrollRef}
           style={styles.scrollContent}
-          contentContainerStyle={styles.scrollInner}
+          contentContainerStyle={[
+            styles.scrollInner,
+            // Pad the scrollable content by the live keyboard height so Save +
+            // the match list can scroll clear of the keyboard (FTY-404) — the
+            // platform inset, not a fixed offset.
+            keyboardInset > 0 ? { paddingBottom: spacing.xxxl + keyboardInset } : null,
+          ]}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
           showsVerticalScrollIndicator={false}
         >
           {mode === "clarify" ? (
@@ -426,18 +473,20 @@ export function CorrectionSheet({
 
               {/* Change-match panel */}
               {mode === "change-match" ? (
-                <ChangeMatchPanel
-                  query={sheet.matchQuery}
-                  onQueryChange={sheet.handleCandidateSearch}
-                  candidates={sheet.candidates}
-                  loading={sheet.candidatesLoading}
-                  error={sheet.candidatesError}
-                  reResolving={sheet.reResolving}
-                  reResolveError={sheet.reResolveError}
-                  onPickCandidate={(c) => void sheet.handlePickCandidate(c)}
-                  onCancel={sheet.cancelChangeMatch}
-                  colors={colors}
-                />
+                <View onLayout={onMatchPanelLayout}>
+                  <ChangeMatchPanel
+                    query={sheet.matchQuery}
+                    onQueryChange={sheet.handleCandidateSearch}
+                    candidates={sheet.candidates}
+                    loading={sheet.candidatesLoading}
+                    error={sheet.candidatesError}
+                    reResolving={sheet.reResolving}
+                    reResolveError={sheet.reResolveError}
+                    onPickCandidate={(c) => void sheet.handlePickCandidate(c)}
+                    onCancel={sheet.cancelChangeMatch}
+                    colors={colors}
+                  />
+                </View>
               ) : null}
 
               {/* Advanced override lever */}

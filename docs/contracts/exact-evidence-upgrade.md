@@ -130,8 +130,9 @@ evidence rewrite, and no item mutation.
 An **exact** proposal resolves through the existing exact sources and reuses
 their record shapes unchanged:
 
-- **Barcode** — the hardened Open Food Facts path (`food-resolution.md`
-  **Barcode Source — FTY-060**): normalized digits, GTIN length check, hardened
+- **Barcode** — the hardened Open Food Facts path
+  (`food-resolution-barcode-source.md` **Barcode Source — FTY-060**): normalized
+  digits, GTIN length check, hardened
   fetch, per-100g canonicalisation, plausibility bound, global `products` cache
   row. Applying yields `source_type = product_database`,
   `source_ref = open_food_facts:<barcode>`.
