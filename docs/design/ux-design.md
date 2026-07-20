@@ -263,6 +263,15 @@ It mirrors the inputs onboarding captures, so this is where you edit them later.
 - **Setup QR carries the server URL only** (no embedded secret) — scanning connects
   the app; the user still creates the account manually. A simpler, safer QR; manual
   URL entry is the fallback.
+- **The server is changeable later, from Settings.** ACCOUNT & SERVER's Server row
+  opens an inline editor for the API base URL — one address, not a saved list of
+  servers. It runs the same strict `http(s)` validation and `/healthz` reachability
+  probe as the connect screen, so a malformed or unreachable address is refused in
+  place with plain copy rather than silently breaking the app, and a "Use default"
+  action always offers the way back. A change is **destructive to the session** — a
+  token minted by one server is meaningless on another — so it is explicitly
+  confirmed, and confirming signs the user out *before* the new address goes live,
+  then lands them on sign-in for the new server. No token is ever carried across.
 
   *Connect / sign-in / create-account screen detail and their error states are
   covered under States & edges (§6).*

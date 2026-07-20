@@ -47,7 +47,8 @@ export type SettingsVisualReviewSubState =
   | 'goal_edit'
   | 'body_edit'
   | 'formula_edit'
-  | 'appearance';
+  | 'appearance'
+  | 'server_edit';
 
 const SETTINGS_ROUTE = '/profile';
 
@@ -56,6 +57,14 @@ const SUBSTATE_BY_PRESET: Readonly<Record<string, SettingsVisualReviewSubState>>
   'settings.body_edit': 'body_edit',
   'settings.formula_edit': 'formula_edit',
   'settings.appearance': 'appearance',
+  // FTY-405: the server-address editor. `server_edit` opens it against the
+  // default E2E mock, whose `/healthz` falls through to the fixture-not-found
+  // 404 — so a Continue there genuinely exercises the unreachable path.
+  'settings.server_edit': 'server_edit',
+  // Same sub-state, but with `/healthz` answered like a live Slacks server, so
+  // the full switch (probe → confirm → sign-out → sign-in) can be driven end to
+  // end on the running app.
+  'settings.server_switch': 'server_edit',
 };
 
 const E2E_TARGET_WITH_USER_OVERRIDE = {
@@ -71,13 +80,29 @@ function get(suffix: string): (ctx: VisualReviewFetchContext) => boolean {
   return (ctx) => ctx.method === 'GET' && ctx.pathEnd.endsWith(suffix);
 }
 
+/** The one preset that needs fixture overrides; registered on its own below. */
+const SERVER_SWITCH_PRESET = 'settings.server_switch';
+
 for (const name of Object.keys(SUBSTATE_BY_PRESET)) {
+  if (name === SERVER_SWITCH_PRESET) continue;
   registerVisualReviewPreset({
     name,
     route: SETTINGS_ROUTE,
     settledPath: SETTINGS_ROUTE,
   });
 }
+
+// FTY-405: answer the server editor's `GET /healthz` reachability probe the way
+// a live Slacks server does, so the switch flow (probe → confirm → sign out →
+// sign-in) is reachable end to end in the E2E build with no live backend. The
+// probe carries no personal data and this override exists only inside the
+// `isE2EMode()` gate the whole module sits behind.
+registerVisualReviewPreset({
+  name: SERVER_SWITCH_PRESET,
+  route: SETTINGS_ROUTE,
+  settledPath: SETTINGS_ROUTE,
+  responses: [{ match: get('/healthz'), body: { status: 'ok' } }],
+});
 
 registerVisualReviewPreset({
   name: 'settings.target_override',

@@ -35,6 +35,10 @@ import { YouSection } from './settings/YouSection';
 import { BodySection } from './settings/BodySection';
 import { PreferencesSection } from './settings/PreferencesSection';
 import { AccountSection } from './settings/AccountSection';
+import {
+  useServerBaseUrlEditor,
+  type ServerBaseUrlEditorProps,
+} from './settings/useServerBaseUrlEditor';
 import { DataAboutSection } from './settings/DataAboutSection';
 import {
   LoadErrorState,
@@ -45,10 +49,13 @@ import {
 export interface SettingsScreenProps extends SettingsControllerProps {
   /** App version string for the About row. */
   appVersion?: string;
+  /** Injectable reachability probe for the server-address editor (FTY-405). */
+  probeServerFn?: ServerBaseUrlEditorProps['probeFn'];
 }
 
 export function SettingsScreen({
   appVersion = '1.0.0',
+  probeServerFn,
   ...controllerProps
 }: SettingsScreenProps = {}) {
   const router = useRouter();
@@ -57,6 +64,15 @@ export function SettingsScreen({
 
   const c = useSettingsController(controllerProps);
   const { session } = c;
+
+  // Changing the server clears the session, so the switch lands the user on
+  // sign-in for the *new* server. The root auth gate would reach the same
+  // conclusion from the null session; replacing here makes the hand-off
+  // immediate rather than waiting a render for the gate to notice.
+  const server = useServerBaseUrlEditor({
+    onSwitched: () => router.replace('/signin'),
+    ...(probeServerFn ? { probeFn: probeServerFn } : {}),
+  });
 
   // E2E-only visual-review seam (FTY-267): the appearance control sits below the
   // fold, so the `settings.appearance` preset scrolls straight to it on layout
@@ -67,6 +83,15 @@ export function SettingsScreen({
   const handlePreferencesLayout = useCallback(
     (e: LayoutChangeEvent) => {
       if (c.visualReviewSubState !== 'appearance') return;
+      scrollRef.current?.scrollTo({ y: e.nativeEvent.layout.y, animated: false });
+    },
+    [c.visualReviewSubState],
+  );
+  // Same seam for ACCOUNT & SERVER, which sits further below the fold still
+  // (FTY-405 `settings.server_edit` / `settings.server_switch`).
+  const handleAccountLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      if (c.visualReviewSubState !== 'server_edit') return;
       scrollRef.current?.scrollTo({ y: e.nativeEvent.layout.y, animated: false });
     },
     [c.visualReviewSubState],
@@ -112,11 +137,14 @@ export function SettingsScreen({
       <View onLayout={handlePreferencesLayout}>
         <PreferencesSection c={c} colors={colors} />
       </View>
-      <AccountSection
-        session={session}
-        onSignOut={() => void c.handleSignOut()}
-        colors={colors}
-      />
+      <View onLayout={handleAccountLayout}>
+        <AccountSection
+          session={session}
+          onSignOut={() => void c.handleSignOut()}
+          server={server}
+          colors={colors}
+        />
+      </View>
       <DataAboutSection appVersion={appVersion} colors={colors} />
     </ScrollView>
   );

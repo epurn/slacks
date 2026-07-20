@@ -54,13 +54,12 @@ export function setConnectedBaseUrl(url: string | null): void {
 }
 
 /**
- * Return the configured API base URL without a trailing slash, preferring the
- * persisted runtime connection over the build-time default.
+ * The base URL the app falls back to when no runtime connection is established:
+ * the build-time Expo `extra.apiBaseUrl`, or the local dev backend. This is the
+ * "default server address" the Settings server editor (FTY-405) offers as the
+ * way back from a custom address, so it is exported rather than inlined.
  */
-export function resolveApiBaseUrl(): string {
-  if (connectedBaseUrl !== null) {
-    return connectedBaseUrl;
-  }
+export function defaultApiBaseUrl(): string {
   const extra = Constants.expoConfig?.extra as
     | { apiBaseUrl?: unknown }
     | undefined;
@@ -69,4 +68,15 @@ export function resolveApiBaseUrl(): string {
       ? extra.apiBaseUrl.trim()
       : DEFAULT_API_BASE_URL;
   return stripTrailingSlash(configured);
+}
+
+/**
+ * Return the configured API base URL without a trailing slash, preferring the
+ * persisted runtime connection over the build-time default.
+ */
+export function resolveApiBaseUrl(): string {
+  if (connectedBaseUrl !== null) {
+    return connectedBaseUrl;
+  }
+  return defaultApiBaseUrl();
 }

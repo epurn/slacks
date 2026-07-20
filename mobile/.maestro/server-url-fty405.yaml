@@ -1,0 +1,165 @@
+# FTY-405 visual evidence: the user-configurable API server base URL in
+# Settings → ACCOUNT & SERVER. Captures, in light and dark, the three states the
+# story's acceptance criteria name:
+#
+#   1. the base-URL field in its default state (prefilled with the live server),
+#   2. a rejected address (validation error, in place, app still usable),
+#   3. the post-change sign-in screen for the NEW server.
+#
+# The load-bearing assertions are the text checks, not the screenshots: the
+# invalid-address run fails here if no rejection copy renders, and the switch run
+# fails if the sign-in screen does not name the *new* host — which is what proves
+# the session was cleared and the app is now targeting the new base URL rather
+# than silently reusing the old server's token.
+#
+# Two presets back this (registered from the settings lane, see
+# components/settings/visualReviewPresets.ts):
+#   - settings.server_edit   — Settings scrolled to ACCOUNT & SERVER with the
+#     address editor open. `/healthz` is unmocked, so a Continue here genuinely
+#     exercises the unreachable path.
+#   - settings.server_switch — the same, but with `/healthz` answered like a live
+#     Slacks server, so the whole switch (probe → confirm → sign out → sign-in)
+#     runs end to end with no live backend.
+#
+# Ordering: the two switch runs come LAST, and a fresh `launchApp` separates
+# them. `ConnectionProvider` sits *outside* the subtree the visual-review
+# revision remounts (app/_layout.tsx), so a confirmed switch keeps the app
+# pointed at the new address for the rest of that process — only a relaunch
+# re-seeds it from `e2eConnectionStore`. Running the switches first would
+# therefore leave every later capture showing the switched-to address.
+#
+# Selectors: the action buttons are tapped by their accessibility LABEL ("Check
+# server address", "Switch server and sign out"), not their visible glyph text —
+# iOS folds a child Text into its labeled parent Pressable, so "Continue" /
+# "Switch & sign out" are not addressable elements in the a11y tree.
+#
+# Entry point contract (e2e/visualReview/README.md):
+#   slacks://__visual-review?preset=<name>&theme=light|dark
+# Runs against the same E2E debug binary as the other flows
+# (EXPO_PUBLIC_SLACKS_E2E=true, see verify-e2e.sh).
+appId: com.slacks
+---
+- launchApp:
+    clearState: false
+
+# ── 1. Default state — the field prefilled with the current server ───────────
+- openLink: "slacks://__visual-review?preset=settings.server_edit&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:settings.server_edit"
+    timeout: 20000
+- assertVisible: "ACCOUNT & SERVER"
+- assertVisible:
+    id: server-url-input
+- assertVisible: "Changing your server signs you out.*"
+- takeScreenshot: fty405-server-field-light
+
+- openLink: "slacks://__visual-review?preset=settings.server_edit&theme=dark"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:settings.server_edit"
+    timeout: 20000
+- assertVisible:
+    id: server-url-input
+- takeScreenshot: fty405-server-field-dark
+
+# ── 2. Rejected address — malformed input, refused in place ──────────────────
+# Typed, not seeded: the error state is produced by the running validator.
+- openLink: "slacks://__visual-review?preset=settings.server_edit&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:settings.server_edit"
+    timeout: 20000
+- tapOn:
+    id: server-url-input
+- eraseText
+- inputText: "not a server"
+# Dismiss the keyboard before tapping Continue — the action row sits under it,
+# and the ScrollView's keyboardShouldPersistTaps="handled" makes a tap on the
+# section header a plain dismiss.
+- tapOn: "ACCOUNT & SERVER"
+- tapOn: "Check server address"
+- assertVisible: "That doesn't look like a valid server address."
+- takeScreenshot: fty405-server-invalid-light
+
+- openLink: "slacks://__visual-review?preset=settings.server_edit&theme=dark"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:settings.server_edit"
+    timeout: 20000
+- tapOn:
+    id: server-url-input
+- eraseText
+- inputText: "not a server"
+# Dismiss the keyboard before tapping Continue — the action row sits under it,
+# and the ScrollView's keyboardShouldPersistTaps="handled" makes a tap on the
+# section header a plain dismiss.
+- tapOn: "ACCOUNT & SERVER"
+- tapOn: "Check server address"
+- assertVisible: "That doesn't look like a valid server address."
+- takeScreenshot: fty405-server-invalid-dark
+
+# ── 3. Confirmed change → signed out → sign-in on the NEW server ─────────────
+- openLink: "slacks://__visual-review?preset=settings.server_switch&theme=dark"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:settings.server_switch"
+    timeout: 20000
+- tapOn:
+    id: server-url-input
+- eraseText
+- inputText: "https://newserver.example.com"
+# Dismiss the keyboard before tapping Continue — the action row sits under it,
+# and the ScrollView's keyboardShouldPersistTaps="handled" makes a tap on the
+# section header a plain dismiss.
+- tapOn: "ACCOUNT & SERVER"
+- tapOn: "Check server address"
+- extendedWaitUntil:
+    visible: ".*Switching signs you out.*"
+    timeout: 15000
+- takeScreenshot: fty405-server-confirm-dark
+- tapOn: "Switch server and sign out"
+# The sign-in screen names the connected host — seeing the NEW one here is the
+# proof that the session was dropped and the app is now targeting the new base
+# URL, not still bound to the old server. Matched on the subtitle's accessibility
+# LABEL ("Signing in on <host>"); its visible glyph text ("Signing in to <host>")
+# is not addressable, because an RN Text with an explicit accessibilityLabel is
+# exposed to iOS by that label alone.
+- extendedWaitUntil:
+    visible: "Signing in on newserver.example.com"
+    timeout: 15000
+- takeScreenshot: fty405-server-signin-dark
+
+# Relaunch: re-seed the connection from `e2eConnectionStore` after the dark
+# switch above repointed this process at newserver.example.com.
+- launchApp:
+    clearState: false
+- openLink: "slacks://__visual-review?preset=settings.server_switch&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:settings.server_switch"
+    timeout: 20000
+- tapOn:
+    id: server-url-input
+- eraseText
+- inputText: "https://newserver.example.com"
+# Dismiss the keyboard before tapping Continue — the action row sits under it,
+# and the ScrollView's keyboardShouldPersistTaps="handled" makes a tap on the
+# section header a plain dismiss.
+- tapOn: "ACCOUNT & SERVER"
+- tapOn: "Check server address"
+- extendedWaitUntil:
+    visible: ".*Switching signs you out.*"
+    timeout: 15000
+- takeScreenshot: fty405-server-confirm-light
+- tapOn: "Switch server and sign out"
+- extendedWaitUntil:
+    visible: "Signing in on newserver.example.com"
+    timeout: 15000
+- takeScreenshot: fty405-server-signin-light

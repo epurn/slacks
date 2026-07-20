@@ -21,6 +21,7 @@ jest.mock("expo-constants", () => ({
 // eslint-disable-next-line import/first
 import {
   DEFAULT_API_BASE_URL,
+  defaultApiBaseUrl,
   resolveApiBaseUrl,
   setConnectedBaseUrl,
 } from "./config";
@@ -62,5 +63,18 @@ describe("resolveApiBaseUrl — persisted connection preferred", () => {
   it("treats an empty/whitespace connection as no connection", () => {
     setConnectedBaseUrl("   ");
     expect(resolveApiBaseUrl()).toBe(DEFAULT_API_BASE_URL);
+  });
+});
+
+describe("defaultApiBaseUrl — the 'back to default' address (FTY-405)", () => {
+  it("ignores an established connection so it always offers a real way back", () => {
+    setConnectedBaseUrl("https://my-server.example.com");
+    expect(defaultApiBaseUrl()).toBe(DEFAULT_API_BASE_URL);
+  });
+
+  it("returns the normalized build-time extra.apiBaseUrl when one is set", () => {
+    mockExtra.apiBaseUrl = "https://build.example.com/";
+    setConnectedBaseUrl("https://my-server.example.com");
+    expect(defaultApiBaseUrl()).toBe("https://build.example.com");
   });
 });
