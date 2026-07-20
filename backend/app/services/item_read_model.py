@@ -65,6 +65,7 @@ _SOURCE_LABELS: dict[SourceType, str] = {
     SourceType.PRODUCT_DATABASE: "Open Food Facts",
     SourceType.USER_LABEL: "Label scan",
     SourceType.USER_TEXT: "You logged",
+    SourceType.PRIOR_CORRECTION: "Your correction",
     SourceType.MODEL_PRIOR: "Rough estimate",
 }
 

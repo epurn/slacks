@@ -34,6 +34,7 @@ portion inference / `portion_memories` (later), and saved foods/aliases (Milesto
 estimator / contracts / backend-core / security-privacy lane:
 `backend/app/estimator/fdc.py`, `backend/app/estimator/hardened_fetch.py`,
 `backend/app/estimator/food_serving.py`, `backend/app/estimator/food_step.py`,
+`backend/app/estimator/correction_resolution.py` (FTY-406 prior-correction tier),
 `backend/app/models/food_sources.py`, `backend/app/models/derived.py`
 (`DerivedFoodItem` resolution columns), `backend/alembic/`.
 
@@ -94,6 +95,7 @@ order, with deterministic code enforcing the caps and preconditions for each cal
 | --- | --- | --- |
 | `user_text` | Explicit `stated_*` facts extracted from the raw text for the current item. | Finite/non-negative/as-logged abuse cap and Atwater consistency before persistence. |
 | `user_label` | User-provided label facts or image extraction owned by `label-extraction.md`. | Label schema validation, serving math, ownership, and label retention rules. |
+| `prior_correction` | The acting user's own prior corrected value for this normalized item name (FTY-406). | Per-user, name-normalized lookup over the `corrections` trail; stable-value/ambiguity gate; direct-portion match or per-gram rescale serving math; no cross-user reads. See **Prior-Correction Resolution (FTY-406)**. |
 | `open_food_facts` | Barcode digits explicitly supplied by the user plus item identity for fallback context. | Barcode normalization, OFF enablement, HTTPS/allowlisted fetch, per-100g plausibility, serving math. |
 | `usda_fdc` | Sanitized item identity for trusted-database lookup. | FDC enablement/API key boundary, ranked compatibility, per-100g plausibility, common-portion table, serving math. |
 | `official_source` | Bounded sanitized identity variants for named/branded items. | Search/fetch/provider caps, host allowlist, active-content stripping, `NamedFoodEstimate` validation, compatibility and serving gates. |
@@ -101,8 +103,14 @@ order, with deterministic code enforcing the caps and preconditions for each cal
 | `model_prior` | Sanitized item identity plus bounded quantity/unit fields and content-free tier-miss reasons. | Provider schema validation, calibrated/cold-pass agreement where required, plausibility bounds, serving math, rough provenance. |
 
 Tier order remains evidence-first: source-backed evidence is tried before pure
-model prior whenever an applicable provider is configured and available. FTY-324
-changes **who may reinterpret** between tiers, not the privacy or safety posture.
+model prior whenever an applicable provider is configured and available. The
+`prior_correction` tier (FTY-406) sits **above every guessed source**
+(`usda_fdc` / `open_food_facts` by name / `official_source` / `reference_source` /
+`model_prior`) — the user's own curated value beats any re-guess — but **below the
+current entry's own explicit evidence** (`user_text`, `user_label`, and a scanned
+barcode), which describe *this* log rather than remembered ground truth for the
+name. FTY-324 changes **who may reinterpret** between tiers, not the privacy or
+safety posture.
 A failed or rejected read feeds the evidence view for re-interpretation:
 
 - OFF/USDA miss, disabled/unavailable source, incompatible branded hit, or
@@ -520,6 +528,91 @@ entry: "Sobeys fresh to go buffalo chicken lime wrap (580 cals idk the breakdown
 - **Ownership.** The `derived_food_items` and `evidence_sources` rows carry `user_id`
   at the persistence boundary and cascade on user/event deletion, exactly as the USDA
   path (**Authorization** above).
+
+## Prior-Correction Resolution (FTY-406)
+
+The **prior-correction resolution step**
+(`backend/app/estimator/correction_resolution.py`,
+`PriorCorrectionResolveStep`) makes the user's own corrections a **resolution
+source**. The `corrections` audit trail (FTY-051) was write-only telemetry — every
+hand-edit was recorded and never read back at estimate time — so a food the user
+had already corrected was re-guessed from scratch on the next log. The operator case:
+"black coffee" first-passed a deterministic 148.8 kcal source match every time, was
+auto-`re_match`ed to 4.8, then hand-edited to 3, over and over. This step closes the
+loop: a candidate whose normalized name matches a food the user has already
+**hand-corrected** resolves from that corrected value, short-circuiting the wrong
+first guess.
+
+It runs as a pipeline step **after** the rank-1 current-entry tiers (`user_text`,
+image-label facts) and **before** the USDA/OFF food step, claiming each candidate it
+resolves from `context.food_candidates` so the source tiers only see the rest — the
+same claim-and-remove shape `user_text_step` uses. A candidate carrying a **barcode**
+is skipped (a scan is the current entry's own explicit evidence and resolves via OFF).
+
+### Precedence
+
+`prior_correction` outranks every guessed source (`usda_fdc`, `open_food_facts` by
+name, `official_source`, `reference_source`, `model_prior`) and sits below the
+current entry's own explicit evidence (`user_text` / `user_label` / barcode). See the
+tier-order note under **Interpretation loop and evidence tools** above.
+
+### Lookup and authority (per-user, name-normalized)
+
+- **Keying.** The candidate name is normalized with the shared saved-food rule
+  (`app.normalization.normalize_text` — NFKD + diacritic fold + casefold +
+  whitespace collapse), the same normalization saved-food typeahead uses. A match is
+  an **exact** normalized-name equality.
+- **Per-user, no cross-user leakage.** Only the acting user's own
+  `derived_food_items` are read (`DerivedFoodItem.user_id`), joined to the
+  `corrections` trail. Another user's correction is never consulted.
+- **What counts as a confident prior correction.** Only an item carrying a
+  `user_edit` correction on `calories` — the user's deliberate value override, not a
+  `re_match` or an `amount_adjust` — whose parent log event is **not voided**. A
+  food auto-re-matched but never hand-edited is not replayed.
+- **Authoritative only on a stable value.** When several matching priors agree on the
+  corrected value (or per-gram density, for a rescale) the value is authoritative;
+  when they **conflict**, the priors are ambiguous and the candidate **falls through**
+  to normal resolution.
+- **Quantity: direct match, rescale, or fall through.** A candidate whose portion
+  signature (normalized unit + amount + normalized quantity phrase, collapsing to a
+  single `unportioned` sentinel) equals the prior correction's resolves to the
+  corrected total **directly** (`basis = as_logged`, never re-scaled). A **different**
+  quantity is **rescaled** from a mass-bearing prior (its corrected per-gram density ×
+  the grams the candidate's own quantity resolves to via `resolve_grams`), recording
+  the content-free `prior_correction_rescaled` assumption. When neither a direct match
+  nor a safe rescale applies (e.g. a different quantity against an as-logged prior with
+  no portion mass), the candidate **falls through** — so an item with no usable prior
+  correction resolves exactly as today. **Never make a prior correction produce a
+  worse result than today for an item with no matching correction.**
+
+### Persistence and provenance
+
+A resolved prior-correction item is an ordinary `resolved` `derived_food_items` row
+with a user-owned `evidence_sources` row: `source_type = prior_correction`
+(`SourceType.PRIOR_CORRECTION`), `source_ref = prior_correction:<content_hash>`,
+`basis = as_logged`, and **no** global `products` cache row (`product_id = NULL`) —
+it is per-user curated truth, not a shared source fact. The run records
+`prior_correction` in `source_refs`. The read-model source descriptor labels it
+"Your correction" so the client can render its provenance (the mobile surfacing —
+history-sourced typeahead and corrected-entry quick-add default — is deferred to
+FTY follow-ups). No new correction row is written and the correction-writing path
+(FTY-051) and `re_match` pass are unchanged; this step only **reads** the trail.
+
+### Routing
+
+| Condition | Pipeline signal | Persisted | Event transition |
+| --- | --- | --- | --- |
+| Confident stable prior correction, portion matches (or rescalable) | _(claims candidate; completes)_ | food `resolved` (`prior_correction`, `as_logged`) + `evidence_sources` (no `products`) | `processing → completed` |
+| No matching prior / ambiguous priors / un-rescalable different quantity / barcode candidate | _(falls through)_ | resolved by the normal source tiers exactly as today | per the source it falls to |
+
+### Security / Privacy
+
+- **Per-user reads only.** `risk: medium` — correction lookups are strictly scoped to
+  the acting user's rows and name-normalized; no cross-user reads. No new PII surface;
+  corrections already exist.
+- **No raw text.** The evidence row stores the projected facts + a content hash over
+  them (mirroring `user_text`), never the raw diary phrase or item name; nothing new
+  egresses.
 
 ## Barcode Source (Open Food Facts) — FTY-060
 

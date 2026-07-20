@@ -12,6 +12,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from app.estimator.correction_resolution import (
+    PriorCorrectionResolver,
+    PriorCorrectionResolveStep,
+)
 from app.estimator.fdc import build_fdc_client
 from app.estimator.food_resolvers import BarcodeResolver, FoodResolver, OffNameResolver
 from app.estimator.image_facts_step import ImageFactsResolveStep
@@ -92,6 +96,10 @@ def build_worker_pipeline(session: Session, label_upload: LabelInput | None) -> 
             reference_fetch_settings=reference_fetch_settings,
         )
     )
+    # The prior-correction tier (FTY-406) replays the user's own hand-corrected value
+    # for a food they've corrected before, so a repeat log short-circuits the wrong
+    # first guess. It reads the per-user ``corrections`` trail through the session.
+    prior_correction_step = PriorCorrectionResolveStep(PriorCorrectionResolver(session=session))
     return default_pipeline(
         provider,
         parse_policy=ParsePolicySettings.from_app_settings(app_settings),
@@ -100,4 +108,5 @@ def build_worker_pipeline(session: Session, label_upload: LabelInput | None) -> 
         official_step=official_step,
         user_text_step=user_text_step,
         image_facts_step=ImageFactsResolveStep(provider),
+        prior_correction_step=prior_correction_step,
     )
