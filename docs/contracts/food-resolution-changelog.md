@@ -147,7 +147,8 @@ read-model label "Your correction". The correction-writing path (FTY-051) and th
 `re_match` pass are unchanged — this tier only **reads**. Mobile surfacing
 (history-sourced typeahead, corrected-entry quick-add default) is deferred to
 follow-ups. No migration. See **Prior-Correction Resolution (FTY-406)** in
-`food-resolution.md`.
+[food-resolution-prior-correction.md](food-resolution-prior-correction.md)
+(extracted by FTY-414).
 
 26 (FTY-397, contract only): the reverse-chronological Version log was **extracted
 verbatim** from `food-resolution.md` into this page (`food-resolution-changelog.md`),
@@ -299,7 +300,7 @@ and an uncostable amount requires user action (`422`) instead of a guess; a
 fallback is never presented as exact. No schema, migration, endpoint code, or
 estimator change in this story; backend implementation is FTY-307–FTY-309,
 mobile consumption FTY-310–FTY-313. See **Exact Evidence Upgrade Routing —
-FTY-306** below.
+FTY-306** in [food-resolution.md](food-resolution.md).
 
 16 (FTY-324, contract only): redefines food resolution's source tiers as
 bounded **tools available to the `InterpretationSession`**, not a one-way
@@ -419,7 +420,8 @@ component with **no usable identity/detail at all**, or **self-contradictory /
 implausible** stated facts — not for a detail that merely was not the field the
 pipeline expected. No schema/migration/serving-math change in this story; the
 estimator work is the **downstream FTY-280 follow-up** and the FTY-278/FTY-275
-baseline ships until then. See **User-Stated Resolution (FTY-279)** below.
+baseline ships until then. See **User-Stated Resolution (FTY-279)** in
+[food-resolution.md](food-resolution.md).
 
 9 (FTY-278, contract only) **makes any remaining amount clarification
 item-scoped** instead of whole-entry-terminal, routing a mixed log to the new
@@ -511,13 +513,17 @@ FTY-078 hardened fetch, and otherwise falling through to a **model-prior** estim
 with an explicit source status. It adds the additive `evidence_sources.assumptions`
 column (`0012` migration) and an additive `brand` field on the parse candidate; it
 does not change the FTY-044 USDA, FTY-060 OFF, or FTY-061 label paths. See
-**Official-Source Resolution (FTY-062)** below.
+**Official-Source Resolution (FTY-062)** in
+[food-resolution-official-source.md](food-resolution-official-source.md) (extracted
+by FTY-426).
 
 3 (FTY-078) extends the shared `hardened_fetch` policy with an **official-source page
 fetch** (`fetch_text` → inert text) and its egress configuration, without changing the
 FTY-044 USDA path or the FTY-060 OFF path. This is the SSRF / egress prerequisite for
 official-source resolution (FTY-062); it ships no search adapter or resolution pipeline
-of its own. See **Official-Source Fetch Boundary (FTY-078)** below.
+of its own. See **Official-Source Fetch Boundary (FTY-078)** in
+[food-resolution-official-source.md](food-resolution-official-source.md) (extracted
+by FTY-426).
 
 2 (FTY-060) adds the **Open Food Facts barcode source** *above* USDA generic in the
 source hierarchy (a confident packaged-product match is preferred over a generic
