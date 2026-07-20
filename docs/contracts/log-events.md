@@ -49,6 +49,16 @@ backend-core / contracts lane (`backend/app/models/log_events.py`,
 
 ## Version
 
+11 (FTY-421): the event DTO gains a nullable **`name`** — a short,
+human-readable **model-generated** meal label (e.g. `"Turkey sandwich"`). It is
+added as a nullable `String` column on `log_events` (migration `0023`,
+additive, Postgres/SQLite-parity, no backfill) and threaded through the event
+DTO returned by create, get-by-id, and the by-date list read. It is **never
+user-authored** in v1: the estimator (FTY-422) is the sole writer, so `name` is
+`null` on every existing row and on every freshly-created event until estimation
+names it. This story only creates and exposes the field; population (FTY-422)
+and mobile display (FTY-420) are separate slices.
+
 10 (FTY-384, contract only): **structural relocation** — the soft-void (delete)
 semantics (the detailed `### Soft-void (delete) (FTY-321)` section) move out of
 this page into [log-event-soft-void.md](log-event-soft-void.md). **No semantic
@@ -178,11 +188,20 @@ The `0003` migration creates:
 
 - **`log_events`** — a user-owned raw log entry. Columns: `id` (UUID, PK),
   `user_id` (UUID, FK → `users.id`, `ON DELETE CASCADE`, indexed), `raw_text`
-  (text, not null), `status` (string, not null), `idempotency_key` (string,
+  (text, not null), `name` (string, **nullable**, added by the `0023`
+  migration), `status` (string, not null), `idempotency_key` (string,
   **nullable**), `voided_at` (timestamptz, **nullable**, added by the `0019`
   migration), `created_at` (timestamptz, not null, indexed), `updated_at`
   (timestamptz, not null). `created_at` is indexed because the Today timeline
   queries events by day.
+- **`name`** (FTY-421) is the **model-generated meal label** — a short,
+  human-readable name (e.g. `"Turkey sandwich"`) the estimator (FTY-422) writes.
+  It is **never user-authored** in v1 (no rename UI yet): `NULL` on every
+  existing row and on every freshly-created event until estimation names it, so
+  it is always safe to be `null`. It is derived user data (a label over what the
+  user logged) — not sensitive in the way `raw_text` is, but still user content,
+  so it is returned only to the owner and kept out of logs/errors alongside
+  `raw_text`.
 - **`voided_at`** (FTY-321) is the **soft-void marker**: `NULL` for a live
   event, set **once** to the void instant when the user deletes the entry. It is
   orthogonal to `status` (the event keeps its pre-void estimation status), and
@@ -248,11 +267,16 @@ clarification answer):
   "id": "UUID",
   "user_id": "UUID",
   "raw_text": "string",
+  "name": "string | null",
   "status": "pending | processing | completed | failed | needs_clarification | partially_resolved",
   "created_at": "datetime",
   "updated_at": "datetime"
 }
 ```
+
+`name` (FTY-421) is the nullable, model-generated meal label. It is **always
+present** in the response shape and `null` until the estimator (FTY-422) names
+the event — every event create/get/list here returns `name: null`.
 
 - **Create (fresh)** → `201` with the event DTO at `status: "pending"`.
 - **Create (idempotent replay)** → `200` with the **existing** event's DTO at its
@@ -270,6 +294,7 @@ clarification answer):
       "id": "UUID",
       "user_id": "UUID",
       "raw_text": "rice and a walk",
+      "name": null,
       "status": "completed",
       "created_at": "datetime",
       "updated_at": "datetime"
@@ -555,6 +580,10 @@ label event still reaches terminal `completed`; only its food item is held
 
 - `raw_text` is sensitive personal data: it is user-owned, never logged, and
   never returned to a non-owner.
+- `name` (FTY-421) is derived user data — a model-generated label over what the
+  user logged. It is not sensitive in the way `raw_text` is, but it is still user
+  content: returned only to the owner through the event DTO and kept out of
+  logs/errors alongside `raw_text` where those already redact event content.
 - Day-listing item names, calories/macros/burn values, and provenance are
   sensitive nutrition data: they are returned only to the owner through the
   scoped read, are not logged, and are derived server-side so the client never
@@ -666,6 +695,15 @@ questions) live in `clarification.md`.
   and exercised against Postgres by the FTY-143 migration guard. Retention is
   unchanged — the column lives on `log_events` and is removed by the existing
   `ON DELETE CASCADE` on account deletion.
+- The `0023` migration (FTY-421) is **additive**: it adds the nullable `name`
+  `String` column to `log_events` with no backfill (existing rows read back
+  `name = NULL` and stay live). Rendered DDL is Postgres/SQLite-parity — a plain
+  nullable column with no server default. It applies on top of `0022` and rolls
+  back cleanly (`alembic downgrade 0022`), verified by an apply/rollback test and
+  exercised against Postgres by the FTY-143 migration guard. Retention is
+  unchanged — the column lives on `log_events` and is removed by the existing
+  `ON DELETE CASCADE` on account deletion. The estimator (FTY-422) is the writer;
+  the mobile display (FTY-420) is the reader.
 - **FTY-170 (breaking, pre-v1, no shim).** The clarification read's
   per-question shape changes from `{ text }` to `{ id, text, options }`, the
   read is scoped to unanswered questions, and the clarification answer

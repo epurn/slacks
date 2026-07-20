@@ -1279,6 +1279,17 @@
             "title": "Id",
             "type": "string"
           },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
           "raw_text": {
             "title": "Raw Text",
             "type": "string"
