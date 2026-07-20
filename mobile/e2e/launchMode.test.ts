@@ -50,6 +50,7 @@ import {
   E2E_SAVED_FOOD_ITEM_ID,
   E2E_SAVED_FOOD_EDITED_ITEM,
   E2E_SOURCE_CANDIDATE,
+  E2E_PRIOR_CORRECTION_CANDIDATE,
   E2E_RESOLVE_RAW_TEXT,
   E2E_RESOLVE_EVENT_ID,
   E2E_RESOLVE_ITEM,
@@ -799,7 +800,7 @@ describe('FTY-183 correction flow: stateful mock endpoints', () => {
 
   it('Change-match lists the USDA candidate for the item', async () => {
     const mockFetch = createE2EMockFetch();
-    const candidates = await listSourceCandidates(
+    const { candidates } = await listSourceCandidates(
       apiSession,
       E2E_SAVED_FOOD_ITEM_ID,
       undefined,
@@ -808,6 +809,25 @@ describe('FTY-183 correction flow: stateful mock endpoints', () => {
     expect(candidates).toHaveLength(1);
     expect(candidates[0]?.source_ref).toBe(E2E_SOURCE_CANDIDATE.source_ref);
     expect(candidates[0]?.name).toBe(E2E_SOURCE_CANDIDATE.name);
+  });
+
+  it("Change-match ranks the user's own prior correction alongside the USDA candidate", async () => {
+    const mockFetch = createE2EMockFetch();
+    const { priorCorrections } = await listSourceCandidates(
+      apiSession,
+      E2E_SAVED_FOOD_ITEM_ID,
+      undefined,
+      mockFetch,
+    );
+    expect(priorCorrections).toHaveLength(1);
+    expect(priorCorrections[0]?.source_ref).toBe(
+      E2E_PRIOR_CORRECTION_CANDIDATE.source_ref,
+    );
+    // as_logged total for the item's own portion, not a per-100g density.
+    expect(priorCorrections[0]?.basis).toBe('as_logged');
+    expect(priorCorrections[0]?.calories).toBe(105);
+    // A macro the correction never supplied stays honestly unknown.
+    expect(priorCorrections[0]?.fat_g).toBeNull();
   });
 
   it('re-resolve commits the same item with new provenance and recomputed calories', async () => {

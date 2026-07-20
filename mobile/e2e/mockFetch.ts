@@ -59,6 +59,8 @@ import {
   E2E_SAVED_FOOD_ITEM_ID,
   E2E_SAVED_FOOD_EDITED_ITEM,
   E2E_SOURCE_CANDIDATE,
+  E2E_PRIOR_CORRECTION_CANDIDATE,
+  E2E_PRIOR_CORRECTION_APPLIED_ITEM,
   E2E_RERESOLVED_ITEM,
 } from './fixtures';
 import {
@@ -608,17 +610,33 @@ export function createE2EMockFetch(): typeof fetch {
     }
 
     // /derived-items/food/{id}/source-candidates — the Change-match panel's
-    // alternative-source list (FTY-093). Returns one candidate the correction
-    // flow re-resolves to. Matched before the generic derived-items paths.
+    // alternative-source list (FTY-093). Returns one guessed candidate the
+    // correction flow re-resolves to, plus the user's own prior correction
+    // (FTY-407/411), which the panel ranks above it. Matched before the generic
+    // derived-items paths.
     if (pathEnd.endsWith('/source-candidates')) {
-      return json({ candidates: [E2E_SOURCE_CANDIDATE] });
+      return json({
+        candidates: [E2E_SOURCE_CANDIDATE],
+        prior_corrections: [E2E_PRIOR_CORRECTION_CANDIDATE],
+      });
     }
 
     // /derived-items/food/{id}/re-resolve — commit the Change-match pick
     // (FTY-093/183). Returns the same item with honest new provenance and
     // server-recomputed values, which the sheet + timeline re-render in place.
+    // A `prior_correction:` reference takes the FTY-411 apply branch, so it
+    // resolves to the user's own corrected value ("Your correction"), not the
+    // guessed USDA row — mirroring the two server-side outcomes (FTY-407).
     if (pathEnd.endsWith('/re-resolve')) {
-      return json(E2E_RERESOLVED_ITEM);
+      const sourceRef =
+        typeof init?.body === 'string'
+          ? ((JSON.parse(init.body) as { source_ref?: string }).source_ref ?? '')
+          : '';
+      return json(
+        sourceRef.startsWith('prior_correction:')
+          ? E2E_PRIOR_CORRECTION_APPLIED_ITEM
+          : E2E_RERESOLVED_ITEM,
+      );
     }
 
     // /food-suggestions — the FTY-340 quick-add ranking read (FTY-341 chip row).

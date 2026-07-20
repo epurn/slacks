@@ -16,6 +16,7 @@ import {
   inputValue,
   mount,
 } from "./todayTestUtils";
+import { sourceCandidates } from "@/testUtils/correctionCandidates";
 
 /**
  * FTY-263: the correction sheet's `detail` / `typeahead` / `confirm_apply`
@@ -94,18 +95,20 @@ describe("Correction sheet visual-review seam (FTY-263)", () => {
   it("opens correction.typeahead directly in change-match mode with candidates already loaded — no tap", async () => {
     setE2E(true);
     activateVisualReviewPreset("correction.typeahead", null);
-    const listSourceCandidates = jest.fn().mockResolvedValue([
-      {
-        source_type: "trusted_nutrition_database",
-        source_ref: "usda_fdc:171477",
-        name: "Chicken, grilled, USDA",
-        basis: "per_100g",
-        calories: 165,
-        protein_g: 31,
-        carbs_g: 0,
-        fat_g: 3.6,
-      },
-    ]);
+    const listSourceCandidates = jest.fn().mockResolvedValue(
+      sourceCandidates([
+        {
+          source_type: "trusted_nutrition_database",
+          source_ref: "usda_fdc:171477",
+          name: "Chicken, grilled, USDA",
+          basis: "per_100g",
+          calories: 165,
+          protein_g: 31,
+          carbs_g: 0,
+          fat_g: 3.6,
+        },
+      ]),
+    );
     const load = jest.fn().mockResolvedValue([]);
     const tree = mount(
       <TodayScreen

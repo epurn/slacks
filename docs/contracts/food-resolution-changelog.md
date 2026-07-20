@@ -19,6 +19,31 @@ estimator / contracts / backend-core / security-privacy lane (same owners as
 
 ## Version
 
+30 (FTY-407): **the correction sheet surfaces prior corrections as match candidates.**
+The mobile consumer of version 29's surface, added as **Mobile surfacing (FTY-407)**
+under the FTY-411 section; the two stale "mobile change deferred / no mobile change"
+notes are updated to point at it. No new DTO or endpoint: `listSourceCandidates`
+(`mobile/api/corrections.ts`) now reads **both** sibling lists from the one
+`source-candidates` response and returns `{ candidates, priorCorrections }` (a breaking
+client-side shape change from the bare array — pre-v1, no compatibility shim), and a
+picked prior correction applies through the existing `reResolveItem` using its
+`prior_correction:<content_hash>` reference. The Change-match panel renders a
+**"Your corrections"** group above **"Other matches"** — prior corrections are
+`as_logged` totals, not per-100g densities, so they are ranked and labelled separately
+rather than flattened into the guessed list — with the pencil provenance icon and a
+`… · Your correction` meta line (`, adjusted for this amount` when `rescaled`). An
+empty `prior_corrections` renders exactly as before (no headers, no added rows), and an
+unknown macro stays `null`/`—` rather than a fabricated `0`. The client provenance map
+gains the `prior_correction` source type ("Your correction") so an applied item no
+longer degrades to the unknown-source icon. Owner adds
+`mobile/api/corrections.ts`, `mobile/components/correction/ChangeMatchPanel.tsx`,
+`mobile/components/correction/useCorrectionSheet.ts`,
+`mobile/components/ui/ProvenanceIcon.tsx`. Covered by
+`mobile/api/corrections.test.ts`,
+`mobile/components/correction/ChangeMatchPanel.test.tsx`, and
+`mobile/components/CorrectionSheet.test.tsx`; running-app evidence in
+`docs/verification/FTY-407/`.
+
 29 (FTY-411): **prior corrections become a pickable candidate + apply surface.** The
 per-user prior-correction trail FTY-406 made authoritative at estimate time is now
 exposed on the "Change match" boundary and given a re-derivable apply path (new section

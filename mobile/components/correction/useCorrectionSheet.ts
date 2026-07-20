@@ -15,6 +15,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   listSourceCandidates as listSourceCandidatesApi,
   reResolveItem as reResolveItemApi,
+  type PickableCandidate,
+  type PriorCorrectionCandidate,
   type SourceCandidate,
 } from "@/api/corrections";
 import {
@@ -135,6 +137,11 @@ export function useCorrectionSheet({
 
   // ─── Change-match state ─────────────────────────────────────────────────────
   const [candidates, setCandidates] = useState<readonly SourceCandidate[]>([]);
+  // FTY-407: the acting user's own prior corrections for this item's name,
+  // ranked above the guessed-source `candidates`. Empty ⇒ no matching history.
+  const [priorCorrections, setPriorCorrections] = useState<
+    readonly PriorCorrectionCandidate[]
+  >([]);
   const [candidatesLoading, setCandidatesLoading] = useState(false);
   const [candidatesError, setCandidatesError] = useState<string | null>(null);
   const [matchQuery, setMatchQuery] = useState("");
@@ -181,6 +188,7 @@ export function useCorrectionSheet({
       setMode(defaultMode);
       setAmountError(null);
       setCandidates([]);
+      setPriorCorrections([]);
       setCandidatesError(null);
       setMatchQuery("");
       setReResolveError(null);
@@ -244,11 +252,13 @@ export function useCorrectionSheet({
       try {
         const results = await listCandidates(session, food.id, query || undefined);
         if (seq !== searchSeq.current) return; // superseded by a newer query
-        setCandidates(results);
+        setCandidates(results.candidates);
+        setPriorCorrections(results.priorCorrections);
       } catch (err) {
         if (seq !== searchSeq.current) return; // superseded by a newer query
         setCandidatesError(messageForError(err, "load alternatives"));
         setCandidates([]);
+        setPriorCorrections([]);
       } finally {
         if (seq === searchSeq.current) setCandidatesLoading(false);
       }
@@ -288,19 +298,23 @@ export function useCorrectionSheet({
   );
 
   const handlePickCandidate = useCallback(
-    async (candidate: SourceCandidate) => {
+    async (candidate: PickableCandidate) => {
       if (item.item_type !== "food") return;
       const food = item as DerivedFoodItemDTO;
       cancelPendingSearch();
       setReResolving(true);
       setReResolveError(null);
       try {
+        // A prior-correction candidate applies through the same re-resolve path:
+        // its `source_ref` (`prior_correction:<hash>`) is the re-derivable handle
+        // the server recognizes (FTY-411 apply branch).
         const updated = await reResolve(session, food.id, candidate.source_ref);
         setItem(updated);
         onItemChange?.(updated);
         setMode("normal");
         setMatchQuery("");
         setCandidates([]);
+        setPriorCorrections([]);
         fireCorrectionSaved();
       } catch (err) {
         setReResolveError(messageForError(err, "apply that match"));
@@ -316,6 +330,7 @@ export function useCorrectionSheet({
     setMode("normal");
     setMatchQuery("");
     setCandidates([]);
+    setPriorCorrections([]);
     setCandidatesError(null);
   }, [cancelPendingSearch]);
 
@@ -492,6 +507,7 @@ export function useCorrectionSheet({
     handleAmountStep,
     // Change match
     candidates,
+    priorCorrections,
     candidatesLoading,
     candidatesError,
     matchQuery,

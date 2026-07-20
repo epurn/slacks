@@ -20,6 +20,7 @@ import type { SourceCandidate } from "@/api/corrections";
 import type { DerivedFoodItemDTO, ItemSourceDTO } from "@/api/derivedItems";
 import type { ApiSession } from "@/state/session";
 import { cleanupReactTestRenderers, trackReactTestRenderer } from "@/testUtils/reactTestRenderer";
+import { sourceCandidates } from "@/testUtils/correctionCandidates";
 import { mockReduceMotion } from "@/testUtils/reduceMotion";
 
 jest.mock("@/theme/haptics", () => ({
@@ -102,7 +103,7 @@ function baseProps(overrides: Partial<CorrectionSheetBaseProps> = {}): Correctio
     onClose: jest.fn(),
     session: SESSION,
     editItem: jest.fn(),
-    listCandidates: jest.fn().mockResolvedValue([]),
+    listCandidates: jest.fn().mockResolvedValue(sourceCandidates()),
     reResolve: jest.fn(),
     saveFood: jest.fn(),
     ...overrides,
@@ -195,10 +196,12 @@ describe("CorrectionSheet keyboard-avoidance", () => {
   });
 
   it("keeps the match/typeahead list present while the keyboard reports an inset", async () => {
-    const listCandidates = jest.fn().mockResolvedValue([
-      candidate({ name: "Turkey breast, roasted" }),
-      candidate({ name: "Turkey breast, raw", source_ref: "usda_fdc:888" }),
-    ]);
+    const listCandidates = jest.fn().mockResolvedValue(
+      sourceCandidates([
+        candidate({ name: "Turkey breast, roasted" }),
+        candidate({ name: "Turkey breast, raw", source_ref: "usda_fdc:888" }),
+      ]),
+    );
     const tree = await mount(
       <CorrectionSheet {...baseProps({ listCandidates })} e2eInitialMode="change-match" />,
     );
@@ -235,7 +238,7 @@ describe("CorrectionSheet keyboard-avoidance", () => {
   });
 
   it("scrolls the search field to the top (not the list end) when the keyboard rises", async () => {
-    const listCandidates = jest.fn().mockResolvedValue([candidate()]);
+    const listCandidates = jest.fn().mockResolvedValue(sourceCandidates([candidate()]));
     const tree = await mount(
       <CorrectionSheet {...baseProps({ listCandidates })} e2eInitialMode="change-match" />,
     );

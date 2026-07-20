@@ -595,9 +595,9 @@ it is per-user curated truth, not a shared source fact. The run records
 `prior_correction` in `source_refs`. The read-model source descriptor labels it
 "Your correction" so the client can render its provenance. The same per-user
 prior-correction trail is exposed as a **pickable re-match candidate + apply surface**
-by FTY-411 (see **Prior-Correction Candidate Surface + Apply (FTY-411)** below); the
-mobile consumers of that surface — the history-sourced typeahead (FTY-407) and the
-corrected-entry quick-add default (FTY-408) — remain deferred to their own lanes. No
+by FTY-411 (see **Prior-Correction Candidate Surface + Apply (FTY-411)** below), and
+consumed by the mobile correction sheet's match list (FTY-407 — see **Mobile surfacing
+(FTY-407)** under that section) and the corrected-entry quick-add default (FTY-408). No
 new correction row is written and the correction-writing path (FTY-051) and `re_match`
 pass are unchanged; this step only **reads** the trail.
 
@@ -626,9 +626,10 @@ correction sheet's "Change match" boundary and gives a picked candidate a re-der
 correction = 3" and have the corrected value applied, rather than re-deriving the wrong
 guess. It reuses FTY-406's resolver end-to-end (`match_prior_correction`,
 `backend/app/estimator/correction_resolution.py`), so a candidate/apply reproduces
-estimate-time resolution rather than re-implementing it. No mobile change (FTY-407/408),
-no change to estimate-time resolution logic, and no change to the USDA candidate
-provider's own behaviour.
+estimate-time resolution rather than re-implementing it. FTY-411 itself carried no
+mobile change, no change to estimate-time resolution logic, and no change to the USDA
+candidate provider's own behaviour; the mobile surfacing landed separately in FTY-407
+(**Mobile surfacing (FTY-407)** below).
 
 ### Candidate surface (list)
 
@@ -694,6 +695,36 @@ value; `corrections.md` → `is_edited` derivation). Issues no network egress.
 - **No new PII surface, no raw text.** The apply's evidence row stores the projected
   facts + content hash (mirroring FTY-406/`user_text`), never the raw diary phrase or
   item name; the reference is a content hash, not diary text; nothing new egresses.
+
+### Mobile surfacing (FTY-407)
+
+The correction sheet's **Change match** panel is the client consumer of the surface
+above. It invents no DTO or endpoint of its own: `listSourceCandidates`
+(`mobile/api/corrections.ts`) reads **both** sibling lists from the one
+`source-candidates` response — no second request — and returns them as
+`{ candidates, priorCorrections }`; picking either kind applies through the same
+`reResolveItem` call, since a prior correction's `source_ref`
+(`prior_correction:<content_hash>`) is the re-derivable handle the apply branch
+recognizes.
+
+Rendering follows the tier order rather than flattening the two lists together, because
+their facts are not comparable: a guessed candidate previews a **per-100g density**,
+while a prior correction is an **`as_logged` total** for the item's own portion.
+
+| Response | Panel renders |
+| --- | --- |
+| `prior_corrections` non-empty | a **"Your corrections"** group **above** the guessed matches — each row with the pencil provenance icon and `<kcal> · Your correction` (`…, adjusted for this amount` when `rescaled`) — then **"Other matches"** over the unchanged `candidates` |
+| `prior_corrections` empty (no matching history) | the guessed `candidates` exactly as before FTY-407: no section headers, no added rows |
+| both empty | the existing empty state ("No matches found…" / "No alternatives available.") |
+
+A macro the correction never supplied arrives as `null` and stays unknown through the
+client — rendered as `—`, never a fabricated `0`. An applied item comes back with
+`source_type = prior_correction` and `is_edited = false`, which the client's provenance
+map (`mobile/components/ui/ProvenanceIcon.tsx`) renders as the pencil icon with the
+read-model's "Your correction" label rather than the unknown-source fallback.
+
+Running-app evidence (light + dark candidate list, and the applied result) is in
+`docs/verification/FTY-407/`.
 
 ## Barcode Source (Open Food Facts) — FTY-060
 
