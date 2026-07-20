@@ -58,6 +58,25 @@ DEFAULT_MAX_PROVIDER_CALLS = 128
 #: here; the ~15s margin below 90s absorbs a typical in-flight call plus the commit.
 DEFAULT_RUN_DEADLINE_SECONDS = 75.0
 
+#: Reserved wall-clock headroom (seconds) below the hard ceiling for the FTY-371 degrade
+#: producer's **own** per-candidate model-prior calls (FTY-425). When a slow multi-item
+#: run crosses the soft deadline it stops resolving and falls forward to the degrade
+#: producer, which may spend one bounded model-prior call per remaining candidate — a
+#: rough estimate with **real, non-null macros** — *before* the hard ceiling. Those calls
+#: are only reachable if enough of the hard wall-clock budget is still unspent when the
+#: soft point trips, so the soft deadline is pinned exactly this far below the hard one
+#: (``DEFAULT_SOFT_RUN_DEADLINE_SECONDS`` below). Sized for a slow ``claude_code``-class
+#: CLI provider (~10–15 s per call, the FTY-371/FTY-425 dogfood casualty): ~3 fall-forward
+#: model-prior degrades fit before the hard ceiling, so a normal multi-item meal degrades
+#: with real macros (``degraded_primary``) instead of the resolution phase eating the whole
+#: budget and hard-breaching into the budget-free deterministic coarse prior
+#: (``degraded_budget_free``). Widening this from the FTY-371 shipped 30 s → 45 s is the
+#: FTY-425 fix: raising the *hard* ceiling only moves the red past the 90 s poll window
+#: (Non-Goal); reserving more of the existing hard budget for the good degrade path does
+#: not. A documented tunable, bounded by the hard ceiling staying under the 90 s poll
+#: window — a genuine runaway with no headroom left still degrades ``budget_free``.
+DEFAULT_DEGRADE_HEADROOM_SECONDS = 45.0
+
 #: The **soft** degradation point below the FTY-363 hard ceiling (FTY-371). A slow
 #: multi-component resolution that crosses either soft bound stops resolving *exactly*
 #: and falls forward to rough, budget-cheap degraded estimates for its remaining
@@ -66,13 +85,20 @@ DEFAULT_RUN_DEADLINE_SECONDS = 75.0
 #: breaching it and failing — a regression guard against the live
 #: ``run_wall_clock_deadline_exceeded`` casualty that rotates nondeterministically across
 #: dissimilar branded/homemade fixtures on a resource-constrained host (raising the hard
-#: ceiling only moves that red; graceful degradation is the fix). The soft bounds sit far
-#: enough below the hard ones to leave headroom for the degrade producer's own bounded
-#: per-candidate model-prior calls before the hard ceiling; when even that headroom is
-#: gone the producer degrades **without** a provider call. :meth:`soft_budget_reason`
-#: reports a crossing *without* raising — unlike the hard ceiling it is not a failure,
-#: just a signal to switch strategy — so the run stays alive.
-DEFAULT_SOFT_RUN_DEADLINE_SECONDS = 45.0
+#: ceiling only moves that red; graceful degradation is the fix). The soft deadline is
+#: pinned exactly :data:`DEFAULT_DEGRADE_HEADROOM_SECONDS` below the hard one (FTY-425), so
+#: the soft→hard gap **is** the reserved degrade headroom: crossing it early enough leaves
+#: room for the degrade producer's own bounded per-candidate model-prior calls before the
+#: hard ceiling; when even that headroom is gone the producer degrades **without** a
+#: provider call. :meth:`soft_budget_reason` reports a crossing *without* raising — unlike
+#: the hard ceiling it is not a failure, just a signal to switch strategy — so the run
+#: stays alive.
+DEFAULT_SOFT_RUN_DEADLINE_SECONDS = DEFAULT_RUN_DEADLINE_SECONDS - DEFAULT_DEGRADE_HEADROOM_SECONDS
+
+#: Soft **call**-count degradation point below the hard :data:`DEFAULT_MAX_PROVIDER_CALLS`.
+#: Wall-clock, not call count, is the binding constraint on a slow CLI provider (a normal
+#: meal makes far fewer than either bound), so this is unchanged by FTY-425; it still
+#: reserves ample call headroom for the fall-forward degrades below the hard call ceiling.
 DEFAULT_SOFT_MAX_PROVIDER_CALLS = 96
 
 #: Content-free, sanitized terminal-failure reasons persisted on the run's ``error``.
