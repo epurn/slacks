@@ -213,7 +213,7 @@ packaged-product brand when the item is a *named* product (`"Big Mac"` →
 `"McDonald's"`), and is left empty for a generic food (`"white rice"`). It is the
 signal the food step uses to route an item USDA/OFF cannot resolve to the
 official-source resolver (search + hardened fetch, then a model-prior fallback)
-instead of stopping at `needs_clarification` — see `food-resolution.md`
+instead of stopping at `needs_clarification` — see `food-resolution-official-source.md`
 (**Official-Source Resolution**). The model never invents a brand the user did not
 name; like every field it is stored as data, never interpreted.
 
