@@ -23,7 +23,13 @@ FoodData Central household weights / FDA RACC vicinity):
 - bread: one regular sandwich slice ≈ 30 g (USDA commercially-prepared bread
   slices run ~25-36 g);
 - toast: one slice ≈ 25 g (the same slice after toasting moisture loss);
-- butter: one pat ≈ 5 g, one stick ≈ 113 g (USDA household weights).
+- butter: one pat ≈ 5 g, one stick ≈ 113 g (USDA household weights);
+- deli meat (turkey / ham / chicken / bologna / salami): one sandwich slice
+  ≈ 28 g (USDA/FDA-RACC — a deli-meat slice is ~1 oz; the 2026-07-20 dogfood
+  "2 slices of deli turkey" costed a flat 100 g slice, FTY-418);
+- cheese (sliced mozzarella / American / cheddar / provolone / swiss): one
+  pre-sliced sandwich slice ≈ 22 g (USDA/FDA-RACC — pre-sliced sandwich cheese
+  runs ~19-28 g; "1 slice of mozzarella" must not cost a flat 100 g).
 
 Pure functions, no I/O, no LLM, bounded vocabulary — the same character as the
 serving math it backstops (:mod:`app.estimator.food_serving`).
@@ -74,6 +80,18 @@ COMMON_PORTIONS: Final[Mapping[str, CommonPortionSpec]] = {
     "bread": CommonPortionSpec(cue_grams={"slice": 30.0}, default_cue="slice"),
     "toast": CommonPortionSpec(cue_grams={"slice": 25.0}, default_cue="slice"),
     "butter": CommonPortionSpec(cue_grams={"pat": 5.0, "stick": 113.0}, default_cue="pat"),
+    # Deli meat: one sandwich slice ≈ 28 g (~1 oz). Keyed by the meat's head
+    # noun so "2 slices of deli turkey" (head "turkey") resolves (FTY-418).
+    "turkey": CommonPortionSpec(cue_grams={"slice": 28.0}, default_cue="slice"),
+    "ham": CommonPortionSpec(cue_grams={"slice": 28.0}, default_cue="slice"),
+    "bologna": CommonPortionSpec(cue_grams={"slice": 28.0}, default_cue="slice"),
+    "salami": CommonPortionSpec(cue_grams={"slice": 28.0}, default_cue="slice"),
+    # Sliced sandwich cheese: one pre-sliced slice ≈ 22 g (FTY-418).
+    "mozzarella": CommonPortionSpec(cue_grams={"slice": 22.0}, default_cue="slice"),
+    "cheese": CommonPortionSpec(cue_grams={"slice": 22.0}, default_cue="slice"),
+    "cheddar": CommonPortionSpec(cue_grams={"slice": 22.0}, default_cue="slice"),
+    "provolone": CommonPortionSpec(cue_grams={"slice": 22.0}, default_cue="slice"),
+    "swiss": CommonPortionSpec(cue_grams={"slice": 22.0}, default_cue="slice"),
 }
 
 

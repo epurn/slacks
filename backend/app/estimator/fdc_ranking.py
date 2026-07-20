@@ -46,6 +46,13 @@ _TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"[a-z0-9]+")
 #: calorie purposes (dehydrated banana is ~4x fresh). A row carrying one of
 #: these tokens is rejected unless the query states that form itself
 #: ("banana powder", "dried apricots"). A bounded documented tunable.
+#:
+#: ``oil`` is the extracted-fat form (FTY-418): USDA "Oil, X" rows are ~884
+#: kcal/100 g of pure fat — the plain food's *oil*, not the food. A bare
+#: "mustard" that matched "Oil, mustard" costed 15 g at 132.6 kcal (≈13x real
+#: prepared mustard), the 2026-07-20 dogfood wrong-variant. A query stating the
+#: oil ("mustard oil", "olive oil") keeps the row through the same stated-form
+#: exemption every other rejected form uses.
 REJECTED_FORM_TOKENS: Final[frozenset[str]] = frozenset(
     {
         "dehydrated",
@@ -61,6 +68,7 @@ REJECTED_FORM_TOKENS: Final[frozenset[str]] = frozenset(
         "crisps",
         "babyfood",
         "dry",
+        "oil",
     }
 )
 

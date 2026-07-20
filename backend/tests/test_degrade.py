@@ -209,10 +209,13 @@ def test_budget_free_mode_makes_zero_provider_calls_and_still_resolves() -> None
         round(150.0 / 100.0 * COARSE_ENERGY_DENSITY_KCAL_PER_100G, 1)
     )
     assert item.calories > 0  # a real rough row, never a silent zero
-    # Macros are unknown, never invented as user-supplied zeroes.
-    assert item.protein_g is None
-    assert item.carbs_g is None
-    assert item.fat_g is None
+    # FTY-418: a resolved rough row carries macros (honestly rough, marked
+    # estimated), never a silent null — 150 g at the documented mixed-food split.
+    assert item.protein_g == pytest.approx(15.0)  # 150g * 10/100g
+    assert item.carbs_g == pytest.approx(37.5)  # 150g * 25/100g
+    assert item.fat_g == pytest.approx(10.1)  # 150g * 6.7/100g
+    assert item.field_provenance is not None
+    assert item.field_provenance["protein_g"] == "estimated"
     labels = set(item.assumptions)
     assert "degraded:run_provider_call_budget_exceeded" in labels
     assert DEGRADED_DEFAULT_SERVING_ASSUMPTION in labels
@@ -234,6 +237,28 @@ def test_budget_free_amountless_candidate_uses_a_coarse_default_serving() -> Non
     assert DEGRADED_DEFAULT_SERVING_ASSUMPTION in item.assumptions
 
 
+def test_budget_free_counted_everyday_food_uses_a_food_aware_portion() -> None:
+    # FTY-418: even the emergency provider-free prior must give a counted everyday
+    # food a realistic per-slice gram mass ("1 slice of mozzarella" ≈ 22 g), never a
+    # flat 100 g slice, and carry macros rather than a silent null.
+    provider = FakeProvider(responses=[])
+    producer = DegradeProducer(provider=provider)
+    context = _context()
+    candidate = CandidateDraft(name="mozzarella", quantity_text="1 slice", unit="slice", amount=1.0)
+
+    item = producer.degrade_food_candidate(
+        context, candidate, reason=WALL_CLOCK_DEADLINE_EXCEEDED, index=0, budget_free=True
+    )
+
+    assert provider.prompts == []
+    assert item.grams == pytest.approx(22.0)  # food-aware slice, not a flat 100 g
+    assert item.calories == pytest.approx(44.0)  # 22g * 200/100g
+    assert item.protein_g is not None and item.protein_g > 0
+    # The food-aware portion label replaces the coarse default-serving assumption.
+    assert any("estimated_common_portion:mozzarella" in a for a in item.assumptions)
+    assert DEGRADED_DEFAULT_SERVING_ASSUMPTION not in item.assumptions
+
+
 def test_primary_falls_back_to_the_deterministic_prior_when_the_estimate_is_unusable() -> None:
     # The provider is consulted (one call) but returns an unresolved disposition, so the
     # producer degrades to the deterministic coarse prior rather than failing the entry.
@@ -250,7 +275,7 @@ def test_primary_falls_back_to_the_deterministic_prior_when_the_estimate_is_unus
 
     assert len(provider.prompts) == 1
     assert item.calories == pytest.approx(300.0)  # coarse prior: 150g * 200/100g
-    assert item.protein_g is None
+    assert item.protein_g == pytest.approx(15.0)  # FTY-418: rough macros, never null
     assert DEGRADED_DEFAULT_SERVING_ASSUMPTION in item.assumptions
 
 

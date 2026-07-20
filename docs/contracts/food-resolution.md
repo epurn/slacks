@@ -167,7 +167,10 @@ Resolution checks the global `products` cache by `(source, query_key)` first; on
 miss it calls FDC `/foods/search` (data types `Foundation` / `SR Legacy`, whose
 nutrient values are **per 100 g**), selects the **best-ranked compatible**
 energy-bearing result (FTY-254, `fdc_ranking.py` — head-noun identity match, no
-unstated density-changing form, stated added ingredients present; preferred by
+unstated density-changing form — the dehydrated/dried/powder/flour/concentrate
+family plus the extracted-**`oil`** form (FTY-418): a plain "mustard" rejects
+"Oil, mustard" (884 kcal/100g of pure fat) unless the query itself states the oil —
+stated added ingredients present; preferred by
 fewest unstated part-of-food tokens (FTY-388 — `white`/`yolk`/`shell`), then
 fewest unstated demoted forms, then query-token coverage, then relevance order —
 see **Version 25**, **Version 15**), maps it to canonical per-100g facts, and
@@ -244,9 +247,12 @@ quantity to grams, v1-simple per the story scope:
 Returns `None` when none apply — e.g. a count with no known serving size, or an
 unrecognised/absent quantity. Before that gap routes onward, a **stated count of
 an everyday common food** (FTY-254 — banana, egg, bread/toast slice, butter
-pat/stick, with small/medium/large/jumbo size cues read from the parse) resolves
+pat/stick, with small/medium/large/jumbo size cues read from the parse; plus
+FTY-418 deli-meat slices — turkey/ham/bologna/salami ≈ 28 g — and sliced-cheese
+slices — mozzarella/cheese/cheddar/provolone/swiss ≈ 22 g) resolves
 via the documented common-portion table (`common_portions.py`, published USDA
-household weights), keeping the trusted-source facts and recording an explicit
+household weights / FDA RACC vicinity), keeping the trusted-source facts and
+recording an explicit
 `estimated_common_portion:<food> <cue> <grams> g` assumption on the evidence row.
 The table declines a **composed/assembled dish** (FTY-368 — sandwich, wrap,
 burger, taco, … by closed vocabulary): the dish is the sum of its parts, so one
@@ -758,6 +764,18 @@ when no provider headroom remains, it produces a deterministic rough estimate
 facts, or a documented deterministic prior — so degradation can never itself
 block on the exhausted budget. The concrete producer is the downstream
 **FTY-371**; the worker routing that invokes it is **FTY-372**.
+
+The **documented deterministic prior** (FTY-418) is food-aware, so even this rare
+last-ditch is never a flat-lined `2 cal/g + null macros + 100 g` row: it resolves a
+counted everyday food through the common-portion table above (a mozzarella slice
+≈ 22 g, a deli-turkey slice ≈ 28 g — never a blanket 100 g default serving), and it
+carries a documented mixed-food macro split (≈ 50 % carbohydrate / 20 % protein /
+30 % fat by energy, Atwater-consistent) alongside the coarse energy-density prior,
+marked `estimated` per field — a resolved rough row carries macros, never a silent
+`null` (**Macros are never silently null for a resolved food**). The coarse
+energy-density prior stays a genuine emergency (true budget exhaustion); the meal
+flat-lined in the 2026-07-20 dogfood was a per-run wall-clock ceiling **tail
+event**, not the common outcome — a healthy re-run resolves each item.
 
 ### Persistence
 

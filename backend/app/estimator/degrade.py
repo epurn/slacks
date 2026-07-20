@@ -31,6 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
+from app.estimator.common_portions import resolve_common_portion_grams
 from app.estimator.evidence_utils import _content_hash, _record_source_ref
 from app.estimator.food_serving import NutritionFacts, resolve_grams
 from app.estimator.interpretation_tools import add_evidence_record, evidence_status_labels
@@ -76,6 +77,16 @@ COARSE_DEFAULT_SERVING_GRAMS = 100.0
 #: inside the per-100g plausibility bound (``food-resolution.md``: ≤ 900 kcal/100g) —
 #: documented rough and honestly labelled, never presented as a trusted per-100g fact.
 COARSE_ENERGY_DENSITY_KCAL_PER_100G = 200.0
+
+#: Documented per-100g macro split for the coarse energy-density prior (FTY-418). A
+#: typical mixed food splits its energy ≈ 50 % carbohydrate / 20 % protein / 30 % fat;
+#: at 200 kcal/100g that is 25 g carbs, 10 g protein, 6.7 g fat (Atwater-consistent:
+#: 25·4 + 10·4 + 6.7·9 ≈ 200). A resolved rough estimate must carry macros rather than
+#: a silent ``null`` (``food-resolution.md``: a tier that produces calories produces
+#: macros); these are honestly-rough, marked ``estimated``, and scale with the grams.
+COARSE_PROTEIN_PER_100G = 10.0
+COARSE_CARBS_PER_100G = 25.0
+COARSE_FAT_PER_100G = 6.7
 
 #: Content-free provenance labels for a budget/transience-degraded estimate.
 DEGRADED_DEFAULT_SERVING_ASSUMPTION = "degraded_default_serving"
@@ -213,34 +224,61 @@ class DegradeProducer:
     ) -> ResolvedFoodItem:
         """A coarse, provider-free rough estimate — the always-available last resort.
 
-        Resolves the logged quantity to grams when the deterministic serving math can,
-        else assumes a coarse default serving, and costs it at a documented coarse
-        energy-density prior. Macros are left **unknown** (``None``) rather than invented,
-        with per-field provenance marking calories estimated. Bounded by construction, so
-        it always yields a plausible ``resolved`` row and never asks or fails.
+        Resolves the logged quantity to a **food-aware** gram mass — deterministic
+        serving math first, then the documented common-portion table (FTY-418: "1 slice
+        of mozzarella" ≈ 22 g, "2 slices of deli turkey" ≈ 28 g each — never a blanket
+        100 g) — and only assumes a coarse default serving when neither knows the food.
+        It costs that at a documented coarse energy-density prior with a documented
+        mixed-food macro split, so even this rare emergency estimate is never a
+        flat-lined ``2 cal/g + null macros + 100 g`` row (FTY-418). Macros are honestly
+        rough, marked ``estimated`` per field. Bounded by construction, so it always
+        yields a plausible ``resolved`` row and never asks or fails.
         """
 
         _record_source_ref(context, MODEL_PRIOR_SOURCE)
+        portion_assumption: str | None = None
         grams = resolve_grams(
             unit=candidate.unit,
             amount=candidate.amount,
             quantity_text=candidate.quantity_text,
-            default_serving_g=COARSE_DEFAULT_SERVING_GRAMS,
+            default_serving_g=None,
         )
+        if grams is None:
+            # A stated count of an everyday food ("1 slice of mozzarella") resolves to a
+            # realistic per-food gram mass from the documented common-portion table
+            # rather than a blanket default serving.
+            portion = resolve_common_portion_grams(
+                name=candidate.name,
+                unit=candidate.unit,
+                amount=candidate.amount,
+                quantity_text=candidate.quantity_text,
+            )
+            if portion is not None:
+                grams = portion.grams
+                portion_assumption = portion.assumption
         if grams is None:
             grams = _default_serving_grams(candidate, COARSE_DEFAULT_SERVING_GRAMS)
         if grams is None:
             grams = COARSE_DEFAULT_SERVING_GRAMS
         grams = round(grams, 3)
-        calories = round(grams / 100.0 * COARSE_ENERGY_DENSITY_KCAL_PER_100G, 1)
-        # Fingerprint the coarse canonical facts (no user data); macros are unknown, so
-        # they are hashed as zero while the persisted macro fields stay ``None``.
+        scale = grams / 100.0
+        calories = round(scale * COARSE_ENERGY_DENSITY_KCAL_PER_100G, 1)
+        protein_g = round(scale * COARSE_PROTEIN_PER_100G, 1)
+        carbs_g = round(scale * COARSE_CARBS_PER_100G, 1)
+        fat_g = round(scale * COARSE_FAT_PER_100G, 1)
+        # Fingerprint the coarse canonical facts (no user data).
         content_hash = _content_hash(
             MODEL_PRIOR_SOURCE,
             NutritionFacts(
-                calories=COARSE_ENERGY_DENSITY_KCAL_PER_100G, protein_g=0.0, carbs_g=0.0, fat_g=0.0
+                calories=COARSE_ENERGY_DENSITY_KCAL_PER_100G,
+                protein_g=COARSE_PROTEIN_PER_100G,
+                carbs_g=COARSE_CARBS_PER_100G,
+                fat_g=COARSE_FAT_PER_100G,
             ),
         )
+        # A food-aware portion replaces the coarse default-serving label; a genuine
+        # fall-through to the coarse serving keeps the default-serving assumption.
+        serving_label = portion_assumption or DEGRADED_DEFAULT_SERVING_ASSUMPTION
         return ResolvedFoodItem(
             name=candidate.name,
             quantity_text=candidate.quantity_text,
@@ -248,25 +286,25 @@ class DegradeProducer:
             amount=candidate.amount,
             grams=grams,
             calories=calories,
-            protein_g=None,
-            carbs_g=None,
-            fat_g=None,
+            protein_g=protein_g,
+            carbs_g=carbs_g,
+            fat_g=fat_g,
             product_id=None,
             source_type=MODEL_PRIOR_SOURCE_TYPE,
             source_ref=MODEL_PRIOR_SOURCE,
             content_hash=content_hash,
             fetched_at=datetime.now(UTC),
             calories_per_100g=COARSE_ENERGY_DENSITY_KCAL_PER_100G,
-            protein_per_100g=None,
-            carbs_per_100g=None,
-            fat_per_100g=None,
-            assumptions=(_DETERMINISTIC_PRIOR_ASSUMPTION, DEGRADED_DEFAULT_SERVING_ASSUMPTION),
+            protein_per_100g=COARSE_PROTEIN_PER_100G,
+            carbs_per_100g=COARSE_CARBS_PER_100G,
+            fat_per_100g=COARSE_FAT_PER_100G,
+            assumptions=(_DETERMINISTIC_PRIOR_ASSUMPTION, serving_label),
             basis=FactBasis.PER_100G.value,
             field_provenance={
                 "calories": "estimated",
-                "protein_g": "unknown",
-                "carbs_g": "unknown",
-                "fat_g": "unknown",
+                "protein_g": "estimated",
+                "carbs_g": "estimated",
+                "fat_g": "estimated",
             },
         )
 

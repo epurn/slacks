@@ -19,6 +19,28 @@ estimator / contracts / backend-core / security-privacy lane (same owners as
 
 ## Version
 
+32 (FTY-418): loosely-described everyday foods resolve to real per-food nutrition
+with food-aware portions. Three normative changes: (1) the FDC/common-food
+density-changing **form gate** (`fdc_ranking.REJECTED_FORM_TOKENS`) now rejects the
+extracted-**`oil`** form — a bare "mustard" no longer matches "Oil, mustard"
+(884 kcal/100g of pure fat, ~13x real prepared mustard); a query stating the oil
+("mustard oil", "olive oil") keeps the row through the same stated-form exemption
+every other rejected form uses. (2) The **common-portion table**
+(`common_portions.py`) gains deli-meat (turkey/ham/bologna/salami ≈ 28 g/slice) and
+sliced-cheese (mozzarella/cheese/cheddar/provolone/swiss ≈ 22 g/slice) sandwich
+slices, so "2 slices of deli turkey" / "1 slice of mozzarella" resolve to a
+food-aware gram mass instead of a blanket default serving. (3) The **budget-free
+deterministic degrade prior** (`degrade.py`, the genuine last-ditch after a per-run
+ceiling breach) is now food-aware: it resolves counted everyday foods through the
+common-portion table (never a flat 100 g slice) and carries a documented
+mixed-food macro split (≈ 50 % carb / 20 % protein / 30 % fat by energy,
+Atwater-consistent), marked `estimated`, so a degraded resolved row is never a
+flat `2 cal/g + null macros + 100 g` line. The coarse energy-density prior stays a
+rare emergency; no new source tier, provider, DTO, or contract shape. Diagnosis:
+the reported flat-lined meal was a per-run **wall-clock ceiling** tail event
+(`run_wall_clock_deadline_exceeded` → FTY-372 budget-free degrade for the whole
+meal), not the common outcome — a healthy re-run resolves each item.
+
 31 (FTY-414, contract only): the **Prior-Correction Resolution (FTY-406)** and
 **Prior-Correction Candidate Surface + Apply (FTY-411)** sections (with their
 subsections, including the FTY-407 **Mobile surfacing** subsection) were
