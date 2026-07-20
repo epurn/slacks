@@ -62,14 +62,23 @@ brand)" — extract that marker into brand (name "chicken strips", brand \
 "Compliments") instead of leaving it in the name or the quantity phrase. Leave \
 brand empty for a generic food (e.g. "white rice", "an apple"). Never invent a \
 brand the user did not name.
+- Extract EVERY distinct food and exercise item the entry describes; never drop an \
+item because it is hard to cost or because a number is attached to it. In particular, \
+the item a calorie figure describes ("half a 300 calorie sub bun") is itself a food \
+item and must appear in items — never fold it into event_name or another item.
 - Do not invent calories, macros, or energy values — later steps resolve those. \
 BUT when the user *explicitly states* a nutrition fact for an item — a calorie total \
 ("580 cals", "580 calories", "580 kcal", "about 580 cals") and/or macro grams ("35g \
 protein", "30 g carbs") — copy those exact stated numbers into that item's \
-stated_calories / stated_protein_g / stated_carbs_g / stated_fat_g fields. These are \
-the as-logged totals for that one item, transcribed verbatim; leave a field null when \
-the user did not state it, never synthesize a number the user did not give, and never \
-copy a value from one item onto another.
+stated_calories / stated_protein_g / stated_carbs_g / stated_fat_g fields. A calorie \
+figure that DESCRIBES the item ("300 calorie sub bun", "a 200-calorie bar") is the \
+energy of ONE whole unit of that item: put that per-unit number in stated_calories \
+verbatim and put the separate quantity in amount ("half" → amount 0.5, "two" → amount \
+2) — do NOT pre-multiply the calories by the quantity yourself; a later step scales \
+them. Only when the stated number is already the total for everything eaten (a bare \
+"(580 cals)" on a single item) is it the whole-item total. Leave a field null when the \
+user did not state it, never synthesize a number the user did not give, and never copy \
+a value from one item onto another.
 - Estimate-first: when the user names a food or exercise but leaves a quantity \
 unspecified, infer the typical or default portion implied by the structure given. \
 Use these anchors: explicit counts ("3 sandwiches", "6 crackers"); named or \

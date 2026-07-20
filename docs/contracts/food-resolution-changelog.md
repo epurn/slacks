@@ -19,6 +19,23 @@ estimator / contracts / backend-core / security-privacy lane (same owners as
 
 ## Version
 
+34 (FTY-419): a stated calorie figure is trusted as a **per-unit anchor** that the
+item's count/fraction quantity modifier scales, not an unconditional as-logged total.
+`user_text_step._anchor_quantity` reads the candidate's `amount` (defaulting to 1)
+and multiplies the stated calories and any stated macros by it, so "half a 300 calorie
+sub bun" (`amount 0.5`) resolves to `300 × 0.5 = 150` kcal, "2×" doubles it, and a
+stated total against a **measured** mass/volume portion ("100 g chips, 500 cals") is
+left unscaled (`_is_measured_unit`). The anchor still **hard-overrides** an independent
+estimate for the field(s) the user gave, missing macros are still estimated (now from
+the scaled energy), and a scaled anchor records a content-free `calorie_anchor:` provenance
+assumption (numbers only, no raw text). The parse prompt is updated so the model transcribes
+the per-unit calorie descriptor verbatim into `stated_calories` with the quantity in
+`amount` (never pre-multiplying), and enumerates every described item — the item a calorie
+figure describes is a food item, never folded into `event_name`. No schema, migration, DTO,
+or source-tier change: `stated_calories` / `amount` are the existing FTY-042/279 fields and
+the `evidence_sources` shapes are unchanged. A deliberate pre-v1 refinement of the FTY-279
+as-logged semantics.
+
 33 (FTY-426, contract only): the **Official-Source Fetch Boundary (FTY-078)** and
 **Official-Source Resolution (FTY-062)** sections (with all their subsections — the
 `OfficialFetchSettings` config, SSRF/egress policy, egress diagnostics; the
