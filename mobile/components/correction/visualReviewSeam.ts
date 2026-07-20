@@ -14,7 +14,9 @@
  *     `Make it exact` audit presets `correction.exact_eligible`,
  *     `correction.exact_choose`, `correction.exact_barcode_exact`,
  *     `correction.exact_barcode_fallback`, `correction.exact_no_proposal`,
- *     `correction.exact_label`, and `correction.exact_applied` (FTY-313) —
+ *     `correction.exact_label`, and `correction.exact_applied` (FTY-313), plus
+ *     `correction.prior_correction` (FTY-407), the change-match panel for an item
+ *     whose name the user has corrected before —
  *     through FTY-247's registration API ({@link registerVisualReviewPreset}),
  *     from correction-owned code, without editing the shared registry or
  *     `presets.ts`;
@@ -43,6 +45,9 @@ import {
   E2E_CORRECTION_ITEM,
   E2E_CORRECTION_RAW_TEXT,
   E2E_CORRECTION_SUMMARY,
+  E2E_PRIOR_CORRECTION_APPLIED_ITEM,
+  E2E_PRIOR_CORRECTION_CANDIDATE,
+  E2E_SOURCE_CANDIDATE,
 } from "@/e2e/fixtures";
 import {
   E2E_EXACT_APPLIED_ENTRY,
@@ -63,6 +68,7 @@ import {
   registerVisualReviewPreset,
   useVisualReviewCore,
   type VisualReviewFetchContext,
+  type VisualReviewResponse,
 } from "@/e2e/visualReview";
 
 import type { ExactEvidenceCaptureInjectables } from "./ExactEvidencePanel";
@@ -72,6 +78,11 @@ import type { ExactEvidenceSeed } from "./useExactEvidence";
 /** Match a GET request whose path ends with `suffix`. */
 function get(suffix: string): (ctx: VisualReviewFetchContext) => boolean {
   return (ctx) => ctx.method === "GET" && ctx.pathEnd.endsWith(suffix);
+}
+
+/** Match a POST request whose path ends with `suffix` (FTY-407). */
+function post(suffix: string): (ctx: VisualReviewFetchContext) => boolean {
+  return (ctx) => ctx.method === "POST" && ctx.pathEnd.endsWith(suffix);
 }
 
 /** The label-capture `takePhoto` seam for `correction.exact_label`: the camera-less
@@ -92,6 +103,14 @@ interface SeamPreset {
   readonly exactSeed?: ExactEvidenceSeed;
   /** FTY-313: injected `takePhoto` for the label-capture-from-correction shot. */
   readonly labelTakePhoto?: () => Promise<{ uri: string }>;
+  /**
+   * FTY-407: extra fetch overrides this preset alone installs, on top of the
+   * shared entry/event/summary seeds every correction preset gets. Scoping them
+   * per-preset is what lets `correction.prior_correction` seed a
+   * `prior_corrections` list without changing the shared E2E mock — and so
+   * without changing what `correction.typeahead` renders.
+   */
+  readonly responses?: readonly VisualReviewResponse[];
 }
 
 /** A trusted-item preset (FTY-263) over the shared synthetic Oatmeal entry. */
@@ -127,6 +146,33 @@ const PRESETS: Readonly<Record<string, SeamPreset>> = {
   "correction.detail": correctionPreset("normal"),
   "correction.typeahead": correctionPreset("change-match"),
   "correction.confirm_apply": correctionPreset("override"),
+
+  // FTY-407: the same change-match panel, but for an item whose normalized name
+  // the user has corrected before — so FTY-411's `prior_corrections` list is
+  // non-empty and the panel shows a "Your corrections" group ranked above the
+  // guessed USDA match. Seeded here rather than in the shared E2E mock so
+  // `correction.typeahead` above keeps rendering the guessed-only list it always
+  // has (its screenshots are the no-history control for this one).
+  //
+  // The seeded `/re-resolve` answers with the applied prior correction: in this
+  // preset the only pickable history row is that one, so the response needs no
+  // body inspection (preset matchers see method + path only).
+  "correction.prior_correction": {
+    ...correctionPreset("change-match"),
+    responses: [
+      {
+        match: post("/source-candidates"),
+        body: {
+          candidates: [E2E_SOURCE_CANDIDATE],
+          prior_corrections: [E2E_PRIOR_CORRECTION_CANDIDATE],
+        },
+      },
+      {
+        match: post("/re-resolve"),
+        body: E2E_PRIOR_CORRECTION_APPLIED_ITEM,
+      },
+    ],
+  },
 
   // FTY-313 `Make it exact` audit presets.
   // Normal detail sheet on a low-trust item: the `Make it exact` nudge is visible.
@@ -179,6 +225,10 @@ for (const [name, preset] of Object.entries(PRESETS)) {
     route: "/",
     settledPath: "/",
     responses: [
+      // Preset-specific overrides go first: `resolveVisualReviewFetch` answers
+      // with the first match, so these win over both the shared seeds below and
+      // the default E2E mock (FTY-407).
+      ...(preset.responses ?? []),
       { match: get("/log-events/by-date"), body: [preset.entry] },
       { match: get("/log-events"), body: [preset.event] },
       { match: get("/daily-summary"), body: preset.summary },

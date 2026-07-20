@@ -50,7 +50,6 @@ import {
   E2E_SAVED_FOOD_ITEM_ID,
   E2E_SAVED_FOOD_EDITED_ITEM,
   E2E_SOURCE_CANDIDATE,
-  E2E_PRIOR_CORRECTION_CANDIDATE,
   E2E_RESOLVE_RAW_TEXT,
   E2E_RESOLVE_EVENT_ID,
   E2E_RESOLVE_ITEM,
@@ -811,7 +810,11 @@ describe('FTY-183 correction flow: stateful mock endpoints', () => {
     expect(candidates[0]?.name).toBe(E2E_SOURCE_CANDIDATE.name);
   });
 
-  it("Change-match ranks the user's own prior correction alongside the USDA candidate", async () => {
+  it('the shared mock offers no prior corrections — that is the default state', async () => {
+    // FTY-407: the history surface is seeded by the `correction.prior_correction`
+    // preset alone (components/correction/visualReviewSeam.ts). The shared mock
+    // stays on the no-history path so every other correction preset renders the
+    // change-match panel exactly as it did before this story.
     const mockFetch = createE2EMockFetch();
     const { priorCorrections } = await listSourceCandidates(
       apiSession,
@@ -819,15 +822,7 @@ describe('FTY-183 correction flow: stateful mock endpoints', () => {
       undefined,
       mockFetch,
     );
-    expect(priorCorrections).toHaveLength(1);
-    expect(priorCorrections[0]?.source_ref).toBe(
-      E2E_PRIOR_CORRECTION_CANDIDATE.source_ref,
-    );
-    // as_logged total for the item's own portion, not a per-100g density.
-    expect(priorCorrections[0]?.basis).toBe('as_logged');
-    expect(priorCorrections[0]?.calories).toBe(105);
-    // A macro the correction never supplied stays honestly unknown.
-    expect(priorCorrections[0]?.fat_g).toBeNull();
+    expect(priorCorrections).toEqual([]);
   });
 
   it('re-resolve commits the same item with new provenance and recomputed calories', async () => {

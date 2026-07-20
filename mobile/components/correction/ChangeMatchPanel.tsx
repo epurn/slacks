@@ -24,6 +24,9 @@ import { DisplayText } from "@/components/ui/DisplayText";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { radius, spacing, typeScale, type ColorPalette } from "@/theme";
 
+/** Leading provenance-slot width, shared by the icon and the guessed-row spacer. */
+const ICON_SIZE = 16;
+
 export function ChangeMatchPanel({
   query,
   onQueryChange,
@@ -130,8 +133,12 @@ export function ChangeMatchPanel({
                     disabled={reResolving}
                     accessibilityState={{ disabled: reResolving }}
                   >
-                    {/* Provenance, always on: this value is the user's own. */}
-                    <AppIcon name="pencil" size={16} color={colors.textMuted} />
+                    {/* Provenance, always on: this value is the user's own. The
+                        fixed-width slot is what the guessed rows below mirror
+                        with a spacer, so both groups' text starts on one grid. */}
+                    <View style={styles.candidateLeading}>
+                      <AppIcon name="pencil" size={ICON_SIZE} color={colors.textMuted} />
+                    </View>
                     <View style={styles.candidateInfo}>
                       <Text
                         style={[styles.candidateName, { color: colors.text }]}
@@ -176,6 +183,13 @@ export function ChangeMatchPanel({
                     disabled={reResolving}
                     accessibilityState={{ disabled: reResolving }}
                   >
+                    {/* Only when the grouped list is on screen: an empty slot the
+                        width of the prior-correction rows' pencil, so both
+                        groups' names/meta share one left edge. With no history
+                        there is no group to align to and the row is unchanged. */}
+                    {hasPriorCorrections ? (
+                      <View style={styles.candidateLeading} />
+                    ) : null}
                     <View style={styles.candidateInfo}>
                       <Text
                         style={[styles.candidateName, { color: colors.text }]}
@@ -274,6 +288,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     minHeight: 56,
     gap: spacing.sm,
+  },
+  // Fixed-width leading slot (FTY-407): the pencil on a prior-correction row, an
+  // empty spacer on a guessed row, so a grouped list keeps one text grid.
+  candidateLeading: {
+    width: ICON_SIZE,
+    alignItems: "center",
   },
   candidateInfo: {
     flex: 1,

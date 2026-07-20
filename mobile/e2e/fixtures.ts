@@ -522,7 +522,6 @@ export const E2E_PRIOR_CORRECTION_CANDIDATE: PriorCorrectionCandidate = {
   rescaled: false,
 };
 
-
 /**
  * The item after re-resolving to the USDA candidate: the **same** id and
  * log_event_id (so it reconciles back onto the same row — no duplicate), an

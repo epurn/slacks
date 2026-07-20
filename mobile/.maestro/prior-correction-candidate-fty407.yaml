@@ -1,0 +1,133 @@
+# FTY-407 visual-review flow: a food the user has corrected before surfaces as a
+# top-ranked "Your corrections" candidate in the change-match panel.
+#
+# Uses the correction seam's own `correction.prior_correction` preset
+# (components/correction/visualReviewSeam.ts), which opens the sheet straight in
+# change-match mode over the synthetic "Oatmeal" entry AND seeds its own
+# source-candidates response with one `prior_corrections` entry. That seeding is
+# preset-scoped on purpose: the shared E2E mock still answers with the
+# guessed-only list, so `correction.typeahead` (captured in
+# correction-visual-review-seam.yaml) stays the untouched no-history control.
+#
+# The panel is a pure function of the seeded response, so this flow opens the
+# preset and screenshots the settled frame — no scripted tap builds the state.
+#
+# iOS marker scope (FTY-272): change-match opens at NativeSheet's large, DIMMED
+# detent, where iOS's native presentation does not expose the in-modal subtree to
+# the accessibility tree at all (ratified in docs/verification/FTY-263/README.md)
+# — so the `visual-review-settled:` wait is Android-only, exactly as the sibling
+# correction-visual-review-seam.yaml does it. iOS opens the same preset and
+# screenshots it after confirming the sheet itself is up.
+#
+# Bundle ID matches app.json so a directory-level Maestro run launches the app
+# under test reliably.
+appId: com.slacks
+---
+# ── Light ──────────────────────────────────────────────────────────────────
+# Relaunch before each preset: a native sheet is a real presented
+# UIViewController, and activating a new preset while one is still on screen
+# races its dismissal against the next presentation (see the note in
+# correction-visual-review-seam.yaml).
+- launchApp:
+    clearState: false
+- openLink: "slacks://__visual-review?preset=correction.prior_correction&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "visual-review-settled:correction.prior_correction"
+          timeout: 20000
+      - assertVisible:
+          id: "visual-review-settled:correction.prior_correction"
+      # The group header and the corrected total (105 kcal for this item's own
+      # portion — never the guessed "/ 100g" copy) are the story's load-bearing
+      # copy. Android-only for the same FTY-272 reason as the marker above: on
+      # iOS the screenshot, not an a11y assertion, is the proof.
+      - assertVisible: "Your corrections"
+      - assertVisible:
+          text: ".*105 kcal.*Your correction.*"
+      - assertVisible: "Other matches"
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - extendedWaitUntil:
+          visible:
+            text: ".*Oatmeal.*"
+          timeout: 10000
+- takeScreenshot: fty407-prior-correction-candidate-light
+
+# ── Dark ───────────────────────────────────────────────────────────────────
+- launchApp:
+    clearState: false
+- openLink: "slacks://__visual-review?preset=correction.prior_correction&theme=dark"
+- runFlow: common/accept-open-in-slacks.yaml
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "visual-review-settled:correction.prior_correction"
+          timeout: 20000
+      - assertVisible:
+          id: "visual-review-settled:correction.prior_correction"
+      - assertVisible: "Your corrections"
+      - assertVisible: "Other matches"
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - extendedWaitUntil:
+          visible:
+            text: ".*Oatmeal.*"
+          timeout: 10000
+- takeScreenshot: fty407-prior-correction-candidate-dark
+
+# ── Apply ──────────────────────────────────────────────────────────────────
+# Picking the prior correction re-resolves the item to the user's own corrected
+# values. The preset seeds the /re-resolve response too, so this is a committed,
+# reproducible capture — not a hand-driven coordinate tap.
+#
+# Android drives the row by its VoiceOver label (iOS folds a row's labels into
+# one element, but at this dimmed detent iOS exposes no in-modal element at all —
+# FTY-272 — so there is nothing to select by text). iOS therefore taps the row's
+# position instead. That point tap is committed HERE, in the flow, rather than
+# performed by hand: the preset makes the row's position deterministic (one
+# prior correction, fixed sheet layout), so this capture reproduces on a rerun.
+- launchApp:
+    clearState: false
+- openLink: "slacks://__visual-review?preset=correction.prior_correction&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "visual-review-settled:correction.prior_correction"
+          timeout: 20000
+      - tapOn:
+          text: "Select Oatmeal, your correction, 105 kcal"
+      # The sheet is back in normal mode on the corrected value + provenance.
+      - extendedWaitUntil:
+          visible:
+            text: ".*Your correction.*"
+          timeout: 10000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - extendedWaitUntil:
+          visible:
+            text: ".*Oatmeal.*"
+          timeout: 10000
+      # The single "Your corrections" row, just under the search field.
+      - tapOn:
+          point: "50%,55%"
+      - waitForAnimationToEnd:
+          timeout: 5000
+- takeScreenshot: fty407-prior-correction-applied

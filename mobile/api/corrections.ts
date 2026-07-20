@@ -66,13 +66,13 @@ export interface SourceCandidate {
  */
 export interface PriorCorrectionCandidate {
   /** Always `prior_correction` — drives the "Your correction" provenance. */
-  readonly source_type: string;
+  readonly source_type: "prior_correction";
   /** Opaque `prior_correction:<hash>` reference the re-resolve operation accepts. */
   readonly source_ref: string;
   /** Display name for the corrected food entry. */
   readonly name: string;
   /** Always `as_logged` — the facts are the corrected total for the item's portion. */
-  readonly basis: string;
+  readonly basis: "as_logged";
   /** Corrected energy total for the item's portion (kcal). */
   readonly calories: number;
   /** Corrected protein total (g), or `null` when the correction never supplied it. */
@@ -89,6 +89,8 @@ export interface PriorCorrectionCandidate {
  * A candidate the correction sheet can apply via {@link reResolveItem} — either a
  * guessed source match or the user's own prior correction. Both carry the
  * `source_ref` handle re-resolve accepts; that is all the apply path needs.
+ * `PriorCorrectionCandidate.source_type` is the literal `"prior_correction"`, so
+ * a caller that ever needs to tell the two apart can narrow on that discriminant.
  */
 export type PickableCandidate = SourceCandidate | PriorCorrectionCandidate;
 

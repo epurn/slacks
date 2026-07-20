@@ -4,7 +4,12 @@ import { TodayScreen } from "@/components/TodayScreen";
 import {
   __deactivateVisualReview,
   getVisualReviewCore,
+  resolveVisualReviewFetch,
 } from "@/e2e/visualReview/session";
+import {
+  E2E_PRIOR_CORRECTION_CANDIDATE,
+  E2E_SOURCE_CANDIDATE,
+} from "@/e2e/fixtures";
 import { activateVisualReviewPreset } from "@/e2e/visualReview";
 import { mockReduceMotion } from "@/testUtils/reduceMotion";
 
@@ -16,7 +21,6 @@ import {
   inputValue,
   mount,
 } from "./todayTestUtils";
-import { sourceCandidates } from "@/testUtils/correctionCandidates";
 
 /**
  * FTY-263: the correction sheet's `detail` / `typeahead` / `confirm_apply`
@@ -95,8 +99,8 @@ describe("Correction sheet visual-review seam (FTY-263)", () => {
   it("opens correction.typeahead directly in change-match mode with candidates already loaded — no tap", async () => {
     setE2E(true);
     activateVisualReviewPreset("correction.typeahead", null);
-    const listSourceCandidates = jest.fn().mockResolvedValue(
-      sourceCandidates([
+    const listSourceCandidates = jest.fn().mockResolvedValue({
+      candidates: [
         {
           source_type: "trusted_nutrition_database",
           source_ref: "usda_fdc:171477",
@@ -107,8 +111,9 @@ describe("Correction sheet visual-review seam (FTY-263)", () => {
           carbs_g: 0,
           fat_g: 3.6,
         },
-      ]),
-    );
+      ],
+      priorCorrections: [],
+    });
     const load = jest.fn().mockResolvedValue([]);
     const tree = mount(
       <TodayScreen
@@ -131,6 +136,82 @@ describe("Correction sheet visual-review seam (FTY-263)", () => {
     // with the candidate list painted — the expanded, dimmed-detent case that
     // failed on PR #230, now reachable from inside the sheet's modal subtree.
     expect(hasA11yLabel(tree, "visual-review-settled:correction.typeahead")).toBe(true);
+  });
+
+  // FTY-407: registration entry for the story's mandated `correction.prior_correction`
+  // preset — the change-match panel for an item the user has corrected before.
+  // The pair below is the load-bearing part: this preset seeds its OWN
+  // `prior_corrections` response, and `correction.typeahead` seeds none, so the
+  // history surface is reachable without changing what the shared preset renders.
+  describe("correction.prior_correction (FTY-407)", () => {
+    const sourceCandidatesCtx = {
+      url: "http://localhost:8000/users/u1/derived-items/food/food-1/source-candidates",
+      method: "POST",
+      pathEnd: "/users/u1/derived-items/food/food-1/source-candidates",
+    };
+
+    it("seeds a prior correction alongside the guessed candidate", async () => {
+      setE2E(true);
+      activateVisualReviewPreset("correction.prior_correction", null);
+      const seeded = resolveVisualReviewFetch(sourceCandidatesCtx);
+      expect(seeded).not.toBeNull();
+      const body = (await seeded!.json()) as {
+        candidates: { name: string }[];
+        prior_corrections: { source_ref: string; basis: string; fat_g: number | null }[];
+      };
+      expect(body.candidates).toHaveLength(1);
+      expect(body.prior_corrections).toHaveLength(1);
+      expect(body.prior_corrections[0]?.source_ref).toBe(
+        E2E_PRIOR_CORRECTION_CANDIDATE.source_ref,
+      );
+      // as_logged total for this item's own portion, not a per-100g density.
+      expect(body.prior_corrections[0]?.basis).toBe("as_logged");
+      // A macro the correction never supplied stays honestly unknown.
+      expect(body.prior_corrections[0]?.fat_g).toBeNull();
+    });
+
+    it("leaves correction.typeahead's candidate response untouched", () => {
+      setE2E(true);
+      activateVisualReviewPreset("correction.typeahead", null);
+      // No source-candidates override at all: `typeahead` falls through to the
+      // shared E2E mock, which offers no history — byte-for-byte what it
+      // rendered before FTY-407.
+      expect(resolveVisualReviewFetch(sourceCandidatesCtx)).toBeNull();
+    });
+
+    it("opens directly in change-match mode with the prior correction ranked above the guess", async () => {
+      setE2E(true);
+      activateVisualReviewPreset("correction.prior_correction", null);
+      const listSourceCandidates = jest.fn().mockResolvedValue({
+        candidates: [E2E_SOURCE_CANDIDATE],
+        priorCorrections: [E2E_PRIOR_CORRECTION_CANDIDATE],
+      });
+      const load = jest.fn().mockResolvedValue([]);
+      const tree = mount(
+        <TodayScreen
+          session={SESSION}
+          load={load}
+          listSourceCandidates={listSourceCandidates}
+          useActive={INACTIVE}
+        />,
+      );
+      await act(async () => {});
+
+      expect(hasA11yLabel(tree, "Cancel change match")).toBe(true);
+      expect(
+        hasA11yLabel(
+          tree,
+          `Select ${E2E_PRIOR_CORRECTION_CANDIDATE.name}, your correction, 105 kcal`,
+        ),
+      ).toBe(true);
+      expect(
+        hasA11yLabel(tree, `Select ${E2E_SOURCE_CANDIDATE.name}, 165 kcal per 100g`),
+      ).toBe(true);
+      // The in-modal settled marker the Maestro flow waits on before shooting.
+      expect(
+        hasA11yLabel(tree, "visual-review-settled:correction.prior_correction"),
+      ).toBe(true);
+    });
   });
 
   it("opens correction.confirm_apply directly in override mode with the current value pre-filled — no tap", async () => {
