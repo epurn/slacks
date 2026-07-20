@@ -35,6 +35,17 @@ For each claimed candidate the step:
    (extracted FTY-319); this step constructs and calls it. A stated macro is preserved
    exactly (``user_stated``).
 
+A stated calorie figure is the **energy of one logged unit** of the item — a
+per-unit *anchor* ("300 calorie sub bun" → 300 kcal for one bun) — so a count /
+fraction quantity modifier scales it (FTY-419): "half a 300 calorie sub bun"
+(``amount = 0.5``) is trusted for its calories at ``300 × 0.5 = 150`` kcal, and any
+stated macro scales the same way. The anchor **hard-overrides** an independent
+estimate for the field(s) the user gave; only the *missing* macros are estimated,
+now consistent with the scaled energy. A bare stated total with no count quantity
+("wrap (580 cals)", ``amount`` absent or 1) and a stated total against a *measured*
+mass/volume portion ("100 g chips, 500 cals") are as-logged totals, not per-unit
+anchors, so they are counted unscaled.
+
 Security: the raw diary phrase is never persisted — the evidence row stores only the
 extracted, validated facts, a hash over them, and the timestamp. The LLM extracts
 the stated numbers (upstream, schema-validated); no instruction embedded in the text
@@ -50,6 +61,7 @@ from datetime import UTC, datetime
 from typing import cast
 
 from app.estimator.evidence_utils import _record_source_ref
+from app.estimator.food_serving import _MASS_UNIT_GRAMS, _VOLUME_UNIT_GRAMS
 from app.estimator.pipeline import (
     CandidateDraft,
     ClarificationDraft,
@@ -133,6 +145,46 @@ def _has_stated_calorie_total(candidate: CandidateDraft) -> bool:
     return candidate.stated_calories is not None and candidate.stated_calories > 0
 
 
+def _is_measured_unit(unit: str | None) -> bool:
+    """Whether ``unit`` is a measured mass/volume unit (g, ml, oz, cup, tbsp, …).
+
+    A measured portion means the stated calories are the as-logged total for *that*
+    amount, not a per-unit anchor to multiply by the amount (``500 cals`` for ``100 g``
+    is 500, not 50 000). Drawn from the serving-math vocabularies so it stays in sync.
+    """
+
+    if not unit:
+        return False
+    key = " ".join(unit.strip().lower().split())
+    return key in _MASS_UNIT_GRAMS or key in _VOLUME_UNIT_GRAMS
+
+
+def _anchor_quantity(candidate: CandidateDraft) -> float:
+    """The unit-count multiplier a stated per-unit calorie anchor scales by (FTY-419).
+
+    A stated calorie figure is the energy of one logged unit of the item — a per-unit
+    anchor ("300 calorie sub bun" → 300 for one bun). A count / fraction quantity
+    modifier scales it: "half" (``amount = 0.5``) → 150 kcal, "2×" (``amount = 2``) →
+    600 kcal. Returns ``1.0`` when the item carries no scaling count — a bare stated
+    total (``amount`` absent / non-positive) or a measured mass/volume portion, whose
+    stated calories are the as-logged total for that amount rather than a per-unit
+    anchor. Gross counts are already bounded by the FTY-156 parse plausibility gate.
+    """
+
+    amount = candidate.amount
+    if amount is None or amount <= 0:
+        return 1.0
+    if _is_measured_unit(candidate.unit):
+        return 1.0
+    return amount
+
+
+def _scaled(value: float | None, multiplier: float) -> float | None:
+    """Scale a stated per-unit fact by the anchor multiplier, preserving ``None``."""
+
+    return None if value is None else round(value * multiplier, 1)
+
+
 def _validate_stated_facts(candidate: CandidateDraft) -> str | None:
     """Return a sanitized failure reason if the stated facts cannot back a number.
 
@@ -213,12 +265,17 @@ class UserTextResolveStep:
 
         _record_source_ref(context, USER_TEXT_SOURCE)
         # ``_validate_stated_facts`` has guaranteed a positive, finite calorie total.
-        calories = cast(float, candidate.stated_calories)
+        # The stated facts are a per-unit anchor; a count/fraction quantity modifier
+        # ("half", "2×") scales them (FTY-419). Validation ran on the per-unit values
+        # (the Atwater ratio is scale-invariant); persistence uses the scaled total.
+        stated_calories = cast(float, candidate.stated_calories)
+        multiplier = _anchor_quantity(candidate)
+        calories = cast(float, _scaled(stated_calories, multiplier))
 
         stated = {
-            "protein_g": candidate.stated_protein_g,
-            "carbs_g": candidate.stated_carbs_g,
-            "fat_g": candidate.stated_fat_g,
+            "protein_g": _scaled(candidate.stated_protein_g, multiplier),
+            "carbs_g": _scaled(candidate.stated_carbs_g, multiplier),
+            "fat_g": _scaled(candidate.stated_fat_g, multiplier),
         }
         missing = tuple(name for name, value in stated.items() if value is None)
 
@@ -240,6 +297,14 @@ class UserTextResolveStep:
                 provenance[name] = PROVENANCE_UNKNOWN
 
         assumptions = tuple(estimated.assumptions)
+        if multiplier != 1.0:
+            # Honest, content-free provenance for the scaled anchor (numbers only —
+            # never raw diary text): the per-unit calories, the count, and the total.
+            assumptions = (
+                f"calorie_anchor: {stated_calories:g} kcal/unit × {multiplier:g} "
+                f"= {calories:g} kcal",
+                *assumptions,
+            )
         for assumption in assumptions:
             if assumption not in context.assumptions:
                 context.assumptions.append(assumption)

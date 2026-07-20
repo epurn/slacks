@@ -58,6 +58,31 @@ field(s):
 
 The consulted source system `user_text` is recorded on the run `source_refs`.
 
+### Per-unit calorie anchors and the quantity modifier (FTY-419)
+
+A stated calorie figure is the **energy of one logged unit** of the item — a per-unit
+*anchor* — not always the whole as-logged total. When the entry describes the item's
+calories and gives a **separate count/fraction quantity** ("half a **300 calorie** sub
+bun", "two **200-calorie** bars"), the parser transcribes the per-unit number verbatim
+into `stated_calories` and the quantity into `amount` (`half → 0.5`, `two → 2`); it must
+**not** pre-multiply the calories itself. The `user_text` step then scales the stated
+calories — and any stated macro — by that count (`_anchor_quantity`): "half a 300 calorie
+sub bun" resolves to `300 × 0.5 = 150` kcal, honoring the explicit anchor (a **hard
+override** of any independent estimate) while still respecting the quantity. The missing
+macros are estimated as above, now from the **scaled** energy, so a 150 kcal anchor never
+carries null macros. A scaled anchor records a content-free `calorie_anchor:` assumption
+(the per-unit value, the multiplier, and the total — numbers only, never raw text).
+
+The count multiplier applies only to a **unit count** (a bare/count-unit `amount`,
+defaulting to 1 when absent). A stated total against a **measured mass/volume portion**
+("100 g chips, 500 cals") is the as-logged total for that measured amount and is counted
+unscaled, and a bare `(580 cals)` on a single item (`amount` absent or 1) is unchanged
+from FTY-279. Gross counts are already bounded by the FTY-156 parse plausibility gate, so
+the scaled total stays sane. **No described item is dropped**: the item a calorie figure
+describes is itself a food item the parser must enumerate (never folded into `event_name`
+or another item), and a food that cannot be resolved falls forward to a rough estimate or
+an honest editable/`unresolved` row — never a vanished one.
+
 ### The no-second-follow-up rule (clarification boundary)
 
 Once the user supplies a **usable concrete detail** for a recognizable item — a

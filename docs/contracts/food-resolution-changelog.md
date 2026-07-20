@@ -19,9 +19,10 @@ estimator / contracts / backend-core / security-privacy lane (same owners as
 
 ## Version
 
-34 (FTY-428, contract only): the **User-Stated Resolution (FTY-279)** section (with
+35 (FTY-428, contract only): the **User-Stated Resolution (FTY-279)** section (with
 all its subsections — the intro, `### Direct resolution from a stated total`, the
-`### The no-second-follow-up rule (clarification boundary)`, the `### Worked example
+`### Per-unit calorie anchors and the quantity modifier (FTY-419)`, the `### The
+no-second-follow-up rule (clarification boundary)`, the `### Worked example
 (the Sobeys wrap)`, and `### Security / Privacy`) was **extracted verbatim** from
 `food-resolution.md` into a new sibling page,
 [food-resolution-user-stated.md](food-resolution-user-stated.md), leaving a forwarding
@@ -30,6 +31,23 @@ citations (`estimate-first-routing.md`, `evidence-retrieval.md`, this changelog)
 the new page. Structure-only relocation of one settled `user_text` source-tier block —
 no wording, field, routing-rule, ordering, code-fence, example, schema, DTO, endpoint,
 or behaviour change.
+
+34 (FTY-419): a stated calorie figure is trusted as a **per-unit anchor** that the
+item's count/fraction quantity modifier scales, not an unconditional as-logged total.
+`user_text_step._anchor_quantity` reads the candidate's `amount` (defaulting to 1)
+and multiplies the stated calories and any stated macros by it, so "half a 300 calorie
+sub bun" (`amount 0.5`) resolves to `300 × 0.5 = 150` kcal, "2×" doubles it, and a
+stated total against a **measured** mass/volume portion ("100 g chips, 500 cals") is
+left unscaled (`_is_measured_unit`). The anchor still **hard-overrides** an independent
+estimate for the field(s) the user gave, missing macros are still estimated (now from
+the scaled energy), and a scaled anchor records a content-free `calorie_anchor:` provenance
+assumption (numbers only, no raw text). The parse prompt is updated so the model transcribes
+the per-unit calorie descriptor verbatim into `stated_calories` with the quantity in
+`amount` (never pre-multiplying), and enumerates every described item — the item a calorie
+figure describes is a food item, never folded into `event_name`. No schema, migration, DTO,
+or source-tier change: `stated_calories` / `amount` are the existing FTY-042/279 fields and
+the `evidence_sources` shapes are unchanged. A deliberate pre-v1 refinement of the FTY-279
+as-logged semantics.
 
 33 (FTY-426, contract only): the **Official-Source Fetch Boundary (FTY-078)** and
 **Official-Source Resolution (FTY-062)** sections (with all their subsections — the

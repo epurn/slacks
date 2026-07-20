@@ -455,9 +455,11 @@ no-special-case scan — is covered by `tests/test_exact_snack_phrase_resolution
 The user-stated (`user_text`-tier) resolution contract moved to
 [food-resolution-user-stated.md](food-resolution-user-stated.md) (FTY-428,
 contract-only extraction — no semantic change). That page owns this source tier
-verbatim: its intro, `### Direct resolution from a stated total`, `### The
-no-second-follow-up rule (clarification boundary)`, the `### Worked example (the
-Sobeys wrap)`, and its `### Security / Privacy` sub-sections.
+verbatim: its intro, `### Direct resolution from a stated total`, the `### Per-unit
+calorie anchors and the quantity modifier (FTY-419)`, `### The no-second-follow-up
+rule (clarification boundary)`, the `### Worked example (the Sobeys wrap)`, and its
+`### Security / Privacy` sub-sections.
+
 
 ## Prior-Correction Resolution (FTY-406)
 
