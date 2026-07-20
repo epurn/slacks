@@ -18,6 +18,7 @@ import {
   hasA11yLabel,
   mount,
   press,
+  pressByLabelPrefix,
   summary,
   textContent,
 } from "./today/todayTestUtils";
@@ -181,11 +182,13 @@ describe("TodayScreen resolve in place (FTY-180)", () => {
     expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(true);
   });
 
-  it("restores secondary item rows after a multi-item completion resolves from a pending skeleton", async () => {
+  it("resolves a multi-item completion into one collapsed meal row that expands to editable items (FTY-420)", async () => {
     const pending = event({ id: "a", raw_text: "Greek yogurt and banana", status: "pending" });
     const completed = event({
       id: "a",
       raw_text: "Greek yogurt and banana",
+      // No model-generated name here (null): the collapsed meal row falls back
+      // to the raw phrase rather than rendering blank.
       status: "completed",
     });
     const banana = foodItem({
@@ -223,11 +226,23 @@ describe("TodayScreen resolve in place (FTY-180)", () => {
     act(() => jest.advanceTimersByTime(200));
     await act(async () => {});
 
-    expect(hasA11yLabel(tree, "Greek yogurt, 150 kcal")).toBe(true);
-    expect(hasA11yLabel(tree, "Banana, 105 kcal")).toBe(true);
-    expect(textContent(tree)).toContain("Banana");
+    // The multi-item meal resolves in place to ONE collapsed row — the meal
+    // label (raw-phrase fallback) and the summed total (150 + 105 = 255) — not
+    // two loose item rows. The breakdown is hidden until the row is expanded.
+    const mealLabel = "Greek yogurt and banana, 255 kcal total, 2 items";
+    expect(hasA11yLabel(tree, mealLabel)).toBe(true);
+    expect(textContent(tree)).not.toContain("Banana");
 
-    press(tree, "Banana, 105 kcal");
+    // Tap the meal row to expand the per-item breakdown; each item is now shown
+    // (name · portion · macros · kcal) and individually editable.
+    press(tree, mealLabel);
+    const expanded = textContent(tree);
+    expect(expanded).toContain("Greek yogurt");
+    expect(expanded).toContain("Banana");
+    expect(expanded).toContain("150 kcal");
+    expect(expanded).toContain("105 kcal");
+
+    pressByLabelPrefix(tree, "Banana,");
     expect(hasA11yLabel(tree, "Increase amount")).toBe(true);
   });
 

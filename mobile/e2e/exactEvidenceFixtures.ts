@@ -42,6 +42,7 @@ export const E2E_EXACT_EVENT: LogEventDTO = {
   id: E2E_EXACT_EVENT_ID,
   user_id: E2E_SESSION.userId,
   raw_text: E2E_EXACT_RAW_TEXT,
+  name: null,
   status: 'completed',
   created_at: '2026-01-01T08:10:00Z',
   updated_at: '2026-01-01T08:10:00Z',

@@ -133,6 +133,9 @@ export function optimisticLogEvent(args: {
     id: args.id,
     user_id: args.userId,
     raw_text: args.rawText,
+    // An optimistic (not-yet-estimated) entry has no model-generated meal name
+    // yet — the estimator writes it later (FTY-421/422). Null until then.
+    name: null,
     status: "pending",
     created_at: args.createdAt,
     updated_at: args.createdAt,

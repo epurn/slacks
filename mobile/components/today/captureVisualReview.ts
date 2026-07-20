@@ -57,6 +57,7 @@ export const CAPTURE_CONFIRM_PARSED_EVENT: LogEventDTO = {
   id: "e2e-visual-review-capture-confirm-parsed-event",
   user_id: E2E_SESSION.userId,
   raw_text: "Nutrition label photo",
+  name: null,
   status: "completed",
   created_at: "2026-01-01T12:00:00Z",
   updated_at: "2026-01-01T12:00:00Z",

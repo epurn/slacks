@@ -34,6 +34,7 @@ afterEach(() => {
 
 const IN_SCOPE = [
   'today.populated',
+  'today.meal',
   'today.empty',
   'today.suggestions',
   'today.signed_out',
@@ -73,6 +74,20 @@ describe('today.populated seeds a resolved day through the real clients', () => 
     const summary = await getDailySummary(apiSession, '2026-01-01', mockFetch);
     expect(summary.has_intake).toBe(true);
     expect(summary.intake.calories).toBe(245);
+  });
+});
+
+describe('today.meal seeds a named multi-item meal (FTY-420)', () => {
+  it('serves one multi-item event carrying a model-generated name', async () => {
+    activateVisualReviewPreset('today.meal', null);
+    const mockFetch = createE2EMockFetch();
+    const entries = await listTodayLogEventEntries(apiSession, '2026-01-01', mockFetch);
+    // One event (the meal) with several derived items — the collapsed meal row.
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.items.length).toBeGreaterThan(1);
+    expect(entries[0]?.event.name).toBe('Turkey sandwich');
+    const summary = await getDailySummary(apiSession, '2026-01-01', mockFetch);
+    expect(summary.has_intake).toBe(true);
   });
 });
 

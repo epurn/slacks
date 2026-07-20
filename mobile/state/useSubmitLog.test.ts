@@ -21,6 +21,7 @@ function serverEvent(overrides: Partial<LogEventDTO> = {}): LogEventDTO {
     id: "server-1",
     user_id: SESSION.userId,
     raw_text: "two eggs",
+    name: null,
     status: "pending",
     created_at: "2026-06-28T08:00:00Z",
     updated_at: "2026-06-28T08:00:00Z",
