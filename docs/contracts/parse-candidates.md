@@ -126,7 +126,7 @@ baseline**, a genuinely amountless component routed the whole event to an event-
 `needs_clarification` and persisted no candidates; FTY-298 supersedes that default for
 recognizable identities by falling forward to rough estimation before any question. The
 answer flow and read shape are `clarification.md`; the item-scoped status and counting
-semantics are `log-events.md` v6, `estimation-jobs.md` v3, and `daily-summary.md`.
+semantics are `log-events-history.md` v6, `estimation-jobs.md` v3, and `daily-summary.md`.
 
 4 (FTY-172): the estimator now **produces** the FTY-170 clarification-with-options
 shape and records schema version `parse/v2`. Model-raised clarification output is
@@ -607,7 +607,7 @@ event.raw_text = "stuff"
   default it to `NULL` and remain valid event-level questions; no backfill), but
   they are **owned by the downstream FTY-278 implementation follow-up**, not this
   spec — this version fixes the shape and routing so that story and the backend
-  read/answer story (`clarification.md`, `log-events.md` v6, `estimation-jobs.md` v3,
+  read/answer story (`clarification.md`, `log-events-history.md` v6, `estimation-jobs.md` v3,
   `daily-summary.md`) build to one agreed contract. No existing `ParseResult`
   field, `ClarificationQuestion` shape, or column semantics change; the FTY-275
   baseline (whole-event event-level clarification, nothing committed) ships until

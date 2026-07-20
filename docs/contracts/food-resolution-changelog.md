@@ -424,7 +424,7 @@ an entry with *no* costable component still routes to event-level
 estimate first; `strict` or an unavailable/unsafe rough path can still produce the
 item-scoped question FTY-278 defined. This decides routing/counting semantics only (no
 `food_step.py`/serving-math/DTO/schema/migration change); the estimator work is a
-**downstream follow-up** (`log-events.md` v6, `estimation-jobs.md` v3,
+**downstream follow-up** (`log-events-history.md` v6, `estimation-jobs.md` v3,
 `daily-summary.md`), and the **v8 baseline** ships until then.
 
 8 (FTY-275) **widened the deterministic serving math to standard household volume

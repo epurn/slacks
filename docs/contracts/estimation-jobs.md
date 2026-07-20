@@ -70,7 +70,7 @@ atomicity/idempotency/sanitization invariants. Implemented downstream by
 [Never-fail degrade semantics](#never-fail-degrade-semantics-fty-370).
 
 6 (FTY-374, contract only; no schema change to these tables): the worker learns
-to feed a **unified text+image submission** (`log-events.md` v9) to the
+to feed a **unified text+image submission** (`log-events-history.md` v9) to the
 estimator. The `EstimationJobPayload` is **unchanged — ids only, reaffirmed**:
 no image bytes, paths, or hashes ever ride the queue or logs. Instead, the
 worker **loads the event's transient image attachments by `log_event_id` at
@@ -107,7 +107,7 @@ model. No schema change (`trace` is already JSON). See
 
 3 (FTY-278, contract only): the answer-triggered re-estimate under **item-scoped
 partial resolution**. The new first-class `partially_resolved` event status
-(`log-events.md` v6) carries committed `resolved` derived items (the costable
+(`log-events-history.md` v6) carries committed `resolved` derived items (the costable
 siblings of a mixed log — `food-resolution-changelog.md` v9); answering an **item-scoped**
 question re-estimates the same event (`partially_resolved → processing`) and must
 **preserve those siblings** without re-costing, duplicating, or double-counting
@@ -220,7 +220,7 @@ image rather than NL text. It uses the same step-signal vocabulary and status
 transitions; see `label-extraction.md`.
 
 **Pipeline selection for image-bearing events (FTY-374):** an event created by
-the unified text+image submission (`log-events.md` v9) is an **NL event with
+the unified text+image submission (`log-events-history.md` v9) is an **NL event with
 image evidence**, not a label event — it runs `default_pipeline` (the
 parse/interpretation path) **augmented with the event's images as vision
 evidence surfaces**, never `label_pipeline`. Text supplies identity, count, and
@@ -306,7 +306,7 @@ of failing:
   (`processing → completed`), or `partially_resolved`
   (`processing → partially_resolved`) when the terminal write also carries an
   open item-scoped question alongside the committed siblings (the existing
-  `log-events.md` v6 shape; already-`resolved` siblings are preserved untouched,
+  `log-events-history.md` v6 shape; already-`resolved` siblings are preserved untouched,
   exactly as on any terminal write). Components that already resolved exactly
   keep their exact provenance; only the degraded candidates carry the rough,
   content-free degraded marking.
@@ -382,7 +382,7 @@ in the one transaction that persists the `clarification_answers` row:
   neither re-opens nor re-enqueues.
 - **Resolved siblings preserved untouched, never double-counted (FTY-278, contract only):**
   when the event carries committed `resolved` siblings from an earlier round
-  (the `partially_resolved` item-scoped partial state — `log-events.md` v6,
+  (the `partially_resolved` item-scoped partial state — `log-events-history.md` v6,
   `food-resolution-changelog.md` v9),
   the re-estimate re-costs **only the open (newly-answered) component** and
   **leaves the already-`resolved` siblings untouched** — it neither re-costs,
@@ -414,7 +414,7 @@ in the one transaction that persists the `clarification_answers` row:
 
 ### Image-bearing events (FTY-374)
 
-An event created with images (`log-events.md` v9) runs the same claim → run →
+An event created with images (`log-events-history.md` v9) runs the same claim → run →
 transition machinery with four additional rules, implemented by the downstream
 FTY-375/FTY-376 split:
 

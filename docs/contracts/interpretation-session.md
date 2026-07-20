@@ -34,7 +34,7 @@ working objects — not public HTTP DTOs and not persisted wholesale.
 ## Version
 
 2 (FTY-374, contract only): the session gains **image evidence surfaces**. An
-event created by the unified text+image submission (`log-events.md` v9) enters
+event created by the unified text+image submission (`log-events-history.md` v9) enters
 the session with its validated images available alongside the raw text at every
 model-consultable interpretation call: text supplies identity/count/context, an
 image supplies label facts as `user_label`-tier evidence (`parse-candidates.md`
@@ -73,7 +73,7 @@ The raw log text and answered clarification text remain available **only inside
 the configured LLM boundary** for every model interpretation call in the session.
 They are not copied into search queries, fetch requests, run traces,
 `assumptions`, `source_refs`, provider error strings, logs, or evidence rows.
-The event's **image attachments** (FTY-374, `log-events.md` v9) are an evidence
+The event's **image attachments** (FTY-374, `log-events-history.md` v9) are an evidence
 surface with the same boundary: available to every model interpretation call in
 the session (as `ImageInput`s via the vision-capable provider —
 `estimation-jobs.md` v6), and never sent to search/fetch/tools, never logged,

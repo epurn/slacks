@@ -161,7 +161,7 @@ entry's **costable** components as `resolved` items (via the downstream food
 step, `food-resolution.md`) and raises a clarification only for the component(s)
 that still have an allowed clarification reason after the active FTY-298 policy has
 tried rough estimation, each question carrying its
-`derived_food_item_id`. Such a `partially_resolved` event (`log-events.md` v6)
+`derived_food_item_id`. Such a `partially_resolved` event (`log-events-history.md` v6)
 therefore carries committed `resolved` siblings alongside its open item-scoped
 questions — the
 event's derived-item set (resolved siblings + the `unresolved` component)

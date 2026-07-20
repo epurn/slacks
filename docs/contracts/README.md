@@ -72,6 +72,7 @@ Use contracts for:
 | [log-event-images.md](log-event-images.md) | Unified text+image log submission: multipart create wire shape, fail-closed image validation, and async never-reject routing |
 | [log-event-soft-void.md](log-event-soft-void.md) | Soft-void (delete) semantics for a log event: marker-not-deletion, read-model exclusion, and fail-closed single-item surfaces |
 | [log-events.md](log-events.md) | Log-event data model, status state machine, and create/list/edit API |
+| [log-events-history.md](log-events-history.md) | Version and migration change history (change log) for `log-events.md` |
 | [parse-candidates.md](parse-candidates.md) | Structured parse step producing candidate food and exercise items with clarification questions |
 | [saved-foods.md](saved-foods.md) | Saved foods, aliases, and typeahead data model and API |
 | [target-calculator.md](target-calculator.md) | Deterministic daily calorie target calculation from profile and weight goal |

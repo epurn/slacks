@@ -366,7 +366,7 @@ about:
   same shape the all-costable path writes — so they surface and count with no new
   read path. Answering the item-scoped question re-estimates the **same** event and
   preserves those siblings without duplicating or double-counting them
-  (`daily-summary.md`, `log-events.md` v6, `estimation-jobs.md` v3).
+  (`daily-summary.md`, `log-events-history.md` v6, `estimation-jobs.md` v3).
 - **Baseline** (ships until the downstream estimator follow-ups land): the historical
   whole-event routing tables may still send an amountless/unknown/unresolvable
   component to `needs_clarification`, nothing costed. FTY-298 changes the target
@@ -1150,14 +1150,14 @@ The backend exposes four health-check endpoints, all returning structured JSON w
   overwritten.
 - **FTY-278 (contract only; no code, no migration in this story).** Redefines the
   clarification boundary from whole-event to **item-scoped** for a mixed food log,
-  routing it to the new `partially_resolved` status (`log-events.md` v6): costable
+  routing it to the new `partially_resolved` status (`log-events-history.md` v6): costable
   components commit as `resolved` and count while a specific amountless
   component owns the question. Every source path, the serving math, plausibility
   gate, and `evidence_sources`/`products` shapes are **unchanged** — only the
   *routing* changes. The `derived_food_item_id` question link and its
   additive migration are `parse-candidates.md` v5's, owned by the downstream
   **FTY-278 implementation follow-up** (reads/answer flow: `daily-summary.md`,
-  `log-events.md` v6, `estimation-jobs.md` v3); the FTY-275 (v8) baseline ships until
+  `log-events-history.md` v6, `estimation-jobs.md` v3); the FTY-275 (v8) baseline ships until
   then.
 - **FTY-253 (brand-aware packaged-product routing).** A deliberate pre-v1 breaking
   change to branded-candidate routing: the food step now applies the

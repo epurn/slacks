@@ -37,7 +37,7 @@ security-privacy / backend-core lane: `backend/app/models/attachments.py`,
 ## Version
 
 3 (FTY-374, contract only): adds **transient-then-purge retention** for the
-images of a unified text+image log submission (`log-events.md` v9). A mixed
+images of a unified text+image log submission (`log-events-history.md` v9). A mixed
 submission's images must outlive the create request so the ids-only async
 worker can load them by event id (`estimation-jobs.md` v6), so they are
 persisted at create time as `log_attachments` rows **marked transient** and
@@ -107,7 +107,7 @@ saved attachment; it omits the raw bytes (served separately):
 
 ## Transient retention — mixed submission images (FTY-374)
 
-A unified text+image create (`log-events.md` v9) is the second writer of this
+A unified text+image create (`log-events-history.md` v9) is the second writer of this
 table, and the first with a **transient** retention window. The rules:
 
 - **Write at create, tied to the event.** Each validated `image` part of the
@@ -232,7 +232,7 @@ ingest_upload(session, owner_id=uid, current_user=user,
   **FTY-307–FTY-309**.
 - **FTY-374 (contract only; no code, no migration in this story).** Adds the
   transient-then-purge retention class for unified text+image submissions
-  (`log-events.md` v9) and pins the additive `transient` boolean column
+  (`log-events-history.md` v9) and pins the additive `transient` boolean column
   (not null, default `false`). The **migration is owned by FTY-375** (the
   backend ingestion/retention implementation story): additive and reversible,
   existing rows default to `false` with no behaviour change to the FTY-077 /

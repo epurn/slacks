@@ -30,7 +30,8 @@ services).
 ## Version
 
 1 (FTY-384, contract only): **structural relocation** of the soft-void (delete)
-semantics out of `log-events.md` (where they landed as v8, FTY-321) into this
+semantics out of `log-events.md` (where they landed as `log-events-history.md`
+v8, FTY-321) into this
 dedicated page. **No normative change** — the marker-not-deletion, read-model
 exclusion, fail-closed single-item-surface enumeration, any-status voiding,
 database-enforced first-write-wins idempotency, void-does-not-cancel-estimation,

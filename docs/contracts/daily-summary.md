@@ -58,7 +58,7 @@ range consumer can tell a genuinely empty day from a day whose only entries are
 uncounted; additive, no migration, populated identically in the single-day and
 range reads.
 5 (FTY-278, contract only) makes the finalized-state filter and `uncounted_entries`
-account for the **item-scoped partial clarification** state (`log-events.md` v6,
+account for the **item-scoped partial clarification** state (`log-events-history.md` v6,
 `food-resolution-changelog.md` v9): the new first-class `partially_resolved` event status
 carries committed `resolved` siblings, so the finalized filter's event-status
 clause relaxes from `completed`-only to `completed` **or** `partially_resolved`,
@@ -90,7 +90,7 @@ macro columns; the `user_text` source system is `evidence-retrieval.md`'s, and i
 **committed resolved items** rather than the parent event's transient status, so a
 partial event's already-counted `resolved` siblings **stay counted for the whole
 window** while an item-scoped answer flips the event `partially_resolved →
-processing` to re-cost the still-open component (`log-events.md` v6 shape #1). A
+processing` to re-cost the still-open component (`log-events-history.md` v6 shape #1). A
 `resolved` item counts when its event is `completed` or `partially_resolved` **or**
 is momentarily `processing` **as a scoped re-estimate of a previously-partial
 event** — discriminated by **two** facts on that event: ≥1 already-committed
@@ -298,7 +298,7 @@ event's transient status alone:
   even inside the worker's two-commit completion window.
 - **A scoped re-estimate keeps committed siblings counted (FTY-349).** When a user
   answers an item-scoped question the event flips `partially_resolved → processing`
-  to re-cost only the still-open component (`log-events.md` v6 shape #1); its
+  to re-cost only the still-open component (`log-events-history.md` v6 shape #1); its
   already-committed `resolved` siblings are left untouched. The finalized-event gate
   admits a `processing` event **iff** it carries ≥1 already-committed `resolved`
   derived item **and** ≥1 open item-scoped question on a still-`unresolved`
@@ -316,7 +316,7 @@ event's transient status alone:
   counted across the window and drops only when its own component resolves — so no
   surface dips.
 - **`partially_resolved` events are included (FTY-278).** Under the item-scoped
-  partial contract (`log-events.md` v6, `food-resolution-changelog.md` v9) a
+  partial contract (`log-events-history.md` v6, `food-resolution-changelog.md` v9) a
   `partially_resolved` event carries committed `resolved` siblings — a mixed
   log's costable components — committed in the same terminal transaction as the
   `processing → partially_resolved` transition, exactly as FTY-043/FTY-044 commit
@@ -597,7 +597,7 @@ curl -s ':8000/api/users/<uid>/daily-summary/range?from=2025-01-01&to=2026-06-01
   finalized-event gate in terms of **committed resolved items**: a `resolved` item
   counts when its event is `completed` / `partially_resolved` **or** is momentarily
   `processing` as an answer-triggered scoped re-estimate of a previously-partial
-  event (`log-events.md` v6 shape #1) — discriminated by **two** facts that must
+  event (`log-events-history.md` v6 shape #1) — discriminated by **two** facts that must
   both hold on that event: ≥1 already-committed `resolved` sibling **and** ≥1 open
   item-scoped clarification question on a still-`unresolved` component. Committed
   resolved rows **alone** do not admit a `processing` event: a first-pass

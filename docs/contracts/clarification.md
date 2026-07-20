@@ -30,7 +30,7 @@ answer/resolve, `answer_clarification_question`; `backend/app/schemas/log_events
 ## Version
 
 2 (FTY-321): both endpoints **fail closed (`404`) against a voided event**.
-The soft-void operation (`log-events.md` v8) excludes a voided event from
+The soft-void operation (`log-events-history.md` v8) excludes a voided event from
 every read, and the clarify loop resolves its event through the same
 voided-excluding loader as get-by-id — so the clarification read, a fresh
 answer, **and** the idempotent replay of an already-answered question all
@@ -42,10 +42,10 @@ behaviour is byte-for-byte unchanged.
 1 (FTY-282): relocates the clarify-loop endpoint contract out of
 `log-events.md` into its own page — a **verbatim move, no semantic change**.
 The read/answer shapes, status gating, idempotency, and privacy rules are
-unchanged from `log-events.md`'s prior versions 3 (FTY-152, adds the read), 4
+unchanged from `log-events-history.md`'s prior versions 3 (FTY-152, adds the read), 4
 (FTY-170, the `{ id, text, options }` read shape plus the answer/resolve
 endpoint), and 6 (FTY-278, item-scoped-question notes, no shape change). See
-`log-events.md`'s Version history for the full semantic history of these
+`log-events-history.md`'s Version history for the full semantic history of these
 endpoints prior to this relocation.
 
 ## Inputs
@@ -354,5 +354,5 @@ curl -sX POST :8000/api/users/<uid>/log-events/<event_id>/clarification/answers 
 This page introduces no migration of its own — it is a docs-only relocation.
 The `clarification_questions` and `clarification_answers` tables, and their
 migrations (`0005`/FTY-042, `0016`/FTY-171, `0017`/FTY-172), remain owned and
-documented by `log-events.md`'s and `parse-candidates.md`'s Migration /
+documented by `log-events-history.md`'s and `parse-candidates.md`'s Migration /
 Compatibility sections.
