@@ -50,12 +50,16 @@ from app.estimator.pipeline import (
 from app.estimator.processing import process_estimation
 from app.estimator.reference_fetch import ReferenceFetchSettings
 from app.estimator.run_budget import (
+    DEFAULT_DEGRADE_HEADROOM_SECONDS,
+    DEFAULT_RUN_DEADLINE_SECONDS,
+    DEFAULT_SOFT_RUN_DEADLINE_SECONDS,
     PROVIDER_CALL_BUDGET_EXCEEDED,
     WALL_CLOCK_DEADLINE_EXCEEDED,
     BudgetedProvider,
 )
 from app.estimator.search import (
     OFFICIAL_SOURCE_TYPE,
+    SearchCandidate,
     SearchCapability,
     SearchResult,
     SearchStatus,
@@ -378,6 +382,229 @@ def test_can_make_provider_call_is_false_past_the_hard_deadline() -> None:
 
     assert budgeted.can_make_provider_call() is False
     assert budgeted.soft_budget_reason() == WALL_CLOCK_DEADLINE_EXCEEDED
+
+
+# --------------------------------------------------------------------------- #
+# FTY-425: reserved degrade headroom below the hard ceiling. A slow *multi-call*
+# resolution (the real official→reference→model-prior cascade costs several provider
+# calls per candidate) that crosses the soft budget must fall forward to the
+# **model-prior** degrade (real macros) for its remaining candidates, not eat the
+# whole hard budget and spill into the budget-free deterministic coarse prior. These
+# drive the REAL OfficialSourceResolveStep + BudgetedProvider + DegradeProducer with an
+# injected call-count clock (no real sleeping); the only stub is a prompt-routing
+# provider that makes a reference-page extract miss (so a candidate costs two calls to
+# resolve) while a model-prior estimate resolves (a degrade costs one). That call-cost
+# asymmetry — not present when search is disabled (one call/candidate) — is exactly what
+# the soft budget converts to cheap degrades, so reserving more headroom lands more of
+# them via the good path.
+# --------------------------------------------------------------------------- #
+
+#: Prompt openers that route the fake (from ``searched_reference.py``): the model-prior
+#: estimate resolves; a reference-page transcription misses.
+_MODEL_PRIOR_MARKER = "nutrition estimator"
+_EXTRACT_MARKER = "transcriber"
+
+
+class _RoutingProvider(FakeProvider):
+    """A network-free fake that answers by prompt kind rather than a fixed script.
+
+    A reference-page **extract** (transcriber prompt) always returns ``unresolved`` — the
+    page states no facts — so a candidate walks reference → model prior: **two** provider
+    calls to resolve. A **model-prior** estimate (estimator prompt) always resolves — so a
+    *degrade* costs **one** call. No fixed response count, so the same provider serves any
+    mix of resolved/degraded candidates deterministically.
+    """
+
+    def __init__(self, *, calories: float = 250.0) -> None:
+        super().__init__(responses=[])
+        self._calories = calories
+
+    def _complete(self, prompt, schema, *, images, timeout_seconds):  # type: ignore[no-untyped-def]
+        self.prompts.append(prompt)
+        self.image_counts.append(len(images) if images else 0)
+        if _MODEL_PRIOR_MARKER in prompt:
+            return _resolved_estimate(calories=self._calories)
+        assert _EXTRACT_MARKER in prompt  # the only other provider prompt this run makes
+        return {"disposition": "unresolved", "confidence": 0.1}
+
+
+class _EnabledMissSearchProvider:
+    """Search enabled + available, always returning one snippet-less result whose page
+    the routing provider misses — so a generic candidate reaches the model-prior tier."""
+
+    @property
+    def enabled(self) -> bool:
+        return True
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def capability(self) -> SearchCapability:
+        return SearchCapability(
+            id="official_source",
+            source_type=OFFICIAL_SOURCE_TYPE,
+            kinds=("named_product",),
+            enabled=True,
+            available=True,
+        )
+
+    def search(self, query: str) -> SearchResult:
+        return SearchResult(
+            status=SearchStatus.SUCCESS,
+            candidates=(SearchCandidate(url="https://example.test/ref", title="ref"),),
+        )
+
+
+def _page_fetch(url: str, settings: object) -> str:
+    """A non-empty inert reference page (the routing provider extracts nothing from it)."""
+
+    return "Reference page. No nutrition facts stated here."
+
+
+def _multi_call_step(budgeted: BudgetedProvider) -> OfficialSourceResolveStep:
+    """The real official step wired so each candidate's resolution costs two calls."""
+
+    return OfficialSourceResolveStep(
+        provider=budgeted,
+        search_provider=_EnabledMissSearchProvider(),
+        fetch_settings=OfficialFetchSettings(),
+        reference_fetch_settings=ReferenceFetchSettings(),
+        fetch_fn=_page_fetch,
+        reference_fetch_fn=_page_fetch,
+    )
+
+
+def _budgeted_default(
+    fake: FakeProvider, *, per_call: float, soft_deadline: float | None = None
+) -> BudgetedProvider:
+    """A budgeted provider at the **default** hard ceiling and (unless overridden) the
+    default soft deadline, on the call-count clock (elapsed = calls_made * per_call)."""
+
+    clock = _CallCountClock(per_call=per_call)
+    soft = DEFAULT_SOFT_RUN_DEADLINE_SECONDS if soft_deadline is None else soft_deadline
+    budgeted = BudgetedProvider(fake, clock=clock, soft_deadline_seconds=soft)
+    clock.provider = budgeted
+    return budgeted
+
+
+def _generic_pending(n: int) -> list[CandidateDraft]:
+    return [
+        CandidateDraft(name=f"stew {i}", quantity_text="150g", unit="g", amount=150.0)
+        for i in range(n)
+    ]
+
+
+def _run_multi_call_meal(*, per_call: float, soft_deadline: float | None) -> EstimationContext:
+    """Run an 8-item multi-call meal through the real step at ``per_call`` latency."""
+
+    fake = _RoutingProvider(calories=250.0)
+    budgeted = _budgeted_default(fake, per_call=per_call, soft_deadline=soft_deadline)
+    step = _multi_call_step(budgeted)
+    context = _context()
+    context.pending_official_candidates = _generic_pending(8)
+    result = Pipeline([step]).run(context)
+    # Never a raised hard breach: the graceful soft-degradation kept the run alive.
+    assert result.outcome is PipelineOutcome.COMPLETED
+    return context
+
+
+def _outcome_of(item: ResolvedFoodItem) -> str:
+    if _degraded_labels(item):
+        # Coarse deterministic prior fingerprint (200 kcal/100g) ⇒ budget-free last-ditch;
+        # any other per-100g value ⇒ a real model-prior degrade.
+        return "budget_free" if item.calories_per_100g == pytest.approx(200.0) else "model_prior"
+    return "resolved"
+
+
+def test_reserved_headroom_lands_overflow_degrade_on_the_model_prior_path() -> None:
+    """The FTY-425 fix: with the reshaped (wider) reserved headroom, the slow meal's
+    overflow candidate degrades via the **model-prior** path with real, non-null macros
+    and lands inside the hard ceiling — where the pre-FTY-425 narrower headroom (soft at
+    45 s) spilled that same candidate into the budget-free deterministic coarse prior."""
+
+    # NEW: default reserved headroom (soft 30 s below the 75 s hard ceiling).
+    new_context = _run_multi_call_meal(per_call=8.0, soft_deadline=None)
+    new_outcomes = [_outcome_of(item) for item in new_context.resolved_food_items]
+    # No candidate spilled into the budget-free coarse prior; the overflow degraded rows
+    # all carry real model-prior macros.
+    assert "budget_free" not in new_outcomes
+    degraded = [item for item in new_context.resolved_food_items if _degraded_labels(item)]
+    assert degraded, "the slow meal must fall forward to degraded estimates"
+    for item in degraded:
+        assert item.source_type == MODEL_PRIOR_SOURCE_TYPE
+        assert item.calories_per_100g == pytest.approx(250.0)  # the real rough estimate
+        assert item.protein_g is not None and item.protein_g > 0  # never a silent null
+        assert _degraded_labels(item) == ["degraded:run_wall_clock_deadline_exceeded"]
+
+    # OLD: the pre-FTY-425 narrower reserved headroom (soft 45 s) forced under this exact
+    # slow meal — resolution eats more of the budget, so the last candidate spills into the
+    # budget-free coarse prior. This is the regression the reshape fixes.
+    old_context = _run_multi_call_meal(per_call=8.0, soft_deadline=45.0)
+    old_outcomes = [_outcome_of(item) for item in old_context.resolved_food_items]
+    assert "budget_free" in old_outcomes
+
+
+def test_reserved_headroom_relationship_fits_the_degrade_producers_own_calls() -> None:
+    """AC (b): the soft deadline is pinned exactly the reserved headroom below the hard
+    ceiling, and that headroom fits several per-candidate model-prior degrade calls."""
+
+    assert (
+        DEFAULT_SOFT_RUN_DEADLINE_SECONDS
+        == DEFAULT_RUN_DEADLINE_SECONDS - DEFAULT_DEGRADE_HEADROOM_SECONDS
+    )
+    # Sized for a slow ~10-15 s/call CLI provider: at least ~3 fall-forward model-prior
+    # degrade calls fit in the reserved window before the hard ceiling.
+    slow_per_call = 12.0
+    assert DEFAULT_DEGRADE_HEADROOM_SECONDS / slow_per_call >= 3.0
+    # And the whole hard budget still terminates inside the live smoke's 90 s poll window.
+    assert DEFAULT_RUN_DEADLINE_SECONDS < 90.0
+
+
+def test_runaway_still_degrades_budget_free_at_the_hard_ceiling() -> None:
+    """AC (c): a run so slow the degrade producer can never afford a model-prior call
+    still stops at the hard ceiling and falls to the budget-free deterministic prior as
+    the last-ditch (never removed, only narrowed), terminating inside the poll window."""
+
+    fake = _RoutingProvider(calories=250.0)
+    # 40 s/call: resolving the first candidate (2 calls) already lands elapsed at 80 s —
+    # past the 75 s hard ceiling — so every later candidate has zero provider headroom.
+    budgeted = _budgeted_default(fake, per_call=40.0, soft_deadline=None)
+    step = _multi_call_step(budgeted)
+    context = _context()
+    context.pending_official_candidates = _generic_pending(3)
+
+    result = Pipeline([step]).run(context)
+
+    assert result.outcome is PipelineOutcome.COMPLETED  # never a terminal failure
+    outcomes = [_outcome_of(item) for item in context.resolved_food_items]
+    assert "budget_free" in outcomes  # the last-ditch deterministic prior still fires
+    for item in context.resolved_food_items:
+        if _outcome_of(item) == "budget_free":
+            assert item.calories_per_100g == pytest.approx(200.0)  # coarse prior
+            assert item.protein_g is not None and item.protein_g > 0  # still macros (FTY-418)
+    # The hard ceiling still bounded the work: no provider call was charged past it, so the
+    # run terminates well inside the 90 s poll window (max elapsed 80 s < 90 s).
+    assert budgeted._clock() - budgeted._started_at < 90.0
+
+
+def test_in_budget_meal_is_unchanged_by_the_reshaped_headroom() -> None:
+    """Regression: a normal in-budget run (fast provider) never crosses the (lower) soft
+    deadline, so it still resolves every candidate exactly — no degraded rows."""
+
+    fake = _RoutingProvider(calories=250.0)
+    budgeted = _budgeted_default(fake, per_call=1.0, soft_deadline=None)  # 1 s/call: fast
+    step = _multi_call_step(budgeted)
+    context = _context()
+    context.pending_official_candidates = _generic_pending(8)
+
+    result = Pipeline([step]).run(context)
+
+    assert result.outcome is PipelineOutcome.COMPLETED
+    # 8 candidates × 2 calls each, all exact — nothing degraded (16 calls, elapsed 16 s).
+    assert all(_degraded_labels(item) == [] for item in context.resolved_food_items)
+    assert budgeted.calls_made == 16
 
 
 # --------------------------------------------------------------------------- #
