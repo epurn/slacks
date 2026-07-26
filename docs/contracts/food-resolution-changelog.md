@@ -19,6 +19,33 @@ estimator / contracts / backend-core / security-privacy lane (same owners as
 
 ## Version
 
+37 (FTY-437): **a counted piece is not a counted serving.** Serving-math step 4 no
+longer multiplies a source's gram serving size by a *piece* count. `food_serving.py`
+adds the closed `PIECE_CLASS_FOODS` vocabulary (shipping with `cracker`) plus the
+shared head-noun matcher `is_piece_count`/`head_noun`, and `resolve_grams` gains an
+optional `name` argument so a bare count ("4", "4 pieces") of a piece-class identity is
+recognised as well as a piece unit ("4 crackers"). Such a count resolves from a
+**per-piece** weight in the `common_portions.py` table (one standard snack cracker
+≈ 3.5 g, published USDA household-weight basis, `MAX_PIECE_PORTION_COUNT = 200`), and
+every piece-class food must have such an entry — a test-enforced completeness
+invariant, so no piece count can reach the `unresolvable_quantity` branch in any
+clarify mode. Both build sites are fixed: `food_step._build_item` (product path) and
+`resolved_item._build_item`, which now consults the table before its own rough
+default-serving fallback — and `_default_serving_grams` no longer scales a stated piece
+count either, since it multiplied a serving mass independently. Effect on the reported
+defect (`branded-crackers-and-hummus` smoke, `item 'crackers' calories 360 outside the
+band [30, 250]`): the cached `open_food_facts:0066721029218` row (473.68 kcal/100 g,
+19 g serving) keeps its facts, source type, and source ref, and `4 crackers` now costs
+14 g / 66.3 kcal with an `estimated_common_portion:cracker cracker 3.5 g` assumption on
+the evidence row instead of `4 × 19 g` = 76 g / 360 kcal. **Breaking by design** for
+this input class only: serving-equivalent counts (`1 serving`, `2 servings`, `1 bar`),
+the FTY-167 serving nouns (`slice`, `handful`, `3 cracker sandwiches`), the FTY-254/418
+table foods, and every count noun outside the piece vocabulary resolve exactly as
+before; an *amountless* piece identity still assumes one serving. Reading OFF's stated
+`serving_size` count relation ("19 g (5 crackers)") into FTY-252's `CountServing` stays
+out of scope (FTY-439), as do the FTY-368 plausibility bands. No schema, migration,
+DTO, endpoint, or source-tier change: closed vocabulary plus published gram constants.
+
 36 (FTY-424): the FDC candidate-ranking preference key demotes an **unstated
 identity-shifting modifier** — a leaf/green/seed or cabbage-family sense of the head
 noun the query did not ask for. The head-noun gate alone cannot separate the everyday

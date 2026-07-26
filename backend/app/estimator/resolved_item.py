@@ -3,19 +3,22 @@ evidence tier (official source, reference source, model prior).
 
 Given validated :class:`~app.estimator.searched_reference.SearchedReferenceFacts`
 and the candidate that was resolved, this module applies the deterministic FTY-044
-serving math — as-logged total, count-serving scaling, or gram-based scaling, with
-a rough default-serving fallback under estimate-first policy — and assembles the
+serving math — as-logged total, count-serving scaling, or gram-based scaling, with a
+documented per-unit common-portion default (FTY-254/418/437) and then a rough
+default-serving fallback under estimate-first policy — and assembles the
 :class:`~app.estimator.pipeline.ResolvedFoodItem` plus its content-fingerprinted
 provenance. It is pure composition: no network egress, no model call.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from app.estimator.common_portions import resolve_common_portion_grams
 from app.estimator.count_serving_resolution import has_explicit_amount, scale_count_reference
 from app.estimator.evidence_utils import _content_hash
-from app.estimator.food_serving import resolve_grams, scale_facts
+from app.estimator.food_serving import is_piece_count, resolve_grams, scale_facts
 from app.estimator.pipeline import (
     CandidateDraft,
     ClarificationDraft,
@@ -137,27 +140,22 @@ def _build_item(  # noqa: PLR0913 - shared tier-agnostic builder seam
         default_serving_g=(
             None if reference.count_serving is not None else reference.default_serving_g
         ),
+        name=candidate.name,
     )
     if grams is None:
-        grams = _default_serving_grams(candidate, reference.default_serving_g)
-        if grams is None:
-            if allow_unresolvable_fallthrough:
+        gap = _gap_portion(candidate, reference, clarify_mode=clarify_mode)
+        if gap is None or (
+            gap.rough and not _allows_default_serving_estimate(clarify_mode, candidate)
+        ):
+            if gap is None and allow_unresolvable_fallthrough:
                 return None
             _record_clarified_quantity(context, step_name, candidate_index)
             context.clarification_questions = [ClarificationDraft(text=quantity_question)]
             raise NeedsClarification("unresolvable_quantity")
-        if not _allows_default_serving_estimate(clarify_mode, candidate):
-            _record_clarified_quantity(context, step_name, candidate_index)
-            context.clarification_questions = [ClarificationDraft(text=quantity_question)]
-            raise NeedsClarification("unresolvable_quantity")
-        _record_serving("default_serving_estimated")
-        assumptions = _with_unique_assumptions(
-            assumptions,
-            (
-                f"clarify_mode:{clarify_mode}",
-                "estimated_default_serving",
-            ),
-        )
+        if gap.rough:
+            _record_serving("default_serving_estimated")
+        grams = gap.grams
+        assumptions = _with_unique_assumptions(assumptions, gap.assumptions)
 
     per_100g = reference.per_100g_facts
     if per_100g is None:
@@ -213,6 +211,61 @@ def _allows_default_serving_estimate(
     return False
 
 
+@dataclass(frozen=True)
+class _GapPortion:
+    """Grams for a quantity the deterministic serving math could not resolve.
+
+    ``rough`` distinguishes the two documented defaults: a **food-aware** per-unit
+    common portion (``rough=False`` — a published household/per-piece weight) from
+    the **rough** default-serving fallback (``rough=True``), which the active policy
+    may still refuse in favour of asking.
+    """
+
+    grams: float
+    assumptions: tuple[str, ...]
+    rough: bool
+
+
+def _gap_portion(
+    candidate: CandidateDraft,
+    reference: SearchedReferenceFacts,
+    *,
+    clarify_mode: EstimatorClarifyMode,
+) -> _GapPortion | None:
+    """The documented portion defaults for an unresolved quantity, in order.
+
+    1. The per-unit **common-portion table** (FTY-254/418/437): a stated count of an
+       everyday food ("2 large eggs", "1 slice of mozzarella") — and every stated
+       count of a **piece**, which the source's serving mass must never multiply
+       (``4 crackers`` is four ~3.5 g pieces, not four whole 19 g servings). This is
+       the only path a piece count has, so consulting it here is what keeps such an
+       item on this tier's own trusted per-100g facts instead of dropping through to
+       the coarse model-prior density.
+    2. The **rough default serving** (:func:`_default_serving_grams`), labelled with
+       the active clarify mode so the estimate stays honestly rough.
+
+    Returns ``None`` when neither applies, so the caller keeps its documented
+    fall-through/clarification routing.
+    """
+
+    portion = resolve_common_portion_grams(
+        name=candidate.name,
+        unit=candidate.unit,
+        amount=candidate.amount,
+        quantity_text=candidate.quantity_text,
+    )
+    if portion is not None:
+        return _GapPortion(grams=portion.grams, assumptions=(portion.assumption,), rough=False)
+    grams = _default_serving_grams(candidate, reference.default_serving_g)
+    if grams is None:
+        return None
+    return _GapPortion(
+        grams=grams,
+        assumptions=(f"clarify_mode:{clarify_mode}", "estimated_default_serving"),
+        rough=True,
+    )
+
+
 def _default_serving_grams(
     candidate: CandidateDraft, default_serving_g: float | None
 ) -> float | None:
@@ -222,9 +275,24 @@ def _default_serving_grams(
     a positive structured count scales the default serving, while an amountless
     recognized identity assumes one default serving. The assumption is recorded on the
     evidence row by the caller.
+
+    A stated count of **pieces** is never scaled this way (FTY-437) — the same
+    piece-vs-serving rule :func:`~app.estimator.food_serving.resolve_grams` applies,
+    enforced here too because this fallback multiplies a serving mass independently.
+    A piece count has already been resolved from the per-piece common-portion table
+    by the caller, so the ``None`` this returns is reached only by a count above that
+    table's sanity bound, which keeps its existing routing. An **amountless** piece
+    identity ("crackers", no count) still assumes one serving: that is a serving, not
+    a piece count.
     """
 
     if default_serving_g is None or default_serving_g <= 0:
+        return None
+    if (
+        candidate.amount is not None
+        and candidate.amount > 0
+        and is_piece_count(name=candidate.name, unit=candidate.unit)
+    ):
         return None
     servings = candidate.amount if candidate.amount is not None and candidate.amount > 0 else 1.0
     return round(servings * default_serving_g, 3)

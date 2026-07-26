@@ -11,7 +11,12 @@ from __future__ import annotations
 
 import pytest
 
-from app.estimator.common_portions import CommonPortion, resolve_common_portion_grams
+from app.estimator.common_portions import (
+    COMMON_PORTIONS,
+    CommonPortion,
+    resolve_common_portion_grams,
+)
+from app.estimator.food_serving import PIECE_CLASS_FOODS
 
 
 def _resolve(
@@ -155,6 +160,64 @@ def test_plain_table_foods_still_resolve_after_the_dish_guard() -> None:
 
     assert portion is not None
     assert portion.grams == pytest.approx(60.0)
+
+
+# ---------------------------------------------------------------------------
+# Piece-class foods (FTY-437)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("name", "unit"),
+    [
+        ("crackers", "crackers"),
+        # A branded product name still hits the entry through its head noun, which
+        # is what the reported Open Food Facts row ("Christie, Toppables Crackers")
+        # needs to keep its trusted per-100g facts.
+        ("Christie Toppables Crackers", "crackers"),
+        ("toppables crackers", None),
+        ("crackers", "pieces"),
+    ],
+)
+def test_four_crackers_cost_four_pieces_not_four_servings(name: str, unit: str | None) -> None:
+    portion = _resolve(name, unit=unit, amount=4, quantity_text="4 crackers")
+
+    assert portion is not None
+    assert portion.grams == pytest.approx(14.0)  # 4 * 3.5 g, not 4 * 19 g
+    assert portion.assumption == "estimated_common_portion:cracker cracker 3.5 g"
+
+
+@pytest.mark.parametrize("food", sorted(PIECE_CLASS_FOODS))
+def test_every_piece_class_food_has_a_per_piece_table_entry(food: str) -> None:
+    """The completeness invariant: a piece-class food the table cannot cost would
+    strand a count that resolves today, so the vocabulary may only grow with the
+    published per-piece weight that keeps it resolvable."""
+
+    spec = COMMON_PORTIONS.get(food)
+    assert spec is not None, f"piece-class food {food!r} has no common-portion entry"
+    assert spec.cue_grams[spec.default_cue] > 0
+
+    for unit in (None, food, f"{food}s", "pieces"):
+        portion = _resolve(food, unit=unit, amount=3, quantity_text=f"3 {food}s")
+        assert portion is not None, f"a plain count of {food!r} (unit {unit!r}) must resolve"
+        assert portion.grams == pytest.approx(3 * spec.cue_grams[spec.default_cue])
+        assert portion.assumption.startswith(f"estimated_common_portion:{food} ")
+
+
+def test_a_counted_snack_assembly_is_not_a_counted_piece() -> None:
+    # "3 cracker sandwiches" is a composed snack: its head noun is "sandwich", so
+    # the cracker piece weight never supplies a whole sandwich's grams (FTY-167).
+    assert _resolve("cracker sandwiches", unit="sandwiches", amount=3, quantity_text="3") is None
+
+
+def test_piece_counts_are_bounded_more_generously_than_whole_foods() -> None:
+    # 60 crackers is an ordinary bowl of snack; 60 bananas is not a log.
+    sixty = _resolve("crackers", unit="crackers", amount=60, quantity_text="60")
+    assert sixty is not None
+    assert sixty.grams == pytest.approx(210.0)
+    assert _resolve("bananas", unit=None, amount=60, quantity_text="60") is None
+    # Absurd piece counts still fail closed to the caller's existing routing.
+    assert _resolve("crackers", unit="crackers", amount=201, quantity_text="201") is None
 
 
 def test_unknown_foods_fail_closed() -> None:

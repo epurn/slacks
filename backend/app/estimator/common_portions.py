@@ -29,7 +29,21 @@ FoodData Central household weights / FDA RACC vicinity):
   "2 slices of deli turkey" costed a flat 100 g slice, FTY-418);
 - cheese (sliced mozzarella / American / cheddar / provolone / swiss): one
   pre-sliced sandwich slice ≈ 22 g (USDA/FDA-RACC — pre-sliced sandwich cheese
-  runs ~19-28 g; "1 slice of mozzarella" must not cost a flat 100 g).
+  runs ~19-28 g; "1 slice of mozzarella" must not cost a flat 100 g);
+- cracker: one **piece** ≈ 3.5 g (FTY-437). This is the standard snack cracker
+  class — the round/square buttery or saltine-style cracker a casual log counts by
+  the piece (USDA household weights: a saltine ≈ 3.0 g, a standard snack-type
+  round cracker ≈ 3.3-4.0 g; the FDA RACC for crackers is 30 g, i.e. roughly 8-9
+  such pieces). It deliberately does **not** represent a large flatbread /
+  crispbread / graham sheet, which weighs several times more and is not what "4
+  crackers" means in a diary entry.
+
+The cracker entry is also the first member of the **piece-class** vocabulary
+(:data:`~app.estimator.food_serving.PIECE_CLASS_FOODS`): a food whose serving holds
+several pieces, whose count therefore may never multiply a source's *serving* mass.
+That vocabulary and this table are kept in step by a completeness invariant — every
+piece-class food must have a per-piece entry here — so the serving math can hand a
+piece count straight to this table instead of costing whole servings.
 
 Pure functions, no I/O, no LLM, bounded vocabulary — the same character as the
 serving math it backstops (:mod:`app.estimator.food_serving`).
@@ -43,7 +57,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
-from app.estimator.food_serving import _COUNT_UNITS
+from app.estimator.food_serving import (
+    _COUNT_UNITS,
+    head_noun,
+    is_piece_count,
+    singular_token,
+    text_tokens,
+)
 from app.estimator.resolved_plausibility import is_composed_dish
 
 #: Sanity cap on the counted units a common-portion default may multiply; a
@@ -51,7 +71,11 @@ from app.estimator.resolved_plausibility import is_composed_dish
 #: routing (rough tiers or clarification per the active policy).
 MAX_COMMON_PORTION_COUNT: Final[float] = 50.0
 
-_TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"[a-z]+")
+#: The same cap for a **piece** count (FTY-437). Pieces are counted higher than
+#: whole foods — nobody eats 40 bananas, but 40 crackers is an ordinary bowl of
+#: snack — and this is the only routing a piece count has, so the bound is set well
+#: above any real log while still failing closed on absurd input.
+MAX_PIECE_PORTION_COUNT: Final[float] = 200.0
 
 
 @dataclass(frozen=True)
@@ -92,6 +116,11 @@ COMMON_PORTIONS: Final[Mapping[str, CommonPortionSpec]] = {
     "cheddar": CommonPortionSpec(cue_grams={"slice": 22.0}, default_cue="slice"),
     "provolone": CommonPortionSpec(cue_grams={"slice": 22.0}, default_cue="slice"),
     "swiss": CommonPortionSpec(cue_grams={"slice": 22.0}, default_cue="slice"),
+    # Piece-class snack (FTY-437): one standard snack cracker ≈ 3.5 g (USDA
+    # household weights ~3.0 g saltine / ~3.3-4.0 g round snack cracker; FDA RACC
+    # 30 g ≈ 8-9 pieces). The cue is the piece itself, so a counted piece never
+    # borrows a serving's mass.
+    "cracker": CommonPortionSpec(cue_grams={"cracker": 3.5}, default_cue="cracker"),
 }
 
 
@@ -108,48 +137,36 @@ class CommonPortion:
     assumption: str
 
 
-#: A stripped root shorter than this is noise, not a word stem.
-_MIN_STEM_CHARS: Final[int] = 3
-
-
-def _singular(token: str) -> str:
-    """Naive singular form for table matching (``eggs`` → ``egg``)."""
-
-    for suffix, replacement in (("ies", "y"), ("s", "")):
-        if (
-            token.endswith(suffix)
-            and not token.endswith("ss")
-            and len(token) - len(suffix) >= _MIN_STEM_CHARS
-        ):
-            return token[: -len(suffix)] + replacement
-    return token
-
-
-def _tokens(text: str | None) -> tuple[str, ...]:
-    return tuple(_TOKEN_RE.findall((text or "").lower()))
-
-
 def _match_spec(name: str, unit: str | None) -> tuple[str, CommonPortionSpec] | None:
     """The table entry for a candidate, matched on the name's head noun.
 
-    The head noun is the food identity (``wheat toast`` → ``toast``; ``egg
-    salad`` → ``salad``, deliberately no match — a composite dish is not a
-    counted egg). A bare count-noun unit that is itself the food (``2 eggs``
-    parsed as unit ``eggs``) matches too.
+    The head noun is the food identity (``wheat toast`` → ``toast``; ``Christie
+    Toppables Crackers`` → ``cracker``; ``egg salad`` → ``salad``, deliberately no
+    match — a composite dish is not a counted egg). A bare count-noun unit that is
+    itself the food (``2 eggs`` parsed as unit ``eggs``) matches too. The head-noun
+    rule is :func:`~app.estimator.food_serving.head_noun`, shared with the serving
+    math's piece-class matching so the two cannot drift apart.
     """
 
-    name_tokens = _tokens(name)
-    if name_tokens:
-        head = _singular(name_tokens[-1])
+    head = head_noun(name)
+    if head is not None:
         spec = COMMON_PORTIONS.get(head)
         if spec is not None:
             return head, spec
-    for token in _tokens(unit):
-        head = _singular(token)
-        spec = COMMON_PORTIONS.get(head)
+    for token in text_tokens(unit):
+        singular = singular_token(token)
+        spec = COMMON_PORTIONS.get(singular)
         if spec is not None:
-            return head, spec
+            return singular, spec
     return None
+
+
+def _max_count(name: str, unit: str | None) -> float:
+    """The sanity cap for this count: the more generous one for a piece count."""
+
+    if is_piece_count(name=name, unit=unit):
+        return MAX_PIECE_PORTION_COUNT
+    return MAX_COMMON_PORTION_COUNT
 
 
 def _unit_is_countable(unit: str | None, food: str, spec: CommonPortionSpec) -> bool:
@@ -165,11 +182,13 @@ def _unit_is_countable(unit: str | None, food: str, spec: CommonPortionSpec) -> 
     normalized = re.sub(r"\s+", " ", (unit or "").strip().lower())
     if normalized in _COUNT_UNITS:
         return True
-    tokens = _tokens(normalized)
+    tokens = text_tokens(normalized)
     if not tokens:
         return False
     return all(
-        _singular(token) == food or _singular(token) in spec.cue_grams or token in _COUNT_UNITS
+        singular_token(token) == food
+        or singular_token(token) in spec.cue_grams
+        or token in _COUNT_UNITS
         for token in tokens
     )
 
@@ -184,17 +203,18 @@ def resolve_common_portion_grams(
     """Resolve a counted common food to grams from the documented portion table.
 
     Applied only after :func:`~app.estimator.food_serving.resolve_grams` fails
-    (the source stated no usable serving size), and only for a **stated count**
+    (the source stated no usable serving size, or the count is a **piece** count
+    the serving size must not multiply — FTY-437), and only for a **stated count**
     of a table food: a positive structured ``amount`` with a count-like unit.
-    The size/serving cue (``large``, ``slice``, ``pat``) is read from the name,
-    unit, or quantity phrase; absent a cue the food's documented default
+    The size/serving cue (``large``, ``slice``, ``pat``, ``cracker``) is read from the
+    name, unit, or quantity phrase; absent a cue the food's documented default
     applies. Returns ``None`` whenever any part does not match, so the caller
     keeps its existing routing (rough tiers or clarification per policy).
     """
 
     if amount is None or not math.isfinite(amount):
         return None
-    if amount <= 0 or amount > MAX_COMMON_PORTION_COUNT:
+    if amount <= 0 or amount > _max_count(name, unit):
         return None
     if is_composed_dish(name, unit):
         # FTY-368: a composed/assembled dish (sandwich, wrap, burger, …) is the
@@ -210,8 +230,8 @@ def resolve_common_portion_grams(
         return None
 
     cue = spec.default_cue
-    for token in (*_tokens(unit), *_tokens(name), *_tokens(quantity_text)):
-        candidate = _singular(token)
+    for token in (*text_tokens(unit), *text_tokens(name), *text_tokens(quantity_text)):
+        candidate = singular_token(token)
         if candidate in spec.cue_grams:
             cue = candidate
             break
