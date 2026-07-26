@@ -6,7 +6,9 @@ The product principle is simple: natural input, deterministic math, visible evid
 
 ## Current Status
 
-**v1.0.0** — the first stable release. All v1 milestones are shipped: accounts and profile, the logging spine, the evidence-backed estimator, editing and saved foods, barcode and label evidence inputs, and weight tracking with a daily summary. See [CHANGELOG.md](CHANGELOG.md) for the full feature summary.
+**Pre-release — feature-complete, with known gaps.** The v1 feature set is built and running end to end: accounts and profile, the logging spine, the evidence-backed estimator, editing and saved foods, barcode and label evidence inputs, and weight tracking with a daily summary. See [CHANGELOG.md](CHANGELOG.md) for the full feature summary — its **Unreleased** section lists what has landed since. No release has been tagged yet, so self-host from `main`.
+
+**Known gap — user-data deletion.** You can delete a body-weight entry and delete (void) a food or exercise log entry from the app today. The remaining per-item deletions are still landing, and **account deletion is deferred until after the first release**. Until it ships, deleting an account means acting on the database you own: `docker compose down -v` drops the whole data volume, or remove the specific rows and let the schema's cascades clean up. See [Data Retention → Deletion Requirements](docs/security/data-retention.md#deletion-requirements) for the exact as-built status.
 
 ## Product Shape
 
@@ -211,6 +213,54 @@ stack is coherent (backend images from one checkout, Alembic at head, health
 green) and prints the exact connect-screen URL derived from your `.env`
 `API_PORT`. See [Local Development Stack → Simulator Readiness Smoke](docs/operations/local-dev-stack.md#simulator-readiness-smoke-fty-250).
 
+### Run the App
+
+The steps above give you a backend. These three get the iOS app onto a simulator
+and connected to it. You need macOS with Xcode and its command-line tools.
+
+**1. Build and launch the app:**
+
+```sh
+cd mobile
+npm install
+npx expo run:ios      # first run: builds the native app, installs it, starts Metro
+```
+
+The first run takes a while — it generates the native iOS project with
+`expo prebuild`, compiles it, and installs the result on the simulator.
+Afterwards `npm run ios` (`expo start --ios`) is enough: it starts Metro and
+opens the app already installed on the simulator.
+
+**Expo Go will not run this app — a dev build is required.** Every `expo-*`
+dependency in `mobile/package.json` ships inside Expo Go, but
+`@react-native-segmented-control/segmented-control` is a third-party native
+module Expo Go does not bundle, so the app has to be compiled once as above.
+`mobile/ios/` is generated output and is gitignored; `npx expo run:ios` creates
+it on your machine.
+
+**2. Connect the app to your backend:**
+
+A fresh install has **no** persisted server — the app opens on a connect screen
+and asks for one. Enter the URL `make sim-smoke` printed (derived from your
+`.env` `API_PORT`, e.g. `http://localhost:18000`). Two gotchas:
+
+- Use the smoke's URL, not the mobile code's `localhost:8000` fallback — that is
+  only correct when `API_PORT` is left at its default.
+- On a **physical device** on your LAN, `localhost` is the device itself. Use
+  the host machine's LAN IP instead (e.g. `http://192.168.1.24:8000`), and leave
+  `API_BIND_HOST` unset so the API is published on all interfaces. For encrypted
+  transport across your devices, use the tailnet path below instead.
+
+**3. Sign in or create an account** on the next screen. Accounts are local to
+your server — registering here creates a user in your own Postgres. A new
+account then walks onboarding (profile and goal) once, and lands on the Today
+screen ready for your first entry.
+
+Details live in [`mobile/README.md`](mobile/README.md) (app layout and the
+development loop) and
+[Local Development Stack → Connecting the simulator](docs/operations/local-dev-stack.md#connecting-the-simulator)
+(the connect-URL rules and the live-backend vs. hermetic-E2E distinction).
+
 ### HTTPS over Tailscale (Optional)
 
 To reach the backend from your other devices with **encrypted transport**, serve
@@ -248,7 +298,8 @@ docker compose run --rm migrate
 
 ```sh
 docker compose down           # stop and remove containers
-docker compose down -v        # also drop the postgres data volume
+docker compose down -v        # also drop the named volumes: postgres data AND
+                              # the claude-config / codex-config login sessions
 ```
 
 ## Development
