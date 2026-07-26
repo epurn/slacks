@@ -1790,10 +1790,13 @@ describe("TrendsScreen — human dates", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Non-color adherence cue (FTY-189): on-target vs. off-target is
 // distinguishable without color (a redundant shape cue), not color alone.
+// FTY-431 changed which shape cue: the off-target cell's `surface`-colored ring
+// (a near-black outline in dark mode) gave way to square corners against the
+// rounded cap every other state keeps.
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("TrendsScreen — non-color adherence cue", () => {
-  it("off-target cells carry a border the on-target fill does not", async () => {
+  it("off-target cells carry a corner shape the on-target fill does not, with no ring", async () => {
     const getSum = jest.fn().mockResolvedValue([
       makeSummary("2026-06-26", 2000, 2000), // on-target
       makeSummary("2026-06-27", 500, 2000), // off-target
@@ -1814,8 +1817,13 @@ describe("TrendsScreen — non-color adherence cue", () => {
     const onStyle = Object.assign({}, ...(onTargetFill.props.style as object[]));
     const offStyle = Object.assign({}, ...(offTargetFill.props.style as object[]));
 
+    // Neither solid fill is ringed — the off-target ring was the dark-mode
+    // black outline FTY-431 removed.
     expect(onStyle.borderWidth ?? 0).toBe(0);
-    expect(offStyle.borderWidth).toBeGreaterThan(0);
+    expect(offStyle.borderWidth ?? 0).toBe(0);
+    // The silhouette is what carries the cue with hue ignored.
+    expect(onStyle.borderRadius).toBeGreaterThan(0);
+    expect(offStyle.borderRadius).toBe(0);
     // The fill hue still differs too (redundant, not a replacement).
     expect(onStyle.backgroundColor).not.toBe(offStyle.backgroundColor);
   });
