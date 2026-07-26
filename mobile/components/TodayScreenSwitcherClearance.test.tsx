@@ -92,4 +92,16 @@ describe("TodayScreen switcher clearance (FTY-257)", () => {
       floatingSwitcherClearance(safeAreaBottom),
     );
   });
+
+  // FTY-432: the composer's actions moved to a row beneath the full-width
+  // field, so on a small phone a grown multiline entry sits lower. The scroll
+  // view adjusts its insets for the keyboard, keeping the whole composer
+  // reachable while typing instead of stranding it behind the keyboard.
+  it("adjusts its insets for the keyboard so the composer stays reachable", async () => {
+    const tree = mountToday();
+    await act(async () => {});
+
+    const scroll = tree.root.find((n) => n.props.testID === "today-screen");
+    expect(scroll.props.automaticallyAdjustKeyboardInsets).toBe(true);
+  });
 });
