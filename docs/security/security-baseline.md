@@ -66,6 +66,19 @@ This project uses the following as design references:
 - Use database and object-storage encryption where supported by the deployment.
 - Consider application-level encryption for highly sensitive fields once the data model is finalized.
 - Store provider keys and app secrets in environment variables or secret managers.
+- A secret whose value is published in this repository must never be usable by a
+  reachable instance. *(v1: `SLACKS_AUTH_SECRET` defaults to the `DEV_AUTH_SECRET`
+  placeholder, and bearer tokens are stateless HMACs over it, so an instance
+  serving on the default lets anyone who reads the source forge a token for any
+  `user_id`. `Settings` therefore fails closed — it refuses to construct while the
+  placeholder is the effective secret in every environment except `test`, the
+  explicit opt-in the test suite and CI fixtures run under. `development` is as
+  network-reachable as `production` on a self-host, so it is gated identically;
+  the documented `cp .env.example .env` bring-up now fails fast with an actionable
+  error instead of quietly serving forgeable tokens. The refusal names the env var
+  and the generation command and is content-free of every secret value —
+  neither the configured secret nor the placeholder constant is interpolated into
+  the message, log, or traceback. FTY-448.)*
 - Never expose LLM/search/nutrition provider keys to clients.
 - Never commit `.env`, tokens, private keys, or production credentials.
 

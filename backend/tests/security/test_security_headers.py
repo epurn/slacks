@@ -15,14 +15,24 @@ from fastapi.testclient import TestClient
 from sqlalchemy.engine import Engine
 
 from app.main import create_app
-from app.settings import Settings, load_settings
+from app.settings import load_settings
 
 
 @pytest.fixture
 def dev_client(db_engine: Engine) -> TestClient:
-    """TestClient built against a development-environment app."""
+    """TestClient built against a development-environment app.
 
-    settings = Settings(environment="development", log_level="WARNING")
+    Development now also requires a non-default auth secret (FTY-448), so a
+    synthetic one is supplied the same way ``prod_client`` does.
+    """
+
+    settings = load_settings(
+        {
+            "SLACKS_ENVIRONMENT": "development",
+            "SLACKS_AUTH_SECRET": "synthetic-dev-secret-for-testing-only",
+            "SLACKS_LOG_LEVEL": "WARNING",
+        }
+    )
     app = create_app(settings=settings, engine=db_engine)
     return TestClient(app)
 

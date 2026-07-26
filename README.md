@@ -64,7 +64,10 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 ```
 
 Open `.env` and replace the `SLACKS_AUTH_SECRET` placeholder with the output.
-The app will not start in production mode with the placeholder in place.
+This step is not optional: the placeholder is published in this repository, so
+tokens signed with it are forgeable. The app refuses to start with the
+placeholder in place in every mode — `development` as well as `production` —
+except `SLACKS_ENVIRONMENT=test`, which exists for the project's own test suite.
 
 **4. (Optional) Configure the API host port:**
 
