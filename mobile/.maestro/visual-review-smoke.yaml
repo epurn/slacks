@@ -391,6 +391,11 @@ appId: com.slacks
 # capture.label_guidance (light): the label-capture framing-guidance sub-state
 # (FTY-268), opened via the same initial-state seam — no scripted "Capture
 # label" tap.
+#
+# FTY-433 pins the two-tap step shape on this same surface: the sticky "Save
+# label photos" control is present in the camera chrome (resting off, so the
+# retention question is off the hot path), and there is no Upload button —
+# the shutter submits by itself, so no post-capture preview stop exists.
 - openLink: "slacks://__visual-review?preset=capture.label_guidance&theme=light"
 - runFlow: common/accept-open-in-slacks.yaml
 - extendedWaitUntil:
@@ -399,6 +404,12 @@ appId: com.slacks
     timeout: 20000
 - assertVisible:
     text: "Fit the nutrition label inside the frame"
+- assertVisible:
+    text: ".*Save label photos.*"
+- assertNotVisible:
+    text: ".*Upload label.*"
+- assertNotVisible:
+    text: ".*Save this photo.*"
 - takeScreenshot: capture-label-guidance-light
 
 # capture.confirm_parsed (light): the confirm-parsed-values sheet (FTY-268),
