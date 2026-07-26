@@ -20,11 +20,26 @@ import { type ComposerImage } from "./useComposerImages";
 import { MAX_RAW_TEXT_LENGTH } from "./helpers";
 
 /**
+ * Resting height of the composer field (FTY-432). Comfortably above the 44 pt
+ * minimum tap target so a single typed line of 17 pt body type has visible
+ * breathing room; the field still grows to `COMPOSER_INPUT_MAX_HEIGHT`.
+ */
+export const COMPOSER_INPUT_MIN_HEIGHT = 68;
+/** Multiline growth ceiling — unchanged from the pre-FTY-432 composer. */
+export const COMPOSER_INPUT_MAX_HEIGHT = 120;
+
+/**
  * Today's natural-language composer: the multiline text field, the attach /
  * barcode / label-capture / add actions, the attached-image thumbnails, the
  * saved-food typeahead bar, and the inline submit-error alert. A pure view
  * block — the screen shell owns the compose state and hands it the value +
  * callbacks.
+ *
+ * Layout (FTY-432): the field owns a full-width line of its own and rests at
+ * `COMPOSER_INPUT_MIN_HEIGHT`, so the app's core action reads as the primary
+ * surface instead of a narrow slot squeezed by four same-row buttons. The four
+ * actions sit on a secondary row directly beneath it — capture affordances
+ * grouped left, the Add button right — all still one obvious tap away.
  */
 export function TodayComposer({
   inputRef,
@@ -98,50 +113,53 @@ export function TodayComposer({
           style={[styles.input, { backgroundColor: colors.surfaceRaised, color: colors.text }]}
         />
         <View style={styles.composerActions}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Attach photo"
-            accessibilityHint="Adds a photo from your library or camera to this log"
-            accessibilityState={{ disabled: attachOff }}
-            disabled={attachOff}
-            onPress={onAttach}
-            style={[
-              styles.scanButton,
-              { backgroundColor: colors.controlBackground, opacity: attachOff ? 0.4 : 1 },
-            ]}
-          >
-            <AppIcon name="photo.badge.plus" size={20} color={colors.text} />
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Scan barcode"
-            accessibilityHint="Opens the camera to scan a product barcode"
-            accessibilityState={{ disabled: submitting }}
-            disabled={submitting}
-            onPress={onScan}
-            style={[styles.scanButton, { backgroundColor: colors.controlBackground }]}
-          >
-            <AppIcon
-              name="barcode.viewfinder"
-              size={20}
-              color={colors.text}
-            />
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Capture label"
-            accessibilityHint="Opens the camera to photograph a nutrition label"
-            accessibilityState={{ disabled: submitting || !apiSession }}
-            disabled={submitting || !apiSession}
-            onPress={onCaptureLabel}
-            style={[styles.scanButton, { backgroundColor: colors.controlBackground }]}
-          >
-            <AppIcon
-              name="camera.fill"
-              size={20}
-              color={colors.text}
-            />
-          </Pressable>
+          {/* Capture affordances grouped left, Add anchored right (FTY-432). */}
+          <View style={styles.captureActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Attach photo"
+              accessibilityHint="Adds a photo from your library or camera to this log"
+              accessibilityState={{ disabled: attachOff }}
+              disabled={attachOff}
+              onPress={onAttach}
+              style={[
+                styles.scanButton,
+                { backgroundColor: colors.controlBackground, opacity: attachOff ? 0.4 : 1 },
+              ]}
+            >
+              <AppIcon name="photo.badge.plus" size={20} color={colors.text} />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Scan barcode"
+              accessibilityHint="Opens the camera to scan a product barcode"
+              accessibilityState={{ disabled: submitting }}
+              disabled={submitting}
+              onPress={onScan}
+              style={[styles.scanButton, { backgroundColor: colors.controlBackground }]}
+            >
+              <AppIcon
+                name="barcode.viewfinder"
+                size={20}
+                color={colors.text}
+              />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Capture label"
+              accessibilityHint="Opens the camera to photograph a nutrition label"
+              accessibilityState={{ disabled: submitting || !apiSession }}
+              disabled={submitting || !apiSession}
+              onPress={onCaptureLabel}
+              style={[styles.scanButton, { backgroundColor: colors.controlBackground }]}
+            >
+              <AppIcon
+                name="camera.fill"
+                size={20}
+                color={colors.text}
+              />
+            </Pressable>
+          </View>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Add entry"
@@ -186,16 +204,23 @@ export function TodayComposer({
 
 const styles = StyleSheet.create({
   composer: {
-    flexDirection: "row",
-    alignItems: "flex-end",
+    // Column, not a row: the field gets the full width of the content column
+    // and the four actions sit beneath it (FTY-432).
+    flexDirection: "column",
     gap: spacing.sm,
     marginTop: spacing.sm,
     marginBottom: spacing.base,
   },
   composerActions: {
     flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  captureActions: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.xs,
-    alignItems: "flex-end",
   },
   scanButton: {
     width: 44,
@@ -207,18 +232,20 @@ const styles = StyleSheet.create({
     minWidth: 44,
   },
   input: {
-    flex: 1,
-    minHeight: 44,
-    maxHeight: 120,
-    borderRadius: radius.md,
-    paddingHorizontal: 14,
-    paddingVertical: spacing.md,
+    // Full-width line of its own — no `flex: 1` fight with the action row.
+    alignSelf: "stretch",
+    minHeight: COMPOSER_INPUT_MIN_HEIGHT,
+    maxHeight: COMPOSER_INPUT_MAX_HEIGHT,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.base,
     fontSize: typeScale.body,
+    lineHeight: 22,
   },
   add: {
     borderRadius: radius.md,
     paddingVertical: spacing.md,
-    paddingHorizontal: 18,
+    paddingHorizontal: spacing.xl,
     alignItems: "center",
     justifyContent: "center",
     minHeight: 44,
