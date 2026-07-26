@@ -32,7 +32,14 @@
  * label-upload errors to friendly copy stays here so the normal host keeps its
  * error UX for free.
  *
- * Retake during an upload **supersedes** it: the capture's `AbortSignal` is
+ * Because the shutter is a submit, it carries an **in-flight guard** like every
+ * other submit in the app: a second tap while a capture is being taken is
+ * ignored, so a habitual double-tap on the shutter cannot produce two uploads,
+ * two label events, and an orphan uncounted proposal. The library pick shares
+ * the guard — it reaches the same upload.
+ *
+ * Retake (or closing the screen) during an upload **supersedes** it: the
+ * capture's `AbortSignal` is
  * aborted, this component ignores the outcome, and a host that honours the
  * signal (TodayScreen does) drops the result instead of yanking the user into a
  * confirm sheet for a shot they already discarded. The network request itself is
@@ -203,11 +210,51 @@ export function LabelCaptureScreen({
   // Monotonic per-capture id: remounts the uploading state so its entrance fade
   // replays for each new shot, and never reuses a superseded capture's frame.
   const [captureId, setCaptureId] = useState(0);
-  // The in-flight capture's abort handle — aborted by Retake, so a superseded
-  // upload neither errors here nor reaches the host's success path.
+  // The in-flight capture's abort handle — aborted by Retake or by closing the
+  // screen, so a superseded upload neither errors here nor reaches the host's
+  // success path.
   const abortRef = useRef<AbortController | null>(null);
   const { saveLabelPhotos, setSaveLabelPhotos } =
     useLabelSavePreference(savePreferenceStore);
+
+  // In-flight guard. Now that the shutter *is* the submit it needs the same
+  // guard every other submit in the app has (`useTodaySubmit`, the confirm
+  // sheet): `takePictureAsync` runs for several hundred ms with the shutter
+  // still on screen, and a camera shutter is exactly the control users
+  // double-tap. Ungated, the second tap starts a second capture → a second
+  // upload → a second server-side label event, leaving an orphan uncounted
+  // proposal on the timeline that the user never asked for (and, with saving
+  // on, a second retained attachment).
+  //
+  // A ref, not state: the second tap lands before any re-render, so a state
+  // flag would still be stale. The run is tagged with a monotonic id and
+  // released only by its owner, so a *superseded* run (the user retook and shot
+  // again) can never release the guard the new run is holding.
+  const runSeqRef = useRef(0);
+  const activeRunRef = useRef<number | null>(null);
+  // The same guard, mirrored into state purely so the controls read as inert
+  // while a capture is being taken.
+  const [capturing, setCapturing] = useState(false);
+
+  /** Claim the capture path; `null` when a capture is already in flight. */
+  const beginRun = useCallback((): number | null => {
+    if (activeRunRef.current !== null) return null;
+    const run = (runSeqRef.current += 1);
+    activeRunRef.current = run;
+    setCapturing(true);
+    return run;
+  }, []);
+
+  /**
+   * Release the capture path. Pass the owning run id to release only if it is
+   * still the active one; pass `null` to release unconditionally (Retake and
+   * close, which deliberately end whatever is in flight).
+   */
+  const endRun = useCallback((run: number | null): void => {
+    if (run !== null && activeRunRef.current !== run) return;
+    activeRunRef.current = null;
+    setCapturing(false);
+  }, []);
 
   const defaultTakePhoto = useCallback(async (): Promise<CapturedPhoto> => {
     const result = await cameraRef.current?.takePictureAsync({ quality: 0.8 });
@@ -253,8 +300,8 @@ export function LabelCaptureScreen({
       setPhase("uploading");
       try {
         // The host decides the outcome (upload + confirm-parsed, or attach as
-        // exact evidence). On success it advances/closes; this component adds no
-        // further state so there is no update after a possible unmount.
+        // exact evidence). On success it advances/closes; the only state this
+        // component still touches afterwards is the in-flight guard's release.
         await onSubmit({
           imageUri: captured.uri,
           savePhoto: saveLabelPhotos,
@@ -274,46 +321,76 @@ export function LabelCaptureScreen({
   );
 
   const handleShutter = useCallback(async () => {
-    let captured: CapturedPhoto;
+    const run = beginRun();
+    if (run === null) return; // a capture is already in flight — ignore the tap
     try {
-      captured = await doTakePhoto();
-    } catch {
-      // Camera not ready — stay on the camera surface; no sensitive content to log.
-      setUploadError("Couldn't capture the photo. Please try again.");
-      setPhase("error");
-      return;
+      let captured: CapturedPhoto;
+      try {
+        captured = await doTakePhoto();
+      } catch {
+        // Camera not ready — stay on the camera surface; no sensitive content to log.
+        setUploadError("Couldn't capture the photo. Please try again.");
+        setPhase("error");
+        return;
+      }
+      await startUpload(captured);
+    } finally {
+      endRun(run);
     }
-    await startUpload(captured);
-  }, [doTakePhoto, startUpload]);
+  }, [beginRun, endRun, doTakePhoto, startUpload]);
 
   const handlePickFromLibrary = useCallback(async () => {
-    let picked: CapturedPhoto | null;
+    // The library pick reaches the same `startUpload`, so it takes the same
+    // guard: two pickers (or a pick racing a shutter) would double-upload just
+    // as two shutter taps would.
+    const run = beginRun();
+    if (run === null) return; // a capture is already in flight — ignore the tap
     try {
-      picked = await doPickPhoto();
-    } catch {
-      // Picker failed to open/read — surface an actionable, content-free error.
-      setUploadError("Couldn't open your photo library. Please try again.");
-      setPhase("error");
-      return;
+      let picked: CapturedPhoto | null;
+      try {
+        picked = await doPickPhoto();
+      } catch {
+        // Picker failed to open/read — surface an actionable, content-free error.
+        setUploadError("Couldn't open your photo library. Please try again.");
+        setPhase("error");
+        return;
+      }
+      if (!picked) return; // user canceled the picker — stay in the camera phase
+      await startUpload(picked);
+    } finally {
+      endRun(run);
     }
-    if (!picked) return; // user canceled the picker — stay in the camera phase
-    await startUpload(picked);
-  }, [doPickPhoto, startUpload]);
+  }, [beginRun, endRun, doPickPhoto, startUpload]);
 
   const handleRetake = useCallback(() => {
     // Supersede the in-flight upload before returning to framing.
     abortRef.current?.abort();
     abortRef.current = null;
+    // Unconditional release: the user is deliberately ending this capture, and
+    // the shutter must be live again the instant they are back at the
+    // viewfinder — the superseded run's own release is then a no-op.
+    endRun(null);
     setPhoto(null);
     setUploadError(null);
     setPhase("camera");
-  }, []);
+  }, [endRun]);
+
+  const handleClose = useCallback(() => {
+    // Closing mid-upload is the natural "I didn't mean that" gesture now that
+    // the shutter auto-submits, and it is the only escape once the modal is
+    // dismissed — so it supersedes the capture exactly like Retake, rather than
+    // letting the result yank a confirm sheet open over Today seconds later.
+    abortRef.current?.abort();
+    abortRef.current = null;
+    endRun(null);
+    onClose();
+  }, [endRun, onClose]);
 
   const framing = phase === "camera" || phase === "error";
 
   return (
     <CameraCapture
-      onClose={onClose}
+      onClose={handleClose}
       rationale={RATIONALE}
       permissionsHook={permissionsHook}
     >
@@ -351,6 +428,7 @@ export function LabelCaptureScreen({
               <ShutterControls
                 onShutter={() => void handleShutter()}
                 onPickFromLibrary={() => void handlePickFromLibrary()}
+                busy={capturing}
                 error={phase === "error" ? uploadError : null}
                 colors={colors}
               />
@@ -470,14 +548,21 @@ function SavePhotosToggle({
   );
 }
 
+/**
+ * The capture controls. `busy` is the in-flight guard made visible: while a
+ * capture is being taken both entry points read as inert, so the shutter does
+ * not silently swallow the double-tap it is about to ignore.
+ */
 function ShutterControls({
   onShutter,
   onPickFromLibrary,
+  busy,
   error,
   colors,
 }: {
   onShutter: () => void;
   onPickFromLibrary: () => void;
+  busy: boolean;
   error: string | null;
   colors: ColorPalette;
 }) {
@@ -497,8 +582,10 @@ function ShutterControls({
         accessibilityRole="button"
         accessibilityLabel="Take photo"
         accessibilityHint="Captures the nutrition label and uploads it right away"
+        accessibilityState={{ disabled: busy }}
+        disabled={busy}
         onPress={onShutter}
-        style={styles.shutterButton}
+        style={[styles.shutterButton, busy && styles.controlBusy]}
       >
         <View style={styles.shutterInner} />
       </Pressable>
@@ -509,8 +596,10 @@ function ShutterControls({
         accessibilityRole="button"
         accessibilityLabel="Choose from Library"
         accessibilityHint="Pick a nutrition-label photo from your library instead of the camera"
+        accessibilityState={{ disabled: busy }}
+        disabled={busy}
         onPress={onPickFromLibrary}
-        style={styles.libraryButton}
+        style={[styles.libraryButton, busy && styles.controlBusy]}
       >
         <AppIcon name="photo.on.rectangle" size={18} color="#FFFFFF" />
         <Text style={styles.libraryButtonLabel}>Choose from Library</Text>
@@ -637,12 +726,18 @@ function makeStyles(colors: ColorPalette) {
       // Deliberately NOT top-right: CameraCapture owns that corner for its close
       // button (`closeButton`, top: 60 / right: 20), and a control stacked under
       // the dismiss affordance is untappable. `left` clears the flash button's
-      // 44pt footprint plus a gap; the status caption hangs below the button, so
-      // the button itself never moves as the state changes.
+      // 44pt footprint plus a gap.
       position: "absolute",
       top: 60,
       left: 76,
-      alignItems: "center",
+      // `flex-start`, NOT `center`: absolutely positioned with only `left` set,
+      // this box shrink-wraps its widest child, and the "Saving photos" caption
+      // is far wider than the 44pt button. Centring would re-centre the button
+      // inside the widened box every time the caption mounts — a ~25pt sideways
+      // jump of the very control under the user's finger. Left-anchoring pins
+      // the button to `left` in both states (and lines it up with the flash
+      // button's own left rail), so only the caption below it appears.
+      alignItems: "flex-start",
       gap: 6,
     },
     saveToggle: {
@@ -671,6 +766,12 @@ function makeStyles(colors: ColorPalette) {
       borderRadius: 8,
       paddingHorizontal: 8,
       paddingVertical: 3,
+    },
+    controlBusy: {
+      // The in-flight guard, made visible: a capture is already being taken, so
+      // the control dims rather than silently ignoring the tap. Opacity only —
+      // no size or position change, so nothing moves under the finger.
+      opacity: 0.5,
     },
     errorText: {
       color: colors.coral,

@@ -24,6 +24,7 @@
 
 import React from "react";
 import { act, create as render, type ReactTestRenderer } from "react-test-renderer";
+import { StyleSheet } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { PermissionStatus } from "expo";
 import type { PermissionResponse } from "expo";
@@ -161,6 +162,16 @@ function textContent(tree: ReactTestRenderer): string {
 
 function hasA11yLabel(tree: ReactTestRenderer, label: string): boolean {
   return tree.root.findAll((n) => n.props.accessibilityLabel === label).length > 0;
+}
+
+/** Whether a labelled control is currently presented as disabled. */
+function disabledState(tree: ReactTestRenderer, label: string): boolean {
+  const node = tree.root.find(
+    (n) =>
+      n.props.accessibilityLabel === label &&
+      typeof n.props.onPress === "function",
+  );
+  return node.props.disabled === true;
 }
 
 function press(tree: ReactTestRenderer, label: string): void {
@@ -464,6 +475,232 @@ describe("LabelCaptureScreen – shutter auto-uploads", () => {
     // The user already moved on: no error copy, still framing the next shot.
     expect(textContent(tree)).not.toContain("couldn't upload");
     expect(hasA11yLabel(tree, "Take photo")).toBe(true);
+  });
+
+  /**
+   * A `takePhoto` the test holds open, so a second tap can land inside the
+   * capture window the real `takePictureAsync` leaves open for hundreds of ms.
+   */
+  function pendingTakePhoto(): {
+    takePhoto: jest.Mock<Promise<{ uri: string }>, []>;
+    finish: () => void;
+  } {
+    let finishTake!: () => void;
+    const takePhoto = jest.fn<Promise<{ uri: string }>, []>(
+      () =>
+        new Promise<{ uri: string }>((res) => {
+          finishTake = () => res({ uri: "file:///label.jpg" });
+        }),
+    );
+    return { takePhoto, finish: () => finishTake() };
+  }
+
+  it("double-tapping the shutter takes one capture and starts one upload", async () => {
+    // The shutter is the submit now, so an unguarded second tap inside the
+    // capture window would produce two uploads, two server-side label events,
+    // and an orphan uncounted proposal the user never asked for.
+    const onSubmit = noopSubmit();
+    const take = pendingTakePhoto();
+    const tree = mount(
+      <LabelCaptureScreen
+        onSubmit={onSubmit}
+        onClose={jest.fn()}
+        permissionsHook={makeGrantedHook()}
+        takePhoto={take.takePhoto}
+        savePreferenceStore={makeSaveStore()}
+      />,
+    );
+    await flush();
+
+    // Two taps while the first capture is still being taken.
+    act(() => {
+      press(tree, "Take photo");
+    });
+    act(() => {
+      press(tree, "Take photo");
+    });
+
+    // The guard bites before the camera is even asked for a second frame.
+    expect(take.takePhoto).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      take.finish();
+    });
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it("the library pick shares the shutter's guard — one upload, not two", async () => {
+    // Both entry points reach the same `startUpload`, so a pick racing a
+    // shutter tap must not double-submit either.
+    const onSubmit = noopSubmit();
+    const take = pendingTakePhoto();
+    const pickPhoto = jest.fn().mockResolvedValue({ uri: "file:///picked.jpg" });
+    const tree = mount(
+      <LabelCaptureScreen
+        onSubmit={onSubmit}
+        onClose={jest.fn()}
+        permissionsHook={makeGrantedHook()}
+        takePhoto={take.takePhoto}
+        pickPhoto={pickPhoto}
+        savePreferenceStore={makeSaveStore()}
+      />,
+    );
+    await flush();
+
+    act(() => {
+      press(tree, "Take photo");
+    });
+    act(() => {
+      press(tree, "Choose from Library");
+    });
+
+    expect(pickPhoto).not.toHaveBeenCalled();
+
+    await act(async () => {
+      take.finish();
+    });
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      imageUri: "file:///label.jpg",
+    });
+  });
+
+  it("the capture controls read as disabled while a capture is being taken", async () => {
+    const take = pendingTakePhoto();
+    const tree = mount(
+      <LabelCaptureScreen
+        onSubmit={noopSubmit()}
+        onClose={jest.fn()}
+        permissionsHook={makeGrantedHook()}
+        takePhoto={take.takePhoto}
+        savePreferenceStore={makeSaveStore()}
+      />,
+    );
+    await flush();
+
+    expect(disabledState(tree, "Take photo")).toBe(false);
+
+    act(() => {
+      press(tree, "Take photo");
+    });
+
+    // The guard is visible, not silent: the shutter it is about to ignore dims.
+    expect(disabledState(tree, "Take photo")).toBe(true);
+    expect(disabledState(tree, "Choose from Library")).toBe(true);
+
+    await act(async () => {
+      take.finish();
+    });
+  });
+
+  it("retake releases the guard so the next shutter still works mid-upload", async () => {
+    // The guard must not outlive the capture it was taken for: Retake ends the
+    // in-flight upload, so the shutter has to be live again immediately even
+    // though the superseded submit is still pending.
+    const pending = pendingSubmit();
+    const takePhoto = jest
+      .fn()
+      .mockResolvedValueOnce({ uri: "file:///first.jpg" })
+      .mockResolvedValueOnce({ uri: "file:///second.jpg" });
+    const tree = mount(
+      <LabelCaptureScreen
+        onSubmit={pending.onSubmit}
+        onClose={jest.fn()}
+        permissionsHook={makeGrantedHook()}
+        takePhoto={takePhoto}
+        savePreferenceStore={makeSaveStore()}
+      />,
+    );
+    await flush();
+
+    await shoot(tree);
+    press(tree, "Retake photo");
+    expect(disabledState(tree, "Take photo")).toBe(false);
+
+    await shoot(tree);
+
+    expect(pending.onSubmit).toHaveBeenCalledTimes(2);
+    expect(pending.onSubmit.mock.calls[1][0]).toMatchObject({
+      imageUri: "file:///second.jpg",
+    });
+  });
+
+  it("a superseded upload settling cannot release a newer capture's guard", async () => {
+    // The guard is owned by the run that took it. Without that ownership check,
+    // capture 1 settling after the user had already retaken and tapped again
+    // would release the guard capture 2 is holding — reopening the double-tap
+    // window in the middle of capture 2's own capture.
+    const pending = pendingSubmit();
+    let finishSecond!: () => void;
+    const takePhoto = jest
+      .fn<Promise<{ uri: string }>, []>()
+      .mockResolvedValueOnce({ uri: "file:///first.jpg" })
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ uri: string }>((res) => {
+            finishSecond = () => res({ uri: "file:///second.jpg" });
+          }),
+      );
+    const tree = mount(
+      <LabelCaptureScreen
+        onSubmit={pending.onSubmit}
+        onClose={jest.fn()}
+        permissionsHook={makeGrantedHook()}
+        takePhoto={takePhoto}
+        savePreferenceStore={makeSaveStore()}
+      />,
+    );
+    await flush();
+
+    await shoot(tree); // capture 1: upload in flight
+    press(tree, "Retake photo"); // superseded, guard released, back at camera
+    act(() => {
+      press(tree, "Take photo"); // capture 2: still being taken
+    });
+
+    // Capture 1's submit settles now, while capture 2 owns the path.
+    await act(async () => {
+      pending.resolve();
+    });
+
+    // A tap landing in that window must still be ignored.
+    act(() => {
+      press(tree, "Take photo");
+    });
+    expect(takePhoto).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      finishSecond();
+    });
+    expect(pending.onSubmit).toHaveBeenCalledTimes(2);
+  });
+
+  it("closing the screen mid-upload supersedes the capture, like retake", async () => {
+    const pending = pendingSubmit();
+    const onClose = jest.fn();
+    const tree = mount(
+      <LabelCaptureScreen
+        onSubmit={pending.onSubmit}
+        onClose={onClose}
+        permissionsHook={makeGrantedHook()}
+        takePhoto={jest.fn().mockResolvedValue({ uri: "file:///label.jpg" })}
+        savePreferenceStore={makeSaveStore()}
+      />,
+    );
+    await flush();
+
+    await shoot(tree);
+    expect(pending.capture().signal.aborted).toBe(false);
+
+    press(tree, "Close scanner");
+
+    // The host still gets its close, and the abandoned upload is aborted so a
+    // signal-honouring host drops the result instead of yanking a confirm sheet
+    // open over Today seconds later.
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(pending.capture().signal.aborted).toBe(true);
   });
 
   it("a second shutter after a retake submits the new capture", async () => {
@@ -812,6 +1049,39 @@ describe("LabelCaptureScreen – sticky save preference", () => {
     });
     // Off is the quiet resting state — no "saving" caption to read.
     expect(textContent(tree)).not.toContain("Saving photos");
+  });
+
+  it("the control does not move sideways when it is switched on", async () => {
+    // Regression (FTY-433 review): the container is absolutely positioned with
+    // only `left` set, so it shrink-wraps its widest child. Turning saving on
+    // mounts the "Saving photos" caption, which is far wider than the 44pt
+    // button — under `alignItems: "center"` the button was then re-centred
+    // inside the widened box and jumped ~25pt to the right, under the finger
+    // that had just tapped it. Left-anchoring keeps the only x-determinant the
+    // container's fixed `left`, in both states.
+    const tree = mountWithStore(makeSaveStore());
+    await flush();
+
+    const container = () => saveToggle(tree).parent!;
+    const layoutOff = StyleSheet.flatten(container().props.style);
+
+    act(() => {
+      saveToggle(tree).props.onPress();
+    });
+    await flush();
+
+    // The caption really is mounted now — i.e. the widening child is present
+    // and this assertion is exercising the state that used to shift.
+    expect(textContent(tree)).toContain("Saving photos");
+
+    const layoutOn = StyleSheet.flatten(container().props.style);
+    expect(layoutOn).toEqual(layoutOff);
+    expect(layoutOn.left).toBe(76);
+    expect(layoutOn.alignItems).toBe("flex-start");
+    // The button itself contributes no horizontal offset either way.
+    const button = StyleSheet.flatten(saveToggle(tree).props.style);
+    expect(button.marginLeft ?? 0).toBe(0);
+    expect(button.width).toBe(44);
   });
 
   it("the auto-upload request carries save=false while the preference is off", async () => {

@@ -103,7 +103,9 @@ export function TodayScreen({
   saveFood = saveFoodApi,
   listSourceCandidates = listSourceCandidatesApi,
   reResolveItem = reResolveItemApi,
-  uploadLabel = uploadLabelImageApi,
+  // No destructuring default: the real client is applied *after* the E2E
+  // capture seam below, so an unset prop can still fall through to the seam.
+  uploadLabel,
   labelTakePhoto,
   getLabelProposal = getLabelProposalApi,
   confirmLabelProposal = confirmLabelProposalApi,
@@ -287,9 +289,15 @@ export function TodayScreen({
   // therefore supplies both a synthetic shutter frame and a synthetic upload, so
   // the real shutter → auto-upload → confirm-parsed path is drivable end to end.
   // Inert outside `isE2EMode()` (always `{}` there), and an explicit test prop
-  // still wins.
+  // still wins. Both seams resolve in the same order — `prop ?? seam ?? real` —
+  // so injecting either one while a capture preset is active behaves the same
+  // way. `uploadLabel` therefore takes its real-client fallback here rather than
+  // as a destructuring default, which would have shadowed the seam entirely;
+  // `labelTakePhoto` has no fallback here because LabelCaptureScreen supplies
+  // its own (`takePictureAsync`) for an undefined prop.
   const captureSeam = useCaptureVisualReviewInjectables();
-  const effectiveUploadLabel = captureSeam.uploadLabel ?? uploadLabel;
+  const effectiveUploadLabel =
+    uploadLabel ?? captureSeam.uploadLabel ?? uploadLabelImageApi;
   const effectiveLabelTakePhoto = labelTakePhoto ?? captureSeam.labelTakePhoto;
 
   // Swipe-to-delete arbitration (FTY-417): while a row's horizontal swipe is
