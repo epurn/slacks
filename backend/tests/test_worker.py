@@ -7,7 +7,7 @@ from app.worker import create_celery_app
 
 
 def test_celery_app_uses_redis_url_for_broker_and_backend() -> None:
-    settings = Settings(redis_url="redis://redis:6379/2")
+    settings = Settings(environment="test", redis_url="redis://redis:6379/2")
 
     celery_app = create_celery_app(settings)
 
@@ -18,7 +18,7 @@ def test_celery_app_uses_redis_url_for_broker_and_backend() -> None:
 def test_celery_app_includes_estimation_task_module() -> None:
     # FTY-040 adds the first task. The app lists its task modules in ``include``
     # so Celery imports and registers them on worker start.
-    celery_app = create_celery_app(Settings())
+    celery_app = create_celery_app(Settings(environment="test"))
 
     assert "app.estimator.tasks" in celery_app.conf.include
 

@@ -21,9 +21,10 @@ Environment = Literal["development", "test", "production"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 EstimatorClarifyMode = Literal["estimate_first", "balanced", "strict"]
 
-#: Placeholder auth secret used for local development/tests only. Production must
-#: override ``SLACKS_AUTH_SECRET`` with a real secret; the validator below refuses
-#: to start a production app while this default is in place.
+#: Placeholder auth secret. This value is published in this repository, so tokens
+#: signed with it are forgeable by anyone. It is usable only by the test suite
+#: (``SLACKS_ENVIRONMENT=test``); the validator below refuses to construct
+#: ``Settings`` in any other environment while this default is in place.
 DEV_AUTH_SECRET = "dev-insecure-change-me"  # noqa: S105 (not a real credential)
 DEFAULT_ESTIMATOR_MODEL_PRIOR_CONFIDENCE_FLOOR = 0.6
 DEFAULT_ESTIMATOR_MAX_PARSE_REPAIR_ATTEMPTS = 2
@@ -34,9 +35,18 @@ class Settings(BaseModel):
 
     Frozen and ``extra="forbid"`` so configuration is immutable once loaded and
     unknown keys are rejected instead of being silently ignored.
+
+    ``hide_input_in_errors`` keeps rejected *values* out of the rendered
+    ``ValidationError``. This model carries a credential (``auth_secret``), and
+    Pydantic otherwise attaches the whole raw input mapping to a model-level
+    error as ``input_value=...`` — so a boot refusal triggered by a copied-
+    unchanged ``.env`` (which sets ``SLACKS_AUTH_SECRET`` explicitly) would print
+    the configured secret to stderr and into the traceback. Suppressing the echo
+    keeps every settings failure content-free of credentials, not just this one
+    (FTY-448).
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
     app_name: str = Field(default="slacks-backend", min_length=1)
     environment: Environment = "development"
@@ -71,7 +81,8 @@ class Settings(BaseModel):
     )
     # Auth (FTY-020). The signing secret for local-auth bearer tokens is read
     # from SLACKS_AUTH_SECRET and is a SecretStr so it is never rendered in repr,
-    # logs, or tracebacks. Production must override the dev placeholder.
+    # logs, or tracebacks. Every environment except "test" must override the
+    # placeholder default (FTY-448); see the validator below.
     auth_secret: SecretStr = Field(default=SecretStr(DEV_AUTH_SECRET))
     # Bearer-token lifetime in seconds (default 7 days for a self-host session).
     auth_token_ttl_seconds: int = Field(default=7 * 24 * 3600, ge=60)
@@ -113,14 +124,31 @@ class Settings(BaseModel):
         return self.environment != "production"
 
     @model_validator(mode="after")
-    def _require_real_secret_in_production(self) -> Settings:
-        """Fail closed: a production app must not run on the dev auth secret."""
+    def _require_real_auth_secret_outside_tests(self) -> Settings:
+        """Fail closed: only the test suite may run on the placeholder auth secret.
 
-        if (
-            self.environment == "production"
-            and self.auth_secret.get_secret_value() == DEV_AUTH_SECRET
-        ):
-            raise ValueError("SLACKS_AUTH_SECRET must be set to a non-default value in production")
+        ``DEV_AUTH_SECRET`` is a constant published in this repository, and bearer
+        tokens are stateless HMACs over it, so an instance serving on the
+        placeholder lets anyone who reads the source forge a token for any user.
+        ``development`` is as reachable as ``production`` on a self-host, so the
+        guard is an allowlist: ``environment == "test"`` is the single opt-in that
+        still boots on the default (it is what the suite and CI fixtures use);
+        every other environment must supply an operator-generated secret.
+
+        The raised message is deliberately content-free of credentials — it names
+        the env var and the generation command but never interpolates the
+        configured secret or the placeholder constant (FTY-448).
+        """
+
+        if self.environment != "test" and self.auth_secret.get_secret_value() == DEV_AUTH_SECRET:
+            raise ValueError(
+                "SLACKS_AUTH_SECRET is still the placeholder published in this repository, "
+                "so bearer tokens signed with it are forgeable. Generate a real secret with "
+                'python3 -c "import secrets; print(secrets.token_hex(32))" and set '
+                "SLACKS_AUTH_SECRET to it before starting the app (see the README "
+                '"Self-Hosting" section and .env.example). Only SLACKS_ENVIRONMENT=test '
+                "may run on the placeholder."
+            )
         return self
 
 

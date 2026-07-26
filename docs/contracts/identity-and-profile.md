@@ -124,7 +124,14 @@ part of any response.
 - Password hashes are strong (scrypt, salted, self-describing) and live only in
   `auth_identities`; they are never logged or returned.
 - The token signing secret (`SLACKS_AUTH_SECRET`) is read from the environment
-  only and never logged; a production app refuses to start on the dev default.
+  only and never logged. Because the shipped `DEV_AUTH_SECRET` placeholder is
+  published in this repository — and tokens are stateless HMACs over it, so
+  anyone could forge one for any `user_id` — `Settings` refuses to construct
+  while that placeholder is the effective secret in **every** environment except
+  `test` (FTY-448). `test` is the sole opt-in, and is what the test suite and CI
+  fixtures run under; `development` and `production` both require an
+  operator-generated secret. The refusal names `SLACKS_AUTH_SECRET` and the
+  generation command and never echoes any secret value.
 - Retention (per `docs/security/data-retention.md`): account data retained until
   account deletion; profile data retained until edited or account deletion.
   `ON DELETE CASCADE` on `user_id` removes a user's identities and profile when

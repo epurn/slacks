@@ -65,7 +65,7 @@ uv run pytest        # run the tests
   | `SLACKS_PORT` | `8000` | Bind port (1–65535). |
   | `SLACKS_REDIS_URL` | `redis://localhost:6379/0` | Celery broker + result backend. |
   | `SLACKS_DATABASE_URL` | `postgresql://slacks:slacks@localhost:5432/slacks` | Postgres DSN for the identity/profile model and migrations. A bare `postgresql://` DSN binds to psycopg (v3). |
-  | `SLACKS_AUTH_SECRET` | `dev-insecure-change-me` | HMAC signing secret for local-auth bearer tokens. Production refuses to start on the default. |
+  | `SLACKS_AUTH_SECRET` | `dev-insecure-change-me` | HMAC signing secret for local-auth bearer tokens. The app refuses to start on the published default in every environment except `test`. |
   | `SLACKS_AUTH_TOKEN_TTL_SECONDS` | `604800` | Bearer-token lifetime (7 days). |
 
   Invalid or out-of-range values fail fast at startup with a `ValidationError`.
