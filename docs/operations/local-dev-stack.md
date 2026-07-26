@@ -89,7 +89,7 @@ opt-ins the kept engines need:
 | --- | --- |
 | `duckduckgo web` | Best branded-product and UPC coverage of the candidates; answered every probe query with relevant nutrition/product pages. Keyless. |
 | `dogpile` | InfoSpace metasearch with a different backend mix; surfaces official brand product pages and grocery/UPC listings the others miss, and never throttled the instance. |
-| `mojeek` | Small **independent** index (not a Bing/Google front end), so the set keeps answering when the aggregator engines cool off. Sparse on branded queries; it contributes on generic foods. |
+| `mojeek` | Small **independent** index (not a Bing/Google front end), so the set keeps answering when the aggregator engines cool off. Sparse on branded queries; it contributes on generic foods. After a burst of probe traffic it enters an `access denied` cooldown for a while and recovers unaided (`live-probe.md` §3 catches a whole such window) — a soft per-IP limit, not a block wall, so it stays. |
 
 Dropped, with the measured reason (probe run 2026-07-26 from this stack,
 recorded in `docs/verification/FTY-436/live-probe.md`):

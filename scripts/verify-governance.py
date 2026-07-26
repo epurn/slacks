@@ -180,18 +180,33 @@ def main() -> None:
         if term not in review_policy:
             fail(f"review policy must document reviewer status gate term {term!r}")
 
+    # Every pattern below anchors horizontal whitespace as `[ \t]*` rather than
+    # `\s*`: under re.MULTILINE `\s` also matches the newline, so a `\s*`-joined
+    # pattern silently spans lines and would let an unrelated neighbouring block
+    # satisfy the check.
     searxng_settings = read("searxng/settings.yml")
-    if re.search(r"^use_default_settings:\s*true\s*$", searxng_settings, re.MULTILINE):
+    if re.search(r"^use_default_settings:[ \t]*true[ \t]*$", searxng_settings, re.MULTILINE):
         fail(
             "searxng/settings.yml must pin a curated engine set "
             "(use_default_settings.engines.keep_only), not inherit every default engine"
         )
-    keep_only = re.search(r"^\s*keep_only:\n((?:\s*-\s+\S.*\n)+)", searxng_settings, re.MULTILINE)
+    keep_only = re.search(
+        r"^[ \t]*keep_only:\n((?:[ \t]*-[ \t]+\S.*\n)+)", searxng_settings, re.MULTILINE
+    )
     if keep_only is None:
         fail("searxng/settings.yml must declare an explicit engines.keep_only list")
     kept_engines = {
         line.split("-", 1)[1].strip() for line in keep_only.group(1).splitlines() if line.strip()
     }
+    # keep_only holds bare engine names. Anything with a `:` means the regex ran
+    # past the list into an adjacent mapping sequence, which would quietly empty
+    # the throttled-engine check below — fail loudly instead of trusting it.
+    mapping_items = sorted(name for name in kept_engines if ":" in name)
+    if mapping_items:
+        fail(
+            "searxng/settings.yml engines.keep_only must list bare engine names; parsed "
+            + ", ".join(mapping_items)
+        )
     throttling = sorted(kept_engines & THROTTLING_SEARCH_ENGINES)
     if throttling:
         fail(
@@ -199,7 +214,7 @@ def main() -> None:
             + ", ".join(throttling)
             + "); see docs/operations/local-dev-stack.md"
         )
-    if not re.search(r"^\s*-\s*json\s*$", searxng_settings, re.MULTILINE):
+    if not re.search(r"^[ \t]*-[ \t]*json[ \t]*$", searxng_settings, re.MULTILINE):
         fail("searxng/settings.yml must keep the json output format the search adapter consumes")
 
     mobile_workflow = read(".github/workflows/mobile.yml")

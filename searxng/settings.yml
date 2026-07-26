@@ -32,11 +32,26 @@ use_default_settings:
     # docs/operations/local-dev-stack.md for the full measurement and the
     # rationale for each drop):
     #
-    #   duckduckgo — best general product/nutrition relevance; keyless.
-    #   bing       — the only one of the candidates that answered a bare UPC
-    #                string, and the fastest/steadiest responder here.
-    #   mojeek     — small independent index; never throttled this instance,
-    #                so it keeps answering when the big two are cooling off.
+    #   duckduckgo web — DuckDuckGo's HTML endpoint. Best branded-product and
+    #                    UPC coverage of the candidates; keyless. NOT the same
+    #                    engine as plain `duckduckgo` (the lite/JSON endpoint),
+    #                    which CAPTCHA-walled every probe query and is one of
+    #                    the engines this story drops.
+    #   dogpile        — InfoSpace metasearch with a different backend mix;
+    #                    carries roughly half the results on every probe query
+    #                    and surfaces official brand product pages the others
+    #                    miss. Never throttled this instance.
+    #   mojeek         — small INDEPENDENT crawler (not a Bing/Google front
+    #                    end), so the set keeps answering when the aggregators
+    #                    cool off. Sparse on branded queries; contributes on
+    #                    generic foods. After a burst of probe traffic it does
+    #                    enter an `access denied` cooldown for a while and
+    #                    recovers unaided — a soft per-IP limit, not a block
+    #                    wall, and the other two carry the set meanwhile.
+    #
+    # `bing` was measured and REJECTED: redundant with `duckduckgo web`, and on
+    # numeric UPC queries it injected unrelated results that outranked the real
+    # product hits. See the dropped-engine table in the ops doc.
     #
     # Widening this list is a deliberate operator choice: add the engine's
     # upstream name here (and `disabled: false` below if it ships disabled).
