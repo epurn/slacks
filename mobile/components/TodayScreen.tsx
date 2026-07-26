@@ -46,6 +46,7 @@ import { ConnectionBanner } from "@/components/ConnectionBanner";
 import { DailySummary } from "@/components/DailySummary";
 import { LabelCaptureScreen } from "@/components/LabelCaptureScreen";
 import { MacroTier } from "@/components/MacroTier";
+import { useCaptureVisualReviewInjectables } from "@/components/today/captureVisualReview";
 import { QuickAddChips } from "@/components/today/QuickAddChips";
 import { SwipeScrollLockContext } from "@/components/today/swipeScrollLock";
 import { Timeline } from "@/components/today/Timeline";
@@ -280,6 +281,17 @@ export function TodayScreen({
     refresh();
   }, [refresh]);
 
+  // Label auto-upload visual-review seam (FTY-433): the simulator has no camera
+  // and the label upload streams bytes through native networking (so the shared
+  // E2E fetch mock can't answer it) — the `capture.label_auto_upload` preset
+  // therefore supplies both a synthetic shutter frame and a synthetic upload, so
+  // the real shutter → auto-upload → confirm-parsed path is drivable end to end.
+  // Inert outside `isE2EMode()` (always `{}` there), and an explicit test prop
+  // still wins.
+  const captureSeam = useCaptureVisualReviewInjectables();
+  const effectiveUploadLabel = captureSeam.uploadLabel ?? uploadLabel;
+  const effectiveLabelTakePhoto = labelTakePhoto ?? captureSeam.labelTakePhoto;
+
   // Swipe-to-delete arbitration (FTY-417): while a row's horizontal swipe is
   // active the row locks the timeline scroll so the enclosing `ScrollView` can't
   // reclaim the pan and snap the delete reveal shut. `setSwipeScrollLocked` is a
@@ -327,13 +339,22 @@ export function TodayScreen({
         {apiSession && (
           <LabelCaptureScreen
             onClose={() => setLabelCaptureOpen(false)}
-            onSubmit={async ({ imageUri, savePhoto }) => {
-              // Normal Today path: upload via uploadLabelImage, then open the
-              // confirm-parsed-values flow with the returned label event.
-              const event = await uploadLabel(apiSession, imageUri, savePhoto);
+            onSubmit={async ({ imageUri, savePhoto, signal }) => {
+              // Normal Today path: the shutter starts this upload directly
+              // (FTY-433), then the confirm-parsed-values flow opens with the
+              // returned label event.
+              const event = await effectiveUploadLabel(
+                apiSession,
+                imageUri,
+                savePhoto,
+              );
+              // Retaken while this was in flight: the user is already framing
+              // the next shot, so the superseded parse must not yank a confirm
+              // sheet over the camera.
+              if (signal.aborted) return;
               handleLabelUploaded(event);
             }}
-            takePhoto={labelTakePhoto}
+            takePhoto={effectiveLabelTakePhoto}
           />
         )}
         {/* Same rationale as the scanner Modal above. */}

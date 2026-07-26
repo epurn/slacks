@@ -131,6 +131,14 @@ token is `401`.
 - **Discard by default.** The raw image is retained as a `log_attachment` only on
   `save=true`, and never on a failed extraction (FTY-077). The default discards it
   after extraction.
+- **Where the client's `save` value comes from (FTY-433).** The mobile capture
+  screen no longer asks per capture. `save` is a **sticky, default-off device-local
+  preference** (`mobile/state/labelSavePreference.ts`), surfaced as a quiet control
+  in the camera chrome and read at shutter time by the auto-upload. It fails
+  closed — unset, unreadable, or not-yet-hydrated all send `save=false` — so a
+  steady-state capture is never retained and only a deliberate opt-in can send
+  `save=true`. The wire contract, the query param, and the server-side retention
+  behaviour are unchanged; the preference value itself never leaves the device.
 - **Never enqueued / never logged.** The image is processed in-request and never
   published to the broker; no image bytes, URIs, or extracted content are logged on
   either side.

@@ -103,6 +103,14 @@ composer (an intended modal, not a surprise navigation), dismissing back to Toda
   then confirm the parsed values (looks-right / edit) before it's added (label
   provenance). Unreadable scan → retake or type. This keeps OCR misreads out of the
   day's totals — Slacks never silently trusts a fallible parse.
+- **The shutter is the submit (FTY-433).** Tapping the shutter starts the upload
+  immediately: the label path is **open → shutter → confirm**, two taps before the
+  parse-confirm gate, against the barcode flow's one. The captured frame becomes
+  the uploading state's backdrop with **Retake** as an optional undo (it supersedes
+  the in-flight upload) — never a blocking preview, an Upload button, or a
+  per-capture question. Keeping a label photo is a **sticky, default-off preference**
+  in the camera chrome, not a stop on the hot path (retention stays discard-by-default,
+  FTY-077).
 
 ### Onboarding
 

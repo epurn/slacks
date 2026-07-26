@@ -1,16 +1,23 @@
 /**
- * Tests for LabelCaptureScreen (FTY-064, generalized in FTY-311).
+ * Tests for LabelCaptureScreen (FTY-064, generalized in FTY-311, two-tap flow in
+ * FTY-433).
  *
  * Covers:
  * - Permission flows: rationale shown, blocked → Open Settings, granted → camera.
- * - Capture → preview → retake transitions and capture chrome (framing, flash).
+ * - Merged shutter → upload (FTY-433): the shutter submits directly, with no
+ *   Upload button, no blocking preview, and no per-capture save question.
+ * - Retake during the upload: back to the camera, and the superseded capture's
+ *   outcome (success or failure) never surfaces.
+ * - Capture chrome (framing guide, flash) and its phase gating.
  * - Submit path: onSubmit receives the captured image URI + save-photo flag; the
  *   capture component makes no assumption that a LogEventDTO comes back.
  * - Normal Today host: onSubmit uploads via a label upload and forwards the
  *   returned event to the confirm-parsed flow (host wiring unchanged).
  * - Exact-evidence host: onSubmit receives the capture (URI + save flag) without
  *   creating a log event.
- * - Save-photo default off + opt-in.
+ * - The sticky save preference (FTY-433): default off, `save=false` on the real
+ *   upload request, deliberate opt-in sends `save=true`, and a stored opt-in is
+ *   visible on the control the next time capture opens.
  * - Submit failure: in-place error, no image bytes/URI/extracted content leaked.
  * - Client-side size/type guard (pure unit).
  */
@@ -23,13 +30,18 @@ import type { PermissionResponse } from "expo";
 
 import { LabelCaptureScreen, type LabelCapture } from "./LabelCaptureScreen";
 import {
+  uploadLabelImage,
   validateImageGuard,
   MAX_UPLOAD_BYTES,
   LabelUploadTooLargeError,
   LabelUploadInvalidTypeError,
   LabelUploadApiError,
+  type LocalImageFile,
+  type OpenLocalImage,
 } from "@/api/labelCapture";
 import type { LogEventDTO } from "@/api/logEvents";
+import type { ApiSession } from "@/state/session";
+import type { LabelSavePreferenceStore } from "@/state/labelSavePreference";
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -162,21 +174,62 @@ function press(tree: ReactTestRenderer, label: string): void {
   });
 }
 
-/** Drive shutter → preview, then toggle save-photo on if requested. */
-async function captureThenPreview(tree: ReactTestRenderer, save = false): Promise<void> {
+/** Flush pending microtasks (the preference hydrate, an upload settle). */
+async function flush(): Promise<void> {
+  await act(async () => {});
+}
+
+/**
+ * Tap the shutter (FTY-433: this both captures *and* starts the upload) and, if
+ * asked, deliberately turn the sticky save preference on beforehand — the only
+ * way `save=true` can ever be sent.
+ */
+async function shoot(tree: ReactTestRenderer, save = false): Promise<void> {
+  if (save) {
+    press(tree, "Save label photos");
+  }
   await act(async () => {
     press(tree, "Take photo");
   });
-  if (save) {
-    const switchNode = tree.root.find(
-      (n) =>
-        n.props.accessibilityLabel === "Save this photo" &&
-        typeof n.props.onValueChange === "function",
-    );
-    act(() => {
-      switchNode.props.onValueChange(true);
-    });
-  }
+}
+
+/** An in-memory save-preference store: the seam the on-device file store fills. */
+function makeSaveStore(initial = false): LabelSavePreferenceStore & {
+  readonly stored: () => boolean;
+  readonly set: jest.Mock<Promise<void>, [boolean]>;
+} {
+  let value = initial;
+  const set = jest.fn<Promise<void>, [boolean]>(async (next) => {
+    value = next;
+  });
+  return { get: async () => value, set, stored: () => value };
+}
+
+const UPLOAD_SESSION: ApiSession = {
+  baseUrl: "https://api.example.test",
+  token: "test-token",
+  userId: USER_ID,
+};
+
+/**
+ * A fake readable local image + its opener seam, so a test can drive the *real*
+ * `uploadLabelImage` client and assert the URL the auto-upload actually issues
+ * (notably its `?save=` retention flag) without a filesystem or a network.
+ */
+function fakeUpload(): { openImage: OpenLocalImage; upload: jest.Mock } {
+  const upload = jest.fn(() =>
+    Promise.resolve({ status: 201, body: JSON.stringify(makeEvent()) }),
+  );
+  const file: LocalImageFile = {
+    exists: true,
+    size: 50_000,
+    type: "image/jpeg",
+    upload,
+  };
+  return {
+    openImage: jest.fn().mockReturnValue(file) as unknown as OpenLocalImage,
+    upload,
+  };
 }
 
 // ─── Client-side guard (pure unit tests) ─────────────────────────────────────
@@ -305,52 +358,139 @@ describe("LabelCaptureScreen – permission flows", () => {
   });
 });
 
-// ─── Capture → preview ───────────────────────────────────────────────────────
+// ─── Merged shutter → upload (FTY-433) ───────────────────────────────────────
 
-describe("LabelCaptureScreen – capture and preview", () => {
-  it("transitions to preview after taking a photo", async () => {
-    const fakePhoto = { uri: "file:///captured-label.jpg" };
-    const takePhoto = jest.fn().mockResolvedValue(fakePhoto);
-    const tree = mount(
+describe("LabelCaptureScreen – shutter auto-uploads", () => {
+  /** A submit that stays in flight until the test resolves/rejects it. */
+  function pendingSubmit(): {
+    onSubmit: jest.Mock<Promise<void>, [LabelCapture]>;
+    capture: () => LabelCapture;
+    resolve: () => void;
+    reject: (error: unknown) => void;
+  } {
+    let resolveSubmit!: () => void;
+    let rejectSubmit!: (error: unknown) => void;
+    const onSubmit = jest.fn<Promise<void>, [LabelCapture]>(
+      () =>
+        new Promise<void>((res, rej) => {
+          resolveSubmit = res;
+          rejectSubmit = rej;
+        }),
+    );
+    return {
+      onSubmit,
+      capture: () => onSubmit.mock.calls[0][0],
+      resolve: () => resolveSubmit(),
+      reject: (error) => rejectSubmit(error),
+    };
+  }
+
+  function mountWithPending(pending: ReturnType<typeof pendingSubmit>) {
+    return mount(
       <LabelCaptureScreen
-        onSubmit={noopSubmit()}
+        onSubmit={pending.onSubmit}
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
-        takePhoto={takePhoto}
+        takePhoto={jest.fn().mockResolvedValue({ uri: "file:///label.jpg" })}
+        savePreferenceStore={makeSaveStore()}
       />,
     );
+  }
+
+  it("uploads straight from the shutter — no Upload button, no preview, no save question", async () => {
+    const pending = pendingSubmit();
+    const tree = mountWithPending(pending);
+    await flush();
+
+    await shoot(tree);
+
+    // The capture was submitted by the shutter itself.
+    expect(pending.onSubmit).toHaveBeenCalledTimes(1);
+    expect(pending.capture()).toMatchObject({
+      imageUri: "file:///label.jpg",
+      savePhoto: false,
+    });
+    // The blocking preview stop is gone: no Upload button and no per-capture
+    // save question anywhere in the tree.
+    expect(hasA11yLabel(tree, "Upload label")).toBe(false);
+    expect(hasA11yLabel(tree, "Save this photo")).toBe(false);
+    // The uploading state is what the user sees, with the captured frame held
+    // behind it and Retake still available.
+    expect(hasA11yLabel(tree, "Uploading label")).toBe(true);
+    expect(hasA11yLabel(tree, "Captured nutrition label photo")).toBe(true);
+    expect(hasA11yLabel(tree, "Retake photo")).toBe(true);
 
     await act(async () => {
-      press(tree, "Take photo");
+      pending.resolve();
     });
-
-    // Preview controls appear; shutter disappears.
-    expect(hasA11yLabel(tree, "Upload label")).toBe(true);
-    expect(hasA11yLabel(tree, "Retake photo")).toBe(true);
-    expect(hasA11yLabel(tree, "Save this photo")).toBe(true);
-    expect(hasA11yLabel(tree, "Take photo")).toBe(false);
   });
 
-  it("retake returns to the camera phase", async () => {
-    const fakePhoto = { uri: "file:///captured-label.jpg" };
-    const takePhoto = jest.fn().mockResolvedValue(fakePhoto);
+  it("retake during the upload returns to the camera and aborts the capture", async () => {
+    const pending = pendingSubmit();
+    const tree = mountWithPending(pending);
+    await flush();
+
+    await shoot(tree);
+    expect(pending.capture().signal.aborted).toBe(false);
+
+    press(tree, "Retake photo");
+
+    // Back at the viewfinder, and the in-flight capture is superseded so a host
+    // that honours the signal drops its result.
+    expect(hasA11yLabel(tree, "Take photo")).toBe(true);
+    expect(hasA11yLabel(tree, "Uploading label")).toBe(false);
+    expect(pending.capture().signal.aborted).toBe(true);
+
+    // The superseded upload settling later must not disturb the camera phase.
+    await act(async () => {
+      pending.resolve();
+    });
+    expect(hasA11yLabel(tree, "Take photo")).toBe(true);
+    expect(hasA11yLabel(tree, "Uploading label")).toBe(false);
+  });
+
+  it("a superseded upload's failure never surfaces as an error", async () => {
+    const pending = pendingSubmit();
+    const tree = mountWithPending(pending);
+    await flush();
+
+    await shoot(tree);
+    press(tree, "Retake photo");
+
+    await act(async () => {
+      pending.reject(new LabelUploadApiError(500, "We couldn't upload the label."));
+    });
+
+    // The user already moved on: no error copy, still framing the next shot.
+    expect(textContent(tree)).not.toContain("couldn't upload");
+    expect(hasA11yLabel(tree, "Take photo")).toBe(true);
+  });
+
+  it("a second shutter after a retake submits the new capture", async () => {
+    const onSubmit = noopSubmit();
+    const takePhoto = jest
+      .fn()
+      .mockResolvedValueOnce({ uri: "file:///first.jpg" })
+      .mockResolvedValueOnce({ uri: "file:///second.jpg" });
     const tree = mount(
       <LabelCaptureScreen
-        onSubmit={noopSubmit()}
+        onSubmit={onSubmit}
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
         takePhoto={takePhoto}
+        savePreferenceStore={makeSaveStore()}
       />,
     );
+    await flush();
 
-    await act(async () => {
-      press(tree, "Take photo");
-    });
+    await shoot(tree);
     press(tree, "Retake photo");
+    await shoot(tree);
 
-    // Back to camera: shutter visible, preview controls gone.
-    expect(hasA11yLabel(tree, "Take photo")).toBe(true);
-    expect(hasA11yLabel(tree, "Upload label")).toBe(false);
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+    expect(onSubmit.mock.calls[1][0]).toMatchObject({
+      imageUri: "file:///second.jpg",
+    });
   });
 });
 
@@ -396,22 +536,22 @@ describe("LabelCaptureScreen – capture chrome", () => {
     expect(flashButton().props.accessibilityState).toEqual({ selected: true });
   });
 
-  it("hides the framing guide and flash toggle once in the preview phase", async () => {
+  it("hides the framing guide, flash, and save toggle once uploading", async () => {
     const tree = mount(
       <LabelCaptureScreen
         onSubmit={noopSubmit()}
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
         takePhoto={jest.fn().mockResolvedValue({ uri: "file:///captured-label.jpg" })}
+        savePreferenceStore={makeSaveStore()}
       />,
     );
 
-    await act(async () => {
-      press(tree, "Take photo");
-    });
+    await shoot(tree);
 
     expect(hasA11yLabel(tree, "Fit the nutrition label inside the frame")).toBe(false);
     expect(hasA11yLabel(tree, "Flash")).toBe(false);
+    expect(hasA11yLabel(tree, "Save label photos")).toBe(false);
   });
 
   it("turns the torch off when leaving the camera phase even if flash was on", async () => {
@@ -421,6 +561,7 @@ describe("LabelCaptureScreen – capture chrome", () => {
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
         takePhoto={jest.fn().mockResolvedValue({ uri: "file:///captured-label.jpg" })}
+        savePreferenceStore={makeSaveStore()}
       />,
     );
 
@@ -460,23 +601,22 @@ describe("LabelCaptureScreen – submit", () => {
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
         takePhoto={jest.fn().mockResolvedValue({ uri: "file:///label.jpg" })}
+        savePreferenceStore={makeSaveStore()}
       />,
     );
+    await flush();
 
-    await captureThenPreview(tree);
-    await act(async () => {
-      press(tree, "Upload label");
-    });
+    await shoot(tree);
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
     // The capture carries the URI and the save flag — no LogEventDTO required.
-    expect(onSubmit).toHaveBeenCalledWith({
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
       imageUri: "file:///label.jpg",
       savePhoto: false,
     });
   });
 
-  it("forwards savePhoto=true only when the save-photo toggle is switched on", async () => {
+  it("forwards savePhoto=true only when the sticky save preference is on", async () => {
     const onSubmit = noopSubmit();
     const tree = mount(
       <LabelCaptureScreen
@@ -484,15 +624,14 @@ describe("LabelCaptureScreen – submit", () => {
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
         takePhoto={jest.fn().mockResolvedValue({ uri: "file:///label.jpg" })}
+        savePreferenceStore={makeSaveStore()}
       />,
     );
+    await flush();
 
-    await captureThenPreview(tree, /* save */ true);
-    await act(async () => {
-      press(tree, "Upload label");
-    });
+    await shoot(tree, /* save */ true);
 
-    expect(onSubmit).toHaveBeenCalledWith({
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
       imageUri: "file:///label.jpg",
       savePhoto: true,
     });
@@ -517,13 +656,12 @@ describe("LabelCaptureScreen – submit", () => {
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
         takePhoto={jest.fn().mockResolvedValue({ uri: "file:///label.jpg" })}
+        savePreferenceStore={makeSaveStore()}
       />,
     );
+    await flush();
 
-    await captureThenPreview(tree);
-    await act(async () => {
-      press(tree, "Upload label");
-    });
+    await shoot(tree);
 
     expect(upload).toHaveBeenCalledWith("file:///label.jpg", false);
     expect(onUploaded).toHaveBeenCalledTimes(1);
@@ -546,17 +684,18 @@ describe("LabelCaptureScreen – submit", () => {
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
         takePhoto={jest.fn().mockResolvedValue({ uri: "file:///exact-label.jpg" })}
+        savePreferenceStore={makeSaveStore()}
       />,
     );
+    await flush();
 
-    await captureThenPreview(tree, /* save */ true);
-    await act(async () => {
-      press(tree, "Upload label");
+    await shoot(tree, /* save */ true);
+
+    expect(received).toHaveLength(1);
+    expect(received[0]).toMatchObject({
+      imageUri: "file:///exact-label.jpg",
+      savePhoto: true,
     });
-
-    expect(received).toEqual([
-      { imageUri: "file:///exact-label.jpg", savePhoto: true },
-    ]);
   });
 
   it("shows an in-place error when onSubmit rejects, without leaking sensitive content", async () => {
@@ -569,13 +708,12 @@ describe("LabelCaptureScreen – submit", () => {
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
         takePhoto={jest.fn().mockResolvedValue({ uri: "file:///label.jpg" })}
+        savePreferenceStore={makeSaveStore()}
       />,
     );
+    await flush();
 
-    await captureThenPreview(tree);
-    await act(async () => {
-      press(tree, "Upload label");
-    });
+    await shoot(tree);
 
     // Error is shown; the message must not contain image bytes or sensitive content.
     const content = textContent(tree);
@@ -594,13 +732,12 @@ describe("LabelCaptureScreen – submit", () => {
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
         takePhoto={jest.fn().mockResolvedValue({ uri: sensitiveUri })}
+        savePreferenceStore={makeSaveStore()}
       />,
     );
+    await flush();
 
-    await captureThenPreview(tree);
-    await act(async () => {
-      press(tree, "Upload label");
-    });
+    await shoot(tree);
 
     const content = textContent(tree);
     // Error message must not contain the image URI or any path-like content.
@@ -622,20 +759,158 @@ describe("LabelCaptureScreen – submit", () => {
         onClose={jest.fn()}
         permissionsHook={makeGrantedHook()}
         takePhoto={jest.fn().mockResolvedValue({ uri: "file:///label.jpg" })}
+        savePreferenceStore={makeSaveStore()}
       />,
     );
+    await flush();
 
-    await captureThenPreview(tree);
-    act(() => {
-      press(tree, "Upload label");
-    });
+    await shoot(tree);
 
-    // While submit is in flight, a spinner is shown.
+    // While submit is in flight, a spinner is shown over the held capture and
+    // the shutter is gone.
     expect(hasA11yLabel(tree, "Uploading label")).toBe(true);
-    expect(hasA11yLabel(tree, "Upload label")).toBe(false);
+    expect(hasA11yLabel(tree, "Take photo")).toBe(false);
 
     await act(async () => {
       resolveSubmit();
+    });
+  });
+});
+
+// ─── Sticky save preference (FTY-433) ────────────────────────────────────────
+
+describe("LabelCaptureScreen – sticky save preference", () => {
+  function mountWithStore(
+    store: LabelSavePreferenceStore,
+    onSubmit = noopSubmit(),
+  ): ReactTestRenderer {
+    return mount(
+      <LabelCaptureScreen
+        onSubmit={onSubmit}
+        onClose={jest.fn()}
+        permissionsHook={makeGrantedHook()}
+        takePhoto={jest.fn().mockResolvedValue({ uri: "file:///label.jpg" })}
+        savePreferenceStore={store}
+      />,
+    );
+  }
+
+  function saveToggle(tree: ReactTestRenderer) {
+    return tree.root.find(
+      (n) =>
+        n.props.accessibilityLabel === "Save label photos" &&
+        typeof n.props.onPress === "function",
+    );
+  }
+
+  it("is off by default, in the camera chrome rather than on the capture path", async () => {
+    const tree = mountWithStore(makeSaveStore());
+    await flush();
+
+    expect(saveToggle(tree).props.accessibilityState).toEqual({
+      selected: false,
+    });
+    // Off is the quiet resting state — no "saving" caption to read.
+    expect(textContent(tree)).not.toContain("Saving photos");
+  });
+
+  it("the auto-upload request carries save=false while the preference is off", async () => {
+    // Drives the REAL upload client so the assertion is on the request the
+    // shutter issues, not just the flag handed to the host.
+    const { openImage, upload } = fakeUpload();
+    const onSubmit = jest
+      .fn<Promise<void>, [LabelCapture]>()
+      .mockImplementation(async ({ imageUri, savePhoto }) => {
+        await uploadLabelImage(UPLOAD_SESSION, imageUri, savePhoto, openImage);
+      });
+    const tree = mountWithStore(makeSaveStore(), onSubmit);
+    await flush();
+
+    await shoot(tree);
+
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(upload.mock.calls[0][0]).toBe(
+      `${UPLOAD_SESSION.baseUrl}/api/users/${USER_ID}/log-events/label?save=false`,
+    );
+  });
+
+  it("a deliberate opt-in shows the sticky state, persists it, and sends save=true", async () => {
+    const store = makeSaveStore();
+    const { openImage, upload } = fakeUpload();
+    const onSubmit = jest
+      .fn<Promise<void>, [LabelCapture]>()
+      .mockImplementation(async ({ imageUri, savePhoto }) => {
+        await uploadLabelImage(UPLOAD_SESSION, imageUri, savePhoto, openImage);
+      });
+    const tree = mountWithStore(store, onSubmit);
+    await flush();
+
+    act(() => {
+      saveToggle(tree).props.onPress();
+    });
+
+    // The control itself shows the state it now holds…
+    expect(saveToggle(tree).props.accessibilityState).toEqual({
+      selected: true,
+    });
+    expect(textContent(tree)).toContain("Saving photos");
+    // …it is written through so it survives the next launch…
+    expect(store.set).toHaveBeenCalledWith(true);
+    expect(store.stored()).toBe(true);
+
+    await act(async () => {
+      press(tree, "Take photo");
+    });
+
+    // …and the auto-upload carries the retention flag.
+    expect(upload.mock.calls[0][0]).toContain("?save=true");
+  });
+
+  it("a stored opt-in is already on when capture reopens, and sends save=true", async () => {
+    const { openImage, upload } = fakeUpload();
+    const onSubmit = jest
+      .fn<Promise<void>, [LabelCapture]>()
+      .mockImplementation(async ({ imageUri, savePhoto }) => {
+        await uploadLabelImage(UPLOAD_SESSION, imageUri, savePhoto, openImage);
+      });
+    // A fresh mount over a store that already holds the opt-in — the "next time
+    // the user opens label capture" case.
+    const tree = mountWithStore(makeSaveStore(true), onSubmit);
+    await flush();
+
+    expect(saveToggle(tree).props.accessibilityState).toEqual({
+      selected: true,
+    });
+
+    await act(async () => {
+      press(tree, "Take photo");
+    });
+
+    expect(upload.mock.calls[0][0]).toContain("?save=true");
+  });
+
+  it("a shutter that beats the preference read still uploads with save=false", async () => {
+    // Fail closed (FTY-077): until the stored value is known, discard-by-default
+    // wins — an opt-in can never be *assumed*.
+    let releaseRead!: (value: boolean) => void;
+    const store: LabelSavePreferenceStore = {
+      get: () =>
+        new Promise<boolean>((resolve) => {
+          releaseRead = resolve;
+        }),
+      set: jest.fn().mockResolvedValue(undefined),
+    };
+    const onSubmit = noopSubmit();
+    const tree = mountWithStore(store, onSubmit);
+
+    await act(async () => {
+      press(tree, "Take photo");
+    });
+
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ savePhoto: false });
+
+    await act(async () => {
+      releaseRead(true);
     });
   });
 });
@@ -672,17 +947,13 @@ describe("LabelCaptureScreen – photo-library fallback", () => {
       press(tree, "Choose from Library");
     });
 
-    // The picked photo lands in the same preview as a capture.
-    expect(hasA11yLabel(tree, "Upload label")).toBe(true);
+    // The picked photo starts the same auto-upload a capture does.
+    expect(hasA11yLabel(tree, "Uploading label")).toBe(true);
     expect(hasA11yLabel(tree, "Take photo")).toBe(false);
-
-    await act(async () => {
-      press(tree, "Upload label");
-    });
 
     // The picked URI feeds the same submit handler + save semantics as a capture.
     expect(pickPhoto).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith({
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
       imageUri: "file:///library-label.jpg",
       savePhoto: false,
     });
@@ -703,9 +974,9 @@ describe("LabelCaptureScreen – photo-library fallback", () => {
       press(tree, "Choose from Library");
     });
 
-    // No preview, no error — the shutter (camera phase) is still shown.
+    // No upload started, no error — the shutter (camera phase) is still shown.
     expect(hasA11yLabel(tree, "Take photo")).toBe(true);
-    expect(hasA11yLabel(tree, "Upload label")).toBe(false);
+    expect(hasA11yLabel(tree, "Uploading label")).toBe(false);
     const content = textContent(tree);
     expect(content).not.toContain("Couldn't open your photo library");
   });

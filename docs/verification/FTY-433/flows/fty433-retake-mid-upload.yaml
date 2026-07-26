@@ -1,0 +1,49 @@
+# FTY-433 running-app evidence: Retake still works after the shutter.
+#
+# Same `capture.label_auto_upload` preset and the same real code path as
+# fty433-two-tap-label.yaml (see that file's header). Here the run stops at the
+# uploading state and taps Retake instead of waiting the upload out: the flow
+# must land back on the live viewfinder, and the superseded upload — which
+# resolves a few seconds later — must never surface its confirm sheet.
+#
+#   maestro --udid <udid> test -e THEME=light fty433-retake-mid-upload.yaml
+appId: com.slacks
+---
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      id: today-screen
+    timeout: 30000
+- openLink: "slacks://__visual-review?preset=capture.label_auto_upload&theme=${THEME}"
+- runFlow: ../../../../mobile/.maestro/common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible: "Fit the nutrition label inside the frame"
+    timeout: 20000
+
+# Shoot, then change your mind mid-upload.
+- tapOn: "Take photo"
+- extendedWaitUntil:
+    visible: ".*Uploading.*"
+    timeout: 20000
+- tapOn: ".*Retake.*"
+
+# Straight back to framing the next shot.
+- extendedWaitUntil:
+    visible: "Fit the nutrition label inside the frame"
+    timeout: 10000
+- assertNotVisible: ".*Uploading.*"
+- takeScreenshot: fty433-6-retake-back-to-camera-${THEME}
+
+# The superseded upload lands while we wait here (the seam holds it ~25s from the
+# shutter — see CAPTURE_LABEL_AUTO_UPLOAD_HOLD_MS). It must be dropped: no confirm
+# sheet may appear over the viewfinder. This optional wait deliberately burns past
+# the hold so the assertions below run *after* the upload has resolved.
+- extendedWaitUntil:
+    visible: "Granola bar"
+    timeout: 30000
+    optional: true
+- assertNotVisible: "Granola bar"
+- assertNotVisible: "Looks right.*"
+- assertVisible: "Fit the nutrition label inside the frame"
+- takeScreenshot: fty433-7-superseded-dropped-${THEME}
