@@ -8,9 +8,17 @@
  * accessibilityLabel (with a human-formatted date, FTY-189) for VoiceOver, and
  * on-target vs. off-target — the pair a sighted colorblind user is most likely
  * to confuse, since both render as a solid fill — carries a redundant
- * non-color cue too: off-target adds a ringed border so its *shape* differs
- * from on-target's plain fill, not just its hue. `no-target` keeps its
- * existing hollow-border shape; `no-data` stays a muted, borderless fill.
+ * non-color cue too: off-target is drawn with **square corners** while every
+ * other state keeps the rounded `CELL_R` cap, so its *silhouette* differs from
+ * on-target's, not just its hue (FTY-431). `no-target` keeps its existing
+ * hollow-border shape; `no-data` stays a muted, borderless fill.
+ *
+ * That corner cue replaced FTY-189's original `surface`-colored ring: in dark
+ * mode `surface` is near-black, so the ring drew a literal black outline around
+ * the coral bar that read as broken next to the clean amber on-target bar
+ * (operator dogfood 2026-07-26). The shape cue carries no scheme-dependent
+ * color of its own, so the coral fill now reads as clean as the amber one in
+ * both schemes while staying distinguishable without hue.
  */
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -24,7 +32,8 @@ const CELL_W = 10;
 const CELL_H = 24;
 const CELL_R = 3;
 const CELL_GAP = 2;
-const OFF_TARGET_BORDER_W = 2;
+/** Off-target's non-color cue: square corners against every other state's `CELL_R` cap. */
+const OFF_TARGET_CELL_R = 0;
 
 interface AdherenceStripProps {
   days: readonly AdherenceDay[];
@@ -90,18 +99,24 @@ export function AdherenceStrip({ days, today, onDayPress }: AdherenceStripProps)
 
 function resolveCellStyle(
   day: AdherenceDay,
-  colors: { accent: string; coral: string; textMuted: string; separator: string; surface: string },
-): { backgroundColor: string; borderWidth?: number; borderColor?: string; opacity?: number } {
+  colors: { accent: string; coral: string; textMuted: string; separator: string },
+): {
+  backgroundColor: string;
+  borderRadius?: number;
+  borderWidth?: number;
+  borderColor?: string;
+  opacity?: number;
+} {
   switch (day.state) {
     case "on-target":
       return { backgroundColor: colors.accent };
     case "off-target":
-      // Ringed border — a non-color cue distinguishing it from on-target's
-      // plain fill (see the module comment).
+      // A clean coral fill with square corners — the non-color cue is the
+      // silhouette, not a border, so nothing scheme-colored is painted on top
+      // of the bar in either scheme (see the module comment).
       return {
         backgroundColor: colors.coral,
-        borderWidth: OFF_TARGET_BORDER_W,
-        borderColor: colors.surface,
+        borderRadius: OFF_TARGET_CELL_R,
       };
     case "no-target":
       return {
