@@ -22,6 +22,7 @@ import {
 
 import {
   CAPTURE_BARCODE_GRANTED_PRESET,
+  CAPTURE_LABEL_AUTO_UPLOAD_PRESET,
   CAPTURE_LABEL_GUIDANCE_PRESET,
   type CaptureVisualReviewPreset,
 } from "./captureVisualReview";
@@ -82,7 +83,11 @@ export function useTodayScanner({
     () => activeCapturePreset === CAPTURE_BARCODE_GRANTED_PRESET,
   );
   const [labelCaptureOpen, setLabelCaptureOpen] = useState(
-    () => activeCapturePreset === CAPTURE_LABEL_GUIDANCE_PRESET,
+    () =>
+      activeCapturePreset === CAPTURE_LABEL_GUIDANCE_PRESET ||
+      // FTY-433: the auto-upload preset opens the same surface, then drives the
+      // real shutter → upload → confirm path through its capture seams.
+      activeCapturePreset === CAPTURE_LABEL_AUTO_UPLOAD_PRESET,
   );
 
   // Barcode scan entry point (FTY-063). Mirrors the text-composer submit flow:
