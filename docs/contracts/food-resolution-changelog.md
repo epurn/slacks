@@ -19,6 +19,25 @@ estimator / contracts / backend-core / security-privacy lane (same owners as
 
 ## Version
 
+37 (FTY-429, contract only): the **FDC candidate-ranking** and **common-portion**
+rules were **extracted** from `food-resolution.md` into a new sibling page,
+[food-resolution-ranking.md](food-resolution-ranking.md). Unlike the FTY-409 /
+FTY-414 / FTY-426 / FTY-428 splits, these rules were not whole `##` sections —
+they lived as prose interwoven inside the normative `### Source lookup and
+caching` (the compatibility gate, the preference ordering, the FTY-326 rejected-row
+ledger and miss boundary, and cache rank stability) and `### Serving math` (the
+common-portion table's food vocabulary, household weights, and FTY-368
+composed-dish decline) subsections. Both blocks are relocated verbatim under
+dedicated `##` headings on the new page, with a forwarding `###` heading left in
+each original position, an inline pointer kept at the exact step that consults
+them, and the sibling citations (`food-resolution-official-source.md`, the in-page
+FTY-254 migration note, this changelog) re-pointed. The connective sentences that
+introduced each moved block in `food-resolution.md` are rewritten so both pages
+read coherently — the normative rules themselves are unchanged. Structure-only
+relocation: no ranking rule, token vocabulary, portion weight, ordering, routing
+rule, env var, field, DTO, schema, endpoint, `fdc_ranking.py` / `common_portions.py`,
+or behaviour change.
+
 36 (FTY-424): the FDC candidate-ranking preference key demotes an **unstated
 identity-shifting modifier** — a leaf/green/seed or cabbage-family sense of the head
 noun the query did not ask for. The head-noun gate alone cannot separate the everyday
@@ -39,7 +58,8 @@ are unaffected. A row with an unstated identity-shifting modifier is also never 
 so a cached greens/seed/cabbage row for a bare query self-heals on the next lookup, exactly
 like the FTY-388 egg-white row. No schema, migration, DTO, or source-tier change: a bounded
 deterministic vocabulary over already-validated FDC description fields, in the same
-reject/demote design as FTY-254 and FTY-388.
+reject/demote design as FTY-254 and FTY-388. See **Candidate ranking (FTY-254)** in
+[food-resolution-ranking.md](food-resolution-ranking.md).
 
 35 (FTY-428, contract only): the **User-Stated Resolution (FTY-279)** section (with
 all its subsections — the intro, `### Direct resolution from a stated total`, the
@@ -401,7 +421,8 @@ routing. A bare, genuinely ambiguous item (`coffee`) resolves as an explicit
 rough model-prior default under `estimate_first` (never the generic no-option
 quantity question), and an item needing clarification (`curry`) asks an
 item-specific, optioned question per `parse-candidates.md`. No migration; no
-DTO change.
+DTO change. See **Candidate ranking (FTY-254)** and **Common-portion table
+(FTY-254)** in [food-resolution-ranking.md](food-resolution-ranking.md).
 
 14 (FTY-253) adds **brand-aware packaged-product routing**. For a **branded**
 candidate (non-blank `brand`), a generic USDA FDC hit is a *candidate source, not an
