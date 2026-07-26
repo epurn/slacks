@@ -78,7 +78,23 @@ This project uses the following as design references:
 - Self-hosted auth must support a secure local path. *(v1: local email + password
   with stateless, HMAC-SHA256-signed bearer tokens; login is constant-time and does
   not reveal whether an email exists. Tokens are not yet revocable — tracked
-  finding.)*
+  finding; see the operator stance below.)*
+- **Token revocation — what an operator can and cannot do today.** A bearer token
+  is a stateless signed claim (`{"sub", "iat", "exp"}` signed with
+  `SLACKS_AUTH_SECRET`, `app/security/tokens.py`) with **no server-side session
+  table**. Nothing is stored to invalidate, so there is no per-token or
+  per-device revocation endpoint: a token stays valid until it expires, which by
+  default is **7 days** after it was minted
+  (`auth_token_ttl_seconds`, tunable via `SLACKS_AUTH_TOKEN_TTL_SECONDS`).
+  Signing out clears the credential from the device keychain but does not tell
+  the server anything. The one lever the operator has is **rotating
+  `SLACKS_AUTH_SECRET`**: every outstanding token then fails signature
+  verification, so all sessions on all devices end at once and everyone signs in
+  again. It is deliberately blunt — all-or-nothing, no per-user granularity — so
+  reach for it when a token or the secret itself has ended up somewhere it should
+  not be, and shorten the TTL if you want a tighter default window. Per-session
+  revocation waits on server-side sessions; until then, keep the TTL and this
+  lever in mind when deciding how widely to expose a self-host instance.
 - Rate-limit the auth endpoints to bound online brute-force and credential-stuffing.
   *(v1: `POST /api/auth/login` is throttled per source IP and per account (hashed
   email); `POST /api/auth/register` is throttled per source IP. Backed by the

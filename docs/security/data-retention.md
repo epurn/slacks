@@ -95,13 +95,20 @@ dependent rows.
 
 **Required — direct user-initiated deletion** of individual items:
 - Food and exercise log entries — delivered as a soft void (FTY-321): the entry and its derived items, clarification questions, evidence sources, corrections, and saved label-image attachments are excluded from every read but retained in storage until the user/account-deletion cascades remove them (see the as-built status below).
-- Body weight entries.
-- Saved foods, recipes, aliases, and portion memories.
+- Body weight entries — delivered as a hard delete (FTY-070).
+- Saved foods, recipes, aliases, and portion memories — saved-food deletion is landing (FTY-452 / FTY-453).
 - Attachments (nutrition label images).
 
-**Required — account deletion**, cascading to all user-owned data (profile, logs,
-entries, saved foods, memories, attachments, corrections, weight history,
-evidence) and the user and auth identity.
+**Account deletion — deferred until after the first release.** The end state is
+unchanged: a user-invoked account deletion cascading to all user-owned data
+(profile, logs, entries, saved foods, memories, attachments, corrections, weight
+history, evidence) and the user and auth identity. It is not a first-release
+blocker because Slacks is **self-hosted**: the operator owns the database, so an
+account can be erased today without an endpoint — `docker compose down -v` drops
+the data volume entirely, or deleting the `users` row removes every dependent
+row through the `ON DELETE CASCADE` chain the schema already carries. That
+substitute is an operator action, not a user-facing one, which is why the
+endpoint remains required before a hosted deployment could exist.
 
 As-built status: body weight entries expose a hard-deletion endpoint
 (`DELETE /api/users/{user_id}/weight-entries/{entry_id}`, FTY-070), and food and
@@ -112,10 +119,14 @@ and all its derived rows (derived items, clarification questions, evidence
 sources, corrections, saved label-image attachments) from every read model —
 including derived summaries — but
 retains the rows in storage, consistent with append-only storage; the retained
-rows are hard-removed only through the user/account-deletion cascades. The
-remaining direct-deletion endpoints and the account-deletion endpoint are
-required for release but **not yet implemented**; the schema-level cascades
-above are already in place to support them. By design there is no per-item `DELETE` for individual
+rows are hard-removed only through the user/account-deletion cascades.
+**Saved-food deletion is landing** (FTY-452 / FTY-453) and is not on this list
+yet — `backend/app/routers/saved_foods.py` exposes no `DELETE` route at the time
+of writing. The remaining direct-deletion endpoints (saved foods until those
+stories merge, recipes, aliases, portion memories, saved label attachments) are
+still gaps, and the **account-deletion endpoint is deferred post-first-release**
+per the stance above. The schema-level cascades are already in place to support
+all of them. By design there is no per-item `DELETE` for individual
 `evidence_sources` or `clarification_questions` — they are removed only as cascade
 consequences of deleting the parent log event, user, or account. Global source
 facts (`products`, cached USDA/OFF data) remain after user deletion since they

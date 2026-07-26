@@ -155,6 +155,77 @@ copy it into the image, commit it, or include it in support artifacts.
 `CODEX_HOME=/codex-config` is fixed in the compose `environment:` block for both
 `api` and `worker`.
 
+## Backup and Upgrade
+
+**What survives what.** All three volumes above are **named** volumes, so they
+outlive container replacement: `docker compose build`, `docker compose up
+--force-recreate`, and `docker compose down && docker compose up` all keep your
+database and your provider sessions. Only `docker compose down -v` (or an
+explicit `docker volume rm`) destroys them — that command drops `postgres-data`
+*and* the `claude-config` / `codex-config` login sessions, so you would re-run
+`claude login` / `codex login` afterwards.
+
+**Backup.** The database is the only thing holding user data; back it up with
+`pg_dump` through the running container (no host port needed):
+
+```sh
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+  > slacks-backup.sql
+```
+
+Use `-T` so Docker does not attach a TTY and corrupt the redirected dump. The
+role and database come from your `.env` (`POSTGRES_USER` / `POSTGRES_DB`, both
+`slacks` in `.env.example`); reading them from the container's own environment
+keeps the command correct if you changed them — or on an older stack whose
+volume predates the rename. Restore into a running stack the same way:
+
+```sh
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+  < slacks-backup.sql
+```
+
+A dump contains real personal data — food logs, weight history, profile — so
+treat the file like the database itself: keep it off shared storage and out of
+source control.
+
+**Upgrade.** Pull the new code, rebuild the backend images from that checkout,
+apply migrations, and restart on the new image — the same coherent path
+`make sim-smoke` prints when it detects drift (see
+[Simulator Readiness Smoke](#simulator-readiness-smoke-fty-250) for the snippet
+and what each step fixes). Migrations are forward-only in practice: take a
+`pg_dump` first if you want a way back. The `migrate` service runs
+`alembic upgrade head`, so a stack whose database is behind the code is
+repaired by `docker compose run --rm migrate` alone.
+
+## Running Behind a Reverse Proxy
+
+If you put a reverse proxy (nginx, Caddy, Traefik, `tailscale serve`) in front of
+the API, set this in `.env`:
+
+```sh
+SLACKS_RATE_LIMIT_TRUSTED_PROXY=true
+```
+
+Without it the auth rate limiter keys on the TCP peer address, which behind a
+proxy is **the proxy** for every request — so the per-IP login and register
+limits collapse into a single shared bucket for all of your users
+(`backend/app/settings.py`, `rate_limit_trusted_proxy`;
+`backend/app/routers/auth.py`, `_client_ip`). With it enabled the limiter reads
+the client address from `X-Forwarded-For`, taking the **rightmost** hop — the
+address the trusted proxy itself observed — so a client-supplied header value
+cannot mint a fresh limiter key.
+
+**Assumption: exactly one trusted proxy sits directly in front of the app.** That
+is the only topology this setting is safe under. With additional hops in front,
+the trusted layer must overwrite `X-Forwarded-For` rather than append to it.
+Leave the setting at its default `false` when nothing proxies the API, because
+then `X-Forwarded-For` is just an inbound header anyone can set.
+
+This is a rate-limiting setting only; it does not terminate or require TLS. For
+encrypted transport the paved path is
+[HTTPS over Tailscale](tailscale-https.md), where `tailscale serve` is itself the
+single trusted proxy in front of the loopback-bound API.
+
 ## Configuration
 
 Configuration comes from `.env` (copied from `.env.example`). `.env.example` is
@@ -414,8 +485,19 @@ its API base URL from the on-device connection store, which starts empty
 (`mobile/api/config.ts`). So the first-run flow is:
 
 1. `docker compose up -d` and `make sim-smoke` until it reports **READY**.
-2. Launch the app in the simulator.
+2. Build and launch the app in the simulator:
+   ```sh
+   cd mobile
+   npm install
+   npx expo run:ios      # first run: prebuild + compile + install, then Metro
+   npm run ios           # thereafter: Metro + open the installed dev build
+   ```
+   Expo Go cannot host this app — `@react-native-segmented-control/segmented-control`
+   is a third-party native module it does not bundle — so the first run has to
+   compile a dev build (Xcode required). See [`mobile/README.md`](../../mobile/README.md).
 3. On the connect screen, enter the printed URL (e.g. `http://localhost:18000`).
+   From a **physical device** on your LAN, use the host's LAN IP instead of
+   `localhost` (which would be the device itself).
 4. Sign in or create an account.
 
 You must connect to the printed URL **before** sign-in; there is no persisted

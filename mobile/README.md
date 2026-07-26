@@ -26,7 +26,7 @@ original estimate.
 
 ## Stack
 
-- **Expo** (SDK 56) with **Expo Router** for file-based routing.
+- **Expo** (SDK 57) with **Expo Router** for file-based routing.
 - **TypeScript** in strict mode.
 - **Jest** (`jest-expo`) for tests and **ESLint** (`eslint-config-expo`) for
   linting.
@@ -38,12 +38,13 @@ app/                 file-based routes (Expo Router)
   _layout.tsx        root Stack + SafeAreaProvider
   index.tsx          the Today route ("/")
   profile.tsx        the profile capture route ("/profile")
-api/                 typed clients for the backend (config, profile, logEvents,
-                     derivedItems)
+api/                 typed clients for the backend (config, auth, profile,
+                     logEvents, derivedItems)
 components/          presentational UI (TodayScreen, EntryRow, ItemTimelineRow,
                      StatusIcon, ProfileForm, ProfileScreen)
 state/               local state + pure logic (today.ts, derivedItems.ts,
-                     polling.ts, useScreenActive.ts, profile.ts, session.ts)
+                     polling.ts, useScreenActive.ts, profile.ts, session.tsx,
+                     sessionStore.ts)
 ```
 
 `api/logEvents.ts` is the typed client for the FTY-030 log-event create /
@@ -71,16 +72,32 @@ edit's server result back into it.
 the field vocabulary, unit conversion to canonical units (metres, kilograms),
 and nonjudgmental client-side validation. `api/profile.ts` is the typed client
 for the FTY-020 profile read/write API. The capture flow persists for the
-authenticated user; `state/session.ts` is the seam for the mobile sign-in flow
-(a later story) that supplies the bearer token — until then the screen renders a
-"sign in to save" state.
+authenticated user, and that user is real: sign-in has shipped (FTY-090/091).
+`api/auth.ts` is the typed client for the local email + password path and always
+addresses the server the user connected to; `state/session.tsx` holds the
+`SessionProvider` that hydrates the session on launch and exposes
+`signIn` / `createAccount` / `signOut`, and `useSession()` returns the current
+`{ serverUrl, token, userId }` record (or `null` when signed out) that the API
+clients send as their bearer token. `state/sessionStore.ts` persists that record
+atomically in the OS keychain via `expo-secure-store` — never in app state
+alone, never logged.
 
 ## Develop
 
 ```sh
 npm install          # first time
-npm run ios          # open the Today screen in the iOS simulator
+npx expo run:ios     # first time: prebuild + compile + install the dev build
+npm run ios          # thereafter: start Metro and open the installed dev build
 ```
+
+A **dev build is required** — Expo Go cannot host this app, because
+`@react-native-segmented-control/segmented-control` is a third-party native
+module Expo Go does not bundle (every other native dependency here is an
+`expo-*` module Expo Go ships). `npx expo run:ios` generates `ios/` with
+`expo prebuild` (gitignored output) and compiles it, so it needs Xcode.
+
+To point the app at a backend, see the repo README's **Run the App** section and
+[Local Development Stack → Connecting the simulator](../docs/operations/local-dev-stack.md#connecting-the-simulator).
 
 ## Root verification
 
