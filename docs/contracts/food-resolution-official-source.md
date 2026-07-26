@@ -233,7 +233,8 @@ block on the exhausted budget. The concrete producer is the downstream
 
 The **documented deterministic prior** (FTY-418) is food-aware, so even this rare
 last-ditch is never a flat-lined `2 cal/g + null macros + 100 g` row: it resolves a
-counted everyday food through the common-portion table above (a mozzarella slice
+counted everyday food through the common-portion table
+([food-resolution-ranking.md](food-resolution-ranking.md)) (a mozzarella slice
 ≈ 22 g, a deli-turkey slice ≈ 28 g — never a blanket 100 g default serving), and it
 carries a documented mixed-food macro split (≈ 50 % carbohydrate / 20 % protein /
 30 % fat by energy, Atwater-consistent) alongside the coarse energy-density prior,

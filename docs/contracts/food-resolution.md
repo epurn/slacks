@@ -166,34 +166,11 @@ The food name is normalized (lower-cased, whitespace-collapsed) into a `query_ke
 Resolution checks the global `products` cache by `(source, query_key)` first; on a
 miss it calls FDC `/foods/search` (data types `Foundation` / `SR Legacy`, whose
 nutrient values are **per 100 g**), selects the **best-ranked compatible**
-energy-bearing result (FTY-254, `fdc_ranking.py` — head-noun identity match, no
-unstated density-changing form — the dehydrated/dried/powder/flour/concentrate
-family plus the extracted-**`oil`** form (FTY-418): a plain "mustard" rejects
-"Oil, mustard" (884 kcal/100g of pure fat) unless the query itself states the oil —
-stated added ingredients present; preferred by
-fewest unstated **identity-modifier** tokens — a part-of-food (FTY-388 —
-`white`/`yolk`/`shell`) or an identity-shifting leaf/green/seed/cabbage sense
-(FTY-424 — `greens`/`green`/`leaf`/`leaves`/`seed`/`seeds`/`spinach`/`cabbage`:
-bare "mustard" prefers the prepared/condiment row over "Mustard greens", "Cabbage,
-mustard", or "Mustard seed", while "mustard greens" keeps the greens row via the
-stated-token exemption; this is a demotion, **not** a head-noun-position gate, so
-category-led rows like "Fish, salmon" / "Cheese, mozzarella" are unaffected), then
-fewest unstated demoted forms, then query-token coverage, then relevance order —
-see **Version 36**, **Version 25**, **Version 15**), maps it to canonical per-100g facts, and
-caches it as a `products` row. Rejecting every result is a **miss**, not a wrong-food match —
-but since FTY-326 the gate is a bounding pre-filter, not the final row-acceptance
-authority: the bounded rejected energy-bearing rows are first recorded on the
-interpretation-session ledger as `rejected_incompatible_row` evidence (sanitized
-outcome + global row description + source ref), and the session may spend its one
-bounded re-interpretation pass to revise the identity for a **single** retried
-lookup before the miss stands. If the session keeps its hypothesis, the rejection
-is deliberate and resolution falls forward exactly as before. A
-**compatible rank-stable** cache hit makes **no** external call. Incompatible
-cached rows are never served; compatible but non-rank-stable rows (e.g. `tuna`
-cached to canned tuna, `scrambled eggs` to raw egg, or `large eggs` cached to the
-egg-white row before FTY-388) re-fetch once and refresh the
-single `(source, query_key)` row when a better result is available, otherwise
-fall back to the compatible cache.
+energy-bearing result (FTY-254, `fdc_ranking.py` — see **Candidate ranking**
+below), maps it to canonical per-100g facts, and caches it as a `products` row.
+Which rows are compatible, how the survivors are ordered, what a total rejection
+means, and whether a cached row may be served without a re-fetch are all decided
+by those same ranking rules.
 
 Nutrient mapping: energy kcal (id 1008, **required**), protein (1003), carbohydrate
 (1005), total fat (1004); missing macros default to 0. A result with no energy value
@@ -217,6 +194,18 @@ produces per-100g facts too but is out of FTY-115's scope; it remains gated only
 looser `MAX_ENERGY_KCAL` abuse bound.) Default
 serving grams come from `servingSize` only when `servingSizeUnit` is `g` (or `ml`,
 treated 1 ml ≈ 1 g); otherwise unknown.
+
+### Candidate ranking (FTY-254)
+
+The FDC candidate-ranking contract moved to
+[food-resolution-ranking.md](food-resolution-ranking.md) (FTY-429, contract-only
+extraction — no semantic change). That page owns these rules verbatim: the
+compatibility gate (head-noun identity, unstated density-changing forms including
+the FTY-418 extracted-`oil` form, stated added ingredients), the preference
+ordering (the FTY-388 part-of-food and FTY-424 identity-shifting-modifier
+demotions, unstated demoted forms, query-token coverage, relevance order), the
+`### Rejection, the interpretation ledger, and the miss boundary (FTY-326)`, and
+the `### Cache compatibility and rank stability` rules.
 
 ### Serving math
 
@@ -252,17 +241,11 @@ quantity to grams, v1-simple per the story scope:
 
 Returns `None` when none apply — e.g. a count with no known serving size, or an
 unrecognised/absent quantity. Before that gap routes onward, a **stated count of
-an everyday common food** (FTY-254 — banana, egg, bread/toast slice, butter
-pat/stick, with small/medium/large/jumbo size cues read from the parse; plus
-FTY-418 deli-meat slices — turkey/ham/bologna/salami ≈ 28 g — and sliced-cheese
-slices — mozzarella/cheese/cheddar/provolone/swiss ≈ 22 g) resolves
-via the documented common-portion table (`common_portions.py`, published USDA
-household weights / FDA RACC vicinity), keeping the trusted-source facts and
-recording an explicit
-`estimated_common_portion:<food> <cue> <grams> g` assumption on the evidence row.
-The table declines a **composed/assembled dish** (FTY-368 — sandwich, wrap,
-burger, taco, … by closed vocabulary): the dish is the sum of its parts, so one
-component's household weight never stands in for the whole dish's grams.
+an everyday common food** (FTY-254) resolves
+via the documented common-portion table (`common_portions.py` — see
+**Common-portion table** below), keeping the trusted-source facts and recording an
+explicit `estimated_common_portion:<food> <cue> <grams> g` assumption on the
+evidence row.
 Otherwise the active shared policy ([estimator-policy.md](estimator-policy.md))
 determines whether that gap falls forward to rough default-serving/reference/
 model-prior estimation or asks for more detail. Calories/macros then scale per-100g
@@ -276,6 +259,16 @@ stated component amount — back through the rough tiers, tagged
 the terminal model-prior tier itself stays ungated. Storage is canonical (kcal, grams); the 1 ml ≈ 1 g density
 and the simple grams/millilitres/count scope are documented assumptions, with richer
 portion inference deferred.
+
+### Common-portion table (FTY-254)
+
+The common-portion table contract moved to
+[food-resolution-ranking.md](food-resolution-ranking.md) (FTY-429, contract-only
+extraction — no semantic change). That page owns the table verbatim: its closed
+everyday-food vocabulary and household weights (FTY-254 banana / egg /
+bread-and-toast slice / butter pat and stick with the small–jumbo size cues,
+FTY-418 deli-meat and sliced-cheese slices) and the FTY-368
+composed/assembled-dish decline.
 
 ### Persistence
 
@@ -446,10 +439,9 @@ parsed food candidate: name "crackers", quantity_text "", unit null, amount null
 See the worked example above. The serving math, FDC mapping, SSRF policy, migration
 rollback, and end-to-end resolution (with a stubbed FDC source) are covered by
 `tests/test_food_serving.py`, `tests/test_fdc_client.py`, `tests/test_hardened_fetch.py`,
-`tests/test_food_migration.py`, and `tests/test_food_resolution.py`. The FTY-254
-common-food ranking, the common-portion defaults, and the dogfood fixture set
-(calorie bands + provenance) are covered by `tests/test_fdc_ranking.py`,
-`tests/test_common_portions.py`, and `tests/test_common_food_resolution.py`. The
+`tests/test_food_migration.py`, and `tests/test_food_resolution.py`. The
+candidate-ranking and common-portion tests are listed under **Examples (tests)** in
+[food-resolution-ranking.md](food-resolution-ranking.md). The
 FTY-315 end-to-end dogfood regression — the exact audited snack phrase plus
 natural-language variants resolving through the FTY-254 rejection, FTY-253
 identity-variant search, FTY-314 snippet fallback, and FTY-252 count math with
@@ -769,7 +761,8 @@ The backend exposes four health-check endpoints, all returning structured JSON w
   the best-ranked *compatible* result (`fdc_ranking.py`) instead of the first
   energy-bearing one, and the food step resolves stated counts of everyday foods
   through the documented common-portion table (`common_portions.py`) with an
-  explicit evidence assumption. **No migration**: both are pure routing/serving
+  explicit evidence assumption (both in
+  [food-resolution-ranking.md](food-resolution-ranking.md)). **No migration**: both are pure routing/serving
   policy; `evidence_sources.assumptions` (the `0012` column) already carries the
   new `estimated_common_portion:*` label, and `products`/`evidence_sources`
   shapes, barcode/OFF precedence, and the official/reference/model-prior tiers
