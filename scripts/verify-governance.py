@@ -26,6 +26,7 @@ REQUIRED_FILES = [
     "scripts/code-shape-baseline.json",
     "scripts/verify-brand-names.py",
     "scripts/verify-code-shape.py",
+    "searxng/settings.yml",
     ".github/CODEOWNERS",
     ".github/pull_request_template.md",
     ".github/workflows/governance.yml",
@@ -66,6 +67,12 @@ REQUIRED_STATUS_CHECKS = [
 ]
 LEGACY_WORKTREE_TOKEN = "fat" + "ty-worktrees"
 CURRENT_WORKTREE_TOKEN = "slacks-worktrees"
+
+# Engines measured (FTY-436, docs/verification/FTY-436/live-probe.md) answering
+# the self-hosted instance with a CAPTCHA, a "too many requests", or a silent
+# block. Re-adding one to the committed default config brings the upstream 429s
+# back, so it takes a fresh measurement and an edit here.
+THROTTLING_SEARCH_ENGINES = frozenset({"google", "startpage", "brave", "duckduckgo"})
 
 STALE_REQUIRED_MOBILE_E2E_TEXT = [
     "Require `mobile-e2e`",
@@ -172,6 +179,28 @@ def main() -> None:
     for term in ["reviewer-approved", "current PR head SHA", "other than the PR author"]:
         if term not in review_policy:
             fail(f"review policy must document reviewer status gate term {term!r}")
+
+    searxng_settings = read("searxng/settings.yml")
+    if re.search(r"^use_default_settings:\s*true\s*$", searxng_settings, re.MULTILINE):
+        fail(
+            "searxng/settings.yml must pin a curated engine set "
+            "(use_default_settings.engines.keep_only), not inherit every default engine"
+        )
+    keep_only = re.search(r"^\s*keep_only:\n((?:\s*-\s+\S.*\n)+)", searxng_settings, re.MULTILINE)
+    if keep_only is None:
+        fail("searxng/settings.yml must declare an explicit engines.keep_only list")
+    kept_engines = {
+        line.split("-", 1)[1].strip() for line in keep_only.group(1).splitlines() if line.strip()
+    }
+    throttling = sorted(kept_engines & THROTTLING_SEARCH_ENGINES)
+    if throttling:
+        fail(
+            "searxng/settings.yml keeps engines measured as blocking this instance ("
+            + ", ".join(throttling)
+            + "); see docs/operations/local-dev-stack.md"
+        )
+    if not re.search(r"^\s*-\s*json\s*$", searxng_settings, re.MULTILINE):
+        fail("searxng/settings.yml must keep the json output format the search adapter consumes")
 
     mobile_workflow = read(".github/workflows/mobile.yml")
     if "\n  pull_request:" not in mobile_workflow:

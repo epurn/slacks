@@ -60,14 +60,77 @@ valid certificate, no high port in the URL) see
   network at `http://searxng:8080`. The backend sends only sanitized
   item-identity queries — never any personal context. Its minimal config lives in
   `searxng/settings.yml` (mounted read-only at `/etc/searxng`), which enables the
-  JSON output format the adapter consumes and sets a documented **non-secret dev
-  placeholder** secret key. Exposing SearXNG to the host or the public internet is
-  out of scope and would need a separate, explicit operator story. Search
-  degrades gracefully (model-prior-with-status) when the service is unreachable,
-  so `api`/`worker` do not hard-depend on it starting.
+  JSON output format the adapter consumes, pins the **curated engine set**
+  (below), and sets a documented **non-secret dev placeholder** secret key.
+  Exposing SearXNG to the host or the public internet is out of scope and would
+  need a separate, explicit operator story. Search degrades gracefully
+  (model-prior-with-status) when the service is unreachable, so `api`/`worker` do
+  not hard-depend on it starting.
 - The `backend/` image includes a pinned Node.js runtime, the Claude Code CLI
   (`claude`), and the Codex CLI (`codex`) so the `api` and `worker` services can
   use the first-party local CLI LLM providers without mounting host binaries.
+
+### SearXNG engine set (FTY-436)
+
+Every adapter query is a plain `general`-category search, so SearXNG fans it out
+to **all** engines enabled in that category. Upstream's defaults enable ten
+(`brave`, `currency`, `dictzone`, `duckduckgo`, `google`, `lingva`,
+`mymemory translated`, `startpage`, `wikidata`, `wikipedia`) — most of them
+useless for nutrition lookup, and several of them answer a self-hosted instance
+with a CAPTCHA or a block wall. That fan-out was the source of the "SearXNG is
+hitting rate limits a lot" symptom: the 429s came from **upstream engines**
+throttling the instance, not from the instance's own limiter (which is off).
+
+`searxng/settings.yml` therefore replaces the inherit-everything default with an
+explicit `use_default_settings.engines.keep_only` list plus the `disabled: false`
+opt-ins the kept engines need:
+
+| Kept engine | Why |
+| --- | --- |
+| `duckduckgo web` | Best branded-product and UPC coverage of the candidates; answered every probe query with relevant nutrition/product pages. Keyless. |
+| `dogpile` | InfoSpace metasearch with a different backend mix; surfaces official brand product pages and grocery/UPC listings the others miss, and never throttled the instance. |
+| `mojeek` | Small **independent** index (not a Bing/Google front end), so the set keeps answering when the aggregator engines cool off. Sparse on branded queries; it contributes on generic foods. |
+
+Dropped, with the measured reason (probe run 2026-07-26 from this stack,
+recorded in `docs/verification/FTY-436/live-probe.md`):
+
+| Dropped engine | Reason |
+| --- | --- |
+| `google` | Returned **zero** results for every query — a silent block of the datacenter IP. The most aggressively bot-throttled engine in the default set. |
+| `startpage` | `CAPTCHA` on the first query, then SearXNG-suspended for the rest of the run. |
+| `brave` (scraped, not the API) | `too many requests` on the second query, then suspended. Distinct from the keyed `brave` **provider** (`SLACKS_SEARCH_PROVIDER=brave`), which is unaffected. |
+| `duckduckgo` (lite/JSON endpoint) | `CAPTCHA` on every query, unlike DuckDuckGo's HTML endpoint (`duckduckgo web`), which answered normally. |
+| `qwant`, `yep`, `fireball`, `yahoo` | `access denied` / protocol errors — not automation-tolerant here. |
+| `bing` | Not throttled, but redundant: its relevant hits duplicated `duckduckgo web`, and on numeric UPC queries it injected unrelated results (Microsoft support pages) that outranked real product hits. |
+| `currency`, `dictzone`, `lingva`, `mymemory translated`, `wikidata`, `wikipedia` | Currency/translation/encyclopedia engines: extra upstream calls per query with no product or nutrition value. |
+
+**Widening the set** is a deliberate operator choice: add the engine's upstream
+name to `keep_only`, and add a `disabled: false` entry under `engines:` if it
+ships disabled. Engine reachability is IP- and time-dependent — a residential
+self-host may find Google or Brave answer fine — so re-measure before adding one,
+and expect the upstream 429s back if you re-add the blocked engines. No keyed or
+paid engine belongs here: the default stack stays keyless.
+
+Check what the running instance actually queries:
+
+```sh
+docker compose exec searxng /usr/local/searxng/.venv/bin/python -c \
+  "import urllib.request,json; d=json.load(urllib.request.urlopen('http://localhost:8080/config')); \
+   print(sorted(e['name'] for e in d['engines'] if e.get('enabled')))"
+# -> ['dogpile', 'duckduckgo web', 'mojeek']
+```
+
+A SearXNG JSON reply also reports engines that failed the query in
+`unresponsive_engines` (e.g. `[["mojeek", "access denied"]]`) — the fastest way
+to tell an upstream throttle from an empty result set.
+
+`make governance` guards the three invariants this config carries: the engine set
+stays explicitly curated (no `use_default_settings: true` inherit-all), `json`
+stays in `formats` (the search adapter reads it), and none of the measured
+block-wall engines comes back. Re-adding one means updating
+`THROTTLING_SEARCH_ENGINES` in `scripts/verify-governance.py` alongside a fresh
+measurement — the guard exists so the fan-out cannot regress silently, not to
+freeze the list forever.
 
 ## Volumes
 
