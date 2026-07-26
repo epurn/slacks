@@ -377,6 +377,12 @@ export function TodayScreen({
         // pan and cancel the reveal. Re-enabled the moment the gesture ends.
         scrollEnabled={!swipeScrollLocked}
         keyboardShouldPersistTaps="handled"
+        // Keyboard avoidance for the composer (FTY-432): the field now owns a
+        // full-width line with its actions on a row beneath it, so on a small
+        // phone a grown multiline entry can push that row under the keyboard.
+        // The native inset adjustment keeps the whole composer — field and all
+        // four actions — above the keyboard without a layout jump.
+        automaticallyAdjustKeyboardInsets
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

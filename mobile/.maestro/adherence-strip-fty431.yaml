@@ -1,0 +1,63 @@
+# FTY-431 visual evidence: the Trends intake-adherence strip renders its
+# off-target (coral) cells as clean bars — no `surface`-colored ring, which in
+# dark mode drew a literal near-black outline around the bar — while staying
+# distinguishable from the amber on-target cells by silhouette (square vs.
+# rounded corners), not hue alone.
+#
+# Both shots use the `trends.adherence_mix` preset (registered from the Trends
+# lane in components/trends/visualReviewPresets.ts), whose newest days carry all
+# four cell states, so one screenshot frames on-target, off-target, no-target and
+# no-data side by side. The strip auto-scrolls to its newest end, so those are
+# the framed cells.
+#
+# The cell assertions are the load-bearing checks: each adherence cell exposes
+# its state through its accessibilityLabel, so a strip that rendered without an
+# off-target day (or lost its labels) fails here before the screenshot is taken.
+#
+# Entry point contract (e2e/visualReview/README.md):
+#   slacks://__visual-review?preset=<name>&theme=light|dark
+# Runs against the same E2E debug binary as the other flows
+# (EXPO_PUBLIC_SLACKS_E2E=true, see verify-e2e.sh).
+appId: com.slacks
+---
+- launchApp:
+    clearState: false
+
+# Dark — the scheme the black ring showed up in.
+- openLink: "slacks://__visual-review?preset=trends.adherence_mix&theme=dark"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:trends.adherence_mix"
+    timeout: 20000
+- assertVisible:
+    id: trends-screen
+- assertVisible:
+    text: "INTAKE ADHERENCE"
+- assertVisible:
+    text: ".*off target.*"
+- assertVisible:
+    text: ".*on target.*"
+- assertVisible:
+    text: ".*no target set.*"
+- takeScreenshot: adherence-strip-dark
+
+# Light — same strip, same fixture; proves the replacement cue reads as
+# intentional in both schemes.
+- openLink: "slacks://__visual-review?preset=trends.adherence_mix&theme=light"
+- runFlow: common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "visual-review-settled:trends.adherence_mix"
+    timeout: 20000
+- assertVisible:
+    id: trends-screen
+- assertVisible:
+    text: "INTAKE ADHERENCE"
+- assertVisible:
+    text: ".*off target.*"
+- assertVisible:
+    text: ".*on target.*"
+- assertVisible:
+    text: ".*no target set.*"
+- takeScreenshot: adherence-strip-light

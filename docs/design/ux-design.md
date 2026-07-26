@@ -55,8 +55,11 @@ tracker**. The wedge is two things competitors don't do well together:
 
 - **Today's composer — directly beneath the hero — is a natural-language
   composer.** You describe the food; a saved-food typeahead surfaces reactively
-  as you type. Barcode and label
-  capture sit alongside as SF Symbol affordances. Above the composer, a quiet,
+  as you type. **The field owns a full-width line of its own at a generous
+  resting height** — it is the app's core action, not a slot squeezed between
+  buttons (FTY-432) — and attach-photo, barcode, and label capture sit on a
+  secondary row directly beneath it as SF Symbol affordances, grouped left with
+  **Add** anchored right. Above the composer, a quiet,
   horizontally-scrollable **quick-add suggestion row** (FTY-340/341) shows the
   handful of things you most plausibly want to log right now — time-aware, from
   your own saved foods and history (the chips you see at 8am Tuesday are your
