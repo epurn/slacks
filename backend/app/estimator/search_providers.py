@@ -15,6 +15,7 @@ from app.estimator.hardened_fetch import (
     Resolver,
     get_json,
 )
+from app.estimator.search_hygiene import HygienicSearchProvider
 from app.estimator.search_models import (
     OFFICIAL_SOURCE,
     OFFICIAL_SOURCE_TYPE,
@@ -375,14 +376,37 @@ def _map_candidates(
 
 
 def build_search_provider(settings: SearchSettings | None = None) -> SearchProvider:
-    """Build the configured :class:`SearchProvider` from environment-loaded settings."""
+    """Build the configured :class:`SearchProvider` from environment-loaded settings.
+
+    Every egressing backend is wrapped in the FTY-435
+    :class:`~app.estimator.search_hygiene.HygienicSearchProvider`, so search-call
+    hygiene — per-run query dedup, the short-TTL answered-lookup cache, and the
+    ``429`` cooldown — applies at the one factory all callers share and cannot be
+    bypassed by a new call site. The wrapper delegates ``enabled`` / ``available`` /
+    ``capability`` unchanged, so diagnostics still describe the configured backend.
+    The ``none`` backend never egresses, so it is returned bare — there is nothing to
+    dedup, cache, or throttle.
+    """
 
     resolved = settings or load_search_settings()
     if resolved.provider == SEARXNG_PROVIDER:
-        return SearXNGSearchProvider(resolved)
+        return _with_call_hygiene(SearXNGSearchProvider(resolved), resolved)
     if resolved.provider == BRAVE_PROVIDER:
-        return BraveSearchProvider(resolved)
+        return _with_call_hygiene(BraveSearchProvider(resolved), resolved)
     if resolved.provider == NONE_PROVIDER:
         return NullSearchProvider(resolved)
     # Unreachable: SearchSettings validates ``provider`` against KNOWN_PROVIDERS.
     raise ValueError(f"unsupported search provider: {resolved.provider}")
+
+
+def _with_call_hygiene(
+    provider: SearchProvider, settings: SearchSettings
+) -> HygienicSearchProvider:
+    """Wrap an egressing adapter with the configured call-hygiene bounds (FTY-435)."""
+
+    return HygienicSearchProvider(
+        provider,
+        scope=settings.provider,
+        cache_ttl_seconds=settings.cache_ttl_seconds,
+        cooldown_seconds=settings.rate_limit_cooldown_seconds,
+    )

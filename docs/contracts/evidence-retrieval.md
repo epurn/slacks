@@ -57,6 +57,20 @@ Adapter — FTY-079 / FTY-164**.
 
 ## Version
 
+14 (FTY-435): adds **Search-call hygiene — FTY-435** to the search-adapter
+sub-contract — per-run query dedup, a short-TTL in-process cache of *answered*
+lookups, and a bounded cooldown after a `rate_limited` reply — plus its two
+`SLACKS_SEARCH_` tunables and a retention bullet for the cache. **No** new provider,
+status, DTO, evidence field, or source tier: the wrapper delegates
+`enabled`/`available`/`capability`, a memo/cache hit returns the identical
+`SearchResult` (so facts, evidence records, provenance, and the decision trace are
+unchanged), and the `rate_limited` status is consumed as-is. The one *behavioural*
+sharpening is that `rate_limited` no longer reads as a plain miss: it ends that tier's
+remaining identity-variant walk and, for the cooldown window, is answered without any
+provider call — both falling through to the next tier / `model_prior` exactly as an
+unavailable provider does, so the run still completes with honest provenance and a
+throttled provider is never a user-visible failure.
+
 13 (FTY-396, contract only): extracts the **Exact Evidence Upgrade — FTY-306**
 sub-contract into its own page,
 [exact-evidence-upgrade.md](exact-evidence-upgrade.md), **verbatim** — no
@@ -754,6 +768,13 @@ body, or response body.
   page text, search result bodies, provider errors, prompts, URLs containing secrets, or
   request/response bodies into `source_ref`, `assumptions`, logs, traces, diagnostics,
   source refs, or calibration artifacts beyond explicit public fixture inputs.
+- **Bounded in-process search cache (FTY-435).** The search-call-hygiene cache holds
+  **sanitized queries and provider results only** — the same strings that already
+  egress, never raw diary text, personal context, user ids, or credentials — for a
+  bounded TTL (`SLACKS_SEARCH_CACHE_TTL_SECONDS`) and a bounded entry count, in process
+  memory only. It is a global identity-keyed cache like `products`, so it carries no
+  per-user data and nothing to leak across users; it is never persisted, and it holds no
+  failure/rate-limit outcomes. See **Search-call hygiene — FTY-435**.
 - **Source status retained and surfaced.** Each entry keeps its `source_type`,
   `source_ref`, lookup `status`, and assumptions so the user can see how it was
   estimated and edit it; `model_prior` entries record why the fallback was used.
@@ -860,7 +881,9 @@ pipeline** (FTY-062).
 `backend/app/estimator/search.py` (the `SearchProvider` interface, the
 `SearXNGSearchProvider` / `BraveSearchProvider` / `NullSearchProvider` adapters,
 `SearchSettings`, the `sanitize_query` chokepoint, the `SearchStatus` values, and
-`build_search_provider`); the `official_source` entry in the source-diagnostics
+`build_search_provider`), with call hygiene — dedup, the short-TTL answered-lookup
+cache, and the `429` cooldown — in
+`backend/app/estimator/search_hygiene.py` (FTY-435); the `official_source` entry in the source-diagnostics
 surface (`backend/app/services/sources.py`, `backend/app/routers/health.py`). The
 adapters reuse `hardened_fetch.py` for egress.
 
@@ -874,6 +897,8 @@ adapters reuse `hardened_fetch.py` for egress.
 | `SLACKS_SEARCH_BASE_URL` | `http://searxng:8080` (searxng) / `https://api.search.brave.com` (brave) | API base; the allowlisted host is derived from it. See **Base URL rules** below. |
 | `SLACKS_SEARCH_TIMEOUT_SECONDS` | `10` | Per-request wall-clock timeout. |
 | `SLACKS_SEARCH_MAX_RESULTS` | `5` | Candidate result URLs surfaced (Brave: also requested via `count`; SearXNG: bounded client-side). |
+| `SLACKS_SEARCH_CACHE_TTL_SECONDS` | `300` | Lifetime of an answered lookup in the in-process result cache (FTY-435); `0` disables the cross-run cache, leaving only the per-run memo. |
+| `SLACKS_SEARCH_RATE_LIMIT_COOLDOWN_SECONDS` | `60` | How long search calls pause after a `rate_limited` reply (FTY-435); `0` disables the cooldown. |
 
 The Brave key is a `SecretStr`, read from the environment only, never exposed to
 clients, never logged, and sent only in the `X-Subscription-Token` **header** (never
@@ -914,7 +939,7 @@ Capability / Status** vocabulary above:
 | --- | --- | --- |
 | `disabled` | `SLACKS_SEARCH_ENABLED=false`, or `SLACKS_SEARCH_PROVIDER=none`. | No call; caller tries next source / `model_prior`. |
 | `unavailable` | `brave` selected with no API key. (SearXNG is keyless and never `unavailable` by config.) | No call; caller falls through. |
-| `rate_limited` | Provider returned an HTTP 429 rate-limit / quota signal. | Bounded retry, then next source / `model_prior`. |
+| `rate_limited` | Provider returned an HTTP 429 rate-limit / quota signal, **or** the FTY-435 cooldown that reply started is still running (no call made). | The consumer stops issuing further queries for that item's tier and falls through to the next source / `model_prior`. See **Search-call hygiene** below. |
 | `failed` | Timeout, connection error, 5xx, other 4xx, non-JSON, oversized, or policy-blocked (scheme / non-allowlisted / redirect / address-posture) response. | Nothing trusted; next source / `model_prior`. |
 | `partial` | The provider answered but offered no usable candidate URL (or the sanitized query was empty). | Not finalizable; next source. |
 | `success` | A bounded list of candidate HTTP(S) result URLs was returned. | URLs handed to the fetch step (FTY-078). |
@@ -932,6 +957,49 @@ request shape — `q` (the sanitized name) + `count` for Brave, `q` + `format=js
 for SearXNG — so profile, weight, food history, and event metadata have **no
 channel** to the provider. Tests prove no personal context egresses on either
 backend.
+
+### Search-call hygiene — FTY-435
+
+The consumer walks a bounded set of identity-query variants per unresolved item, per
+tier, and a multi-item event / re-interpretation re-query / post-clarification
+re-estimate replays those walks. Every egressing backend is therefore wrapped, at the
+`build_search_provider` factory, in a call-hygiene decorator
+(`backend/app/estimator/search_hygiene.py`) that bounds the outbound call rate. It is
+**not** a new provider, status, or DTO: `enabled` / `available` / `capability`
+delegate to the configured backend unchanged, and the wrapper only ever *reduces*
+calls.
+
+- **Per-run dedup (memo).** Within one estimation run (one `build_search_provider`
+  instance — one worker attempt or one request) a given **sanitized** query reaches
+  the provider **at most once**, whatever its status. A repeat is answered with the
+  *identical* `SearchResult`, so the downstream fetch → extract → evidence chain, the
+  recorded provenance, and the sanitized decision trace are unchanged: a hit is
+  indistinguishable from a fresh call.
+- **Short-TTL cross-run cache.** Only *answered* statuses (`success` / `partial`) are
+  published to a small in-process, TTL-bounded, size-capped cache
+  (`SLACKS_SEARCH_CACHE_TTL_SECONDS`), so the next run inside the TTL is served
+  without egress. `failed` / `rate_limited` / `disabled` / `unavailable` are **never**
+  cached across runs — a transport blip or a throttle window must not suppress search
+  for a later run. Cache keys are the provider key plus the sanitized query only;
+  values are provider results (candidate URLs + bounded titles/snippets). The cache is
+  **in-process, not Redis**: the dominant duplication is *within* a run, which the memo
+  removes with no network hop, and keeping search results out of the durable shared
+  broker avoids a new retention surface for the small cross-run tail.
+- **429 cooldown (bounded stop, not a retry loop).** A `rate_limited` reply starts a
+  bounded per-provider cooldown (`SLACKS_SEARCH_RATE_LIMIT_COOLDOWN_SECONDS`) during
+  which `search` makes **no** provider call and answers `rate_limited` directly. The
+  consumer stops walking that tier's remaining query variants on the first
+  `rate_limited` (live or cooldown-served) and falls through to the next evidence tier
+  and then `model_prior` — the same fall-through an unavailable provider takes. The run
+  still completes with honest provenance: the `model_prior` fallback records the
+  content-free `<tier> search rate limited` reason. **A throttled search provider is
+  never a user-visible failure and never a clarification trigger** — it is a tier
+  fall-through (`estimator-policy.md`, **Allowed clarification reasons under
+  `estimate_first`**). There is no retry-with-backoff inside the fetcher and no change
+  to the variant cap, tier order, or ranking.
+- **Telemetry.** Counts and closed-vocabulary statuses only (cache/memo hits, calls,
+  cooldown skips and trips). Query text is never logged, matching the query
+  sanitization rules above.
 
 ### Errors
 

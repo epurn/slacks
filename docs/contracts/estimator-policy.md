@@ -22,6 +22,14 @@ the public contracts that consume this policy ([interpretation-session.md](inter
 
 ## Version
 
+4 (FTY-435, contract cross-reference): states that a throttled evidence provider is
+not an allowed `estimate_first` clarification reason — a rate-limited search (and the
+bounded cooldown it starts) makes that *tier* unavailable and falls through to the next
+tier / `model_prior`, so the item is costed roughly instead of asked about or failed.
+The search-call-hygiene mechanics are owned by
+[evidence-retrieval.md](evidence-retrieval.md) (**Search-call hygiene — FTY-435**). No
+env var, mode, threshold, DTO, schema, or provider change here.
+
 3 (FTY-324, contract cross-reference; FTY-348 relocation): clarifies that the active
 FTY-298 modes are consumed by the `InterpretationSession` defined in
 [interpretation-session.md](interpretation-session.md) (FTY-324 first stated this in
@@ -119,6 +127,15 @@ recognizable item, it is reserved for genuinely indeterminate or unsafe inputs:
   repair attempts, or explicitly disabled;
 - an operator-selected `balanced`/`strict` mode chooses an amount question for a
   recognizable-but-amountless item.
+
+A throttled or transiently failing evidence provider is **not** one of these
+reasons. A rate-limited search — including the bounded cooldown that answers
+without a call after the provider returns `rate_limited`
+([evidence-retrieval.md](evidence-retrieval.md), **Search-call hygiene —
+FTY-435**) — makes that evidence tier unavailable, not the whole rough-estimate
+path: resolution falls through to the next tier and then `model_prior`, and the
+item is costed roughly with content-free provenance rather than turned into a
+question or a failure.
 
 Across representative everyday logs, the estimator should estimate or resolve
 far more often than it asks without encoding a brittle numeric clarification
