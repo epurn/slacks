@@ -11,10 +11,14 @@ missing row is handled — differs between reads and writes (see the
 - **Override writes need the exact-date row**, materialising it on demand when the
   owner has an active goal covering the day
   (:func:`resolve_or_materialise_target`).
+- **A body-metric profile edit recomputes the current day's row**
+  (:func:`recompute_active_target`), materialising it on demand like an override
+  write but degrading to a silent no-op instead of an error, because the profile
+  write that triggers it has already succeeded.
 
-Both fail closed with :class:`TargetNotFound` (the router's ``404``) so a
-cross-user caller and a caller with no in-horizon row are indistinguishable — no
-existence oracle.
+The two read/override paths fail closed with :class:`TargetNotFound` (the router's
+``404``) so a cross-user caller and a caller with no in-horizon row are
+indistinguishable — no existence oracle.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -31,7 +36,7 @@ from app.timeutils import current_day
 
 from .access import authorize
 from .derivation import compute_daily_target
-from .errors import TargetNotFound
+from .errors import IncompleteProfileError, TargetNotFound
 
 
 def get_active_target(
@@ -153,6 +158,52 @@ def resolve_or_materialise_target(
     if goal is None:
         raise TargetNotFound("no active target for this user and day")
     return compute_daily_target(session, owner_id, goal.id, current_user, for_date=for_date)
+
+
+def recompute_active_target(
+    session: Session,
+    owner_id: uuid.UUID,
+    current_user: User,
+    *,
+    for_date: date | None = None,
+) -> DailyTarget | None:
+    """Refresh the active goal's **derived** target for a day, or no-op (FTY-467).
+
+    The body-metric entry point: an edit to a profile field the calculator consumes
+    (height, birth year, metabolic formula) must move the numbers the app shows, so the
+    profile write recomputes the day's row here. ``for_date`` defaults to the current
+    day in the owner's profile timezone — the same day the target read and the daily
+    summary resolve — so the materialised row is exactly the row the post-write
+    read-back returns. Only that one day is touched: earlier days keep their stored
+    rows and later in-horizon days carry this one forward on read.
+
+    The write goes through :func:`compute_daily_target`, so the documented override
+    precedence is inherited rather than re-derived: the derived columns are refreshed
+    in place, an in-force override is left untouched, and a newly materialised date
+    inherits the goal's in-force override.
+
+    Unlike the override write paths this **degrades to a silent no-op** (returns
+    ``None``) instead of failing closed, because the profile write that triggers it has
+    already succeeded and must not turn into a ``409``/``500`` just because no target
+    could be derived. It no-ops when the owner has no active goal covering the day, and
+    when the calculator refuses the post-edit profile — height or birth year nulled,
+    the formula back on the unspecified family default, or a ``birth_year`` whose
+    whole-year age falls outside the calculator's validated band (all of which the
+    profile DTO admits). Both refusals are raised while assembling the calculator input,
+    before :func:`compute_daily_target` touches a row, so nothing is left half-written.
+
+    Object-level authorization is unchanged: :func:`compute_daily_target` re-authorizes
+    the goal owner and fails closed on a cross-user caller.
+    """
+
+    day = resolve_day(session, owner_id, for_date)
+    goal = _active_goal_covering(session, owner_id, day)
+    if goal is None:
+        return None
+    try:
+        return compute_daily_target(session, owner_id, goal.id, current_user, for_date=day)
+    except (IncompleteProfileError, ValidationError):
+        return None
 
 
 def resolve_carried_target_row(
