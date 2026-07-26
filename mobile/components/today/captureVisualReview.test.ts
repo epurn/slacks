@@ -11,12 +11,16 @@
 
 // Importing the module under test registers the presets as a side effect.
 import {
+  captureVisualReviewInjectables,
   CAPTURE_BARCODE_GRANTED_PRESET,
   CAPTURE_CONFIRM_PARSED_COMMITTED,
   CAPTURE_CONFIRM_PARSED_EVENT,
   CAPTURE_CONFIRM_PARSED_PRESET,
   CAPTURE_CONFIRM_PARSED_PROPOSAL,
+  CAPTURE_LABEL_AUTO_UPLOAD_HOLD_MS,
+  CAPTURE_LABEL_AUTO_UPLOAD_PRESET,
   CAPTURE_LABEL_GUIDANCE_PRESET,
+  CAPTURE_LABEL_PHOTO_URI,
 } from "./captureVisualReview";
 
 import { activateVisualReviewPreset, getVisualReviewPreset } from "@/e2e/visualReview";
@@ -57,6 +61,56 @@ describe("capture sub-state preset registration", () => {
     expect(preset).toBeDefined();
     expect(preset?.route).toBe("/");
     expect(preset?.settledPath).toBe("/");
+  });
+
+  it("registers capture.label_auto_upload with a route + settledPath", () => {
+    const preset = getVisualReviewPreset(CAPTURE_LABEL_AUTO_UPLOAD_PRESET);
+    expect(preset).toBeDefined();
+    expect(preset?.route).toBe("/");
+    expect(preset?.settledPath).toBe("/");
+  });
+});
+
+describe("capture.label_auto_upload installs the camera + upload seams (FTY-433)", () => {
+  it("supplies a synthetic shutter frame and upload for the auto-upload preset", async () => {
+    const { labelTakePhoto, uploadLabel } = captureVisualReviewInjectables(
+      CAPTURE_LABEL_AUTO_UPLOAD_PRESET,
+    );
+
+    // The camera-less simulator can't shoot, so the seam stands in for the frame.
+    await expect(labelTakePhoto?.()).resolves.toEqual({
+      uri: CAPTURE_LABEL_PHOTO_URI,
+    });
+    expect(CAPTURE_LABEL_PHOTO_URI.startsWith("data:image/png;base64,")).toBe(
+      true,
+    );
+
+    // The upload holds long enough for the uploading state (held frame +
+    // Retake) to be observable, then hands back the same synthetic event the
+    // confirm gate is pinned to — so the real handleLabelUploaded → proposal
+    // read → confirm-sheet path runs on it.
+    expect(CAPTURE_LABEL_AUTO_UPLOAD_HOLD_MS).toBeGreaterThan(0);
+    jest.useFakeTimers();
+    try {
+      const inFlight = uploadLabel?.(apiSession, "file:///label.jpg", false);
+      jest.advanceTimersByTime(CAPTURE_LABEL_AUTO_UPLOAD_HOLD_MS);
+      await expect(inFlight).resolves.toEqual(CAPTURE_CONFIRM_PARSED_EVENT);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("installs no seams for any other preset — the real camera and upload stay wired", () => {
+    expect(
+      captureVisualReviewInjectables(CAPTURE_LABEL_GUIDANCE_PRESET),
+    ).toEqual({});
+    expect(captureVisualReviewInjectables(CAPTURE_CONFIRM_PARSED_PRESET)).toEqual(
+      {},
+    );
+  });
+
+  it("installs no seams when no preset is active (every real launch)", () => {
+    expect(captureVisualReviewInjectables(null)).toEqual({});
   });
 });
 

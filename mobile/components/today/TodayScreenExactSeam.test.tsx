@@ -151,14 +151,18 @@ describe("Make it exact visual-review seam (FTY-313)", () => {
     const tree = await mountWithPreset("correction.exact_label");
     // The label capture surface is presented from the correction flow.
     expect(hasA11yLabel(tree, "Take photo")).toBe(true);
-    // The injected takePhoto seam lets the shutter reach the save-photo preview.
-    await act(async () => press(tree, "Take photo"));
-    const saveSwitch = tree.root.find(
+    // FTY-433: the retention choice is a sticky control in the capture chrome,
+    // not a per-capture question — and it rests off (discard by default).
+    const saveToggle = tree.root.find(
       (n) =>
-        n.props.accessibilityLabel === "Save this photo" &&
-        typeof n.props.onValueChange === "function",
+        n.props.accessibilityLabel === "Save label photos" &&
+        typeof n.props.onPress === "function",
     );
-    expect(saveSwitch.props.value).toBe(false);
+    expect(saveToggle.props.accessibilityState).toEqual({ selected: false });
+    // The injected takePhoto seam shoots; the shutter is now the submit, so the
+    // capture hands straight back to the exact-evidence flow with no Upload stop.
+    await act(async () => press(tree, "Take photo"));
+    expect(hasA11yLabel(tree, "Upload label")).toBe(false);
   });
 
   it("is inert outside E2E mode: no exact sheet auto-opens", async () => {
