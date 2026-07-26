@@ -97,6 +97,7 @@ from app.estimator.searched_reference import (
     searched_reference_per_100g,
 )
 from app.estimator.web_evidence_trace import (
+    RateLimitWatch,
     acceptance_gate,
     decision_recorder,
     trace_candidate_index,
@@ -554,6 +555,11 @@ class OfficialSourceResolveStep:
         compatible one. Returns the first fully supported result, or ``None`` so the
         caller falls through to the next tier. Every search / fetch / extract / gate
         decision is recorded on the sanitized run trace per query variant (FTY-255).
+
+        A ``rate_limited`` search **ends** the walk (FTY-435): the remaining variants
+        would only add pressure to a provider that just refused, so the tier falls
+        through immediately — the same fall-through an unavailable provider takes, so
+        the run still completes with honest provenance and no user-visible failure.
         """
 
         candidate = current_food_candidate(context, candidate, candidate_index)
@@ -570,6 +576,9 @@ class OfficialSourceResolveStep:
                 tier=source_type,
                 query_variant=variant_index,
             )
+            # FTY-435: watch the observed search status so a throttled provider stops
+            # this tier's walk instead of being handed the remaining variants.
+            watch = RateLimitWatch(note)
             found = searched_reference_per_100g(
                 provider=self.provider,
                 search_provider=self.search_provider,
@@ -579,10 +588,20 @@ class OfficialSourceResolveStep:
                 source_type=source_type,
                 allow_count_serving=True,
                 accept_result=acceptance_gate(candidate, note),
-                observe=note,
+                observe=watch,
                 stage_text=evidence_text_stager(context, tier=source_type),
             )
             if found is None:
+                if watch.rate_limited:
+                    # FTY-435: the provider is rate limited (a live 429, or the cooldown
+                    # answering call-free). Stop this tier's remaining variants and fall
+                    # through to the next tier / model prior exactly as an unavailable
+                    # provider does, carrying the content-free reason so the fallback's
+                    # provenance still names why no evidence was used.
+                    rate_limited = f"{source_type} search rate limited"
+                    if rate_limited not in reasons:
+                        reasons.append(rate_limited)
+                    break
                 continue
             item = _build_item(
                 context,

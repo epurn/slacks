@@ -19,6 +19,7 @@ from sqlalchemy.engine import Engine
 
 from alembic import command
 from app.db import create_db_engine
+from app.estimator.search import reset_search_hygiene
 from app.main import create_app
 from app.security.rate_limit import InMemoryRateLimiter
 from app.settings import Settings
@@ -83,6 +84,22 @@ def db_engine(tmp_path: Path) -> Iterator[Engine]:
         yield engine
     finally:
         engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _reset_search_hygiene() -> Iterator[None]:
+    """Clear the process-shared search cache / rate-limit cooldown around each test.
+
+    The FTY-435 answered-lookup cache and ``429`` cooldown are deliberately
+    process-shared (they must outlive one estimation run), so without this the state
+    one test leaves behind would decide whether another test's search egresses.
+    """
+
+    reset_search_hygiene()
+    try:
+        yield
+    finally:
+        reset_search_hygiene()
 
 
 @pytest.fixture

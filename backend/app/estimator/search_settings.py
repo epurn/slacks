@@ -9,6 +9,10 @@ from urllib.parse import urlencode, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
+from app.estimator.search_hygiene import (
+    DEFAULT_SEARCH_CACHE_TTL_SECONDS,
+    DEFAULT_SEARCH_RATE_LIMIT_COOLDOWN_SECONDS,
+)
 from app.estimator.search_sanitization import is_local_search_host
 
 #: Search settings are read from variables with this prefix, e.g.
@@ -51,7 +55,9 @@ class SearchSettings(BaseModel):
     is enabled **and available** out of the box with no API key (FTY-164). The base
     URL must be ``https``, except that SearXNG may use plain ``http`` for the local
     dev-stack targets only (``searxng`` / ``localhost`` / loopback); the host is
-    derived from it for the request allowlist.
+    derived from it for the request allowlist. The call-hygiene tunables
+    (:attr:`cache_ttl_seconds`, :attr:`rate_limit_cooldown_seconds`, FTY-435) bound how
+    long an answered lookup is reused and how long search pauses after a ``429``.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -73,6 +79,16 @@ class SearchSettings(BaseModel):
     timeout_seconds: float = Field(default=10.0, gt=0, le=120)
     #: Number of candidate result URLs requested / surfaced.
     max_results: int = Field(default=5, ge=1, le=20)
+    #: Lifetime of a cached answered lookup in the process-shared search cache
+    #: (FTY-435). Short by design; ``0`` disables the cross-run cache, leaving only the
+    #: per-run memo. A documented tunable.
+    cache_ttl_seconds: float = Field(default=DEFAULT_SEARCH_CACHE_TTL_SECONDS, ge=0, le=3600)
+    #: How long search calls pause after the provider answers ``rate_limited``
+    #: (FTY-435). During the cooldown no query egresses and the resolver falls through
+    #: to the next evidence tier / model prior; ``0`` disables the cooldown.
+    rate_limit_cooldown_seconds: float = Field(
+        default=DEFAULT_SEARCH_RATE_LIMIT_COOLDOWN_SECONDS, ge=0, le=3600
+    )
 
     @model_validator(mode="before")
     @classmethod
