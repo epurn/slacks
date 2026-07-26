@@ -179,8 +179,7 @@ describe("AdherenceStrip", () => {
     expect(fillStyle(tree, "2026-06-20")).toEqual(
       expect.objectContaining({
         backgroundColor: lightPalette.coral,
-        borderWidth: 2,
-        borderColor: lightPalette.surface,
+        borderRadius: 0,
       }),
     );
     expect(fillStyle(tree, "2026-06-18")).toEqual(
@@ -214,10 +213,78 @@ describe("AdherenceStrip", () => {
     expect(fillStyle(tree, "2026-06-29")).toEqual(
       expect.objectContaining({
         backgroundColor: darkPalette.coral,
-        borderWidth: 2,
-        borderColor: darkPalette.surface,
+        borderRadius: 0,
       }),
     );
+  });
+
+  // FTY-431: the off-target cell used to paint a 2pt `surface`-colored ring as
+  // its non-color cue, which in dark mode is a near-black outline around the
+  // coral bar. The cue is now the silhouette — square corners against every
+  // other state's rounded cap — so nothing scheme-colored is drawn on the bar
+  // in either scheme, while on- vs off-target stays distinguishable with hue
+  // ignored.
+  describe.each([
+    ["light" as const, lightPalette],
+    ["dark" as const, darkPalette],
+  ])("cell style resolution (%s)", (theme, palette) => {
+    it("gives off-target a clean, ring-free coral fill", () => {
+      const tree = mount(shortWindow(), { theme });
+      const offTarget = fillStyle(tree, "2026-06-29");
+
+      expect(offTarget.backgroundColor).toBe(palette.coral);
+      expect(offTarget.borderWidth).toBeUndefined();
+      expect(offTarget.borderColor).toBeUndefined();
+      // Nothing on the cell is painted in a background token — the ring is gone.
+      expect(Object.values(offTarget)).not.toContain(palette.surface);
+      expect(Object.values(offTarget)).not.toContain(palette.surfaceRaised);
+    });
+
+    it("keeps off-target distinguishable from on-target without relying on hue", () => {
+      const tree = mount(shortWindow(), { theme });
+      const offTarget = fillStyle(tree, "2026-06-29");
+      const onTarget = fillStyle(tree, "2026-06-30");
+
+      // Both are plain solid fills, so the shape is what a colorblind user
+      // reads: square corners vs. the shared rounded cap.
+      expect(offTarget.borderRadius).toBe(0);
+      expect(onTarget.borderRadius).toBe(3);
+      expect(offTarget.borderRadius).not.toBe(onTarget.borderRadius);
+      // Same footprint — the cue costs no layout, so the strip stays even.
+      expect(offTarget.width).toBe(onTarget.width);
+      expect(offTarget.height).toBe(onTarget.height);
+    });
+
+    it("leaves on-target, no-target, and no-data unchanged", () => {
+      const tree = mount(shortWindow(), { theme });
+
+      expect(fillStyle(tree, "2026-06-30")).toEqual(
+        expect.objectContaining({ backgroundColor: palette.accent, borderRadius: 3 }),
+      );
+      expect(fillStyle(tree, "2026-06-28")).toEqual(
+        expect.objectContaining({
+          backgroundColor: "transparent",
+          borderWidth: 1,
+          borderColor: palette.textMuted,
+          opacity: 0.6,
+          borderRadius: 3,
+        }),
+      );
+      expect(fillStyle(tree, "2026-06-27")).toEqual(
+        expect.objectContaining({ backgroundColor: palette.separator, borderRadius: 3 }),
+      );
+    });
+
+    it("keeps every cell's accessibility label intact", () => {
+      const tree = mount(shortWindow(), { theme });
+
+      expect(cellNodes(tree).map((n) => n.props.accessibilityLabel)).toEqual([
+        "June 27: no data",
+        "June 28: no target set",
+        "Yesterday: off target",
+        "Today: on target",
+      ]);
+    });
   });
 
   it("lands on the newest end again when the rendered range changes", () => {

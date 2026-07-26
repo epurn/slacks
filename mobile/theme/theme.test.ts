@@ -155,7 +155,7 @@ describe('ThemeProvider — override seam', () => {
 
 const WCAG_AA = 4.5;
 // WCAG 1.4.11 non-text contrast threshold — used for graphical (non-text)
-// distinguishing marks like the adherence ring and the switcher's pill border.
+// distinguishing marks like the adherence bar and the switcher's pill border.
 const WCAG_NON_TEXT = 3;
 
 describe('lightPalette — WCAG AA token contrast on surface', () => {
@@ -264,10 +264,12 @@ describe('darkPalette — WCAG non-text: pill separates from the canvas (FTY-323
 // The goal-aware headline delta (TrendsScreen.tsx) renders as `accentText`
 // (already covered above — the "toward goal" state), `coral` (the "away from
 // goal" state), or `textSecondary` (already covered — the neutral state), all
-// as body text on `surface`. The adherence strip's off-target cue
-// (AdherenceStrip.tsx) is a `surface`-colored ring on a `coral` fill — a
-// graphical (non-text) distinguishing mark, so it is held to the WCAG 1.4.11
-// non-text 3:1 threshold rather than the 4.5:1 text threshold.
+// as body text on `surface`. The adherence strip's off-target cell
+// (AdherenceStrip.tsx) is a plain `coral` bar on the card's `surfaceRaised`
+// background — a graphical (non-text) mark, so it is held to the WCAG 1.4.11
+// non-text 3:1 threshold rather than the 4.5:1 text threshold. Its cue against
+// on-target is the cell's silhouette (square vs. rounded corners, FTY-431), not
+// a colored ring, so no ring token contrast applies any more.
 // ---------------------------------------------------------------------------
 
 describe('lightPalette — WCAG AA: headline delta "away from goal" state', () => {
@@ -282,14 +284,14 @@ describe('darkPalette — WCAG AA: headline delta "away from goal" state', () =>
   });
 });
 
-describe('lightPalette — WCAG AA: off-target adherence cue (non-color ring)', () => {
-  it('surface ring (#F2F2F7) on the coral off-target fill meets 3:1', () => {
-    expect(contrastRatio(lightPalette.surface, lightPalette.coral)).toBeGreaterThanOrEqual(WCAG_NON_TEXT);
+describe('lightPalette — WCAG AA: off-target adherence cell (ring-free coral bar)', () => {
+  it('the coral bar (#C0392B) on the card surfaceRaised (#FFFFFF) meets 3:1', () => {
+    expect(contrastRatio(lightPalette.coral, lightPalette.surfaceRaised)).toBeGreaterThanOrEqual(WCAG_NON_TEXT);
   });
 });
 
-describe('darkPalette — WCAG AA: off-target adherence cue (non-color ring)', () => {
-  it('surface ring (#1C1C1E) on the coral off-target fill meets 3:1', () => {
-    expect(contrastRatio(darkPalette.surface, darkPalette.coral)).toBeGreaterThanOrEqual(WCAG_NON_TEXT);
+describe('darkPalette — WCAG AA: off-target adherence cell (ring-free coral bar)', () => {
+  it('the coral bar (#FF6B6B) on the card surfaceRaised (#2C2C2E) meets 3:1', () => {
+    expect(contrastRatio(darkPalette.coral, darkPalette.surfaceRaised)).toBeGreaterThanOrEqual(WCAG_NON_TEXT);
   });
 });

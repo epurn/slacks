@@ -345,7 +345,7 @@ function shiftIsoDate(isoDate: string, days: number): string {
  * Every calendar day from `from` through `to` inclusive (oldest first),
  * mirroring the client's buildDayRange so range summaries key onto the strip.
  */
-function e2eDayRange(from: string, to: string): string[] {
+export function e2eDayRange(from: string, to: string): string[] {
   const out: string[] = [];
   let cur = from;
   for (let i = 0; i < 400 && cur <= to; i++) {
