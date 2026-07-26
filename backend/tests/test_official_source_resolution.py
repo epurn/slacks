@@ -52,6 +52,7 @@ from app.estimator.search import (
     OFFICIAL_SOURCE_TYPE,
     SearchCandidate,
     SearchCapability,
+    SearchProvider,
     SearchResult,
     SearchStatus,
 )
@@ -197,7 +198,7 @@ def _pipeline(
     *,
     food_source: FakeFoodSource,
     parsed_item: dict[str, object],
-    search_provider: FakeSearchProvider,
+    search_provider: SearchProvider,
     fetcher: RecordingFetcher,
     estimates: list[dict[str, Any] | LLMError],
     fetch_settings: OfficialFetchSettings | None = None,

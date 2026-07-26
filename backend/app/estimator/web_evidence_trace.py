@@ -15,7 +15,9 @@ orchestration having to know how entries are built:
 - :func:`acceptance_gate` — the FTY-252/253 evidence gates, recording which
   check rejected a result;
 - :func:`trace_candidate_index` — the candidate's stable index in the parsed
-  food-candidate list, matching the food step's entries.
+  food-candidate list, matching the food step's entries;
+- :class:`RateLimitWatch` — a pass-through hook that flags a ``rate_limited``
+  search so the tier can stop walking its remaining query variants (FTY-435).
 
 Nothing here egresses, stores, or logs content: URLs enter the trace only
 through the sanitizer, and every label is a fixed vocabulary string.
@@ -35,6 +37,7 @@ from app.estimator.hardened_fetch import (
 from app.estimator.identity_sanitizer import sanitized_identity
 from app.estimator.interpretation_tools import add_evidence_record
 from app.estimator.pipeline import CandidateDraft, EstimationContext
+from app.estimator.search import SearchStatus
 from app.estimator.searched_reference import (
     AcceptSearchedReference,
     ObserveSearchDecision,
@@ -102,6 +105,29 @@ def decision_recorder(
         )
 
     return _note
+
+
+class RateLimitWatch:
+    """A decision hook that also flags a ``rate_limited`` search outcome (FTY-435).
+
+    The searched-reference chain reports every search outcome through the sanitized
+    decision hook but returns only facts-or-``None``, so a tier could not tell a
+    throttled provider from a plain miss and kept walking its remaining identity
+    variants — more pressure on an instance that just said "too many requests".
+    Wrapping the hook in this watch lets the tier stop the walk on the *observed*
+    status, so the behaviour holds for any provider (a bare adapter's live ``429`` and
+    the FTY-435 cooldown's call-free ``rate_limited`` alike). It forwards every field
+    to the wrapped hook untouched, so the trace/ledger are unchanged.
+    """
+
+    def __init__(self, note: ObserveSearchDecision) -> None:
+        self._note = note
+        self.rate_limited = False
+
+    def __call__(self, **fields: object) -> None:
+        if fields.get("search_status") == SearchStatus.RATE_LIMITED.value:
+            self.rate_limited = True
+        self._note(**fields)
 
 
 def acceptance_gate(
