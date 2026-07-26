@@ -1,11 +1,12 @@
 # SearXNG settings for the Slacks local / self-host dev stack (FTY-165).
 #
-# This is a MINIMAL private-instance configuration. It inherits every upstream
-# default (`use_default_settings: true`) and overrides only what Slacks'
-# official-source search adapter (FTY-164) requires:
+# This is a MINIMAL private-instance configuration. It starts from the upstream
+# defaults and overrides only what Slacks' official-source search adapter
+# (FTY-164) requires:
 #
 #   - JSON output format, which the adapter consumes at
 #     GET /search?q=<sanitized item identity>&format=json;
+#   - a CURATED engine set instead of the upstream default fan-out (FTY-436);
 #   - a dev-only secret key (see the security note below).
 #
 # SearXNG runs as an INTERNAL backend tool on the compose network (service name
@@ -14,7 +15,62 @@
 # item-identity queries (FTY-164); no personal context ever reaches this
 # instance.
 
-use_default_settings: true
+use_default_settings:
+  engines:
+    # CURATED ENGINE SET (FTY-436).
+    #
+    # Every adapter query is a plain `general`-category search, so SearXNG fans
+    # it out to *all* engines enabled in that category. Upstream's defaults
+    # enable ten (brave, currency, dictzone, duckduckgo, google, lingva,
+    # mymemory translated, startpage, wikidata, wikipedia) — most useless for
+    # nutrition lookup, and several of them (Google and Startpage first) answer
+    # a self-hosted instance with a CAPTCHA / block wall. Those blocks are what
+    # the backend sees as rate limiting.
+    #
+    # `keep_only` replaces that inherit-everything default with an explicit
+    # short list, measured against this stack (see
+    # docs/operations/local-dev-stack.md for the full measurement and the
+    # rationale for each drop):
+    #
+    #   duckduckgo web — DuckDuckGo's HTML endpoint. Best branded-product and
+    #                    UPC coverage of the candidates; keyless. NOT the same
+    #                    engine as plain `duckduckgo` (the lite/JSON endpoint),
+    #                    which CAPTCHA-walled every probe query and is one of
+    #                    the engines this story drops.
+    #   dogpile        — InfoSpace metasearch with a different backend mix;
+    #                    carries roughly half the results on every probe query
+    #                    and surfaces official brand product pages the others
+    #                    miss. Never throttled this instance.
+    #   mojeek         — small INDEPENDENT crawler (not a Bing/Google front
+    #                    end), so the set keeps answering when the aggregators
+    #                    cool off. Sparse on branded queries; contributes on
+    #                    generic foods. After a burst of probe traffic it does
+    #                    enter an `access denied` cooldown for a while and
+    #                    recovers unaided — a soft per-IP limit, not a block
+    #                    wall, and the other two carry the set meanwhile.
+    #
+    # `bing` was measured and REJECTED: redundant with `duckduckgo web`, and on
+    # numeric UPC queries it injected unrelated results that outranked the real
+    # product hits. See the dropped-engine table in the ops doc.
+    #
+    # Widening this list is a deliberate operator choice: add the engine's
+    # upstream name here (and `disabled: false` below if it ships disabled).
+    # Re-adding google/startpage/brave will reintroduce the upstream 429s.
+    keep_only:
+      - duckduckgo web
+      - dogpile
+      - mojeek
+
+engines:
+  # All three ship present-but-disabled upstream (none is part of the default
+  # general fan-out), so the curated set opts into them explicitly. All three are
+  # keyless — the self-host stack stays credential-free.
+  - name: duckduckgo web
+    disabled: false
+  - name: dogpile
+    disabled: false
+  - name: mojeek
+    disabled: false
 
 server:
   # NON-SECRET DEV PLACEHOLDER — not a real secret, and safe to commit.

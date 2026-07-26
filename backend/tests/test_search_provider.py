@@ -27,6 +27,7 @@ from app.estimator.hardened_fetch import (
 from app.estimator.search import (
     OFFICIAL_SOURCE,
     BraveSearchProvider,
+    HygienicSearchProvider,
     NullSearchProvider,
     SearchSettings,
     SearchStatus,
@@ -462,13 +463,17 @@ def test_load_search_settings_reads_env_prefix() -> None:
 def test_build_search_provider_returns_searxng_adapter_by_default() -> None:
     provider = build_search_provider(SearchSettings())
 
-    assert isinstance(provider, SearXNGSearchProvider)
+    # FTY-435: the egressing adapter is wrapped in call hygiene at the factory, so no
+    # call site can bypass dedup / cache / cooldown; the backend choice is unchanged.
+    assert isinstance(provider, HygienicSearchProvider)
+    assert isinstance(provider.inner, SearXNGSearchProvider)
 
 
 def test_build_search_provider_returns_brave_adapter() -> None:
     provider = build_search_provider(SearchSettings(provider="brave", api_key=SecretStr(_TEST_KEY)))
 
-    assert isinstance(provider, BraveSearchProvider)
+    assert isinstance(provider, HygienicSearchProvider)
+    assert isinstance(provider.inner, BraveSearchProvider)
 
 
 # --- SearXNG: the keyless default backend (FTY-164) ---------------------------
