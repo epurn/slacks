@@ -242,10 +242,10 @@ quantity to grams, v1-simple per the story scope:
 Returns `None` when none apply — e.g. a count with no known serving size, or an
 unrecognised/absent quantity. Before that gap routes onward, a **stated count of
 an everyday common food** (FTY-254) resolves
-via the documented common-portion table (`common_portions.py`, published USDA
-household weights / FDA RACC vicinity — see **Common-portion table** below),
-keeping the trusted-source facts and recording an explicit
-`estimated_common_portion:<food> <cue> <grams> g` assumption on the evidence row.
+via the documented common-portion table (`common_portions.py` — see
+**Common-portion table** below), keeping the trusted-source facts and recording an
+explicit `estimated_common_portion:<food> <cue> <grams> g` assumption on the
+evidence row.
 Otherwise the active shared policy ([estimator-policy.md](estimator-policy.md))
 determines whether that gap falls forward to rough default-serving/reference/
 model-prior estimation or asks for more detail. Calories/macros then scale per-100g
