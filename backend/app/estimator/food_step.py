@@ -450,11 +450,16 @@ class FoodResolveStep:
             amount=candidate.amount,
             quantity_text=candidate.quantity_text,
             default_serving_g=product.default_serving_g,
+            name=candidate.name,
         )
         if grams is None:
             # FTY-254: a stated count of an everyday food ("one banana", "2 large
             # eggs") with no source serving size resolves via the documented
             # common-portion table instead of losing the trusted-database match.
+            # FTY-437: a counted **piece** takes the same route even when the source
+            # *does* state a serving size — "4 crackers" is four pieces (~3.5 g each),
+            # never four whole servings — so the piece count keeps this product's own
+            # trusted per-100g facts at an honest mass.
             # The portion default is recorded as an explicit assumption so the
             # number stays visibly rough at the portion level and editable.
             portion = resolve_common_portion_grams(

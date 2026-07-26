@@ -7,9 +7,12 @@ canonical calories and macros out. This module owns three deterministic rules:
 1. **quantity → grams** (:func:`resolve_grams`) — the v1-simple resolution the story
    scopes: an explicit mass (grams), a volume (millilitres or a standard household
    measure — cup/tsp/tbsp/fl oz/… — all treated 1 ml ≈ 1 g, FTY-275),
-   or a *count* multiplied by the source's default serving size. A quantity that
-   cannot be resolved to grams confidently returns ``None`` so the caller routes to
-   ``needs_clarification`` rather than guessing.
+   or a *serving-equivalent count* multiplied by the source's default serving size.
+   A count of **pieces** is deliberately excluded from that multiply (FTY-437, see
+   :data:`PIECE_CLASS_FOODS`). A quantity that cannot be resolved to grams
+   confidently returns ``None`` so the caller routes to its documented gap handling
+   (the common-portion table, a rough tier, or ``needs_clarification``) rather than
+   guessing.
 2. **count-serving facts → calories/macros** (:func:`scale_count_serving_facts`) —
    scale source facts stated per ``N <count_unit>`` to a compatible consumed count
    without needing grams first (FTY-252).
@@ -184,6 +187,33 @@ _COUNT_UNITS: Final[frozenset[str]] = frozenset(
     }
 )
 
+#: Foods whose count noun names a **piece**, not a serving (FTY-437). A food in
+#: this closed vocabulary is conventionally eaten several pieces to a serving, so a
+#: stated count of it must never be multiplied by the source's *serving* mass: "4
+#: crackers" against a product whose serving is 19 g is roughly four crackers of
+#: cracker (~14 g), not 76 g — four whole servings, the 360 kcal the
+#: ``branded-crackers-and-hummus`` smoke reported. A piece count resolves from the
+#: published per-piece weights in :mod:`app.estimator.common_portions` instead.
+#:
+#: Every member has a per-piece entry in that table (asserted by the
+#: vocabulary-completeness invariant in ``tests/test_common_portions.py``), so
+#: splitting pieces out of the default-serving rule opens no new
+#: unresolvable-quantity gap: a piece count that resolved before still resolves,
+#: only correctly. Deliberately small, closed, and free of fuzzy matching — the
+#: FTY-167 serving nouns (``slice``, ``sandwich``, ``handful``, ``ring``, ``bowl``,
+#: ``scoop``, …) are **not** piece-class: they name a serving-sized portion, and a
+#: branded product's serving really is one of them. A sibling snack (chip / cookie /
+#: wafer / pretzel) joins only together with its own published per-piece weight.
+PIECE_CLASS_FOODS: Final[frozenset[str]] = frozenset({"cracker"})
+
+#: Count units that carry no portion meaning of their own ("4", "4 x", "4 pieces"),
+#: so the **food's** identity decides whether such a count counts pieces. Every other
+#: count unit (``serving``, ``bowl``, ``slice``, …) names a portion of its own and is
+#: never overridden by the food name: "1 serving of crackers" is one serving.
+_BARE_COUNT_UNITS: Final[frozenset[str]] = frozenset(
+    {"", "x", "ct", "count", "piece", "pieces", "item", "items", "unit", "units"}
+)
+
 #: Closed, bounded count-serving vocabulary for source/model facts stated as
 #: ``per N <unit>``. This is deliberately smaller than ``_COUNT_UNITS``: serving math
 #: may treat broad portion words ("bowl", "handful") as a default-serving count, but
@@ -206,6 +236,12 @@ _COUNT_SERVING_UNIT_ALIASES: Final[dict[str, str]] = {
 
 COUNT_SERVING_UNITS: Final[frozenset[str]] = frozenset(_COUNT_SERVING_UNIT_ALIASES.values())
 MAX_COUNT_SERVING_AMOUNT: Final[float] = 1_000.0
+
+#: Word tokens of a food name / unit phrase, lower-cased and punctuation-free.
+_TOKEN_RE_WORDS: Final[re.Pattern[str]] = re.compile(r"[a-z]+")
+
+#: A stripped root shorter than this is noise, not a word stem.
+_MIN_STEM_CHARS: Final[int] = 3
 
 #: Match a leading "<number> <unit>" inside a free-text quantity phrase ("150 g",
 #: "2 cups"-style won't match a known unit and falls through). Used only when the
@@ -292,6 +328,67 @@ def normalize_count_unit(unit: str | None) -> str | None:
     return _COUNT_SERVING_UNIT_ALIASES.get(_normalize_unit(unit))
 
 
+def singular_token(token: str) -> str:
+    """Naive singular form for vocabulary matching (``eggs`` → ``egg``).
+
+    The one stemming rule shared by this module's piece-class matching and the
+    common-portion table's own matcher (:mod:`app.estimator.common_portions`), so the
+    two vocabularies can never disagree about what a token's singular form is.
+    """
+
+    for suffix, replacement in (("ies", "y"), ("s", "")):
+        if (
+            token.endswith(suffix)
+            and not token.endswith("ss")
+            and len(token) - len(suffix) >= _MIN_STEM_CHARS
+        ):
+            return token[: -len(suffix)] + replacement
+    return token
+
+
+def text_tokens(text: str | None) -> tuple[str, ...]:
+    """Lower-cased word tokens of a name / unit / quantity phrase."""
+
+    return tuple(_TOKEN_RE_WORDS.findall((text or "").lower()))
+
+
+def head_noun(text: str | None) -> str | None:
+    """The singular **head noun** of a phrase, or ``None`` when it has no word token.
+
+    The head noun is the food identity: ``wheat toast`` → ``toast``, ``Christie
+    Toppables Crackers`` → ``cracker``, ``cracker sandwiches`` → ``sandwich``
+    (deliberately — a composed snack is not a counted cracker). Same rule the
+    common-portion table matches on.
+    """
+
+    tokens = text_tokens(text)
+    if not tokens:
+        return None
+    return singular_token(tokens[-1])
+
+
+def is_piece_count(*, name: str | None, unit: str | None) -> bool:
+    """Whether a stated count of this food/unit counts **pieces**, not servings.
+
+    ``True`` when the *unit* is itself a piece noun ("4 crackers") or when a bare
+    count ("4", "4 pieces") is stated of a food whose identity is piece-class ("4
+    Toppables crackers"). Both are matched on the head noun against the closed
+    :data:`PIECE_CLASS_FOODS` vocabulary — no fuzzy matching, no taxonomy.
+
+    A unit that names a portion of its own (``serving``, ``bowl``, ``handful``,
+    ``slice``, …) is never overridden by the food name, so FTY-167 serving nouns and
+    explicit serving counts keep the default-serving rule (:func:`resolve_grams`
+    step 3).
+    """
+
+    normalized = _normalize_unit(unit)
+    if head_noun(normalized) in PIECE_CLASS_FOODS:
+        return True
+    if normalized in _BARE_COUNT_UNITS:
+        return head_noun(name) in PIECE_CLASS_FOODS
+    return False
+
+
 def count_serving_multiplier(
     *,
     source_serving: CountServing,
@@ -319,6 +416,7 @@ def resolve_grams(
     amount: float | None,
     quantity_text: str,
     default_serving_g: float | None,
+    name: str | None = None,
 ) -> float | None:
     """Resolve a candidate's quantity to grams, or ``None`` if not confidently possible.
 
@@ -326,9 +424,19 @@ def resolve_grams(
 
     1. A structured ``amount`` with a recognised **mass** unit → grams directly.
     2. A structured ``amount`` with a recognised **volume** unit → grams at 1 ml ≈ 1 g.
-    3. A structured ``amount`` with a **count** unit (or no unit) → ``amount ×
-       default_serving_g`` when the source supplies a default serving size.
+    3. A structured ``amount`` with a **serving-equivalent count** unit (or no unit) →
+       ``amount × default_serving_g`` when the source supplies a default serving size.
+       A **piece** count is excluded (FTY-437): a counted piece is not a counted
+       serving, so "4 crackers" never costs four whole 19 g servings. It returns
+       ``None`` here and the caller resolves it from the per-piece common-portion
+       table (:func:`~app.estimator.common_portions.resolve_common_portion_grams`),
+       which keeps the source's own trusted per-100g facts.
     4. Otherwise, scan ``quantity_text`` for a leading "<number> <mass|volume unit>".
+
+    ``name`` is the food identity the piece rule needs; a caller that cannot supply
+    one (or supplies no piece-class identity) gets the plain step-3 behaviour, and a
+    piece **unit** is recognised either way. Only callers with a documented per-piece
+    recovery path pass it — see the FTY-437 note in ``docs/contracts/food-resolution.md``.
 
     Returns ``None`` when none of these apply (e.g. a count with no known serving
     size, or an unrecognised/absent quantity), so the caller fails closed.
@@ -340,7 +448,12 @@ def resolve_grams(
         grams = _grams_from_measure(normalized, amount)
         if grams is not None:
             return grams
-        if normalized in _COUNT_UNITS and default_serving_g is not None and default_serving_g > 0:
+        if (
+            normalized in _COUNT_UNITS
+            and default_serving_g is not None
+            and default_serving_g > 0
+            and not is_piece_count(name=name, unit=normalized)
+        ):
             return round(amount * default_serving_g, 3)
 
     return _grams_from_text(quantity_text)

@@ -16,6 +16,7 @@ from app.estimator.food_serving import (
     NutritionFacts,
     count_serving_multiplier,
     grams_from_count_serving,
+    is_piece_count,
     normalize_count_unit,
     nutrition_facts_plausible,
     resolve_grams,
@@ -119,6 +120,131 @@ def test_resolve_grams_unresolvable_returns_none(
             amount=amount,
             quantity_text=quantity_text,
             default_serving_g=default_serving_g,
+        )
+        is None
+    )
+
+
+# ---------------------------------------------------------------------------
+# Piece counts vs serving counts (FTY-437)
+# ---------------------------------------------------------------------------
+
+#: The reported defect's source row: "Christie, Toppables Crackers", 19 g serving.
+_TOPPABLES_SERVING_G = 19.0
+
+
+@pytest.mark.parametrize(
+    ("name", "unit", "quantity_text"),
+    [
+        # The reported shape: a piece unit, with and without the branded identity.
+        ("crackers", "crackers", "4 crackers"),
+        ("Christie Toppables Crackers", "crackers", "4 crackers"),
+        ("crackers", "cracker", "4 cracker"),
+        # A bare count of a piece-class food is a piece count too — the food's
+        # identity decides when the unit carries no portion meaning of its own.
+        ("Christie Toppables Crackers", None, "4"),
+        ("crackers", "", "4"),
+        ("crackers", "pieces", "4 pieces"),
+    ],
+)
+def test_piece_counts_never_multiply_the_sources_serving_grams(
+    name: str, unit: str | None, quantity_text: str
+) -> None:
+    """4 x 19 g = 76 g (360 kcal) is the defect; a piece count must not resolve here."""
+
+    assert (
+        resolve_grams(
+            unit=unit,
+            amount=4.0,
+            quantity_text=quantity_text,
+            default_serving_g=_TOPPABLES_SERVING_G,
+            name=name,
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "unit", "quantity_text", "amount", "expected"),
+    [
+        # Serving-equivalent counts are exactly what the default serving is for.
+        ("crackers", "serving", "1 serving", 1.0, _TOPPABLES_SERVING_G),
+        ("crackers", "servings", "2 servings", 2.0, 2 * _TOPPABLES_SERVING_G),
+        ("crackers", "portions", "2 portions", 2.0, 2 * _TOPPABLES_SERVING_G),
+        # One piece per serving products (a bar) are untouched.
+        ("chocolate chip oat bars", "bar", "1 bar", 1.0, 40.0),
+        ("chocolate chip oat bars", "bars", "2 bars", 2.0, 80.0),
+        # FTY-167 serving nouns name a serving-sized portion, never a piece — even
+        # for a piece-class food ("a handful of crackers" is one handful).
+        ("crackers", "handful", "a handful of crackers", 1.0, 100.0),
+        ("cracker sandwiches", "sandwiches", "3 cracker sandwiches", 3.0, 60.0),
+        ("pizza", "slice", "a slice of pizza", 1.0, 120.0),
+        # A count noun outside the piece vocabulary keeps today's routing.
+        ("chicken strips", "strips", "3 strips", 3.0, 60.0),
+        ("eggs", "eggs", "2 large eggs", 2.0, 100.0),
+    ],
+)
+def test_serving_equivalent_counts_still_scale_the_default_serving(
+    name: str, unit: str | None, quantity_text: str, amount: float, expected: float
+) -> None:
+    default_serving_g = expected / amount
+
+    grams = resolve_grams(
+        unit=unit,
+        amount=amount,
+        quantity_text=quantity_text,
+        default_serving_g=default_serving_g,
+        name=name,
+    )
+
+    assert grams == pytest.approx(expected)
+
+
+def test_amountless_piece_identity_resolves_nothing_to_multiply() -> None:
+    """ "I had crackers" states no count, so the piece rule has nothing to bound.
+
+    ``resolve_grams`` has no amount to scale, so it declines exactly as before; the
+    caller's amountless one-serving fallback is what applies (a serving of crackers
+    is a serving, not a piece count).
+    """
+
+    assert (
+        resolve_grams(
+            unit=None,
+            amount=None,
+            quantity_text="crackers",
+            default_serving_g=_TOPPABLES_SERVING_G,
+            name="crackers",
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "unit", "expected"),
+    [
+        ("crackers", "crackers", True),
+        ("Christie Toppables Crackers", None, True),
+        ("crackers", "x", True),
+        ("crackers", "serving", False),
+        ("crackers", "handful", False),
+        ("cracker sandwiches", None, False),  # head noun is "sandwich"
+        ("oat bars", "bars", False),
+        ("rice", "g", False),
+    ],
+)
+def test_is_piece_count_matches_head_nouns_only(
+    name: str, unit: str | None, expected: bool
+) -> None:
+    assert is_piece_count(name=name, unit=unit) is expected
+
+
+def test_piece_rule_needs_no_name_when_the_unit_is_the_piece() -> None:
+    """A caller that cannot supply an identity still gets the piece rule by unit."""
+
+    assert (
+        resolve_grams(
+            unit="crackers", amount=4.0, quantity_text="4 crackers", default_serving_g=19.0
         )
         is None
     )

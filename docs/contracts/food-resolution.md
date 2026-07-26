@@ -220,8 +220,8 @@ treated 1 ml ≈ 1 g); otherwise unknown.
 
 ### Serving math
 
-`resolve_grams(unit, amount, quantity_text, default_serving_g)` resolves the
-quantity to grams, v1-simple per the story scope:
+`resolve_grams(unit, amount, quantity_text, default_serving_g, name=None)` resolves
+the quantity to grams, v1-simple per the story scope:
 
 1. structured `amount` + **mass** unit (mg/g/kg/oz/lb) → grams directly;
 2. structured `amount` + **volume** unit (ml/l, 1 ml ≈ 1 g) → grams. The volume
@@ -242,27 +242,55 @@ quantity to grams, v1-simple per the story scope:
    concrete singular/plural units such as `strip(s)`, `piece(s)`, `slice(s)`,
    `egg(s)`, `cracker(s)`, and `bar(s)` normalize; broad or incompatible units
    (`cup`, `handful`, unknown spellings) do not fuzzy-match.
-4. structured `amount` + **count** unit (or no unit) → `amount × default_serving_g`
-   when the source supplies a default serving size. The count vocabulary includes the
-   common serving/portion nouns a casual log uses — `slice`, `sandwich`, `handful`,
-   `ring`, `finger`, `bowl`, `scoop`, … (FTY-167) — so "a slice of pizza", "3 cracker
-   sandwiches", or "a handful of onion rings" resolve via the default serving size
-   instead of stopping at clarification;
+4. structured `amount` + **serving-equivalent count** unit (or no unit) → `amount ×
+   default_serving_g` when the source supplies a default serving size. The count
+   vocabulary includes the common serving/portion nouns a casual log uses — `slice`,
+   `sandwich`, `handful`, `ring`, `finger`, `bowl`, `scoop`, … (FTY-167) — so "a slice
+   of pizza", "3 cracker sandwiches", or "a handful of onion rings" resolve via the
+   default serving size instead of stopping at clarification. A **piece count is
+   excluded from this multiply** (FTY-437): a counted piece is not a counted serving.
+   `PIECE_CLASS_FOODS` (`food_serving.py`) is the closed, documented piece-class
+   vocabulary — a food whose serving conventionally holds several pieces, shipping
+   with `cracker`; a sibling snack (chip / cookie / wafer / pretzel) may join it only
+   together with its own published per-piece weight in the common-portion table
+   below, an invariant a table-driven test enforces. Matching is head-noun only (a
+   `crackers` unit, or a bare count — `4`, `4 x`, `4 pieces` — of a piece-class food
+   name such as "Christie Toppables Crackers"), never fuzzy; the FTY-167 serving
+   nouns are deliberately **not** piece-class, because a branded product's serving
+   really is one of them ("1 serving", "a handful", "3 cracker sandwiches" all keep
+   the default-serving rule). A piece count returns `None` here and resolves from the
+   per-piece common-portion table instead, so `4 crackers` against a 19 g serving
+   costs ~14 g / ~66 kcal on the product's own trusted per-100g facts, not `4 × 19 g`
+   = 76 g / 360 kcal. The optional `name` argument carries the food identity the
+   bare-count case needs; it is passed by the two resolved-item build sites
+   (`food_step.py`, `resolved_item.py`) and by the paths that reach them, each of
+   which has the per-piece table as its recovery path. A caller that supplies no
+   identity still gets the rule whenever the *unit* is the piece noun;
 5. otherwise scan `quantity_text` for a leading `<number> <mass|volume unit>`.
 
-Returns `None` when none apply — e.g. a count with no known serving size, or an
-unrecognised/absent quantity. Before that gap routes onward, a **stated count of
-an everyday common food** (FTY-254 — banana, egg, bread/toast slice, butter
-pat/stick, with small/medium/large/jumbo size cues read from the parse; plus
+Returns `None` when none apply — e.g. a count with no known serving size, a piece
+count (step 4), or an unrecognised/absent quantity. Before that gap routes onward, a
+**stated count of an everyday common food** (FTY-254 — banana, egg, bread/toast slice,
+butter pat/stick, with small/medium/large/jumbo size cues read from the parse; plus
 FTY-418 deli-meat slices — turkey/ham/bologna/salami ≈ 28 g — and sliced-cheese
-slices — mozzarella/cheese/cheddar/provolone/swiss ≈ 22 g) resolves
+slices — mozzarella/cheese/cheddar/provolone/swiss ≈ 22 g; plus the FTY-437 per-piece
+weight — one standard snack `cracker` ≈ 3.5 g) resolves
 via the documented common-portion table (`common_portions.py`, published USDA
 household weights / FDA RACC vicinity), keeping the trusted-source facts and
 recording an explicit
 `estimated_common_portion:<food> <cue> <grams> g` assumption on the evidence row.
-The table declines a **composed/assembled dish** (FTY-368 — sandwich, wrap,
+Both build sites consult it: `food_step.py` for a product-path row and
+`resolved_item.py` for every official/reference/model-prior tier — the latter
+**before** its own rough default-serving fallback, which likewise never multiplies a
+stated piece count, so a counted piece keeps its tier's trusted facts instead of
+dropping to the coarse model-prior density. The table's count bound is 50 for a whole
+food and 200 for a piece (`MAX_COMMON_PORTION_COUNT` / `MAX_PIECE_PORTION_COUNT`); a
+count above its bound fails closed to the existing routing. The table declines a
+**composed/assembled dish** (FTY-368 — sandwich, wrap,
 burger, taco, … by closed vocabulary): the dish is the sum of its parts, so one
-component's household weight never stands in for the whole dish's grams.
+component's household weight never stands in for the whole dish's grams — and by the
+same head-noun rule "3 cracker sandwiches" is a counted assembly, never three
+crackers.
 Otherwise the active shared policy ([estimator-policy.md](estimator-policy.md))
 determines whether that gap falls forward to rough default-serving/reference/
 model-prior estimation or asks for more detail. Calories/macros then scale per-100g

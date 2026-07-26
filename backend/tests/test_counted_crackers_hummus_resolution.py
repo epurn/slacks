@@ -266,11 +266,14 @@ def test_counted_crackers_and_measured_hummus_resolve_after_exact_source_miss(
     assert [food.name for food in foods] == ["crackers", "dill pickle hummus"]
     crackers, hummus = foods
     assert all(food.status == DerivedItemStatus.RESOLVED for food in foods)
-    assert crackers.grams == 18.0
-    assert crackers.calories == 77.4
-    assert crackers.protein_g == pytest.approx(1.6)
-    assert crackers.carbs_g == pytest.approx(12.6)
-    assert crackers.fat_g == pytest.approx(2.2)
+    # FTY-437: a counted piece is not a counted serving, so the prior's stated
+    # serving mass never multiplies the count. Six crackers cost six published
+    # per-piece weights (6 x 3.5 g = 21 g) of the per-100g prior.
+    assert crackers.grams == 21.0
+    assert crackers.calories == 90.3
+    assert crackers.protein_g == pytest.approx(1.9)
+    assert crackers.carbs_g == pytest.approx(14.7)
+    assert crackers.fat_g == pytest.approx(2.5)
     assert hummus.grams == 26.25
     assert hummus.calories == 44.6
     assert hummus.protein_g == pytest.approx(1.8)
@@ -391,10 +394,11 @@ def test_retry_phrase_stranded_count_and_approx_portion_reach_completed(
     crackers, hummus = foods
     assert all(food.status == DerivedItemStatus.RESOLVED for food in foods)
     # The stranded count "4" was recovered into the structured amount and drives the
-    # count-serving scaling (4 crackers x 3 g = 12 g of the per-100g prior).
+    # per-piece portion math (FTY-437: 4 crackers x 3.5 g published per-piece weight
+    # = 14 g of the per-100g prior — never four whole stated servings).
     assert crackers.amount == 4.0
-    assert crackers.grams == 12.0
-    assert crackers.calories == 51.6
+    assert crackers.grams == 14.0
+    assert crackers.calories == 60.2
     # The approximate "about 1 tbsp" hummus is stated detail, so it estimates from
     # its model prior instead of clarifying or looping; it resolves with a portion.
     assert hummus.grams is not None
