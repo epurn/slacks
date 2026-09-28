@@ -24,7 +24,10 @@ Override lifecycle (the documented invariant, see ``target-calculator.md``):
 - A derived **recompute** (goal/pace/metric edit) refreshes the derived columns in
   place and **leaves any in-force override untouched**; when a recompute
   materialises a row for a *new* date it carries the goal's in-force override
-  forward so the choice does not silently lapse on a date rollover.
+  forward so the choice does not silently lapse on a date rollover. Goal creation
+  recomputes through :func:`compute_daily_target` directly; a body-metric profile
+  edit recomputes the current day through :func:`recompute_active_target`, which
+  wraps the same primitive in a silent no-op guard.
 - An override is cleared **only** by an explicit reset or by deletion/replacement
   of the owning goal (``ON DELETE CASCADE`` from ``goal_id``).
 - A manual override is validated against the documented safety band and an
@@ -51,6 +54,7 @@ from .read_model import build_target_read_model
 from .resolution import (
     _resolve_active_target,
     get_active_target,
+    recompute_active_target,
     resolve_active_target_row,
     resolve_carried_target_row,
 )
@@ -66,6 +70,7 @@ __all__ = [
     "compute_daily_target",
     "derive_age_years",
     "get_active_target",
+    "recompute_active_target",
     "reset_target_override",
     "resolve_active_target_row",
     "resolve_carried_target_row",

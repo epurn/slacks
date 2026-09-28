@@ -186,11 +186,12 @@ export const E2E_EXACT_NO_PROPOSAL_MESSAGE =
   'No exact match from that barcode, and no rough fallback either. Try again, change the match, or edit it manually.';
 
 /**
- * A 1×1 transparent PNG data URI the label-capture preview's `takePhoto` seam
- * returns, so the save-photo preview renders on the camera-less simulator
- * without a real capture. The preview's fixed dark placeholder fills the frame;
- * the point of the shot is the default-off "Save this photo" toggle, not the
- * pixels. Fabricated for testing only — no real image.
+ * A 1×1 transparent PNG data URI the label-capture `takePhoto` seam returns, so
+ * the camera-less simulator never has to call `takePictureAsync`. FTY-433
+ * removed the post-capture preview, so nothing renders these pixels as a
+ * subject any more: the preset's screenshot is the framing surface with the
+ * sticky "Save label photos" control resting off (discard by default), not the
+ * shot. Fabricated for testing only — no real image.
  */
 export const E2E_EXACT_LABEL_PHOTO_URI =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';

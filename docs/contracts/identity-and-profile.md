@@ -70,6 +70,12 @@ Canonical units only: `height_m` in metres, `weight_kg` in kilograms.
 - `PUT /api/users/{user_id}/profile` — bearer token required. Body is a partial
   update; only provided fields are written:
   `{ height_m?, weight_kg?, birth_year?, metabolic_formula?, units_preference?, timezone? }`.
+  A write that changes `height_m`, `birth_year`, or `metabolic_formula` also
+  recomputes the active goal's derived daily target for the current day, so the
+  target read-back after the write returns fresh numbers; `weight_kg`,
+  `units_preference`, and `timezone` do not. The recompute preserves an in-force
+  user override and is a silent no-op when it cannot run, so the response is
+  unchanged either way — see the "metric edit" rules in `target-calculator.md`.
 
 Authenticated requests carry `Authorization: Bearer <token>`.
 

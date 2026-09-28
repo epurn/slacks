@@ -6,7 +6,7 @@
  *   - the preset is registered through FTY-247's registration API (reachable by
  *     name, without this story touching the shared registry/manifest),
  *   - activating it opens Today's parsed-confirmation sub-state from the very
- *     first render — no "Capture label" / "Take photo" / "Upload label" taps,
+ *     first render — no "Capture label" / "Take photo" taps,
  *   - it is inert outside `isE2EMode()` even if the runtime preset state were
  *     somehow set without going through the gated deep-link route,
  *   - it never perturbs the default Today flow when no preset is active.
@@ -123,7 +123,7 @@ describe("today.confirm_parsed visual-review preset", () => {
 
       // The confirm-parsed-values sheet is open from the first render: its
       // parsed values, "not yet counted" state, and provenance are visible
-      // without ever pressing "Capture label" / "Take photo" / "Upload label".
+      // without ever pressing "Capture label" / "Take photo".
       expect(textContent(tree)).toContain("Granola bar");
       expect(hasA11yLabel(tree, "Looks right, add it")).toBe(true);
 

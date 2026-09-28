@@ -335,20 +335,72 @@ describe("TodayScreen label capture", () => {
     // Open label capture modal.
     press(tree, "Capture label");
 
-    // Take photo.
+    // Tap the shutter — that is the whole submit (FTY-433): no Upload step.
     await act(async () => {
       press(tree, "Take photo");
     });
 
-    // Upload.
-    await act(async () => {
-      press(tree, "Upload label");
-    });
+    // The auto-upload issued the request with the sticky preference's default,
+    // so a steady-state capture is never retained server-side (FTY-077).
+    expect(uploadLabel).toHaveBeenCalledTimes(1);
+    expect(uploadLabel).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION!.userId }),
+      "file:///label.jpg",
+      false,
+    );
 
     // The uploaded event appears on the timeline as pending — a skeleton
     // (FTY-180), not the event's raw text.
     expect(textContent(tree)).not.toContain("nutrition label photo");
     expect(hasA11yLabel(tree, "Waiting to estimate")).toBe(true);
+  });
+
+  it("retaking mid-upload keeps the user on the camera — the superseded parse never lands", async () => {
+    // FTY-433: the shutter uploads immediately, so Retake is the undo. The host
+    // must honour the capture's abort signal or a discarded shot would yank the
+    // confirm sheet over the viewfinder the user is re-framing in.
+    const load = jest.fn().mockResolvedValue([]);
+    let finishUpload!: (event: LogEventDTO) => void;
+    const uploadLabel = jest.fn(
+      () =>
+        new Promise<LogEventDTO>((resolve) => {
+          finishUpload = resolve;
+        }),
+    );
+    const getLabelProposal = jest.fn().mockResolvedValue(null);
+
+    const tree = mount(
+      <TodayScreen
+        session={SESSION}
+        load={load}
+        useActive={INACTIVE}
+        uploadLabel={uploadLabel}
+        getLabelProposal={getLabelProposal}
+        labelTakePhoto={jest.fn().mockResolvedValue({ uri: "file:///blurry.jpg" })}
+      />,
+    );
+    await act(async () => {});
+
+    press(tree, "Capture label");
+    await act(async () => {
+      press(tree, "Take photo");
+    });
+
+    // Mid-upload the user decides the shot was bad.
+    press(tree, "Retake photo");
+    expect(hasA11yLabel(tree, "Take photo")).toBe(true);
+
+    // The upload lands afterwards: it must be dropped, not applied.
+    await act(async () => {
+      finishUpload(
+        event({ id: "superseded-label-event", status: "completed" }),
+      );
+    });
+
+    expect(getLabelProposal).not.toHaveBeenCalled();
+    // Still framing the next shot — no confirm sheet, no timeline row.
+    expect(hasA11yLabel(tree, "Take photo")).toBe(true);
+    expect(hasA11yLabel(tree, "Looks right, add it")).toBe(false);
   });
 });
 
@@ -381,13 +433,15 @@ describe("TodayScreen confirm-parsed-values sheet", () => {
     });
   }
 
+  /**
+   * The whole steady-state label flow up to the confirm gate (FTY-433): open
+   * capture, tap the shutter — which uploads by itself — and let the proposal
+   * read resolve into the confirm sheet. Two taps, no Upload button.
+   */
   async function uploadLabel(tree: ReactTestRenderer): Promise<void> {
     press(tree, "Capture label");
     await act(async () => {
       press(tree, "Take photo");
-    });
-    await act(async () => {
-      press(tree, "Upload label");
     });
     // Let the proposal read resolve and open the confirm sheet.
     await act(async () => {});

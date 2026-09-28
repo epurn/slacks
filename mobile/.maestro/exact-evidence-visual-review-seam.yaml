@@ -10,8 +10,9 @@
 #   - correction.exact_barcode_exact    — a typed-barcode EXACT proposal preview;
 #   - correction.exact_barcode_fallback — a typed-barcode FALLBACK preview (not exact);
 #   - correction.exact_no_proposal      — the calm, actionable no-proposal error;
-#   - correction.exact_label      — the label capture presented from the flow +
-#                                   the save-photo (default OFF) preview.
+#   - correction.exact_label      — the label capture presented from the flow,
+#                                   with the sticky save-photo control default OFF
+#                                   (FTY-433: no post-capture preview any more).
 #
 # Detent / accessibility scope (FTY-272): the make-exact presets open at the
 # large, DIMMED detent, where iOS exposes no in-modal content to the
@@ -258,11 +259,16 @@ appId: com.slacks
           timeout: 20000
 - takeScreenshot: exact-no-proposal-dark
 
-# ─── exact_label — label capture from the flow + save-photo (default OFF) preview ───
+# ─── exact_label — label capture from the flow + the sticky save control (OFF) ───
 # The label modal is a full-screen presentation on top of the sheet, so its
-# framing hint and shutter are reachable on both platforms. Shooting the
-# injected fixture photo (the seam's takePhoto) advances to the save-photo
-# preview, where "Save this photo" defaults OFF.
+# framing hint, shutter, and chrome controls are reachable on both platforms.
+#
+# FTY-433: the shutter IS the submit, so there is no longer a post-capture
+# save-photo preview to shoot into — the retention choice is the sticky "Save
+# label photos" control in the camera chrome, resting OFF (discard by default,
+# FTY-077). Asserting it here keeps the FTY-077 default-off evidence this section
+# was written for, and asserting the Upload button's absence pins the merged
+# shutter → upload step shape.
 - launchApp:
     clearState: false
 - openLink: "slacks://__visual-review?preset=correction.exact_label&theme=light"
@@ -270,10 +276,6 @@ appId: com.slacks
 - extendedWaitUntil:
     visible: "Fit the nutrition label inside the frame"
     timeout: 20000
+- assertVisible: ".*Save label photos.*"
+- assertNotVisible: ".*Upload label.*"
 - takeScreenshot: exact-label-framing-light
-- tapOn:
-    text: "Take photo"
-- extendedWaitUntil:
-    visible: "Save this photo"
-    timeout: 20000
-- takeScreenshot: exact-label-save-photo-off-light

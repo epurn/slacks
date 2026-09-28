@@ -35,6 +35,7 @@
 
 import type { DailySummaryDTO } from "@/api/dailySummary";
 import type { DerivedFoodItemDTO } from "@/api/derivedItems";
+import type { uploadLabelImage } from "@/api/labelCapture";
 import type { LogEventDTO } from "@/api/logEvents";
 import { E2E_SESSION } from "@/e2e/fixtures";
 import { isE2EMode } from "@/e2e/launchMode";
@@ -42,11 +43,13 @@ import {
   registerVisualReviewPreset,
   useVisualReviewCore,
   type VisualReviewFetchContext,
+  type VisualReviewResponse,
 } from "@/e2e/visualReview";
 
 export const CAPTURE_BARCODE_GRANTED_PRESET = "capture.barcode_granted";
 export const CAPTURE_LABEL_GUIDANCE_PRESET = "capture.label_guidance";
 export const CAPTURE_CONFIRM_PARSED_PRESET = "capture.confirm_parsed";
+export const CAPTURE_LABEL_AUTO_UPLOAD_PRESET = "capture.label_auto_upload";
 
 /**
  * Synthetic already-uploaded label event the `confirm_parsed` preset feeds
@@ -160,23 +163,16 @@ function isConfirmParsedConfirmPost(ctx: VisualReviewFetchContext): boolean {
   );
 }
 
-registerVisualReviewPreset({
-  name: CAPTURE_BARCODE_GRANTED_PRESET,
-  route: "/",
-  settledPath: "/",
-});
-
-registerVisualReviewPreset({
-  name: CAPTURE_LABEL_GUIDANCE_PRESET,
-  route: "/",
-  settledPath: "/",
-});
-
-registerVisualReviewPreset({
-  name: CAPTURE_CONFIRM_PARSED_PRESET,
-  route: "/",
-  settledPath: "/",
-  responses: [
+/**
+ * The proposal + confirm + totals fixtures both confirm-gate presets share: the
+ * uncounted parse the sheet renders, the confirm POST that commits it, and the
+ * day totals that jump from 0 to the committed value once it lands. Shared so
+ * `capture.label_auto_upload` (FTY-433) proves the *whole* shutter → upload →
+ * confirm → counted path against exactly the fixtures `capture.confirm_parsed`
+ * already pins for the sheet alone.
+ */
+function confirmGateResponses(): VisualReviewResponse[] {
+  return [
     // The proposal read (sheet open): return the uncounted parse and reset the
     // committed flag so a re-activation always starts from the uncounted day.
     {
@@ -195,19 +191,10 @@ registerVisualReviewPreset({
         return CAPTURE_CONFIRM_PARSED_COMMITTED;
       },
     },
-    // The event feed behind the sheet: the single completed label event, so the
-    // seam-injected row is never wiped by the initial load and persists as a
-    // counted row after confirm. Kept a `completed` event so Today never polls
-    // it away (polling is gated on pending work).
     {
       match: (ctx) =>
         ctx.method === "GET" && ctx.pathEnd.endsWith("/log-events/by-date"),
       body: [] as unknown[],
-    },
-    {
-      match: (ctx) =>
-        ctx.method === "GET" && ctx.pathEnd.endsWith("/log-events"),
-      body: [CAPTURE_CONFIRM_PARSED_EVENT],
     },
     // The hero/totals: uncounted before confirm, counted after — a pure function
     // of whether the confirm POST has landed this activation.
@@ -219,6 +206,53 @@ registerVisualReviewPreset({
           ? CAPTURE_CONFIRM_PARSED_SUMMARY_COUNTED
           : CAPTURE_CONFIRM_PARSED_SUMMARY_UNCOUNTED,
     },
+  ];
+}
+
+registerVisualReviewPreset({
+  name: CAPTURE_BARCODE_GRANTED_PRESET,
+  route: "/",
+  settledPath: "/",
+});
+
+registerVisualReviewPreset({
+  name: CAPTURE_LABEL_GUIDANCE_PRESET,
+  route: "/",
+  settledPath: "/",
+});
+
+registerVisualReviewPreset({
+  name: CAPTURE_CONFIRM_PARSED_PRESET,
+  route: "/",
+  settledPath: "/",
+  responses: [
+    // The event feed behind the sheet: the single completed label event, so the
+    // seam-injected row is never wiped by the initial load and persists as a
+    // counted row after confirm. Kept a `completed` event so Today never polls
+    // it away (polling is gated on pending work).
+    {
+      match: (ctx) =>
+        ctx.method === "GET" && ctx.pathEnd.endsWith("/log-events"),
+      body: [CAPTURE_CONFIRM_PARSED_EVENT],
+    },
+    ...confirmGateResponses(),
+  ],
+});
+
+registerVisualReviewPreset({
+  name: CAPTURE_LABEL_AUTO_UPLOAD_PRESET,
+  route: "/",
+  settledPath: "/",
+  responses: [
+    // An empty day behind the capture surface: unlike `confirm_parsed` (which
+    // seeds the event at mount), here the label event arrives *from the upload*,
+    // so pre-seeding the feed would duplicate the row the auto-upload inserts.
+    {
+      match: (ctx) =>
+        ctx.method === "GET" && ctx.pathEnd.endsWith("/log-events"),
+      body: [] as unknown[],
+    },
+    ...confirmGateResponses(),
   ],
 });
 
@@ -227,6 +261,7 @@ export type CaptureVisualReviewPreset =
   | typeof CAPTURE_BARCODE_GRANTED_PRESET
   | typeof CAPTURE_LABEL_GUIDANCE_PRESET
   | typeof CAPTURE_CONFIRM_PARSED_PRESET
+  | typeof CAPTURE_LABEL_AUTO_UPLOAD_PRESET
   | null;
 
 /**
@@ -245,8 +280,94 @@ export function useActiveCaptureVisualReviewPreset(): CaptureVisualReviewPreset 
     case CAPTURE_BARCODE_GRANTED_PRESET:
     case CAPTURE_LABEL_GUIDANCE_PRESET:
     case CAPTURE_CONFIRM_PARSED_PRESET:
+    case CAPTURE_LABEL_AUTO_UPLOAD_PRESET:
       return core.presetName;
     default:
       return null;
   }
+}
+
+// ─── Label auto-upload seam (FTY-433) ────────────────────────────────────────
+
+/**
+ * The frame the auto-upload preset's `takePhoto` seam returns. The iOS simulator
+ * has no camera, so `takePictureAsync` can't produce a shot; this stands in as
+ * the one the shutter takes.
+ *
+ * It is a tiny (24×40, ~100 byte) greyscale PNG drawn to read as a
+ * nutrition-label card — a dark title bar over pale value rows — so the uploading
+ * state's held-frame backdrop is *visibly* the captured photo in running-app
+ * evidence, which a transparent placeholder could not show. Fabricated for
+ * testing only: synthetic pixels, no real label and no real image.
+ */
+export const CAPTURE_LABEL_PHOTO_URI =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAoCAAAAADBZmWJAAAALElEQVR42mM4gQMwnDjxGgsAS9hgAdSWwGk5GRIVGOD1qB2jdlBsx6CUwA4AusTu01y6fVUAAAAASUVORK5CYII=";
+
+/**
+ * How long the seam's upload is held in flight. Sized for the *driver*, not for
+ * realism: each Maestro command on iOS costs a few seconds of accessibility-tree
+ * latency, so a short hold lets the upload resolve between "assert Uploading" and
+ * "tap Retake" — the shutter→Retake race that made the retake evidence flow
+ * flaky. A generous hold makes both evidence flows deterministic: the uploading
+ * state (held frame + Retake) is a stable surface to screenshot, a Retake tap
+ * genuinely lands mid-upload, and the superseded result still arrives afterwards
+ * so a flow can prove it is dropped.
+ */
+export const CAPTURE_LABEL_AUTO_UPLOAD_HOLD_MS = 25_000;
+
+/** The synthetic shutter frame for `capture.label_auto_upload`. */
+async function e2eLabelTakePhoto(): Promise<{ uri: string }> {
+  return { uri: CAPTURE_LABEL_PHOTO_URI };
+}
+
+/**
+ * The synthetic label upload for `capture.label_auto_upload`. The real client
+ * streams the image bytes through native networking (`File.upload`, FTY-381),
+ * which the E2E fetch mock cannot intercept, so the upload itself is the seam:
+ * it holds for {@link CAPTURE_LABEL_AUTO_UPLOAD_HOLD_MS} and then resolves with
+ * the same synthetic label event `capture.confirm_parsed` pins, handing the real
+ * `handleLabelUploaded` → proposal-read → confirm-sheet path its normal input.
+ */
+const e2eUploadLabel: typeof uploadLabelImage = async () => {
+  await new Promise((resolve) =>
+    setTimeout(resolve, CAPTURE_LABEL_AUTO_UPLOAD_HOLD_MS),
+  );
+  return CAPTURE_CONFIRM_PARSED_EVENT;
+};
+
+/** Capture seams a preset can substitute for the real camera/upload clients. */
+export interface CaptureVisualReviewInjectables {
+  readonly labelTakePhoto?: () => Promise<{ uri: string }>;
+  readonly uploadLabel?: typeof uploadLabelImage;
+}
+
+/** No seams — every preset except the auto-upload one, and every real launch. */
+const NO_CAPTURE_INJECTABLES: CaptureVisualReviewInjectables = {};
+
+const LABEL_AUTO_UPLOAD_INJECTABLES: CaptureVisualReviewInjectables = {
+  labelTakePhoto: e2eLabelTakePhoto,
+  uploadLabel: e2eUploadLabel,
+};
+
+/**
+ * The capture seams a preset installs: none for every preset but
+ * `capture.label_auto_upload` (and none for `null`, which is what every real
+ * launch and every non-E2E build resolves to). Returns module constants, so this
+ * never churns a consumer's render.
+ */
+export function captureVisualReviewInjectables(
+  preset: CaptureVisualReviewPreset,
+): CaptureVisualReviewInjectables {
+  return preset === CAPTURE_LABEL_AUTO_UPLOAD_PRESET
+    ? LABEL_AUTO_UPLOAD_INJECTABLES
+    : NO_CAPTURE_INJECTABLES;
+}
+
+/**
+ * The capture seams the *active* preset installs — what TodayScreen reads.
+ * Inert outside `isE2EMode()`, where the active preset is always `null`, so a
+ * release build always uses the real camera and the real upload client.
+ */
+export function useCaptureVisualReviewInjectables(): CaptureVisualReviewInjectables {
+  return captureVisualReviewInjectables(useActiveCaptureVisualReviewPreset());
 }

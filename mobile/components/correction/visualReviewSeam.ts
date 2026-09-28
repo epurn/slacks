@@ -198,8 +198,11 @@ const PRESETS: Readonly<Record<string, SeamPreset>> = {
   "correction.exact_no_proposal": eligibleExactPreset({
     exactSeed: { step: "error", error: E2E_EXACT_NO_PROPOSAL_MESSAGE },
   }),
-  // The label-capture surface presented from the correction flow, with the
-  // injected `takePhoto` so the save-photo (default off) preview is reachable.
+  // The label-capture surface presented from the correction flow. FTY-433
+  // removed the post-capture preview (the shutter is the submit), so the shot
+  // this seam's injected `takePhoto` stands in for is only needed to keep the
+  // camera-less simulator off `takePictureAsync`; what the preset is here to
+  // show is the framing surface and the sticky save control resting off.
   "correction.exact_label": eligibleExactPreset({
     exactSeed: { step: "choose", labelOpen: true },
     labelTakePhoto: e2eLabelTakePhoto,

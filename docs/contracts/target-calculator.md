@@ -254,6 +254,11 @@ every read. Resolution therefore differs between reads and writes:
   the unspecified default) raises `IncompleteProfileError` → `409` (complete the
   profile first), the same mapping goal creation uses — never an uncaught `500`. The
   read carry-forward above is unchanged.
+- **A metric edit materialises the current day's row too** (FTY-467). A profile write
+  that changes a calculator input recomputes the current day the same way, so the row
+  the read-back resolves carries the fresh derivation. It differs from an override
+  write in one respect: it is a silent no-op instead of an error when it cannot run
+  (see "What counts as a metric edit" below).
 
 ### Set / reset semantics
 
@@ -281,6 +286,33 @@ with its target — no orphaned overrides. No other event silently clears it.
   `user`. When a recompute materialises a target row for a **new** `for_date`, the
   goal's in-force override is carried forward onto it so the choice does not
   silently lapse on a date rollover.
+
+### What counts as a metric edit (FTY-467)
+
+A **metric edit** is a profile write that changes a field the calculator actually
+consumes: `height_m`, `birth_year` (age), or `metabolic_formula`. Such a write
+recomputes the active goal's derived target for the **current day** (the day in the
+owner's profile timezone that the target read and the daily summary resolve), so a
+corrected height or a switched formula variant moves the numbers the app reads back
+instead of leaving the goal-creation-day snapshot in place.
+
+- `weight_kg` is **not** a metric edit: the trajectory's weights come from the goal's
+  fixed `start_weight_kg` / `target_weight_kg` snapshot, not the profile, so a
+  recompute would produce identical numbers. `units_preference` and `timezone` are
+  display/locale settings and likewise do not recompute. Re-submitting an unchanged
+  value is not an edit either.
+- Only the current day is written. Earlier in-horizon days keep their stored rows (no
+  backfill), and later in-horizon days pick the fresh row up through the read
+  carry-forward described under "Target resolution" above.
+- The recompute runs the same `compute_daily_target` primitive as goal creation, so it
+  inherits the override discipline above: derived columns refreshed in place, an
+  in-force override untouched (and carried forward when the current day's row is
+  materialised).
+- Unlike an override write, a recompute that cannot run **degrades to a silent
+  no-op**: no active goal covering the current day, or an edit that leaves the profile
+  un-derivable (height/birth year nulled, formula back on the unspecified default, or
+  an age outside the calculator's validated band) skips the recompute. The profile
+  write still succeeds — it never becomes a `409`/`500`.
 
 ### Override validation — reject, do not clamp
 

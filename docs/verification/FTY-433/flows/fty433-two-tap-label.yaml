@@ -1,0 +1,72 @@
+# FTY-433 running-app evidence: the label flow is open → shutter → confirm.
+#
+# Ad-hoc evidence flow (NOT in mobile/.maestro/, which verify-e2e.sh runs as a
+# suite — see docs/verification/FTY-433/README.md). Drives the real capture
+# surface through the `capture.label_auto_upload` visual-review preset, which
+# supplies only the two things a camera-less simulator cannot: the shutter frame
+# and the label upload (the image bytes stream through native networking, which
+# the E2E fetch mock cannot answer). Everything else is the shipped code path:
+# the real shutter handler, the real auto-upload, the real
+# `handleLabelUploaded` → label-proposal read → `ConfirmParsedValuesSheet` →
+# confirm POST → daily-summary refresh.
+#
+# Run once per theme:
+#   maestro --udid <udid> test -e THEME=light fty433-two-tap-label.yaml
+#   maestro --udid <udid> test -e THEME=dark  fty433-two-tap-label.yaml
+appId: com.slacks
+---
+- launchApp:
+    clearState: false
+# Cold-launch deep-link race: wait for the router to mount before the openLink.
+- extendedWaitUntil:
+    visible:
+      id: today-screen
+    timeout: 30000
+- openLink: "slacks://__visual-review?preset=capture.label_auto_upload&theme=${THEME}"
+- runFlow: ../../../../mobile/.maestro/common/accept-open-in-slacks.yaml
+- extendedWaitUntil:
+    visible: "Fit the nutrition label inside the frame"
+    timeout: 20000
+
+# ── 1. The capture surface ────────────────────────────────────────────────────
+# The shutter, the framing guide, the sticky save control resting OFF — and no
+# Upload button and no per-capture "Save this photo" question anywhere.
+- assertVisible: ".*Save label photos.*"
+- assertNotVisible: ".*Saving photos.*"
+- assertNotVisible: ".*Upload label.*"
+- assertNotVisible: ".*Save this photo.*"
+- takeScreenshot: fty433-1-capture-${THEME}
+
+# ── 2. The sticky save preference ─────────────────────────────────────────────
+# Turning it on is a deliberate act and the control says so, persistently.
+- tapOn: ".*Save label photos.*"
+- assertVisible: ".*Saving photos.*"
+- takeScreenshot: fty433-2-save-on-${THEME}
+# Back off, so the logging run below is the steady-state, discard-by-default one.
+- tapOn: ".*Save label photos.*"
+- assertNotVisible: ".*Saving photos.*"
+
+# ── 3. Tap one: the shutter uploads by itself ─────────────────────────────────
+# No preview stop, no Upload button — the captured frame is held as the
+# uploading backdrop with Retake available as an optional undo.
+- tapOn: "Take photo"
+- extendedWaitUntil:
+    visible: ".*Uploading.*"
+    timeout: 20000
+- assertVisible: ".*Retake.*"
+- assertNotVisible: ".*Upload label.*"
+- takeScreenshot: fty433-3-uploading-${THEME}
+
+# ── 4. Tap two: the parse-confirm gate, unchanged ─────────────────────────────
+# The seam holds the upload ~25s (see CAPTURE_LABEL_AUTO_UPLOAD_HOLD_MS), so this
+# wait has to outlast it.
+- extendedWaitUntil:
+    visible: "Granola bar"
+    timeout: 40000
+- assertVisible: ".*Not yet counted.*"
+- takeScreenshot: fty433-4-confirm-${THEME}
+- tapOn: "Looks right.*"
+- extendedWaitUntil:
+    visible: ".*190.*2,000 kcal.*"
+    timeout: 20000
+- takeScreenshot: fty433-5-counted-${THEME}
